@@ -1,0 +1,13 @@
+# Target labels
+ vpr_launcher
+# Source files and their labels
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/CMakeFiles/vpr_launcher
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/CMakeFiles/vpr_launcher.rule
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/CMakeFiles/vpr_launcher-complete.rule
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/vpr_launcher-prefix/src/vpr_launcher-stamp/vpr_launcher-build.rule
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/vpr_launcher-prefix/src/vpr_launcher-stamp/vpr_launcher-configure.rule
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/vpr_launcher-prefix/src/vpr_launcher-stamp/vpr_launcher-download.rule
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/vpr_launcher-prefix/src/vpr_launcher-stamp/vpr_launcher-install.rule
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/vpr_launcher-prefix/src/vpr_launcher-stamp/vpr_launcher-mkdir.rule
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/vpr_launcher-prefix/src/vpr_launcher-stamp/vpr_launcher-patch.rule
+/home/ee/sensing_fw/build/_sysbuild/sysbuild/images/soc/vpr_launcher-prefix/src/vpr_launcher-stamp/vpr_launcher-update.rule

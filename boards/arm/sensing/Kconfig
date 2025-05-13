@@ -1,0 +1,11 @@
+# BOARD_Sensing board configuration
+
+if BOARD_SENSING
+
+# Nordic Semiconductor nRF54 MCU line
+
+# Copyright (c) 2024 Nordic Semiconductor ASA
+# SPDX-License-Identifier: Apache-2.0
+
+
+endif # BOARD_JUNA

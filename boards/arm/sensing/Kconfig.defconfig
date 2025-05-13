@@ -1,0 +1,21 @@
+if BOARD_SENSING_CPUAPP
+
+config BOARD
+	default "sensing"
+
+config SOC_NRF54L15_CPUAPP
+    bool
+    default y
+
+config SOC_NRF54L15_CPUFLPR
+    bool
+    default y
+
+
+config BT_CTLR
+	default BT
+
+config ROM_START_OFFSET
+	default 0x800 if BOOTLOADER_MCUBOOT
+
+endif

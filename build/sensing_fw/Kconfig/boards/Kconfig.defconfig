@@ -1,0 +1,2 @@
+# Load Zephyr board defconfig descriptions.
+osource "/home/ee/sensing_fw/boards/arm/sensing/Kconfig.defconfig"

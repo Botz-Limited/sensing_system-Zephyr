@@ -1,0 +1,23 @@
+mcuboot:
+  address: 0x0
+  size: 0x15000  # 84KB for bootloader
+
+mcuboot_pad:
+  address: 0x15000
+  size: 0x200    # Padding
+
+vpr_launcher:
+  address: 0x15200
+  size: 0x10000  # 64KB for vpr_launcher
+
+app:
+  # Let this be dynamically placed in remaining space
+  size: 0x100000 # 1MB for application
+
+external_flash:
+  size: 0x800000 # 8MB external flash
+  region: spi_flash
+
+mcuboot_secondary:
+  size: 0x100000 # Secondary slot same size as app
+  region: spi_flash

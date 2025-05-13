@@ -1,0 +1,98 @@
+{
+    "files.autoSave": "afterDelay",
+    "clangd.path": "/usr/lib/llvm-12/bin/clangd",
+    "clang-format.fallbackStyle": "Microsoft",
+    "editor.formatOnType": true,
+    "editor.defaultFormatter": "xaver.clang-format",
+    "editor.bracketPairColorization.enabled": true,
+    "clangd.onConfigChanged": "restart",
+    "git.confirmSync": false,
+    "cmake.configureOnOpen": false,
+    "clang-tidy.buildPath": "build",
+    "editor.formatOnPaste": true,
+    "cmake.buildDirectory": "${workspaceFolder}/build",
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "C_Cpp.autocomplete": "disabled",
+    "C_Cpp.errorSquiggles": "disabled",
+    "nrf-connect.applications": [
+        "${workspaceFolder}"
+    ],
+    "nrf-connect.kconfig.interface": "kconfig",
+    "cmake.autoSelectActiveFolder": true,
+    "cmake.buildBeforeRun": true,
+    "cmake.configureOnEdit": false,
+    "[jsonc]": {
+        "editor.defaultFormatter": "vscode.json-language-features"
+    },
+    "nrf-connect.welcome.showOnStartup": false,
+    "git.autoRepositoryDetection": "subFolders",
+    "[markdown]": {
+        "editor.wordWrap": "wordWrapColumn",
+        "editor.wordWrapColumn": 100,
+    },
+    "nrf-connect.applicationOptions": {
+        "${workspaceFolder}": {
+            "flash": {
+                "softreset": true
+            },
+        }
+    },
+    "nrf-connect.topdir": "/home/ee/ncs",
+    "clangd.arguments": [
+        "-header-insertion=never",
+        "--query-driver=/opt/toolchains/zephyr-sdk-*/arm-zephyr-eabi/bin/arm-zephyr-eabi-g*"
+    ],
+    "cSpell.words": [
+        "FULLSCALE",
+        "prescalar",
+        "Protobuf",
+    ],
+    "restoreTerminals.terminals": [
+        {
+            "splitTerminals": [
+                {
+                    "name": "JLink",
+                    "commands": [
+                        "./sensing_fw/tools/jlink.sh",
+                    ],
+                },
+                {
+                    "name": "RTT Client",
+                    "commands": [
+                        "./sensing_fw/tools/rtt.sh"
+                    ]
+                }
+            ]
+        }
+    ],
+    "restoreTerminals.keepExistingTerminalsOpen" : true,
+    "restoreTerminals.runOnStartup": false,
+    "files.associations": {
+        "utility": "cpp",
+        "cctype": "cpp",
+        "cmath": "cpp",
+        "compare": "cpp",
+        "concepts": "cpp",
+        "cstdarg": "cpp",
+        "cstdio": "cpp",
+        "cstdlib": "cpp",
+        "exception": "cpp",
+        "type_traits": "cpp",
+        "initializer_list": "cpp",
+        "limits": "cpp",
+        "new": "cpp",
+        "*.tcc": "cpp",
+        "cinttypes": "cpp",
+        "cstdint": "cpp",
+        "typeinfo": "cpp"
+    },
+    "[dts]": {
+        "editor.defaultFormatter": "nordic-semiconductor.nrf-devicetree"
+    },
+    "clangformat.style": "{ BasedOnStyle: Microsoft, IndentExternBlock: NoIndent, AlwaysBreakTemplateDeclarations: Yes, IndentCaseLabels: true, BraceWrapping: { AfterFunction: true, SplitEmptyFunction: false, AfterStruct: true } }",
+    "nrf-connect.deviceProvider": "nrfjprog",
+    "C_Cpp.doxygen.generatedStyle": "/**",
+    "nrf-connect.debugging.bindings": {
+        "${workspaceFolder}/build": "Launch build"
+    },
+}

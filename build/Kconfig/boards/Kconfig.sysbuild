@@ -1,0 +1,2 @@
+# Load Sysbuild board Kconfig descriptions.
+osource "/home/ee/sensing_fw/boards/arm/sensing/Kconfig.sysbuild"

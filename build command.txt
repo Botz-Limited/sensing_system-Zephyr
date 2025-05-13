@@ -1,0 +1,1 @@
+west build --build-dir /home/ee/sensing_fw/build /home/ee/sensing_fw/ --pristine --board sensing/nrf54l15/cpuflpr --sysbuild --cmake -- -DCONF_FILE=prj.conf

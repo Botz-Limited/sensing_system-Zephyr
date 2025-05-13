@@ -1,0 +1,10 @@
+default: sensing_fw
+build_dir: /home/ee/sensing_fw/build
+domains:
+  - name: sensing_fw
+    build_dir: /home/ee/sensing_fw/build/sensing_fw
+  - name: vpr_launcher
+    build_dir: /home/ee/sensing_fw/build/vpr_launcher
+flash_order:
+  - sensing_fw
+  - vpr_launcher

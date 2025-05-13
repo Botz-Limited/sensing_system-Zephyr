@@ -1,0 +1,8 @@
+BasedOnStyle: Microsoft
+IndentExternBlock: NoIndent
+AlwaysBreakTemplateDeclarations: Yes
+IndentCaseLabels: true
+BraceWrapping:
+  AfterFunction: true
+  SplitEmptyFunction: false
+  AfterStruct: true

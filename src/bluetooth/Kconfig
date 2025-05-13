@@ -1,0 +1,41 @@
+config BLUETOOTH_MODULE
+	bool "Bluetooth Module"
+	# Bluetooth Stack
+	select BT
+	select BT_SMP
+	select BT_PERIPHERAL
+	select CBPRINTF_FP_SUPPORT
+	# Bluetooth Battery Service
+	select BT_BAS
+	# Paring
+	select BT_PRIVACY
+	select BT_KEYS_OVERWRITE_OLDEST
+
+
+	help
+	  BLUETOOTH_MODULE
+
+
+
+# Setting Configs
+config BT_DEVICE_APPEARANCE
+	default 768
+
+config BT_ATT_ENFORCE_FLOW
+bool "BT Enforce"
+	default n
+
+config BT_MAX_PAIRED
+	default 3
+
+
+module = BLUETOOTH_MODULE
+module-str = bluetooth module
+source "subsys/logging/Kconfig.template.log_config"
+
+
+config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
+	int "Duration the system with advertise for"
+	default 60
+
+

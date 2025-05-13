@@ -1,0 +1,10 @@
+identifier: sensing
+name: Sensing Board
+vendor: arm
+arch: arm
+toolchain:
+  - zephyr
+sysbuild: true
+ram: 188
+flash: 324
+supported: {}

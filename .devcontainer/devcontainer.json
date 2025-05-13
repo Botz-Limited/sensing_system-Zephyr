@@ -1,0 +1,51 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the README at:
+// https://github.com/microsoft/vscode-dev-containers/tree/v0.217.4/containers/docker-existing-dockerfile
+{
+	"name": "sensing-dev",
+
+	"workspaceMount": "source=${localWorkspaceFolder},target=/home/ee/${localWorkspaceFolderBasename},type=bind",
+	"workspaceFolder": "/home/ee/${localWorkspaceFolderBasename}",
+
+	// Add the IDs of extensions you want installed when the container is created.
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"nordic-semiconductor.nrf-connect-extension-pack",
+				"llvm-vs-code-extensions.vscode-clangd",
+				"yzhang.markdown-all-in-one",
+				"xaver.clang-format",
+				"me-dutour-mathieu.vscode-github-actions",
+				"IBM.output-colorizer",
+				"ms-azuretools.vscode-docker",
+				"jeff-hykin.better-cpp-syntax",
+				"streetsidesoftware.code-spell-checker",
+				"bierner.markdown-mermaid",
+				"bpruitt-goddard.mermaid-markdown-syntax-highlighting",
+				"mhutchie.git-graph",
+				"ms-vsliveshare.vsliveshare",
+				"eamodio.gitlens",
+				"wayou.vscode-todo-highlight",
+				"ms-vscode.cpptools-themes",
+				"ms-vscode.cpptools",
+				"EthanSK.restore-terminals",
+				"ms-vscode.cmake-tools",
+				"cschlosser.doxdocgen",
+				"sumfish.cpp-checker-misra",
+				"bbenoist.Doxygen",
+				"github.vscode-github-actions"
+			]
+		}
+	},
+	//"image": "ghcr.io/chiaro/sensing-dev:latest",	
+	 "dockerFile": "../Dockerfile",
+
+	"runArgs": [
+		"--privileged",
+		"-v",
+		"/dev:/dev"
+	],
+
+	//"initializeCommand": "docker pull ghcr.io/chiaro/sensing-dev:latest",
+
+	"postAttachCommand": "./.devcontainer/postAttachCommand.sh"
+}
