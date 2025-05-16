@@ -5,6 +5,9 @@ config BLUETOOTH_MODULE
 	select BT_SMP
 	select BT_PERIPHERAL
 	select CBPRINTF_FP_SUPPORT
+	select CONFIG_NCS_SAMPLE_MCUMGR_BT_OTA_DFU
+	select CONFIG_NCS_SAMPLE_MCUMGR_BT_OTA_DFU_SPEEDUP
+	
 	# Bluetooth Battery Service
 	select BT_BAS
 	# Paring

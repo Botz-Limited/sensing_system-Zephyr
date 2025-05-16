@@ -18,7 +18,6 @@
 		 zephyr,flash = &cpuapp_rram;
 		 nordic,pm-ext-flash = &mx25r64;
 	 };
-
 	 
  };
 
@@ -58,7 +57,7 @@
 			};
 		};
 	};
- 
+
  &cpuapp_sram {
 	 status = "okay";
  };
@@ -292,15 +291,16 @@
 	 / {
 	 	fstab {
 	 		compatible = "zephyr,fstab";
-	 	littlefs_storage: lfs {
-	 		compatible = "zephyr,fstab,littlefs";
-	 		mount-point = "/lfs1";
-	 		partition = <&mx25r64>;
-	 		read-size = <16>;
-	 		prog-size = <16>;
-	 		cache-size = <64>;
-	 		lookahead-size = <32>;
-	 		block-cycles = <512>;
- 		};
+	 		littlefs_storage: lfs {
+	 			compatible = "zephyr,fstab,littlefs";
+	 			mount-point = "/lfs1";
+	 			partition = <&mx25r64>;
+	 			read-size = <16>;
+	 			prog-size = <16>;
+	 			cache-size = <64>;
+	 			lookahead-size = <32>;
+	 			block-cycles = <512>;
+ 			};
+			};
 		};
-	};
+ 

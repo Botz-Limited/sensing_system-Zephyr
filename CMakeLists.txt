@@ -4,9 +4,6 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(util)
 #include(MunkeiVersionFromGit)
 
-set(IGNORE_GIT_REPOS TRUE)
-
-
 # Before find_package(Zephyr)
 set(BUILD_VERSION_FROM_GIT OFF)
 set(CONFIG_APP_VERSION "1.0.0")
@@ -22,10 +19,6 @@ list(APPEND ZEPHYR_EXTRA_MODULES
  # ${CMAKE_CURRENT_SOURCE_DIR}/drivers
   ${CMAKE_CURRENT_SOURCE_DIR}/src/bluetooth
 )
-
-#set(PM_STATIC_YML_FILE
- # ${CMAKE_CURRENT_SOURCE_DIR}/pm_static.yml
-  #)
 
 set(CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION "\"${VERSION}\"" CACHE STRING "MCUboot image version")
 

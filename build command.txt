@@ -1,1 +1,1 @@
-west build --build-dir /home/ee/sensing_fw/build /home/ee/sensing_fw/ --pristine --board sensing/nrf54l15/cpuflpr --sysbuild --cmake -- -DCONF_FILE=prj.conf
+west build  --build-dir /home/ee/sensing_fw/build /home/ee/sensing_fw/ --pristine --board sensing/nrf54l15/cpuapp --sysbuild  -- -DCONF_FILE=prj.conf  -DSB_CONFIG_BOOTLOADER_MCUBOOT=y

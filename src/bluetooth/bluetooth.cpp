@@ -12,12 +12,12 @@
 #define MODULE bluetooth
 
 
-#include <array>
-#include <cctype>
-#include <cerrno>
-#include <cstddef>
-#include <cstring>
-#include <string_view>
+//#include <array>
+//#include <cctype>
+//#include <cerrno>
+//#include <cstddef>
+//#include <cstring>
+//#include <string_view>
 
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/printk.h>

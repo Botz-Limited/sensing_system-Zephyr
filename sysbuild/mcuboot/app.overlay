@@ -1,0 +1,8 @@
+/ {
+	chosen {
+		//zephyr,code-partition = &boot_partition;
+		zephyr,flash = &cpuapp_rram;
+		zephyr,code-partition = &slot0_partition;
+		nordic,pm-ext-flash = &mx25r64;
+	};
+};
