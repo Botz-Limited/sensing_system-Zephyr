@@ -1,0 +1,72 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Main",
+			"type": "nrf-connect-build",
+			"config": "${workspaceFolder}/build",
+			"runCmake": false,
+			"problemMatcher": [
+				"$cmake",
+				"$kconfig",
+				"$kconfig_syntax",
+				"$kconfig_syntax_files",
+				"$dts",
+				"$dts_syntax"
+			],
+			"group": "build",
+		},
+		{
+			"label": "Build Local",
+			"type": "shell",
+			"command": "west build",
+			"options": {
+				"cwd": "${fileDirname}",
+				},
+			"group": "build",
+		},
+		{
+			"label": "Run Local",
+			"type": "shell",
+			"command": "./build/zephyr/zephyr.exe",
+			"options": {
+				"cwd": "${fileDirname}",
+			},
+			"group": "test",
+			"dependsOn": "Build Local",
+		},
+		{
+			"label": "Flash Main",
+			"type": "nrf-connect-flash",
+			"config": "${workspaceFolder}/build",
+			"erase": false,
+			"recover": false,
+			"softreset": true,
+			"problemMatcher": [],
+			"dependsOn": "Build Main"
+		},
+		{
+            "label": "Read Flash Data",
+            "type": "shell",
+            "command": "JLinkExe -CommanderScript ${workspaceFolder}/tools/get_flash_data.JLinkScript > /dev/null",
+        },
+        {
+            "label": "Write Flash Data",
+            "type": "shell",
+            "command": "JLinkExe -CommanderScript ${workspaceFolder}/tools/write_flash_data.JLinkScript > /dev/null",
+        },
+        {
+            "label": "Flash juna/build",
+            "type": "nrf-connect-flash",
+            "config": "${workspaceFolder}/build",
+			"erase": true,
+            "problemMatcher": [],
+        },
+        {
+            "label": "Flash JUNA",
+            "type": "shell",
+            "dependsOn": ["Build Main", "Read Flash Data", "Flash juna/build", "Write Flash Data"],
+            "dependsOrder": "sequence"
+        }
+	]
+}

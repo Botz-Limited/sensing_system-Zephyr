@@ -7,7 +7,7 @@
             "type": "cortex-debug",
             "request": "launch",
             "servertype": "jlink",
-            "device": "nrf54",
+            "device": "CORTEX-M33",
             "rtos": "Zephyr",
             "rttConfig": {
                 "enabled": true,
@@ -32,7 +32,7 @@
             "type": "cortex-debug",
             "request": "attach",
             "servertype": "jlink",
-            "device": "nrf52",
+            "device": "CORTEX-M33",
             "rtos": "Zephyr",
             "rttConfig": {
                 "enabled": true,
@@ -71,7 +71,7 @@
             "type": "cortex-debug",
             "request": "launch",
             "servertype": "jlink",
-            "device": "nrf54",
+            "device": "CORTEX-M33",
             "rtos": "Zephyr",
             "rttConfig": {
                 "enabled": true,
@@ -95,6 +95,18 @@
             "name": "Launch build",
             "config": "${workspaceFolder}/build/",
             "runToEntryPoint": "main"
-        }
+        },
+        {
+            "name": "MCUBoot Launch - nRF54",
+            "cwd": "${workspaceRoot}",
+            "executable": "${workspaceRoot}/build/mcuboot/zephyr/mcuboot.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "jlink",
+            "device": "CORTEX-M33",
+            "interface": "swd",
+            "svdFile": "~/ncs/modules/hal/nordic/nrfx/mdk/nrf54l15_application.svd",
+            "runToEntryPoint": "main"
+        },
     ]
 }

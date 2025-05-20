@@ -1,3 +1,5 @@
+DT_CHOSEN_EXT_FLASH:= nordic,pm-ext-flash
+
 config BLUETOOTH_MODULE
 	bool "Bluetooth Module"
 	# Bluetooth Stack
@@ -5,27 +7,87 @@ config BLUETOOTH_MODULE
 	select BT_SMP
 	select BT_PERIPHERAL
 	select CBPRINTF_FP_SUPPORT
-	select CONFIG_NCS_SAMPLE_MCUMGR_BT_OTA_DFU
-	select CONFIG_NCS_SAMPLE_MCUMGR_BT_OTA_DFU_SPEEDUP
-	
 	# Bluetooth Battery Service
 	select BT_BAS
 	# Paring
 	select BT_PRIVACY
 	select BT_KEYS_OVERWRITE_OLDEST
+	# Settings
+	select SETTINGS
+	select SETTINGS_RUNTIME
+	select SHELL
+	select BT_SETTINGS
+	select MCUMGR_SMP_BT
+	select MCUMGR_SMP_BT_CONN_PARAM_CONTROL
+	select MCUMGR_SMP_REASSEMBLY_BT
+
+	# MCUMGR + SMP
+	select MCUMGR
+	select NET_BUF
+	select ZCBOR
+	select CRC
+	select MCUMGR_TRANSPORT_BT
+	select MCUMGR_TRANSPORT_BT_CONN_PARAM_CONTROL
+	select IMG_MANAGER
+	select STREAM_FLASH
+	select FLASH_MAP
+	select FLASH
+	select MCUMGR_GRP_OS
+	select MCUMGR_GRP_OS_BOOTLOADER_INFO
+	select MCUMGR_TRANSPORT_BT_REASSEMBLY
+	select MCUMGR_GRP_FS
+	select MCUMGR_CMD_FS_MGMT
+	select MCUMGR_SMP_SHELL
+	select MCUMGR_GRP_ZEPHYR_BASIC
+	select MCUMGR_GRP_BASIC_CMD_STORAGE_ERASE
+	select MCUMGR_CMD_IMG_MGMT
+	select MCUMGR_CMD_OS_MGMT
+	select MCUMGR_CMD_STAT_MGMT
+	select MCUMGR_SMP_CLIENT
+
+	#config BOOTLOADER_MCUBOOT
+	#bool "mcuboot support"
+	select MCUMGR_GRP_IMG
+	# CONFIG_MCUMGR_GRP_IMG dependencies
+	#select FLASH
+	select IMG_MANAGER
+	select FLASH_MAP
+	# CONFIG_IMG_MANAGER dependencies
+	select STREAM_FLASH
+	# DFU
+	select NORDIC_SPI_NOR
+	select NCS_SAMPLE_MCUMGR_BT_OTA_DFU_SPEEDUP
+	help
+		Bluetooth Module
+
+
+config MCUMGR_TRANSPORT_BT_AUTHEN
+	bool "Transport Auth"
+	default n
+
+config IMG_ERASE_PROGRESSIVELY
+	default y
+
+
+config MCUMGR_TRANSPORT_NETBUF_SIZE
+	default 2475
+
+config MCUMGR_GRP_OS_MCUMGR_PARAMS
+	default y
 
 
 	help
 	  BLUETOOTH_MODULE
 
 
+if BLUETOOTH_MODULE
 
 # Setting Configs
 config BT_DEVICE_APPEARANCE
 	default 768
 
 config BT_ATT_ENFORCE_FLOW
-bool "BT Enforce"
+	bool "flow enforcement"
 	default n
 
 config BT_MAX_PAIRED
@@ -41,4 +103,4 @@ config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
 	int "Duration the system with advertise for"
 	default 60
 
-
+endif # BLUETOOTH_MODULE

@@ -3,21 +3,20 @@
  * @author
  * @brief
  * @version 2.4.1
- * @date 2024-04-18
+ * @date 2025-05-12
  *
- * @copyright Chiaro Technologies 2024
+ * @copyright Botz Innovation 2025
  *
  */
 
 #define MODULE bluetooth
 
-
-//#include <array>
-//#include <cctype>
-//#include <cerrno>
-//#include <cstddef>
-//#include <cstring>
-//#include <string_view>
+#include <array>
+#include <cctype>
+#include <cerrno>
+#include <cstddef>
+#include <cstring>
+#include <string_view>
 
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/printk.h>
@@ -27,7 +26,7 @@
 
 #include "ble_services.hpp"
 
-
+#include <caf/events/module_state_event.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/controller.h>
@@ -35,13 +34,11 @@
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/services/bas.h>
 #include <zephyr/bluetooth/uuid.h>
-#include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/mgmt/mcumgr/transport/smp_bt.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/types.h>
-
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
@@ -69,7 +66,6 @@ static const bt_le_adv_param *bt_le_adv_conn = BT_LE_ADV_CONN_FAST_1;
 // FWD declarations
 static void ble_timer_expiry_function(struct k_timer *timer_id);
 static void ble_timer_handler_function(struct k_work *work);
-static int bt_init(void);
 static int bt_start_advertising(int err);
 static int bt_stop_advertising(void);
 static int ble_start_hidden(void);
@@ -129,7 +125,6 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
     LOG_ERR("Pairing Failed (%d). Disconnecting.", reason);
     bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
     k_timer_stop(&ble_timer);
-
 }
 
 /**
@@ -205,7 +200,6 @@ static void connected(struct bt_conn *conn, uint8_t err)
         bool bonded = is_connection_bonded(conn);
         if (bonded)
         {
-
         }
 
         LOG_INF("Connected");
@@ -263,7 +257,6 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
     ARG_UNUSED(conn);
 
     LOG_INF("Disconnected (reason 0x%02x)", reason);
-
 }
 
 /**
@@ -310,23 +303,13 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 };
 
 static void ble_set_power_off()
-{
-
-}
-
-
-
-
-
+{}
 
 int set_bluetooth_name()
 {
-
-
     int err = bt_set_name("Sensing");
 
-
-    return err; //To implement error codess
+    return err; // To implement error codess
 }
 
 /**
@@ -338,7 +321,7 @@ int set_bluetooth_name()
  * After initialization, the Bluetooth Low Energy (BLE) module is considered
  * initialized, and subsequent BLE operations can be performed.
  */
-int bt_init(void)
+int bt_module_init(void)
 {
     int err = bt_enable(NULL);
     if (err)
@@ -347,7 +330,6 @@ int bt_init(void)
         return -2;
     }
 
-    // See: https://github.com/zephyrproject-rtos/zephyr/pull/42222
     err = settings_load_subtree("bt");
     if (err != 0)
     {
@@ -369,8 +351,21 @@ int bt_init(void)
         return -2;
     }
 
+    if (bt_start_advertising(0)==0)
+    {
+        LOG_INF("BLE Started Advertising");
+    }
+    else
+    {
+        LOG_ERR("BLE Failed to enter advertising mode");
+    }
 
-    LOG_INF("BLE Module Initialised");
+    for(;;){
+        LOG_INF("BLE Module Initialised");
+        k_sleep(K_MSEC(1000));
+    }
+
+    module_set_state(MODULE_STATE_READY);
     return 0;
 }
 
@@ -407,7 +402,6 @@ int bt_start_advertising(int err)
     {
         LOG_INF("Advertising successfully started");
         k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
-
     }
     return (0);
 }
@@ -467,7 +461,6 @@ static void ble_timer_handler_function(struct k_work *work)
     k_timer_stop(&ble_timer);
     if (ble_status_connected == 0)
     {
-
     }
     ble_status_connected = 0;
     int ret = bt_le_adv_stop();

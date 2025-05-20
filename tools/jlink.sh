@@ -4,4 +4,4 @@
 
 # Requires no arguments
 
-JLinkExe -device nRF52 -autoconnect 1 -speed 4000 -if SWD
+JLinkExe  -USB 1057715872 -nogui 1 -if swd -speed 4000 -device cortex-m33

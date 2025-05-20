@@ -1,9 +1,0 @@
-/ {
-	chosen {
-		zephyr,flash-controller = &cpuapp_rram;
-		 zephyr,code-partition = &slot0_partition;
-		 zephyr,sram = &cpuapp_sram;
-		 zephyr,flash = &cpuapp_rram;
-		 nordic,pm-ext-flash = &mx25r64;
-	};
-};

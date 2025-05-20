@@ -1,0 +1,7 @@
+ExitOnError
+device nRF54L15_xxAA
+speed 4000
+si SWD
+connect
+SaveBin "/home/ee/sensing_fw/tools/tmp_nvs_flash_data.bin" 0xFC000, 0x4000
+exit
