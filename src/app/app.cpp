@@ -31,6 +31,7 @@
 
 #include <app.hpp>
 #include <ble_services.hpp>
+#include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_APP_MODULE_LOG_LEVEL); // NOLINT
 
@@ -74,8 +75,6 @@ int app_init()
 
     k_thread_name_set(app_tid, "app"); // sets the name of the thread
 
-    k_thread_start(app_tid);
-
     bt_module_init(); //To define errors
 
     LOG_INF("APP Module Initialised");
@@ -88,8 +87,8 @@ void app_entry(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 {
     while (true)
     {
-        LOG_INF("I'm the APP task");
-        printk("Cazzo");
+        LOG_DBG("I'm the APP task");
+        k_msleep(app_wait_timer);
     }
-    k_msleep(app_wait_timer);
+    
 }

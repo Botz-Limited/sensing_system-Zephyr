@@ -108,5 +108,19 @@
             "svdFile": "~/ncs/modules/hal/nordic/nrfx/mdk/nrf54l15_application.svd",
             "runToEntryPoint": "main"
         },
+        {
+            "type": "nrf-connect",
+            "request": "launch",
+            "name": "Launch sensing_fw",
+            "config": "${workspaceFolder}/build/sensing_fw",
+            "runToEntryPoint": "main"
+        },
+        {
+            "type": "nrf-connect",
+            "request": "launch",
+            "name": "Launch mcuboot",
+            "config": "${workspaceFolder}/build/mcuboot",
+            "runToEntryPoint": "main"
+        }
     ]
 }

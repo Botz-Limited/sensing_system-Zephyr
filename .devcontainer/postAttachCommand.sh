@@ -4,3 +4,5 @@ git config --global --add core.pager "less -F -X"
 git config --global --add safe.directory /home/ee/sensing_fw
 
 west sdk install
+
+\cp -rf /home/ee/sensing_fw/tools/nrfutil /usr/bin/

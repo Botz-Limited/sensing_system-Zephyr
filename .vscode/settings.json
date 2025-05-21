@@ -93,6 +93,8 @@
     "nrf-connect.deviceProvider": "nrfjprog",
     "C_Cpp.doxygen.generatedStyle": "/**",
     "nrf-connect.debugging.bindings": {
-        "${workspaceFolder}/build": "Launch build"
+        "${workspaceFolder}/build": "Launch build",
+        "${workspaceFolder}/build/sensing_fw": "Launch sensing_fw",
+        "${workspaceFolder}/build/mcuboot": "Launch mcuboot"
     },
 }

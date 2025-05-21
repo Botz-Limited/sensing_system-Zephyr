@@ -26,6 +26,8 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(app LANGUAGES C CXX ASM)
 
+test_sysbuild()
+
 target_include_directories(app PUBLIC ${CMAKE_BINARY_DIR})
 zephyr_include_directories(${CMAKE_BINARY_DIR})
 
@@ -40,9 +42,10 @@ target_include_directories(app PUBLIC ${CMAKE_BINARY_DIR})
 zephyr_include_directories(${CMAKE_BINARY_DIR})
 
 zephyr_include_directories(
- # $ENV{APPLICATION_ROOT_PATH}/include
+  $ENV{APPLICATION_ROOT_PATH}/include
   $ENV{APPLICATION_ROOT_PATH}/src
   configuration
+  ${ZEPHYR_BASE}/../modules/fs/littlefs
   ${CMAKE_BINARY_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
 )

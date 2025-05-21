@@ -18,6 +18,7 @@
 #include <cstring>
 #include <string_view>
 
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/printk.h>
 
@@ -307,7 +308,7 @@ static void ble_set_power_off()
 
 int set_bluetooth_name()
 {
-    int err = bt_set_name("Sensing");
+    int err = bt_set_name("SensingG");
 
     return err; // To implement error codess
 }
@@ -330,7 +331,7 @@ int bt_module_init(void)
         return -2;
     }
 
-    err = settings_load_subtree("bt");
+    err = settings_load();
     if (err != 0)
     {
         LOG_ERR("Bluetooth settings_load() call failed (err %d)", err);
@@ -360,10 +361,6 @@ int bt_module_init(void)
         LOG_ERR("BLE Failed to enter advertising mode");
     }
 
-    for(;;){
-        LOG_INF("BLE Module Initialised");
-        k_sleep(K_MSEC(1000));
-    }
 
     module_set_state(MODULE_STATE_READY);
     return 0;

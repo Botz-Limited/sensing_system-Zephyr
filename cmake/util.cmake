@@ -1,9 +1,5 @@
 set(SYS_COMPILE_FLAGS 
-   # -Wall
-  #  -Wextra
-   # -Werror
-  #  -Wshadow
-   # -Wno-psabi
+   -std=c++20
     CACHE STRING "SYS_COMPILE_FLAGS"
 )
 
