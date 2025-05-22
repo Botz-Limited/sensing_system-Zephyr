@@ -1,2 +1,3 @@
 rsource "bluetooth/Kconfig"
 rsource "app/Kconfig"
+rsource "data/Kconfig"

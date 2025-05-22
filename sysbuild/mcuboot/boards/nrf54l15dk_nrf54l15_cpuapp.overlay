@@ -19,15 +19,7 @@
 	};
 
 	aliases {
-		led0 = &myled0;
-	};
-
-	leds {
-		compatible = "gpio-leds";
-		status = "okay";
-		myled0: led_0 {
-			gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
-		};
+		ledu = &led0;
 	};
 };
 
@@ -259,21 +251,5 @@
 		zephyr,input-positive = <NRF_SAADC_AIN7>;
 		zephyr,resolution = <12>;
 
-	};
-};
-
-/ {
-	fstab {
-		compatible = "zephyr,fstab";
-		littlefs_storage: lfs {
-			compatible = "zephyr,fstab,littlefs";
-			mount-point = "/lfs1";
-			partition = <&mx25r64>;
-			read-size = <16>;
-			prog-size = <16>;
-			cache-size = <64>;
-			lookahead-size = <32>;
-			block-cycles = <512>;
-		};
 	};
 };

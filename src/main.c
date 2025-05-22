@@ -11,7 +11,7 @@
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/timeutil.h>
 
-#include <app.hpp>
+#include "app.hpp"
 
 #include <zephyr/logging/log.h>
 
@@ -21,8 +21,7 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 int main(void)
 {
-
-    app_init(); // to define errors
+    sensing_app_init(); // to define errors
 
     return 0;
 }

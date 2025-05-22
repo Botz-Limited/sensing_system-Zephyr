@@ -1,1 +1,0 @@
-set(SYSBUILD_IMAGE_LIST app)

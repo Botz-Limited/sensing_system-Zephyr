@@ -5,28 +5,22 @@ app:
   size: 0x167E00
 
 external_flash:
-  address: 0x1000000
-  end_address: 0x1000000
+  address: 0x800000
+  end_address: 0x800000
   region: external_flash
+  device: MX25R64
   size: 0x0
 
-storage_ext:
+littlefs_storage:
   address: 0x17D600
   device: DT_CHOSEN(nordic_pm_ext_flash)
-  end_address: 0x186600
-  region: external_flash
-  size: 0x9000
-
-littlefs_storage:
-  address: 0x186600
-  device: DT_CHOSEN(nordic_pm_ext_flash)
-  end_address: 0x800000
+  end_address: 0x7FD600
   placement:
     before:
     - tfm_storage
     - end
   region: external_flash
-  size: 0x679A00
+  size: 0x680000
 
 mcuboot:
   address: 0x0

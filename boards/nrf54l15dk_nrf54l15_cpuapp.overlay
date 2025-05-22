@@ -19,16 +19,11 @@
 	};
 
 	aliases {
-		led0 = &myled0;
+		ledu = &led0;
 	};
 
-	leds {
-		compatible = "gpio-leds";
-		status = "okay";
-		myled0: led_0 {
-			gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
-		};
-	};
+	
+
 };
 
 
@@ -131,43 +126,12 @@
 			#address-cells = <1>;
 			#size-cells = <1>;
 
-			/* Bootloader (80KB) - Same size as internal */
-			boot_partition_ext: partition@0 {
-				label = "mcuboot-ext";
-				reg = <0x00000 0x14000>;  /* 0x00000-0x13FFF */
-			};
-
-			/* Primary slot (512KB) - Same size as internal */
-			slot0_partition_ext: partition@14000 {
-				label = "image-0-ext";
-				reg = <0x14000 DT_SIZE_K(512)>;  /* 0x14000-0x93FFF */
-			};
-
-			/* Secondary slot (512KB) - Same size as internal */
-			slot1_partition_ext: partition@94000 {
-				label = "image-1-ext";
-				reg = <0x94000 DT_SIZE_K(512)>;  /* 0x94000-0x113FFF */
-			};
-
-			/* TF-M reserved (32KB) - Same size as internal */
-			tfm_partition_ext: partition@114000 {
-				label = "tfm-ext";
-				reg = <0x114000 DT_SIZE_K(32)>;  /* 0x114000-0x11BFFF */
-			};
-
-			/* Storage partition (36KB) - Same size as internal */
-			storage_partition_ext: partition@11c000 {
-				label = "storage-ext";
-				reg = <0x11c000 DT_SIZE_K(36)>;  /* 0x11C000-0x124FFF */
-			};
-
-			/* Additional space for external flash (remaining 7.2MB) */
-			user_partition_ext: partition@125000 {
-				label = "user-ext";
-				reg = <0x125000 0x6DB000>;  /* 0x125000-0x7FFFFF (remaining space) */
-			};
+			lfs1_partition: partition@0 {
+				label = "lfs1_partition";
+				reg = <0x00000000 0x00010000>;
 		};
 	};
+};
 };
 
 
@@ -259,21 +223,5 @@
 		zephyr,input-positive = <NRF_SAADC_AIN7>;
 		zephyr,resolution = <12>;
 
-	};
-};
-
-/ {
-	fstab {
-		compatible = "zephyr,fstab";
-		littlefs_storage: lfs {
-			compatible = "zephyr,fstab,littlefs";
-			mount-point = "/lfs1";
-			partition = <&mx25r64>;
-			read-size = <16>;
-			prog-size = <16>;
-			cache-size = <64>;
-			lookahead-size = <32>;
-			block-cycles = <512>;
-		};
 	};
 };

@@ -13,14 +13,12 @@
 #include <stdint.h>
 #include <zephyr/kernel.h>
 
-#define app_wait_timer 2000
-
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-int app_init(void);
+int sensing_app_init(void);
 
 #ifdef __cplusplus
 }
