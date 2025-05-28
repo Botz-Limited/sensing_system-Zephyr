@@ -1,27 +1,20 @@
 app:
   address: 0x15800
-  end_address: 0x17D600
+  end_address: 0xFC600
   region: flash_primary
-  size: 0x167E00
-
+  size: 0xe6e00
 external_flash:
-  address: 0x800000
+  address: 0x0
   end_address: 0x800000
   region: external_flash
-  device: MX25R64
-  size: 0x0
-
+  device: mx25r6435f
+  size: 0x800000
 littlefs_storage:
-  address: 0x17D600
-  device: DT_CHOSEN(nordic_pm_ext_flash)
-  end_address: 0x7FD600
-  placement:
-    before:
-    - tfm_storage
-    - end
+  address: 0xe7600
+  end_address: 0x800000
   region: external_flash
-  size: 0x680000
-
+  device: mx25r6435f
+  size: 0x718000
 mcuboot:
   address: 0x0
   end_address: 0x15000
@@ -30,7 +23,6 @@ mcuboot:
     - mcuboot_primary
   region: flash_primary
   size: 0x15000
-
 mcuboot_pad:
   address: 0x15000
   end_address: 0x15800
@@ -39,34 +31,40 @@ mcuboot_pad:
     - mcuboot_primary_app
   region: flash_primary
   size: 0x800
-  
 mcuboot_primary:
   address: 0x15000
-  end_address: 0x1927FF
+  end_address: 0xFC600
   orig_span: &id001
   - app
   - mcuboot_pad
   region: flash_primary
-  size: 0x17D600
+  size: 0xe7600
   span: *id001
-
 mcuboot_primary_app:
   address: 0x15800
-  end_address: 0x192800
+  end_address: 0xFCE00
   orig_span: &id002
   - app
   region: flash_primary
-  size: 0x17D600
+  size: 0xe6e00
   span: *id002 
-  
 mcuboot_secondary:
   address: 0x0
-  device: DT_CHOSEN(nordic_pm_ext_flash)
-  end_address: 0x17D600
+  end_address: 0xe7600
   placement:
     align:
       start: 0x4
   region: external_flash
   share_size:
   - mcuboot_primary
-  size: 0x17D600
+  size: 0xe7600
+sram_primary:
+  address: 0x20000000
+  end_address: 0x20040000
+  region: sram_primary
+  size: 0x40000
+user_data:
+  address: 0xFCE00
+  size: 0x3200
+  region: flash_primary
+

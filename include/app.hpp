@@ -10,18 +10,11 @@
 #ifndef APP_INCLUDE_APP_HEADER_
 #define APP_INCLUDE_APP_HEADER_
 
-#include <stdint.h>
 #include <zephyr/kernel.h>
+#include <events/data_event.h>
+#include <events/bluetooth_state_event.h>
+#include <events/data_event.h>
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-int sensing_app_init(void);
-
-#ifdef __cplusplus
-}
-#endif
+void app_log(const char *fmt, ...);
 
 #endif // APP_INCLUDE_APP_HEADER_

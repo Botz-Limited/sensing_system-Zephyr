@@ -17,17 +17,5 @@
 #define VND_MAX_LEN 20
 #define BLE_ADVERTISING_TIMEOUT_MS 30000
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-int bt_module_init(void);
-
-#ifdef __cplusplus
-}
-#endif
-
-
 
 #endif // APP_INCLUDE_BLE_SERVICES_HEADER_

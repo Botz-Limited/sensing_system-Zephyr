@@ -66,13 +66,15 @@ config MCUMGR_TRANSPORT_BT_AUTHEN
 	default n
 
 config IMG_ERASE_PROGRESSIVELY
+	bool
 	default y
 
-
 config MCUMGR_TRANSPORT_NETBUF_SIZE
+	int
 	default 2475
 
 config MCUMGR_GRP_OS_MCUMGR_PARAMS
+	bool
 	default y
 
 
@@ -84,6 +86,7 @@ if BLUETOOTH_MODULE
 
 # Setting Configs
 config BT_DEVICE_APPEARANCE
+	int
 	default 768
 
 config BT_ATT_ENFORCE_FLOW
@@ -91,13 +94,13 @@ config BT_ATT_ENFORCE_FLOW
 	default n
 
 config BT_MAX_PAIRED
+	int
 	default 3
 
 
 module = BLUETOOTH_MODULE
 module-str = bluetooth module
 source "subsys/logging/Kconfig.template.log_config"
-
 
 config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
 	int "Duration the system with advertise for"

@@ -1,3 +1,2 @@
-west build  --build-dir /home/ee/sensing_fw/build /home/ee/sensing_fw/ --pristine --board sensing/nrf54l15/cpuapp --sysbuild  -- -DCONF_FILE=prj.conf  -DSB_CONFIG_BOOTLOADER_MCUBOOT=y
-
- west build  --build-dir /home/ee/sensing_fw/build /home/ee/sensing_fw/ --pristine --board nrf54l15dk/nrf54l15/cpuapp --sysbuild DCONF_FILE=prj.conf   -DSB_CONFIG_BOOTLOADER_MCUBOOT=y
+ west build  --build-dir /home/ee/sensing_fw/build /home/ee/sensing_fw/ --pristine --board nrf5340dk/nrf5340/cpuapp --sysbuild 
+ nrfjprog --program build/merged.hex  --verify --chiperase --reset

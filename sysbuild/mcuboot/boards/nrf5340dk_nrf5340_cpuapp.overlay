@@ -1,0 +1,12 @@
+/ {
+	model = "Nordic NRF5340 DK NRF5340 Application";
+	compatible = "nordic,nrf5340-dk-nrf5340-cpuapp";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash0;
+		zephyr,code-partition = &slot0_partition;
+		nordic,pm-ext-flash = &mx25r64;
+		zephyr,ieee802154 = &ieee802154;
+	};
+};

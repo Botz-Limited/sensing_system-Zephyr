@@ -1,4 +1,4 @@
-name: bluetooth
+name: data
 build:
   # Path to the module's CMakeLists.txt relative to the 'zephyr' subdirectory.
   cmake: ../.

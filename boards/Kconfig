@@ -1,34 +1,26 @@
-# nRF54L15 DK board configuration
+# nRF5340 DK board configuration
 
-# Copyright (c) 2024 Nordic Semiconductor ASA
+# Copyright (c) 2019 - 2021 Nordic Semiconductor ASA
 # SPDX-License-Identifier: Apache-2.0
 
-if BOARD_NRF54L15DK_NRF54L15_CPUAPP_NS
+if BOARD_NRF5340DK_NRF5340_CPUAPP || BOARD_NRF5340DK_NRF5340_CPUAPP_NS
 
-config NRF_MPC_REGION_SIZE
-	hex
-	default 0x1000
+config DOMAIN_CPUNET_BOARD
+	string
+	default "nrf5340dk/nrf5340/cpunet"
 	help
-	  Region size for the Memory Protection Controller (MPC) in bytes.
+	  The board which will be used for CPUNET domain when creating a multi
+	  image application where one or more images should be located on
+	  another board. For example hci_ipc on the nRF5340_cpunet for
+	  Bluetooth applications.
 
-config NRF_TRUSTZONE_FLASH_REGION_SIZE
-	hex
-	default NRF_MPC_REGION_SIZE
+endif #  BOARD_NRF5340DK_NRF5340_CPUAPP || BOARD_NRF5340DK_NRF5340_CPUAPP_NS
+
+config DOMAIN_CPUAPP_BOARD
+	string
+	default "nrf5340dk/nrf5340/cpuapp"
+	depends on BOARD_NRF5340DK_NRF5340_CPUNET
 	help
-	  This defines the flash region size from the TRUSTZONE perspective.
-	  It is used when configuring the TRUSTZONE and when setting alignments
-	  requirements for the partitions.
-	  This abstraction allows us to configure TRUSTZONE without depending
-	  on peripheral specific symbols.
-
-config NRF_TRUSTZONE_RAM_REGION_SIZE
-	hex
-	default NRF_MPC_REGION_SIZE
-	help
-	  This defines the RAM region size from the TRUSTZONE perspective.
-	  It is used when configuring the TRUSTZONE and when setting alignments
-	  requirements for the partitions.
-	  This abstraction allows us to configure TRUSTZONE without depending
-	  on peripheral specific symbols.
-
-endif #BOARD_NRF54L15DK_NRF54L15_CPUAPP_NS
+	  The board which will be used for CPUAPP domain when creating a multi
+	  image application where one or more images should be located on
+	  another board.

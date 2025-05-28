@@ -16,8 +16,10 @@ list(APPEND BOARD_ROOT $ENV{APPLICATION_ROOT_PATH})
 set(BOARD_ROOT "/home/ee/sensing_fw")
 
 list(APPEND ZEPHYR_EXTRA_MODULES
- # ${CMAKE_CURRENT_SOURCE_DIR}/drivers
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/bluetooth
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/app/
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/app_events/
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/data/
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/bluetooth/
 )
 
 set(CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION "\"${VERSION}\"" CACHE STRING "MCUboot image version")
@@ -32,25 +34,34 @@ target_include_directories(app PUBLIC ${CMAKE_BINARY_DIR})
 zephyr_include_directories(${CMAKE_BINARY_DIR})
 
 
+
+
 #This must be added to remove unused variables, and initialise the variables not used.
 target_compile_options(app PRIVATE ${SYS_COMPILE_FLAGS})
 
 # Sets all the zephyr headers to be system include this is prevent
 set_target_properties(zephyr_interface PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:zephyr_interface,INTERFACE_INCLUDE_DIRECTORIES>)
 
-target_include_directories(app PUBLIC ${CMAKE_BINARY_DIR})
-zephyr_include_directories(${CMAKE_BINARY_DIR})
+
 
 zephyr_include_directories(
   $ENV{APPLICATION_ROOT_PATH}/include
   $ENV{APPLICATION_ROOT_PATH}/src
   configuration
+  ${ZEPHYR_BASE}/subsys/fs
+  ${ZEPHYR_BASE}/zephyr/subsys/fs
   ${ZEPHYR_BASE}/../modules/fs/littlefs
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-target_sources(app PRIVATE src/main.c)
+
+target_sources(app PRIVATE src/main.cpp)
+target_include_directories(app PRIVATE include/)
+target_include_directories(app PRIVATE src/)
+
+
 
 # Moves the compile_commands.json file into root for clangd
 add_custom_command(

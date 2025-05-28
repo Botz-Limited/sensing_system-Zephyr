@@ -2,8 +2,7 @@ menu "SENSING"
     config HARDWARE_STRING
         string "v1.0"
         default "v1.0"
-
-    
+        
     rsource "src/Kconfig"
 
 endmenu

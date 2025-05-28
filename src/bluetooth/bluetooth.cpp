@@ -8,7 +8,7 @@
  * @copyright Botz Innovation 2025
  *
  */
-
+ 
 #define MODULE bluetooth
 
 #include <array>
@@ -27,7 +27,6 @@
 
 #include "ble_services.hpp"
 
-#include <caf/events/module_state_event.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/controller.h>
@@ -40,6 +39,14 @@
 #include <zephyr/mgmt/mcumgr/transport/smp_bt.h>
 #include <zephyr/sys/reboot.h>
 #include <zephyr/types.h>
+
+#include <caf/events/module_state_event.h>
+#include <events/app_state_event.h>
+#include <events/bluetooth_state_event.h>
+#include <events/data_event.h>
+#include <app_event_manager.h>
+
+
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
@@ -515,3 +522,30 @@ int bt_stop_advertising()
     }
     return 0;
 }
+
+static bool app_event_handler(const struct app_event_header *aeh)
+{
+    if (is_module_state_event(aeh))
+    {
+        auto *event = cast_module_state_event(aeh);
+
+        if (check_state(event, MODULE_ID(data), MODULE_STATE_READY))
+        {
+            int init = bt_module_init();
+            if (init != 0)
+            {
+                module_set_state(MODULE_STATE_ERROR);
+            }
+            else
+            {
+                module_set_state(MODULE_STATE_READY);
+            }
+        }
+        return false;
+    }
+}
+
+
+APP_EVENT_LISTENER(MODULE, app_event_handler);
+APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
+APP_EVENT_SUBSCRIBE_FINAL(MODULE, module_state_event);

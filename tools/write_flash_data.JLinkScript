@@ -1,7 +1,0 @@
-ExitOnError
-device nRF55L15_xxAA
-speed 4000
-si SWD
-connect
-LoadFile "/home/ee/sensing_fw/tools/tmp_nvs_flash_data.bin" 0xFC000 reset
-exit

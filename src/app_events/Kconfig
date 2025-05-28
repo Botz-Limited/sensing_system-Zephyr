@@ -1,0 +1,13 @@
+config APPLICATION_EVENTS
+	bool "Application Events"
+	select APP_EVENT_MANAGER
+	help
+	  SYSTEM EVENTS
+
+if APPLICATION_EVENTS
+
+module = APPLICATION_EVENTS
+module-str = application events
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # APPLICATION_EVENTS

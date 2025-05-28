@@ -1,3 +1,4 @@
-add_subdirectory_ifdef(CONFIG_BLUETOOTH_MODULE bluetooth)
-add_subdirectory_ifdef(CONFIG_APP_MODULE app)
-add_subdirectory_ifdef(CONFIG_DATA_MODULE data)
+add_subdirectory(app)
+add_subdirectory(data)
+add_subdirectory(bluetooth)
+add_subdirectory(app_events)

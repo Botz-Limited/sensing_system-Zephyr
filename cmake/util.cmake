@@ -1,5 +1,5 @@
 set(SYS_COMPILE_FLAGS 
-   -std=c++20
+    -Wextra
     CACHE STRING "SYS_COMPILE_FLAGS"
 )
 
