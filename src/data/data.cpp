@@ -91,6 +91,50 @@ static int data_init()
     }
 }
 
+static int lsdir(const char *path)
+{
+	int res;
+	struct fs_dir_t dirp;
+	static struct fs_dirent entry;
+
+    LOG_WRN("Starting Directories List");
+
+	fs_dir_t_init(&dirp);
+
+	/* Verify fs_opendir() */
+	res = fs_opendir(&dirp, path);
+	if (res) {
+		LOG_ERR("Error opening dir %s [%d]\n", path, res);
+		return res;
+	}
+
+	LOG_PRINTK("\nListing dir %s ...\n", path);
+	for (;;) {
+		/* Verify fs_readdir() */
+		res = fs_readdir(&dirp, &entry);
+
+		/* entry.name[0] == 0 means end-of-dir */
+		if (res || entry.name[0] == 0) {
+			if (res < 0) {
+				LOG_ERR("Error reading dir [%d]\n", res);
+			}
+			break;
+		}
+
+		if (entry.type == FS_DIR_ENTRY_DIR) {
+			LOG_PRINTK("[DIR ] %s\n", entry.name);
+		} else {
+			LOG_PRINTK("[FILE] %s (size = %zu)\n",
+				   entry.name, entry.size);
+		}
+	}
+
+	/* Verify fs_closedir() */
+	fs_closedir(&dirp);
+
+	return res;
+}
+
 void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 {
     k_thread_name_set(data_tid, "data");
@@ -120,8 +164,15 @@ int mount_file_system(struct fs_mount_t *mount)
     int ret = fs_mount(mount);
     if (ret != 0)
     {
+        LOG_ERR("FS mount failed");
         return -1;
     }
+
+    rc = lsdir(mount->mnt_point);
+	if (rc < 0) {
+		LOG_ERR("FAIL: lsdir %s: %d\n", mount->mnt_point, rc);
+		return -1;
+	}
 
     return 0;
 }

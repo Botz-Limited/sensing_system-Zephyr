@@ -9,7 +9,6 @@ config DATA_MODULE
 	select HWINFO
 	select FILE_SYSTEM_LITTLEFS
 	select CONFIG_PM_PARTITION_REGION_LITTLEFS_EXTERNAL
-	select CONFIG_PM_PARTITION_REGION_SETTINGS_STORAGE_EXTERNAL
 	select SETTINGS
 
 # kconfigs required for shell test commands

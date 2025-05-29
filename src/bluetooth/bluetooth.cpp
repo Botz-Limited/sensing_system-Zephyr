@@ -72,6 +72,7 @@ static const bt_le_adv_param *bt_le_adv_conn = BT_LE_ADV_CONN_FAST_1;
 ;
 
 // FWD declarations
+static bool app_event_handler(const struct app_event_header *aeh);
 static void ble_timer_expiry_function(struct k_timer *timer_id);
 static void ble_timer_handler_function(struct k_work *work);
 static int bt_start_advertising(int err);
@@ -338,7 +339,7 @@ int bt_module_init(void)
         return -2;
     }
 
-      err = settings_load_subtree("bt");
+    err = settings_load_subtree("bt");
     if (err != 0)
     {
         LOG_ERR("Bluetooth settings_load() call failed (err %d)", err);
@@ -420,6 +421,8 @@ int bt_start_advertising(int err)
  */
 int ble_start_hidden()
 {
+    bt_stop_advertising();
+    
     int err = bt_le_adv_start(bt_le_adv_conn, ad, ARRAY_SIZE(ad), NULL, 0);
     if (err)
     {
