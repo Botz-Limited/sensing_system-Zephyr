@@ -44,8 +44,6 @@ config BLUETOOTH_MODULE
 	select MCUMGR_CMD_OS_MGMT
 	select MCUMGR_CMD_STAT_MGMT
 	select MCUMGR_SMP_CLIENT
-	select ZMS if (SOC_FLASH_NRF_RRAM || SOC_FLASH_NRF_MRAM)
-	select NVS if !(SOC_FLASH_NRF_RRAM || SOC_FLASH_NRF_MRAM)
 
 	#config BOOTLOADER_MCUBOOT
 	#bool "mcuboot support"

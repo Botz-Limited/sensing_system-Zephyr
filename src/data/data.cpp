@@ -108,7 +108,7 @@ static int lsdir(const char *path)
 		return res;
 	}
 
-	LOG_PRINTK("\nListing dir %s ...\n", path);
+	LOG_INF("\nListing dir %s ...\n", path);
 	for (;;) {
 		/* Verify fs_readdir() */
 		res = fs_readdir(&dirp, &entry);
@@ -122,9 +122,9 @@ static int lsdir(const char *path)
 		}
 
 		if (entry.type == FS_DIR_ENTRY_DIR) {
-			LOG_PRINTK("[DIR ] %s\n", entry.name);
+			LOG_INF("[DIR ] %s\n", entry.name);
 		} else {
-			LOG_PRINTK("[FILE] %s (size = %zu)\n",
+			LOG_INF("[FILE] %s (size = %zu)\n",
 				   entry.name, entry.size);
 		}
 	}
