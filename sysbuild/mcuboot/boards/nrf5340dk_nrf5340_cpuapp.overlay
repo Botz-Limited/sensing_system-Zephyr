@@ -10,3 +10,7 @@
 		zephyr,ieee802154 = &ieee802154;
 	};
 };
+
+&mx25r64 {
+	status = "okay";
+};

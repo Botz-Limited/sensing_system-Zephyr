@@ -80,7 +80,6 @@ static int data_init()
         // Create the data thread
         data_tid = k_thread_create(&data_thread_data, data_stack_area, K_THREAD_STACK_SIZEOF(data_stack_area),
                                    proccess_data, nullptr, nullptr, nullptr, data_priority, 0, K_NO_WAIT);
-        k_thread_name_set(data_tid, "Data"); // sets the name of the thread
 
         set_data_event(DATA_NO_ERROR);
 

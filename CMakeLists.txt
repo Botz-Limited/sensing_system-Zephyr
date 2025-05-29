@@ -56,6 +56,11 @@ zephyr_include_directories(
   ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+#if(CONFIG_IPC_RADIO_BT_HCI_IPC)
+ # target_sources(app PRIVATE src/bt_hci_ipc.c)
+#else()
+ # target_sources(app PRIVATE src/bt_empty.c)
+#endif()
 
 target_sources(app PRIVATE src/main.cpp)
 target_include_directories(app PRIVATE include/)

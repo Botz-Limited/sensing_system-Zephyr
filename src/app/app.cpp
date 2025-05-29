@@ -110,7 +110,7 @@ void app_entry(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
     while (true)
     {
-        LOG_DBG("I'm the APP task");
+        LOG_INF("I'm the APP task");
         k_msleep(app_wait_timer);
     }
 }
