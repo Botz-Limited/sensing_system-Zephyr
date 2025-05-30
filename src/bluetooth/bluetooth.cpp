@@ -339,7 +339,7 @@ int bt_module_init(void)
         return -2;
     }
 
-    err = settings_load_subtree("bt");
+    err = settings_load();
     if (err != 0)
     {
         LOG_ERR("Bluetooth settings_load() call failed (err %d)", err);

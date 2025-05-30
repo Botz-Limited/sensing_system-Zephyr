@@ -49,7 +49,7 @@ config BLUETOOTH_MODULE
 	#bool "mcuboot support"
 	select MCUMGR_GRP_IMG
 	# CONFIG_MCUMGR_GRP_IMG dependencies
-	#select FLASH
+	select FLASH
 	select IMG_MANAGER
 	select FLASH_MAP
 	# CONFIG_IMG_MANAGER dependencies
@@ -95,7 +95,7 @@ config BT_ATT_ENFORCE_FLOW
 
 config BT_MAX_PAIRED
 	int
-	default 3
+	default 4
 
 
 module = BLUETOOTH_MODULE
