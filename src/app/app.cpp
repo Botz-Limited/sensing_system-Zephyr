@@ -20,21 +20,22 @@
 #include <time.h>
 
 #include <app_event_manager.h>
-#include <events/app_state_event.h>
 #include <caf/events/module_state_event.h>
+#include <events/app_state_event.h>
 #include <events/bluetooth_state_event.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/mgmt/mcumgr/mgmt/callbacks.h>
 #include <zephyr/mgmt/mcumgr/mgmt/mgmt.h>
 #include <zephyr/sys/timeutil.h>
-#include <zephyr/logging/log.h>
-
-#include <zephyr/devicetree.h>
 
 #include <app.hpp>
+#include <errors.hpp>
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_APP_MODULE_LOG_LEVEL); // NOLINT
+
+void initializing_entry();
 
 /********************************** APP THREAD ********************************/
 static constexpr int app_stack_size = CONFIG_APP_MODULE_STACK_SIZE;
@@ -61,7 +62,6 @@ mgmt_cb_return mcumgr_dfu_callback(uint32_t event, enum mgmt_cb_return prev_stat
     return MGMT_CB_OK;
 }
 
-
 void app_log(const char *fmt, ...)
 {
     LOG_MODULE_DECLARE(MODULE, CONFIG_APP_MODULE_LOG_LEVEL);
@@ -75,10 +75,10 @@ void app_log(const char *fmt, ...)
 
 void initializing_entry()
 {
-    LOG_INF("Sensing FW version: %s, Sensing HW version: %s", CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION, CONFIG_HARDWARE_STRING);
-   
-   
-    //To initialise message que here
+    LOG_INF("Sensing FW version: %s, Sensing HW version: %s", CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION,
+            CONFIG_HARDWARE_STRING);
+
+    // To initialise message que here
 
     LOG_DBG("App initializing_entry done ");
 }
@@ -94,10 +94,7 @@ static void app_init()
     app_tid = k_thread_create(&app_thread_data, app_stack_area, K_THREAD_STACK_SIZEOF(app_stack_area), app_entry,
                               nullptr, nullptr, nullptr, app_priority, 0, K_NO_WAIT);
 
-
     LOG_INF("APP Module Initialised");
-    
-
 }
 
 void app_entry(void * /*unused*/, void * /*unused*/, void * /*unused*/)
@@ -129,6 +126,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
         }
         return false;
     }
+    return false;
 }
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);

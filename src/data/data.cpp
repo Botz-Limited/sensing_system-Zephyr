@@ -15,11 +15,12 @@
 #include <zephyr/settings/settings.h>
 #include <zephyr/storage/flash_map.h>
 
-#include <caf/events/module_state_event.h>
-#include <events/bluetooth_state_event.h>
-#include <events/app_state_event.h>
-#include <events/data_event.h>
 #include <app_event_manager.h>
+#include <caf/events/module_state_event.h>
+#include <errors.hpp>
+#include <events/app_state_event.h>
+#include <events/bluetooth_state_event.h>
+#include <events/data_event.h>
 
 #include <data.hpp>
 
@@ -38,9 +39,10 @@ static struct fs_mount_t lfs_ext_storage_mnt = {
     .storage_dev = (void *)FLASH_AREA_ID(littlefs_storage),
 };
 
-
-static int mount_file_system(struct fs_mount_t *mount);
-static int littlefs_flash_erase(unsigned int id);
+static err_t mount_file_system(struct fs_mount_t *mount);
+static err_t littlefs_flash_erase(unsigned int id);
+static err_t data_init();
+static int lsdir(const char *path);
 
 // Thread
 static struct k_thread data_thread_data;
@@ -55,19 +57,18 @@ constexpr char dir_path[] = "/lfs1";
 
 void proccess_data();
 
-
 /**
  * @brief Initialise the file system
  *
  * @return int
  *
  */
-static int data_init()
+static err_t data_init()
 {
     struct fs_mount_t *mp = &lfs_ext_storage_mnt;
     // Mount the File System
-    int err = mount_file_system(mp);
-    if (err != 0) // to implement errors
+    err_t err = mount_file_system(mp);
+    if (err != err_t::NO_ERROR) // to implement errors
     {
         LOG_ERR("Error mounting littlefs");
         module_set_state(MODULE_STATE_ERROR);
@@ -85,54 +86,59 @@ static int data_init()
 
         LOG_DBG("Data module initialised");
         module_set_state(MODULE_STATE_READY);
-        
 
-        return 0; // to implement errors
+        return err_t::NO_ERROR; // to implement errors
     }
 }
 
 static int lsdir(const char *path)
 {
-	int res;
-	struct fs_dir_t dirp;
-	static struct fs_dirent entry;
+    int res;
+    struct fs_dir_t dirp;
+    static struct fs_dirent entry;
 
     LOG_WRN("Starting Directories List");
 
-	fs_dir_t_init(&dirp);
+    fs_dir_t_init(&dirp);
 
-	/* Verify fs_opendir() */
-	res = fs_opendir(&dirp, path);
-	if (res) {
-		LOG_ERR("Error opening dir %s [%d]\n", path, res);
-		return res;
-	}
+    /* Verify fs_opendir() */
+    res = fs_opendir(&dirp, path);
+    if (res)
+    {
+        LOG_ERR("Error opening dir %s [%d]\n", path, res);
+        return res;
+    }
 
-	LOG_INF("\nListing dir %s ...\n", path);
-	for (;;) {
-		/* Verify fs_readdir() */
-		res = fs_readdir(&dirp, &entry);
+    LOG_INF("\nListing dir %s ...\n", path);
+    for (;;)
+    {
+        /* Verify fs_readdir() */
+        res = fs_readdir(&dirp, &entry);
 
-		/* entry.name[0] == 0 means end-of-dir */
-		if (res || entry.name[0] == 0) {
-			if (res < 0) {
-				LOG_ERR("Error reading dir [%d]\n", res);
-			}
-			break;
-		}
+        /* entry.name[0] == 0 means end-of-dir */
+        if (res || entry.name[0] == 0)
+        {
+            if (res < 0)
+            {
+                LOG_ERR("Error reading dir [%d]\n", res);
+            }
+            break;
+        }
 
-		if (entry.type == FS_DIR_ENTRY_DIR) {
-			LOG_INF("[DIR ] %s\n", entry.name);
-		} else {
-			LOG_INF("[FILE] %s (size = %zu)\n",
-				   entry.name, entry.size);
-		}
-	}
+        if (entry.type == FS_DIR_ENTRY_DIR)
+        {
+            LOG_INF("[DIR ] %s\n", entry.name);
+        }
+        else
+        {
+            LOG_INF("[FILE] %s (size = %zu)\n", entry.name, entry.size);
+        }
+    }
 
-	/* Verify fs_closedir() */
-	fs_closedir(&dirp);
+    /* Verify fs_closedir() */
+    fs_closedir(&dirp);
 
-	return res;
+    return res;
 }
 
 void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
@@ -146,63 +152,66 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
     }
 }
 
-int mount_file_system(struct fs_mount_t *mount)
+err_t mount_file_system(struct fs_mount_t *mount)
 {
     const struct device *flash_device = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
 
     if (!device_is_ready(flash_device))
     {
         LOG_ERR("External flash device isn't ready");
-        return -1;
+        return  err_t::DATA_ERROR;
     }
 
-    int rc = littlefs_flash_erase((uintptr_t)mount->storage_dev);
-	if (rc < 0) {
-        return -1;
-	}
+    err_t rc = littlefs_flash_erase((uintptr_t)mount->storage_dev);
+    if (rc != err_t::NO_ERROR)
+    {
+        return  err_t::DATA_ERROR;
+    }
 
     int ret = fs_mount(mount);
     if (ret != 0)
     {
         LOG_ERR("FS mount failed");
-        return -1;
+        return  err_t::DATA_ERROR;
     }
 
-    rc = lsdir(mount->mnt_point);
-	if (rc < 0) {
-		LOG_ERR("FAIL: lsdir %s: %d\n", mount->mnt_point, rc);
-		return -1;
-	}
+    int err = lsdir(mount->mnt_point);
+    if (err < 0)
+    {
+        LOG_ERR("FAIL: lsdir %s: %d\n", mount->mnt_point, err);
+        return  err_t::DATA_ERROR;
+    }
 
-    return 0;
+    return  err_t::NO_ERROR;
 }
 
-static int littlefs_flash_erase(unsigned int id)
+static err_t littlefs_flash_erase(unsigned int id)
 {
-	const struct flash_area *pfa;
-	int rc;
+    const struct flash_area *pfa;
+    int rc;
 
-	rc = flash_area_open(id, &pfa);
-	if (rc < 0) {
-		LOG_ERR("FAIL: unable to find flash area %u: %d\n",
-			id, rc);
-		return rc;
-	}
+    rc = flash_area_open(id, &pfa);
+    if (rc < 0)
+    {
+        LOG_ERR("FAIL: unable to find flash area %u: %d\n", id, rc);
+        return  err_t::DATA_ERROR;
+    }
 
-	LOG_WRN("Area %u at 0x%x on %s for %u bytes\n",
-		   id, (unsigned int)pfa->fa_off, pfa->fa_dev->name,
-		   (unsigned int)pfa->fa_size);
+    LOG_WRN("Area %u at 0x%x on %s for %u bytes\n", id, (unsigned int)pfa->fa_off, pfa->fa_dev->name,
+            (unsigned int)pfa->fa_size);
 
-	/* Optional wipe flash contents */
-	if (IS_ENABLED(CONFIG_APP_WIPE_STORAGE)) {
-		rc = flash_area_flatten(pfa, 0, pfa->fa_size);
-		LOG_ERR("Erasing flash area ... %d", rc);
-	}
+    /* Optional wipe flash contents */
+    if (IS_ENABLED(CONFIG_APP_WIPE_STORAGE))
+    {
+        rc = flash_area_flatten(pfa, 0, pfa->fa_size);
+        LOG_ERR("Erasing flash area ... %d", rc);
+        return err_t::DATA_ERROR;
+    }
 
-	flash_area_close(pfa);
-	return rc;
+    flash_area_close(pfa);
+    return err_t::NO_ERROR;
+    
 }
-
 
 static bool app_event_handler(const struct app_event_header *aeh)
 {
@@ -212,7 +221,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
         if (check_state(event, MODULE_ID(app), MODULE_STATE_READY))
         {
-            if (data_init() == 0) //Develop errors
+            if (data_init() == err_t::NO_ERROR) // Develop errors
             {
                 LOG_DBG("Data device initialization successful");
             }
@@ -225,10 +234,8 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
         return false;
     }
-
+    return false;
 }
-
-
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE_EARLY(MODULE, module_state_event);

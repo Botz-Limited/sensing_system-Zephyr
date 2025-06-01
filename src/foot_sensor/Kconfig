@@ -1,0 +1,23 @@
+config FOOT_SENSOR_MODULE
+	bool "Foot Sensor Module"
+	select GPIO
+	select ADC
+	help
+	  FOOT_SENSOR MODULE
+
+if FOOT_SENSOR_MODULE
+
+module = FOOT_SENSOR_MODULE
+module-str = FOOT_SENSOR module
+source "subsys/logging/Kconfig.template.log_config"
+
+
+config FOOT_SENSOR_MODULE_STACK_SIZE
+	int "Foot Sensor module thread stack size"
+	default 3072
+
+config FOOT_SENSOR_MODULE_PRIORITY
+	int "Foot Sensor module thread priority"
+	default 6
+
+endif # FOOT_SENSOR_MODULE

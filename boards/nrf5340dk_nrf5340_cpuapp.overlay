@@ -8,6 +8,7 @@
         nordic,pm-ext-flash = &mx25r64;
         zephyr,settings-partition = &lfs1;
     };
+    
 };
 
 
@@ -43,3 +44,7 @@
          };
      };
  };
+
+ &adc {
+	status = "okay";
+};

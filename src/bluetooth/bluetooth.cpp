@@ -8,7 +8,7 @@
  * @copyright Botz Innovation 2025
  *
  */
- 
+
 #define MODULE bluetooth
 
 #include <array>
@@ -40,13 +40,12 @@
 #include <zephyr/sys/reboot.h>
 #include <zephyr/types.h>
 
+#include <app_event_manager.h>
 #include <caf/events/module_state_event.h>
+#include <errors.hpp>
 #include <events/app_state_event.h>
 #include <events/bluetooth_state_event.h>
 #include <events/data_event.h>
-#include <app_event_manager.h>
-
-
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
@@ -75,10 +74,10 @@ static const bt_le_adv_param *bt_le_adv_conn = BT_LE_ADV_CONN_FAST_1;
 static bool app_event_handler(const struct app_event_header *aeh);
 static void ble_timer_expiry_function(struct k_timer *timer_id);
 static void ble_timer_handler_function(struct k_work *work);
-static int bt_start_advertising(int err);
-static int bt_stop_advertising(void);
-static int ble_start_hidden(void);
-static int ble_reset_bonds(void);
+static err_t bt_start_advertising(int err);
+static err_t bt_stop_advertising(void);
+static err_t ble_start_hidden(void);
+static err_t ble_reset_bonds(void);
 
 struct bt_conn *local_conn = NULL;
 
@@ -226,8 +225,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
             LOG_ERR("Failed to stop (err 0x%02x)", ret);
         }
 
-        int error = ble_start_hidden();
-        if (error != 0)
+        err_t error = ble_start_hidden();
+        if (error != err_t::NO_ERROR)
         {
             LOG_ERR("Failed to start %d", (int)error);
         }
@@ -318,7 +317,7 @@ int set_bluetooth_name()
 {
     int err = bt_set_name("SensingG");
 
-    return err; // To implement error codess
+    return err;
 }
 
 /**
@@ -330,37 +329,37 @@ int set_bluetooth_name()
  * After initialization, the Bluetooth Low Energy (BLE) module is considered
  * initialized, and subsequent BLE operations can be performed.
  */
-int bt_module_init(void)
+err_t bt_module_init(void)
 {
     int err = bt_enable(NULL);
     if (err)
     {
         LOG_ERR("Bluetooth init failed (err %d)\n", err);
-        return -2;
+        return err_t::BLUETOOTH_ERROR;
     }
 
     err = settings_load();
     if (err != 0)
     {
         LOG_ERR("Bluetooth settings_load() call failed (err %d)", err);
-        return -2;
+        return err_t::BLUETOOTH_ERROR;
     }
 
     int err_name = set_bluetooth_name();
     if (err_name != 0)
     {
         LOG_ERR("Failed to Set Name");
-        return err_name;
+        return err_t::BLUETOOTH_ERROR;
     }
 
     err = bt_conn_auth_info_cb_register(&bt_conn_auth_info);
     if (err)
     {
         LOG_INF("Can't register authentication information callbacks (err: %d)\n", err);
-        return -2;
+        return err_t::BLUETOOTH_ERROR;
     }
 
-    if (bt_start_advertising(0)==0)
+    if (bt_start_advertising(0) == err_t::NO_ERROR)
     {
         LOG_INF("BLE Started Advertising");
     }
@@ -369,9 +368,7 @@ int bt_module_init(void)
         LOG_ERR("BLE Failed to enter advertising mode");
     }
 
-
-    module_set_state(MODULE_STATE_READY);
-    return 0;
+    return err_t::NO_ERROR;
 }
 
 /**
@@ -390,7 +387,7 @@ int bt_module_init(void)
  * parameter. It is used to propagate the error code from the advertising start
  * operation to the caller.
  */
-int bt_start_advertising(int err)
+err_t bt_start_advertising(int err)
 {
 
     bt_stop_advertising();
@@ -401,14 +398,14 @@ int bt_start_advertising(int err)
     {
         LOG_ERR("Advertising failed to start, error=%d", err);
 
-        return (-2);
+        return err_t::BLUETOOTH_ERROR;
     }
     else
     {
         LOG_INF("Advertising successfully started");
         k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
     }
-    return (0);
+    return err_t::NO_ERROR;
 }
 
 /**
@@ -419,19 +416,19 @@ int bt_start_advertising(int err)
  * the advertising fails to start and logs an informational message if the
  * advertising starts successfully.
  */
-int ble_start_hidden()
+err_t ble_start_hidden()
 {
     bt_stop_advertising();
-    
+
     int err = bt_le_adv_start(bt_le_adv_conn, ad, ARRAY_SIZE(ad), NULL, 0);
     if (err)
     {
         LOG_ERR("Hidden Advertising failed to start, error=%d", err);
-        return (-2);
+        return err_t::BLUETOOTH_ERROR;
     }
 
     LOG_INF("Hidden Advertising successfully started");
-    return (0);
+    return err_t::NO_ERROR;
 }
 
 /**
@@ -479,8 +476,8 @@ static void ble_timer_handler_function(struct k_work *work)
 
     if (bonds_present())
     {
-        int err = ble_start_hidden();
-        if (err != 0)
+        err_t err = ble_start_hidden();
+        if (err != err_t::NO_ERROR)
         {
             LOG_ERR("Failed to start %d", (int)err);
         }
@@ -495,7 +492,7 @@ static void ble_timer_handler_function(struct k_work *work)
  * devices. Logging information is provided to indicate that the bonds are being
  * reset.
  */
-int ble_reset_bonds()
+err_t ble_reset_bonds()
 {
     LOG_INF("Reset bonds");
     k_timer_stop(&ble_timer);
@@ -503,9 +500,9 @@ int ble_reset_bonds()
     if (err)
     {
         LOG_ERR("Failed to unpair connections");
-        return -2;
+        return err_t::BLUETOOTH_ERROR;
     }
-    return 0;
+    return err_t::NO_ERROR;
 }
 
 /**
@@ -515,15 +512,15 @@ int ble_reset_bonds()
  * function. It is responsible for halting the transmission of advertising
  * packets.
  */
-int bt_stop_advertising()
+err_t bt_stop_advertising()
 {
     int err = bt_le_adv_stop();
     if (err)
     {
         LOG_ERR("Failed to unpair connections");
-        return -2;
+        return err_t::BLUETOOTH_ERROR;
     }
-    return 0;
+    return err_t::NO_ERROR;
 }
 
 static bool app_event_handler(const struct app_event_header *aeh)
@@ -534,8 +531,8 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
         if (check_state(event, MODULE_ID(data), MODULE_STATE_READY))
         {
-            int init = bt_module_init();
-            if (init != 0)
+            err_t init = bt_module_init();
+            if (init != err_t::NO_ERROR)
             {
                 module_set_state(MODULE_STATE_ERROR);
             }
@@ -546,8 +543,8 @@ static bool app_event_handler(const struct app_event_header *aeh)
         }
         return false;
     }
+    return false;
 }
-
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, app_state_event);

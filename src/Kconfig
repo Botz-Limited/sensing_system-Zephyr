@@ -2,5 +2,6 @@ rsource "app/Kconfig"
 rsource "data/Kconfig"
 rsource "bluetooth/Kconfig"
 rsource "app_events/Kconfig"
+rsource "foot_sensor/Kconfig"
 
 
