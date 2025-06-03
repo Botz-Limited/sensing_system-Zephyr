@@ -26,6 +26,7 @@ enum class err_t
     ADC_ERROR = -19,
     I2C_ERROR = -20,
     BATTERY_DISCONNECTION_ERROR = -21,
+    MOTION_ERROR = -22,
 
     // File related errors continue from here
     FILE_SYSTEM_ERROR = -22,

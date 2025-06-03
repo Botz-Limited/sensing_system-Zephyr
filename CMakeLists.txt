@@ -20,13 +20,36 @@ list(APPEND ZEPHYR_EXTRA_MODULES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/app_events/
   ${CMAKE_CURRENT_SOURCE_DIR}/src/data/
   ${CMAKE_CURRENT_SOURCE_DIR}/src/bluetooth/
+   ${CMAKE_CURRENT_SOURCE_DIR}/drivers
 )
 
 set(CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION "\"${VERSION}\"" CACHE STRING "MCUboot image version")
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
-project(app LANGUAGES C CXX ASM)
+project(SENSING LANGUAGES C CXX ASM)
+
+# Protobuf (Config different due to NCS)
+set(PROTOC_OPTIONS "-I${CMAKE_CURRENT_SOURCE_DIR}")
+set(NANOPB_OPTIONS "nanopb_BUILD_RUNTIME OFF")
+set(CMAKE_MODULE_PATH ${ZEPHYR_BASE}/../modules/lib/nanopb/extra)
+set(ENV{PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION} python)
+find_package(Nanopb REQUIRED)
+set(NANOPB_GENERATE_CPP_STANDALONE FALSE)
+nanopb_generate_cpp(proto_sources proto_headers
+    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/hardware_data.proto
+    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/metadata.proto
+    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/calibration.proto
+)
+
+# Create a custom target for the protobuf generation step
+add_custom_target(generate_protos ALL DEPENDS ${proto_sources} ${proto_headers})
+# Make sure the app target depends on the proto generation
+add_dependencies(app generate_protos)
+
+target_sources(app PRIVATE ${proto_sources})
+target_include_directories(app PUBLIC ${CMAKE_BINARY_DIR})
+zephyr_include_directories(${CMAKE_BINARY_DIR})
 
 test_sysbuild()
 
@@ -34,15 +57,11 @@ target_include_directories(app PUBLIC ${CMAKE_BINARY_DIR})
 zephyr_include_directories(${CMAKE_BINARY_DIR})
 
 
-
-
 #This must be added to remove unused variables, and initialise the variables not used.
 target_compile_options(app PRIVATE ${SYS_COMPILE_FLAGS})
 
 # Sets all the zephyr headers to be system include this is prevent
 set_target_properties(zephyr_interface PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES $<TARGET_PROPERTY:zephyr_interface,INTERFACE_INCLUDE_DIRECTORIES>)
-
-
 
 zephyr_include_directories(
   $ENV{APPLICATION_ROOT_PATH}/include
@@ -65,7 +84,6 @@ zephyr_include_directories(
 target_sources(app PRIVATE src/main.cpp)
 target_include_directories(app PRIVATE include/)
 target_include_directories(app PRIVATE src/)
-
 
 
 # Moves the compile_commands.json file into root for clangd

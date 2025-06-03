@@ -1,0 +1,282 @@
+/**
+ * @file motion_sensor.cpp
+ * @author Giorgio Guglielmino
+ * @version 1.0.1
+ * @date 2025-05-16
+ *
+ * @copyright Copyright (c) 2025
+ *
+ */
+
+#include <zephyr/arch/arm/arch.h>
+#define MODULE motion_sensor
+
+/*************************** INCLUDE HEADERS ********************************/
+#include <cstring>
+#include <time.h>
+#include <variant>
+
+#include <cstdio>
+#include <cstring>
+
+#include <app_event_manager.h>
+#include <bno055.h>
+#include <caf/events/module_state_event.h>
+#include <events/app_state_event.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+
+#include <motion_sensor.hpp>
+
+#include <errors.hpp>
+
+LOG_MODULE_REGISTER(MODULE, CONFIG_MOTION_SENSOR_MODULE_LOG_LEVEL); // NOLINT
+
+static const struct device *const bno055_dev = DEVICE_DT_GET(DT_ALIAS(bno055));
+
+void motion_sensor_initializing_entry();
+void acc_drdy(const struct device *dev, const struct sensor_trigger *trigger);
+void acc_motion(const struct device *dev, const struct sensor_trigger *trigger);
+void acc_high_g(const struct device *dev, const struct sensor_trigger *trigger);
+void gyr_any_motion(const struct device *dev, const struct sensor_trigger *trigger);
+void gyr_high_rate(const struct device *dev, const struct sensor_trigger *trigger);
+
+/********************************** Foot Sensor THREAD ********************************/
+static constexpr int motion_sensor_stack_size = CONFIG_MOTION_SENSOR_MODULE_STACK_SIZE;
+static constexpr int motion_sensor_priority = CONFIG_MOTION_SENSOR_MODULE_PRIORITY;
+K_THREAD_STACK_DEFINE(motion_sensor_stack_area, motion_sensor_stack_size);
+static struct k_thread motion_sensor_thread_data;
+static k_tid_t motion_sensor_tid;
+void motion_sensor_process(void * /*unused*/, void * /*unused*/, void * /*unused*/);
+
+static struct sensor_trigger trig_acc_drdy;
+static struct sensor_trigger trig_acc_motion;
+static struct sensor_trigger trig_acc_high_g;
+static struct sensor_trigger trig_gyr_any_motion;
+static struct sensor_trigger trig_gyr_high_rate;
+static bool trigger_anyno_motion = true;
+static bool bno055_fusion = false;
+
+void motion_sensor_initializing_entry()
+{
+
+    // To initialise message que here
+
+    LOG_INF("Motion Sensor initializing_entry done ");
+}
+
+static void motion_sensor_init()
+{
+
+    motion_sensor_initializing_entry();
+
+    //Initialise BNO055
+
+#if DEVICE_DT_DEFER(DT_ALIAS(bno055))
+    k_sleep(K_MSEC(BNO055_TIMING_STARTUP));
+    device_init(bno055_dev);
+#endif
+
+if (!device_is_ready(bno055_dev)) {
+		LOG_ERR("Device %s is not ready\n", bno055_dev->name);
+		return;
+	}
+
+struct sensor_value config = {
+		.val1 = (bno055_fusion) ? BNO055_MODE_NDOF : BNO055_MODE_ACC_MAG_GYRO,
+		.val2 = 0,
+	};
+    
+sensor_attr_set(bno055_dev, SENSOR_CHAN_ALL, SENSOR_ATTR_CONFIGURATION, &config);
+	config.val1 = BNO055_POWER_NORMAL;
+	config.val2 = 0;
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_ALL, SENSOR_ATTR_PRIV_START, &config);
+
+    trig_acc_drdy.type = SENSOR_TRIG_DATA_READY;
+	trig_acc_drdy.chan = SENSOR_CHAN_ACCEL_XYZ;
+	sensor_trigger_set(bno055_dev, &trig_acc_drdy, acc_drdy);
+
+    if (trigger_anyno_motion) {
+		config.val1 = BNO055_ACC_DURATION_MOTION_ANY;
+		config.val2 = 0x02; // Value
+		sensor_attr_set(bno055_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SLOPE_DUR, &config);
+		config.val1 = BNO055_ACC_THRESHOLD_MOTION_ANY;
+		config.val2 = 0x04; // Value
+		sensor_attr_set(bno055_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SLOPE_TH, &config);
+		trig_acc_motion.type = SENSOR_TRIG_DELTA;
+		trig_acc_motion.chan = SENSOR_CHAN_ACCEL_XYZ;
+		sensor_trigger_set(bno055_dev, &trig_acc_motion, acc_motion);
+	} else {
+		config.val1 = BNO055_ACC_DURATION_MOTION_NO;
+		config.val2 =
+			BNO055_IRQ_ACC_SET_MOTION_NO || BNO055_ACC_DURATION_MOTION_SLOWNO_1_SECONDS;
+		sensor_attr_set(bno055_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SLOPE_DUR, &config);
+		config.val1 = BNO055_ACC_THRESHOLD_MOTION_NO;
+		config.val2 = 0x04; // Value
+		sensor_attr_set(bno055_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SLOPE_TH, &config);
+		trig_acc_motion.type = SENSOR_TRIG_STATIONARY;
+		trig_acc_motion.chan = SENSOR_CHAN_ACCEL_XYZ;
+		sensor_trigger_set(bno055_dev, &trig_acc_motion, acc_motion);
+	}
+
+    config.val1 = BNO055_ACC_DURATION_HIGH_G;
+	config.val2 = 0x7F; // Value (127 + 1) * 2 = 256 ms
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SLOPE_DUR, &config);
+	config.val1 = BNO055_ACC_THRESHOLD_HIGH_G;
+	config.val2 = 0x48; // Value
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_SLOPE_TH, &config);
+	trig_acc_high_g.type = (enum sensor_trigger_type)BNO055_SENSOR_TRIG_HIGH_G ;
+	trig_acc_high_g.chan = SENSOR_CHAN_ACCEL_XYZ;
+	sensor_trigger_set(bno055_dev, &trig_acc_high_g, acc_high_g);
+
+	config.val1 = 0x02; // Value
+	config.val2 = BNO055_GYR_AWAKE_DURATION_MOTION_ANY_8_SAMPLES;
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_XYZ, SENSOR_ATTR_SLOPE_DUR, &config);
+	config.val1 = 0x08; // Value
+	config.val2 = 0;
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_XYZ, SENSOR_ATTR_SLOPE_TH, &config);
+	trig_gyr_any_motion.type = SENSOR_TRIG_DELTA;
+	trig_gyr_any_motion.chan = SENSOR_CHAN_GYRO_XYZ;
+	sensor_trigger_set(bno055_dev, &trig_gyr_any_motion, gyr_any_motion);
+
+	config.val1 = 0x0A; // Value
+	config.val2 = 0;
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_X, SENSOR_ATTR_SLOPE_DUR, &config);
+	config.val1 = 0x0A; // Value
+	config.val2 = 0;
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_Y, SENSOR_ATTR_SLOPE_DUR, &config);
+	config.val1 = 0x0A; // Value
+	config.val2 = 0;
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_Z, SENSOR_ATTR_SLOPE_DUR, &config);
+	config.val1 = 0x01; // Threshold
+	config.val2 = 0x00; // Hysteresis
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_X, SENSOR_ATTR_HYSTERESIS, &config);
+	config.val1 = 0x01; // Threshold
+	config.val2 = 0x00; // Hysteresis
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_Y, SENSOR_ATTR_HYSTERESIS, &config);
+	config.val1 = 0x01; // Threshold
+	config.val2 = 0x00; // Hysteresis
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_Z, SENSOR_ATTR_HYSTERESIS, &config);
+	trig_gyr_high_rate.type = SENSOR_TRIG_PRIV_START;
+	trig_gyr_high_rate.chan = SENSOR_CHAN_GYRO_XYZ;
+	sensor_trigger_set(bno055_dev, &trig_gyr_high_rate, gyr_high_rate);
+
+	config.val1 = BNO055_GYR_FILTER_OFF; // Deactive HR Filter
+	config.val2 = BNO055_GYR_FILTER_OFF; // Deactive AM Filter
+	sensor_attr_set(bno055_dev, SENSOR_CHAN_GYRO_XYZ, SENSOR_ATTR_FEATURE_MASK, &config);
+    
+
+    //Initialise Task
+
+    motion_sensor_tid = k_thread_create(&motion_sensor_thread_data, motion_sensor_stack_area,
+                                        K_THREAD_STACK_SIZEOF(motion_sensor_stack_area), motion_sensor_process, nullptr,
+                                        nullptr, nullptr, motion_sensor_priority, 0, K_NO_WAIT);
+
+    LOG_INF("Foot Sensor Module Initialised");
+}
+
+void motion_sensor_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
+{
+
+    k_thread_name_set(motion_sensor_tid, "Motion_Sensor"); // sets the name of the thread
+
+    module_set_state(MODULE_STATE_READY);
+
+    while (true)
+    {
+        sensor_sample_fetch(bno055_dev);
+
+        // Example for Linear Acceleration and Gravity
+		if (!bno055_fusion) {
+			struct sensor_value acc[3];
+			sensor_channel_get(bno055_dev, SENSOR_CHAN_ACCEL_XYZ, acc);
+
+			LOG_INF("ACCEL: X(m.s-2)[%d.%06d] Y(m.s-2)[%d.%06d] Z(m.s-2)[%d.%06d]\n",
+			       acc[0].val1, acc[0].val2, acc[1].val1, acc[1].val2, acc[2].val1,
+			       acc[2].val2);
+		} else {
+			struct sensor_value lia[3], grav[3], eul[3], quat[4], calib[4];
+			sensor_channel_get(bno055_dev, (enum sensor_channel)BNO055_SENSOR_CHAN_LINEAR_ACCEL_XYZ, lia);
+			sensor_channel_get(bno055_dev, (enum sensor_channel)BNO055_SENSOR_CHAN_GRAVITY_XYZ, grav);
+			sensor_channel_get(bno055_dev, (enum sensor_channel)BNO055_SENSOR_CHAN_EULER_YRP, eul);
+			sensor_channel_get(bno055_dev, (enum sensor_channel)BNO055_SENSOR_CHAN_QUATERNION_WXYZ, quat);
+			sensor_channel_get(bno055_dev, (enum sensor_channel)BNO055_SENSOR_CHAN_CALIBRATION_SGAM, calib);
+
+			LOG_INF("LINACCEL: X(m.s-2)[%d.%06d] Y(m.s-2)[%d.%06d] Z(m.s-2)[%d.%06d]\n",
+			       lia[0].val1, lia[0].val2, lia[1].val1, lia[1].val2, lia[2].val1,
+			       lia[2].val2);
+			LOG_INF("GRAVITY: X(m.s-2)[%d.%06d] Y(m.s-2)[%d.%06d] Z(m.s-2)[%d.%06d]\n",
+			       grav[0].val1, grav[0].val2, grav[1].val1, grav[1].val2, grav[2].val1,
+			       grav[2].val2);
+			LOG_INF("EULER: X(rad.s-1)[%d.%06d] Y(rad.s-1)[%d.%06d] "
+			       "Z(rad.s-1)[%d.%06d]\n",
+			       eul[0].val1, eul[0].val2, eul[1].val1, eul[1].val2, eul[2].val1,
+			       eul[2].val2);
+			LOG_INF("QUATERNION: W[%d.%06d] X[%d.%06d] Y[%d.%06d] Z[%d.%06d]\n",
+			       quat[0].val1, quat[0].val2, quat[1].val1, quat[1].val2, quat[2].val1,
+			       quat[2].val2, quat[2].val1, quat[2].val2);
+			LOG_INF("CALIB: SYS[%d] GYR[%d] ACC[%d] MAG[%d]\n", calib[0].val1,
+			       calib[1].val1, calib[2].val1, calib[3].val1);
+		}
+
+        k_msleep(motion_sensor_timer);
+    }
+}
+
+void acc_drdy(const struct device *dev, const struct sensor_trigger *trigger)
+{
+	LOG_INF("BSX data ready!!\n");
+}
+
+void acc_motion(const struct device *dev, const struct sensor_trigger *trigger)
+{
+	if (trigger->type == SENSOR_TRIG_DELTA) {
+		LOG_WRN("ACC any motion interrupt!!\n");
+	} else if (trigger->type == SENSOR_TRIG_STATIONARY) {
+		LOG_WRN("ACC no motion interrupt!!\n");
+	} else {
+		LOG_ERR("Unknown interrupt!!\n");
+	}
+}
+
+void acc_high_g(const struct device *dev, const struct sensor_trigger *trigger)
+{
+	LOG_WRN("ACC high G interrupt!!\n");
+}
+
+void gyr_any_motion(const struct device *dev, const struct sensor_trigger *trigger)
+{
+	LOG_WRN("GYR any motion interrupt!!\n");
+}
+
+void gyr_high_rate(const struct device *dev, const struct sensor_trigger *trigger)
+{
+	LOG_WRN("GYR high RATE interrupt!!\n");
+}
+
+
+// Return type dictates if event is consumed. False = Not Consumed, True =
+// Consumed.
+static bool app_event_handler(const struct app_event_header *aeh)
+{
+    if (is_module_state_event(aeh))
+    {
+        auto *event = cast_module_state_event(aeh);
+
+        if (check_state(event, MODULE_ID(foot_sensor), MODULE_STATE_READY))
+        {
+            motion_sensor_init();
+        }
+        return false;
+    }
+    return false;
+}
+
+APP_EVENT_LISTENER(MODULE, app_event_handler);
+APP_EVENT_SUBSCRIBE_FIRST(MODULE, module_state_event);
+APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
+APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);

@@ -31,18 +31,19 @@
 
 #include <errors.hpp>
 
-
 LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL); // NOLINT
 
 // ADC configuration
-#define ADC_NODE		DT_NODELABEL(adc)
-#define ADC_RESOLUTION	12
-#define ADC_GAIN		ADC_GAIN_1_6
-#define ADC_REFERENCE	ADC_REF_INTERNAL
+#define ADC_NODE DT_NODELABEL(adc)
+#define ADC_RESOLUTION 12
+#define ADC_GAIN ADC_GAIN_1_6
+#define ADC_REFERENCE ADC_REF_INTERNAL
 #define ADC_ACQUISITION_TIME ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)
 #define ADC_CHANNEL_COUNT 8
 
-static int16_t adc_buffer[ADC_CHANNEL_COUNT];
+static int16_t adc_buffer[ADC_CHANNEL_COUNT+1];
+
+const struct device *adc_dev = DEVICE_DT_GET(ADC_NODE);
 
 static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
     // Channel 0 (AIN0)
@@ -51,8 +52,9 @@ static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
         .reference = ADC_REFERENCE,
         .acquisition_time = ADC_ACQUISITION_TIME,
         .channel_id = 0,
-        .differential = 0,  // 0 = single-ended mode
+        .differential = 0, // 0 = single-ended mode
         .input_positive = SAADC_CH_PSELP_PSELP_AnalogInput0,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC,  // Not connected (single-ended)
     },
     // Channel 1 (AIN1)
     {
@@ -62,6 +64,7 @@ static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
         .channel_id = 1,
         .differential = 0,
         .input_positive = SAADC_CH_PSELP_PSELP_AnalogInput1,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC,
     },
     // Channel 2 (AIN2)
     {
@@ -71,6 +74,7 @@ static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
         .channel_id = 2,
         .differential = 0,
         .input_positive = SAADC_CH_PSELP_PSELP_AnalogInput2,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC,
     },
     // Channel 3 (AIN3)
     {
@@ -80,6 +84,7 @@ static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
         .channel_id = 3,
         .differential = 0,
         .input_positive = SAADC_CH_PSELP_PSELP_AnalogInput3,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC,
     },
     // Channel 4 (AIN4)
     {
@@ -89,6 +94,7 @@ static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
         .channel_id = 4,
         .differential = 0,
         .input_positive = SAADC_CH_PSELP_PSELP_AnalogInput4,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC,
     },
     // Channel 5 (AIN5)
     {
@@ -98,6 +104,7 @@ static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
         .channel_id = 5,
         .differential = 0,
         .input_positive = SAADC_CH_PSELP_PSELP_AnalogInput5,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC,
     },
     // Channel 6 (AIN6)
     {
@@ -107,6 +114,7 @@ static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
         .channel_id = 6,
         .differential = 0,
         .input_positive = SAADC_CH_PSELP_PSELP_AnalogInput6,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC,
     },
     // Channel 7 (AIN7)
     {
@@ -116,13 +124,15 @@ static const struct adc_channel_cfg channel_cfgs[ADC_CHANNEL_COUNT] = {
         .channel_id = 7,
         .differential = 0,
         .input_positive = SAADC_CH_PSELP_PSELP_AnalogInput7,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC,
     }
 };
 
 static const struct adc_sequence_options sequence_options = {
     .interval_us = 0,
     .callback = NULL,
-    .extra_samplings = 1,
+    .user_data = NULL,  // Added missing field
+    .extra_samplings = 0,
 };
 
 static const struct adc_sequence sequence = {
@@ -132,6 +142,8 @@ static const struct adc_sequence sequence = {
     .buffer = adc_buffer,
     .buffer_size = sizeof(adc_buffer),
     .resolution = ADC_RESOLUTION,
+    .oversampling = 0,  // Added missing field (no oversampling)
+    .calibrate = false, // Added missing field (no calibration)
 };
 
 void foot_sensor_initializing_entry();
@@ -144,7 +156,6 @@ static struct k_thread foot_sensor_thread_data;
 static k_tid_t foot_sensor_tid;
 void foot_sensor_process(void * /*unused*/, void * /*unused*/, void * /*unused*/);
 
-
 void foot_sensor_initializing_entry()
 {
 
@@ -156,17 +167,18 @@ void foot_sensor_initializing_entry()
 static void foot_sensor_init()
 {
 
-    const struct device *adc_dev = DEVICE_DT_GET(ADC_NODE);
-
-    if (!device_is_ready(adc_dev)) {
+    if (!device_is_ready(adc_dev))
+    {
         LOG_ERR("ADC device not ready\n");
         return;
     }
 
     // Configure all ADC channels
-    for (int i = 0; i < ADC_CHANNEL_COUNT; i++) {
+    for (int i = 0; i < ADC_CHANNEL_COUNT; i++)
+    {
         int err = adc_channel_setup(adc_dev, &channel_cfgs[i]);
-        if (err < 0) {
+        if (err < 0)
+        {
             LOG_ERR("Failed to setup ADC channel %d (err %d)\n", i, err);
             return;
         }
@@ -174,8 +186,9 @@ static void foot_sensor_init()
 
     foot_sensor_initializing_entry();
 
-    foot_sensor_tid = k_thread_create(&foot_sensor_thread_data, foot_sensor_stack_area, K_THREAD_STACK_SIZEOF(foot_sensor_stack_area), foot_sensor_process,
-                              nullptr, nullptr, nullptr, foot_sensor_priority, 0, K_NO_WAIT);
+    foot_sensor_tid =
+        k_thread_create(&foot_sensor_thread_data, foot_sensor_stack_area, K_THREAD_STACK_SIZEOF(foot_sensor_stack_area),
+                        foot_sensor_process, nullptr, nullptr, nullptr, foot_sensor_priority, 0, K_NO_WAIT);
 
     LOG_INF("Foot Sensor Module Initialised");
 }
@@ -189,11 +202,30 @@ void foot_sensor_process(void * /*unused*/, void * /*unused*/, void * /*unused*/
 
     while (true)
     {
-        LOG_INF("I'm the Foot Sensor task");
+        // Testing inputs
+
+        // Read all ADC channels
+        int err = adc_read(adc_dev, &sequence);
+        if (err < 0)
+        {
+            LOG_ERR("ADC read failed (err %d)\n", err);
+            return;
+        }
+
+        // Print all ADC values
+        for (int i = 0; i < ADC_CHANNEL_COUNT; i++)
+        {
+            int32_t val_mv = adc_buffer[i];
+
+            // Convert to millivolts if needed
+            val_mv = (val_mv * 600 * 2 ^ ADC_RESOLUTION) / (2 ^ ADC_RESOLUTION * ADC_GAIN);
+
+         //   LOG_INF("ADC channel %d: %d (raw value)\n", i, val_mv);
+        }
+
         k_msleep(foot_sensor_timer);
     }
 }
-
 
 // Return type dictates if event is consumed. False = Not Consumed, True =
 // Consumed.
@@ -216,4 +248,3 @@ APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, module_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);
-

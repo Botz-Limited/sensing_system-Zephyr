@@ -107,7 +107,7 @@ void app_entry(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
     while (true)
     {
-        LOG_INF("I'm the APP task");
+        //TODO develop thread
         k_msleep(app_wait_timer);
     }
 }

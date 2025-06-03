@@ -3,11 +3,18 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+
+
 / {
     chosen {
         nordic,pm-ext-flash = &mx25r64;
         zephyr,settings-partition = &lfs1;
     };
+
+    aliases {
+        bno055 = &bno055;
+    };
+
     
 };
 
@@ -48,3 +55,25 @@
  &adc {
 	status = "okay";
 };
+
+&i2c1 {
+	status = "okay";
+	compatible = "nordic,nrf-twim";
+	label = "I2C_1";
+	pinctrl-0 = <&i2c1_default>;
+	pinctrl-1 = <&i2c1_sleep>;
+	pinctrl-names = "default", "sleep";
+	clock-frequency = <I2C_BITRATE_FAST_PLUS>; 
+
+    bno055: bno055@28 {
+        compatible = "bosch,bno055";
+        reg = <0x28>;
+        status = "okay";
+        use_xtal;
+		zephyr,deferred-init;
+        irq-gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
+    };
+};
+
+
+

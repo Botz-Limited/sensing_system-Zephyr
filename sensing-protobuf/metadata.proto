@@ -1,0 +1,34 @@
+syntax = "proto3";
+import "nanopb.proto";
+
+message MetaData {
+    string firmware_version = 3 [(nanopb).max_length = 10];
+    int64 start_date_time = 4 ;
+    uint32 battery_start_pct = 5;
+    ConnectionEnum connection_start = 6;
+    ModeEnum mode = 7;
+    RR_state bounce_status = 8;
+    int64 end_date_time = 9;
+
+    // Must be this order to match the event
+    enum ModeEnum {
+        MODE_BASSINET = 0;
+        MODE_BOUNCER = 1;
+        MODE_NEWBORN = 2;
+        MODE_UNKNOWN = 3;
+        MODE_ERROR = 4;
+    }
+
+
+    enum ConnectionEnum {
+        EXTERNAL_POWER_NOT_CONNECTED = 0;
+        EXTERNAL_POWER_CONNECTED = 1;
+    }
+
+    enum RR_state {
+        BOUNCER_IDLE = 0;
+        RR_RECORD = 1;
+        RR_PLAYBACK = 2;
+        BOUNCER_ERROR = 3;
+    }
+}

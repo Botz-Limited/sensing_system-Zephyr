@@ -1,3 +1,14 @@
+/**
+ * @file device_info_service.cpp
+ * @author
+ * @brief
+ * @version 2.4.1
+ * @date 2025-05-12
+ *
+ * @copyright Botz Innovation 2025
+ *
+ */
+
 #define MODULE bluetooth
 
 #include <array>

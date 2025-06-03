@@ -1,0 +1,116 @@
+syntax = "proto3";
+import "nanopb.proto";
+
+enum BatteryStatus {
+    normal = 0;
+    critical_low = 1;
+    critical_high = 2;
+    low = 3;
+    no_error = 4;
+    full = 5;
+    battery_disconnected = 6;
+    error = 7;
+    battery_extremely_low = 8;
+}
+
+enum ChargerStatus {
+    BatteryNotCharging = 0;
+    BatteryCharging = 1;
+    BatteryNotChargingAcPowerPresent = 2;
+    BatteryChargerError = 3;
+}
+
+enum SystemState {
+    StandBy = 0;
+    Charging = 1;
+    Error = 2;
+    BluetoothPairing = 3;
+    FactoryReset = 4;
+    Idle = 5;
+    RR_Record = 6;
+    RR_Playback = 7;
+    BatteryState = 8;
+}
+
+enum Bluetooth {
+    failedAdvertising = 0;
+    advertising = 1;
+    connected = 2;
+    timeout = 3;
+    pairing = 4;
+    disconnected = 5;
+    paired = 6;
+    notPaired = 7;
+    powerOff = 8;
+}
+
+enum ModeChanged {
+    bassinet = 0;
+    bouncer = 1;
+    newborn = 2;
+    unknown = 3;
+    mode_error = 4;
+}
+
+enum RRstate {
+  rr_idle = 0;
+  rr_record = 1;
+  rr_playback = 2;
+  rr_error = 3;
+}
+
+enum Occupancy {
+        not_occupied = 0;
+        occupied = 1;
+        occupancy_error = 2;
+    }
+
+// 32 bit bitfield definition
+enum ErrorStatus {
+    no_critical_persistent_error = 0x00;
+    coil_persistent_fault_bit = 0x01;
+    storage_persistent_fault_bit = 0x02;
+    battery_adc_persistent_fault_bit = 0x04;
+    rtc_i2c_persistent_fault_bit = 0x08;
+    no_movement_persistent_fault_bit = 0x10;
+    occupancy_persistent_fault_bit = 0x20;
+    charger_persistent_fault_bit = 0x40;
+    mode_persistent_fault_bit = 0x80;
+    bt_persistent_fault_bit = 0x100;
+    dfu_persistent_fault_bit = 0x200;
+    load_cell_persistent_fault_bit = 0x400;
+    led_i2c_persistent_fault_bit = 0x800;
+    halladc_persistent_fault_bit = 0x1000;
+    mode_i2c_persistent_fault_bit = 0x2000;
+    calibration_persistent_fault_bit = 0x4000;
+    battery_disconnection_persistent_fault_bit = 0x8000;
+    flash_persistent_fault_bit = 0x10000;
+    error_unknown_on_reboot = 0xFFFFFF;
+}
+
+message DataPoint {
+    int64 delta_millis = 1; // Time boot
+
+    oneof hardware_event {
+        uint32 battery_percentage = 4;
+        int64 session_start = 9; // Session ID
+        int64 session_end = 10; // Session ID
+        uint32 amplitude = 11;
+        Bluetooth bluetooth_event = 14;// Log a device ID?
+        BatteryStatus battery_status = 15;
+        ChargerStatus charger_status = 20;
+        SystemState state_change = 21;
+        ModeChanged mode_change = 22;
+        Occupancy occupancy = 23;
+        uint32 auto_sleep = 24;
+        RRstate rr_state =25;
+        uint32 error_status = 26;
+    }
+}
+
+message HardwareData {
+    string firmware_version = 2 [(nanopb).max_length = 10];
+    int64 boot_date_time = 3; // 64 Bit Unix
+
+    repeated DataPoint data_points = 4 [(nanopb).max_count = 1]; // Only gonna be creating one data point at once
+}
