@@ -12,67 +12,83 @@
     };
 
     aliases {
-        bno055 = &bno055;
+        bhi360 = &bhi360;
     };
 
-    
+
 };
 
 
 /delete-node/ &storage_partition;
 
- / {
-     fstab {
-         compatible = "zephyr,fstab";
-         status = "okay";
-         lfs1: lfs1 {
-             compatible = "zephyr,fstab,littlefs";
-             mount-point = "/lfs1";
-             partition = <&lfs1_part>;
-             read-size = <16>;
-             prog-size = <16>;
-             cache-size = <64>;
-             lookahead-size = <32>;
-             block-cycles = <512>;
-         };
-     };
- };
-
-  &mx25r64 {
-    status = "okay";
-     partitions {
-         compatible = "fixed-partitions";
-         #address-cells = <1>;
-         #size-cells = <1>;
-
-         lfs1_part: partition@0 {
-             label = "storage";
-             reg = <0x00000000 0x00006000>;
-         };
-     };
- };
-
- &adc {
-	status = "okay";
+/ {
+    fstab {
+        compatible = "zephyr,fstab";
+        status = "okay";
+        lfs1: lfs1 {
+            compatible = "zephyr,fstab,littlefs";
+            mount-point = "/lfs1";
+            partition = <&lfs1_part>;
+            read-size = <16>;
+            prog-size = <16>;
+            cache-size = <64>;
+            lookahead-size = <32>;
+            block-cycles = <512>;
+        };
+    };
 };
 
-&i2c1 {
-	status = "okay";
-	compatible = "nordic,nrf-twim";
-	label = "I2C_1";
-	pinctrl-0 = <&i2c1_default>;
-	pinctrl-1 = <&i2c1_sleep>;
-	pinctrl-names = "default", "sleep";
-	clock-frequency = <I2C_BITRATE_FAST_PLUS>; 
+&mx25r64 {
+    status = "okay";
+    partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
 
-    bno055: bno055@28 {
-        compatible = "bosch,bno055";
-        reg = <0x28>;
-        status = "okay";
-        use_xtal;
-		zephyr,deferred-init;
-        irq-gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
+        lfs1_part: partition@0 {
+            label = "storage";
+            reg = <0x00000000 0x00006000>;
+        };
     };
+};
+
+&adc {
+    status = "okay";
+};
+
+&spi0 {
+    compatible = "nordic,nrf-spim";
+    cs-gpios = <&gpio1 10 GPIO_ACTIVE_LOW>;
+    pinctrl-0 = <&spi0_default>;
+	pinctrl-1 = <&spi0_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    bhi360: bhi360@0 {
+        compatible = "bosch,bhi360";
+        reg = <0>;
+        spi-max-frequency = <8000000>;
+        label = "BHI360";
+    };
+};
+
+&pinctrl {
+	spi0_default: spi0_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+				<NRF_PSEL(SPIM_MISO, 0, 10)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 9)>;
+		};
+	};
+
+	spi0_sleep: spi0_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+				<NRF_PSEL(SPIM_MISO, 0, 10)>,
+				<NRF_PSEL(SPIM_MOSI, 0, 9)>;
+			low-power-enable;
+		};
+	};
+
 };
 
 

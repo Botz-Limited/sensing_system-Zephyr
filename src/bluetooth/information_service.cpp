@@ -25,19 +25,17 @@
 
 #include <cstring>
 
+#include "hardware_data.pb.h"
 #include <ble_services.hpp>
 #include <util.hpp>
-#include "hardware_data.pb.h"
-
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 static uint32_t error_bitfield_data = 0;
 static uint32_t previous_error_bitfield_data = 0; // Store the previous value of error_bitfield_data
-static bool init_status_bt_update = false;     // A flag to force the first update
+static bool init_status_bt_update = false;        // A flag to force the first update
 
 static uint8_t charge_status = 0;
-
 
 static bool status_subscribed = true;
 static bool meta_status_subscribed = true;
@@ -47,8 +45,6 @@ static char meta_req_id[util::max_path_length] = {0};
 
 static uint8_t ct[10];
 static uint8_t ct_update = 0;
-
-
 
 // FWD Declarations
 // clang-format off
@@ -147,72 +143,66 @@ BT_GATT_SERVICE_DEFINE(
  */
 void jis_set_err_status_notify(err_t new_device_status)
 {
-        switch (new_device_status)
+    switch (new_device_status)
+    {
+
+        case err_t::FILE_SYSTEM_ERROR:
+            //   set Fault Storage
+            error_bitfield_data |= ErrorStatus_storage_persistent_fault_bit;
+            LOG_INF("set storage fault");
+            break;
+
+        case err_t::BATTERY_FAULT:
+            //   set Fault Battery
+            error_bitfield_data |= ErrorStatus_battery_adc_persistent_fault_bit;
+            LOG_INF("set battery/charger fault");
+            break;
+
+        case err_t::BATTERY_DISCONNECTION_ERROR:
+            // set Battery disconnection fault
+            error_bitfield_data |= ErrorStatus_battery_disconnection_persistent_fault_bit;
+            LOG_INF("set battery disconnection fault");
+            break;
+
+        case err_t::BLUETOOTH_ERROR:
+            //  set bluetooth error
+            error_bitfield_data |= ErrorStatus_bt_persistent_fault_bit;
+            LOG_INF("set BT fault");
+            break;
+
+        case err_t::DFU_ERROR:
+            //  set DFU error
+            error_bitfield_data |= ErrorStatus_dfu_persistent_fault_bit;
+            LOG_INF("set dfu fault");
+            break;
+
+        case err_t::FLASH_FAILURE:
+            //  set flash error
+            error_bitfield_data |= ErrorStatus_flash_persistent_fault_bit;
+            LOG_INF("Set Flash read/write failure");
+            break;
+
+        default:
+            LOG_WRN("UNKNOWN device fault status reported: %d", (int)new_device_status);
+            break;
+    }
+
+    // Check if error_bitfield_data has changed, update BT, only if there is difference in value
+    if (((!init_status_bt_update) && (error_bitfield_data != 0)) ||
+        ((error_bitfield_data != previous_error_bitfield_data) && (error_bitfield_data != 0)))
+    {
+        if (status_subscribed)
         {
-
-            case err_t::FILE_SYSTEM_ERROR:
-                //   set Fault Storage
-                error_bitfield_data |= ErrorStatus_storage_persistent_fault_bit;
-                LOG_INF("set storage fault");
-                break;
-
-            case err_t::BATTERY_FAULT:
-                //   set Fault Battery
-                error_bitfield_data |= ErrorStatus_battery_adc_persistent_fault_bit;
-                LOG_INF("set battery/charger fault");
-                break;
-
-            case err_t::BATTERY_DISCONNECTION_ERROR:
-                // set Battery disconnection fault
-                error_bitfield_data |= ErrorStatus_battery_disconnection_persistent_fault_bit;
-                LOG_INF("set battery disconnection fault");
-                break;
-
-
-
-            case err_t::BLUETOOTH_ERROR:
-                //  set bluetooth error
-                error_bitfield_data |= ErrorStatus_bt_persistent_fault_bit;
-                LOG_INF("set BT fault");
-                break;
-
-
-
-            case err_t::DFU_ERROR:
-                //  set DFU error
-                error_bitfield_data |= ErrorStatus_dfu_persistent_fault_bit;
-                LOG_INF("set dfu fault");
-                break;
-
-
-
-
-            case err_t::FLASH_FAILURE:
-                //  set flash error
-                error_bitfield_data |= ErrorStatus_flash_persistent_fault_bit;
-                LOG_INF("Set Flash read/write failure");
-                break;
-
-            default:
-                LOG_WRN("UNKNOWN device fault status reported: %d", (int)new_device_status);
-                break;
+            auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &STATUS_UUID.uuid);
+            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&error_bitfield_data),
+                           sizeof(error_bitfield_data));
+            LOG_DBG(" Set Fault status: status user data: 0x%X\n", error_bitfield_data);
         }
 
-        // Check if error_bitfield_data has changed, update BT, only if there is difference in value
-        if (( (!init_status_bt_update) && (error_bitfield_data !=0)) || ((error_bitfield_data != previous_error_bitfield_data) && (error_bitfield_data != 0)))
-        {
-            if (status_subscribed)
-            {
-                auto *status_gatt =
-                    bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &STATUS_UUID.uuid);
-                bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&error_bitfield_data), sizeof(error_bitfield_data));
-                LOG_DBG(" Set Fault status: status user data: 0x%X\n", error_bitfield_data);
-            }
-
-            // Update the previous value, after reporting the error
-            previous_error_bitfield_data = error_bitfield_data;
-            init_status_bt_update = true;
-        }
+        // Update the previous value, after reporting the error
+        previous_error_bitfield_data = error_bitfield_data;
+        init_status_bt_update = true;
+    }
 
     else
     {
@@ -234,42 +224,37 @@ void jis_clear_err_status_notify(err_t new_device_status)
 
         case err_t::FILE_SYSTEM_ERROR:
             //   Clear Fault Storage
-            error_bitfield_data &= ~ ErrorStatus_storage_persistent_fault_bit;
+            error_bitfield_data &= ~ErrorStatus_storage_persistent_fault_bit;
             LOG_DBG("Clear storage fault");
             break;
 
         case err_t::BATTERY_FAULT:
             // Clear Fault Battery
-            error_bitfield_data &= ~ ErrorStatus_battery_adc_persistent_fault_bit;
+            error_bitfield_data &= ~ErrorStatus_battery_adc_persistent_fault_bit;
             LOG_DBG("Clear battery/charger fault");
             break;
 
         case err_t::BATTERY_DISCONNECTION_ERROR:
             // Clear Battery disconnection
-            error_bitfield_data &= ~ ErrorStatus_battery_disconnection_persistent_fault_bit;
+            error_bitfield_data &= ~ErrorStatus_battery_disconnection_persistent_fault_bit;
             LOG_DBG("Clear battery disconnection fault");
             break;
 
-
         case err_t::BLUETOOTH_ERROR:
             //  Clear Fault Bluetooth
-            error_bitfield_data &= ~ ErrorStatus_bt_persistent_fault_bit;
+            error_bitfield_data &= ~ErrorStatus_bt_persistent_fault_bit;
             LOG_DBG("clear BT error");
             break;
 
-
-
         case err_t::DFU_ERROR:
             //  set load cell error
-            error_bitfield_data &= ~ ErrorStatus_dfu_persistent_fault_bit;
+            error_bitfield_data &= ~ErrorStatus_dfu_persistent_fault_bit;
             LOG_DBG("clear dfu fault");
             break;
 
-
-
         case err_t::FLASH_FAILURE:
             //  set flash error
-            error_bitfield_data &= ~ ErrorStatus_flash_persistent_fault_bit;
+            error_bitfield_data &= ~ErrorStatus_flash_persistent_fault_bit;
             LOG_INF("Clear Flash read/write failure");
             break;
 
@@ -283,7 +268,8 @@ void jis_clear_err_status_notify(err_t new_device_status)
         if (status_subscribed)
         {
             auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &STATUS_UUID.uuid);
-            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&error_bitfield_data), sizeof(error_bitfield_data));
+            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&error_bitfield_data),
+                           sizeof(error_bitfield_data));
             LOG_INF("Clear Bit field Data: 0x%X\n", error_bitfield_data);
             // create the critical error event and fill in the status
         }
@@ -292,10 +278,10 @@ void jis_clear_err_status_notify(err_t new_device_status)
 
         // All monitored bits are cleared, allow system reset to be cleared
         // Don't clear it at the first time, the static variable is cleared in the warm reboot.
-        if ( (error_bitfield_data == 0) && (init_status_bt_update) )
+        if ((error_bitfield_data == 0) && (init_status_bt_update))
         {
-            LOG_WRN("error_bitfield_data %d, previous_error_bitfield_data: %d init_status_bt_update: %d", error_bitfield_data,
-                    previous_error_bitfield_data, init_status_bt_update);
+            LOG_WRN("error_bitfield_data %d, previous_error_bitfield_data: %d init_status_bt_update: %d",
+                    error_bitfield_data, previous_error_bitfield_data, init_status_bt_update);
         }
         init_status_bt_update = true;
     }
@@ -315,7 +301,6 @@ static void jis_status_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t
     LOG_DBG("Status CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
-
 /**
  * @brief
  *
@@ -333,8 +318,7 @@ static void jis_current_time_ccc_cfg_changed(const struct bt_gatt_attr *attr, ui
 static ssize_t jis_read_current_time(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                                      uint16_t offset)
 {
-  //To develop
-
+    // To develop
 
     const char *value = static_cast<const char *>(attr->user_data);
 
@@ -393,7 +377,8 @@ void jis_charge_status_notify(uint8_t new_charge_status)
 
     charge_status = new_charge_status;
 
-    bt_gatt_notify_uuid(nullptr, &CHARGE_STATUS_UUID.uuid, info_service.attrs, static_cast<void*>(&charge_status), sizeof(charge_status));
+    bt_gatt_notify_uuid(nullptr, &CHARGE_STATUS_UUID.uuid, info_service.attrs, static_cast<void *>(&charge_status),
+                        sizeof(charge_status));
 }
 
 /**
@@ -422,12 +407,10 @@ static void jis_charge_status_ccc_cfg_changed(const struct bt_gatt_attr *attr, u
  *
  */
 static ssize_t jis_charge_status_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
-                                       uint16_t offset)
+                                      uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, static_cast<void*>(&charge_status), sizeof(charge_status));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, static_cast<void *>(&charge_status), sizeof(charge_status));
 }
-
-
 
 void cs_log_available_meta_notify(uint32_t stu)
 {

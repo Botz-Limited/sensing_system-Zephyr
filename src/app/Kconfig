@@ -1,5 +1,6 @@
 config APP_MODULE
 	bool "App Module"
+	default y
 	select GPIO
 	help
 	  APP MODULE

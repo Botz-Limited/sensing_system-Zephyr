@@ -1,0 +1,19 @@
+# Copyright (c) 2024 CATIE
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig BHI360
+    bool "Bosch Sensortec GmbH BHI360"
+    default y
+    select I2C
+    help
+      Enable driver for Bosch Sensortec GmbH BHI360
+
+if BHI360
+
+module = BHI360_MODULE
+module-str = app module
+source "subsys/logging/Kconfig.template.log_config"
+
+
+
+endif # BHI360

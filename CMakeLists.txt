@@ -66,6 +66,7 @@ set_target_properties(zephyr_interface PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIREC
 zephyr_include_directories(
   $ENV{APPLICATION_ROOT_PATH}/include
   $ENV{APPLICATION_ROOT_PATH}/src
+  $ENV{APPLICATION_ROOT_PATH}/drivers
   configuration
   ${ZEPHYR_BASE}/subsys/fs
   ${ZEPHYR_BASE}/zephyr/subsys/fs
