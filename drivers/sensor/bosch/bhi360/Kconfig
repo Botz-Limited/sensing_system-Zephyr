@@ -4,7 +4,8 @@
 menuconfig BHI360
     bool "Bosch Sensortec GmbH BHI360"
     default y
-    select I2C
+    select SPI
+    select NRFX_SPIM0
     help
       Enable driver for Bosch Sensortec GmbH BHI360
 

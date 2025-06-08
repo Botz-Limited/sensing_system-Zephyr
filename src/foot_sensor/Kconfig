@@ -1,7 +1,10 @@
 config FOOT_SENSOR_MODULE
 	bool "Foot Sensor Module"
 	select GPIO
-	select ADC
+	select NRFX_SAADC
+	select NRFX_TIMER
+	select NRFX_SAADC_CONFIG_CHANNEL_COUNT_ENABLE
+	select NRFX_DPPI_ENABLED
 	help
 	  FOOT_SENSOR MODULE
 
@@ -11,13 +14,8 @@ module = FOOT_SENSOR_MODULE
 module-str = FOOT_SENSOR module
 source "subsys/logging/Kconfig.template.log_config"
 
-
-config FOOT_SENSOR_MODULE_STACK_SIZE
-	int "Foot Sensor module thread stack size"
-	default 3072
-
-config FOOT_SENSOR_MODULE_PRIORITY
-	int "Foot Sensor module thread priority"
-	default 6
+config NRFX_SAADC_CHANNEL_COUNT
+	int
+	default 8	
 
 endif # FOOT_SENSOR_MODULE

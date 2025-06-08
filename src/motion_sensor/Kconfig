@@ -1,7 +1,8 @@
 config MOTION_SENSOR_MODULE
 	bool "Motion Sensor Module"
 	select GPIO
-	select I2C
+	select SPI
+	select SPIM
 	help
 	  MOTION_SENSOR MODULE
 

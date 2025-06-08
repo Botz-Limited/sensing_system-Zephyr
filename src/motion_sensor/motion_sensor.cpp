@@ -26,6 +26,9 @@
 #include <motion_sensor.hpp>
 #include <nrfx.h>
 #include <nrfx_gpiote.h>
+#include <drivers/src/prs/nrfx_prs.h>
+#include <zephyr/irq.h>
+#include <zephyr/sys/util.h>
 #include <nrfx_spim.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -45,6 +48,8 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_LOG_DEFAULT_LEVEL); // NOLINT
 
+static const struct device *const bhi360_dev = DEVICE_DT_GET(DT_ALIAS(bhi360));
+
 /* Uncomment to upload firmware to flash instead of RAM */
 // #define UPLOAD_FIRMWARE_TO_FLASH
 
@@ -60,7 +65,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_LOG_DEFAULT_LEVEL); // NOLINT
 #define MAX_IMU_COUNT 1                   // Maximum number of IMUs supported
 
 // Global array of IMU devices - define your CS pins here
-static imu_device_t imu_devices[] = {{.cs_pin = NRF_GPIO_PIN_MAP(1, 10), // First IMU CS pin (P1.10)
+static imu_device_t imu_devices[] = {{.cs_pin = NRF_GPIO_PIN_MAP(1, 6), // First IMU CS pin (P1.6)
                                       .initialized = false,
                                       .name = "IMU_1"}};
 
@@ -85,7 +90,7 @@ static void bhi360_delay_us(uint32_t period_us, void *intf_ptr);
 static bool initialize_imu(imu_device_t *imu);
 void motion_sensor_initializing_entry();
 
-/********************************** Foot Sensor THREAD ********************************/
+/********************************** Motion Sensor THREAD ********************************/
 static constexpr int motion_sensor_stack_size = CONFIG_MOTION_SENSOR_MODULE_STACK_SIZE;
 static constexpr int motion_sensor_priority = CONFIG_MOTION_SENSOR_MODULE_PRIORITY;
 K_THREAD_STACK_DEFINE(motion_sensor_stack_area, motion_sensor_stack_size);
@@ -109,7 +114,9 @@ static void motion_sensor_init()
     // Init Imu
 
     setup_SPI(&imu_devices[0]); // Setup SPI for each IMU
-    initialize_imu(&imu_devices[0]);
+
+
+//    initialize_imu(&imu_devices[0]);
 
     // Initialise Task
 
@@ -117,7 +124,7 @@ static void motion_sensor_init()
                                         K_THREAD_STACK_SIZEOF(motion_sensor_stack_area), motion_sensor_process, nullptr,
                                         nullptr, nullptr, motion_sensor_priority, 0, K_NO_WAIT);
 
-    LOG_INF("Foot Sensor Module Initialised");
+    LOG_INF("Motion Sensor Module Initialised");
 }
 
 void motion_sensor_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
@@ -138,20 +145,19 @@ void motion_sensor_process(void * /*unused*/, void * /*unused*/, void * /*unused
     while (true)
     {
 
-        for (int i = 0; i < NUM_IMUS; i++)
-        {
-            if (!imu_devices[i].initialized)
-            {
-                continue;
-            }
 
-            uint8_t work_buffer[WORK_BUFFER_SIZE];
-            int8_t rslt = bhy2_get_and_process_fifo(work_buffer, sizeof(work_buffer), &imu_devices[i].bhy2);
-            if (rslt != BHY2_OK)
-            {
-                LOG_WRN("%s: FIFO processing error", imu_devices[0].name);
-            }
-        }
+        //    if (!imu_devices[0].initialized)
+        //    {
+        //        continue;
+        //    }
+
+          //  uint8_t work_buffer[WORK_BUFFER_SIZE];
+          //  int8_t rslt = bhy2_get_and_process_fifo(work_buffer, sizeof(work_buffer), &imu_devices[0].bhy2);
+          //  if (rslt != BHY2_OK)
+          //  {
+           //     LOG_WRN("%s: FIFO processing error", imu_devices[0].name);
+           // }
+        
 
         k_msleep(motion_sensor_timer);
     }
@@ -347,10 +353,6 @@ static int8_t upload_firmware(struct bhy2_dev *dev)
         }                                                                                                              \
     } while (0)
 
-// GPIO pin definitions (using your existing pin numbers)
-#define BSP_SPI_MISO NRF_GPIO_PIN_MAP(0, 9)
-#define BSP_SPI_MOSI NRF_GPIO_PIN_MAP(0, 10)
-#define BSP_SPI_CLK NRF_GPIO_PIN_MAP(0, 8)
 
 // Delay function for BHY2 driver
 static void bhi360_delay_us(uint32_t period_us, void *intf_ptr)
@@ -510,7 +512,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         auto *event = cast_module_state_event(aeh);
 
-        if (check_state(event, MODULE_ID(foot_sensor), MODULE_STATE_READY))
+        if (check_state(event, MODULE_ID(motion_sensor), MODULE_STATE_READY))
         {
             motion_sensor_init();
         }

@@ -38,6 +38,7 @@ int main(void)
         {
             LOG_INF("Successfully, uploaded image ");
         } */
+
         module_set_state(MODULE_STATE_READY);
     }
      while (1)

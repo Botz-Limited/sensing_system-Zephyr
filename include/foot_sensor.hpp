@@ -14,7 +14,4 @@
 #include <zephyr/kernel.h>
 
 
-#define foot_sensor_timer 2000
-
-
 #endif // APP_INCLUDE_FOOT_SENSOR_HEADER_

@@ -59,9 +59,9 @@ typedef struct {
 } imu_device_t;
 
 // GPIO pin definitions for SPI bus
-#define BSP_SPI_MISO   NRF_GPIO_PIN_MAP(0, 10)  
-#define BSP_SPI_MOSI   NRF_GPIO_PIN_MAP(0, 9)  
-#define BSP_SPI_CLK    NRF_GPIO_PIN_MAP(0, 9)  
+#define BSP_SPI_MISO   NRF_GPIO_PIN_MAP(1, 7)  
+#define BSP_SPI_MOSI   NRF_GPIO_PIN_MAP(1, 8)  
+#define BSP_SPI_CLK    NRF_GPIO_PIN_MAP(1, 9)  
 
 // Error check macro
 #define APP_ERROR_CHECK(err_code) \
