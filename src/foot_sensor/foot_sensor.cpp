@@ -43,31 +43,34 @@ extern "C"
 // Paths already adjusted to use <hal/xxx.h>
 #include <hal/nrf_dppi.h>  // For NRF_DPPIC etc.
 #include <hal/nrf_saadc.h> // For NRF_SAADC, nrf_saadc_value_t etc.
-#include <hal/nrf_timer.h> // For NRF_TIMER1 etc.
-
-// The nrfy headers are crucial here, as suggested by the compiler errors
+#include <hal/nrf_timer.h> // For NRF_TIMER0 etc.
 
 #include "/home/ee/ncs/modules/hal/nordic/nrfx/haly//nrfy_dppi.h"
 #include "/home/ee/ncs/modules/hal/nordic/nrfx/haly/nrfy_saadc.h" // For nrfy_saadc_config_t, nrfy_saadc_channel_init, nrfy_saadc_enable etc.
 #include "/home/ee/ncs/modules/hal/nordic/nrfx/haly/nrfy_timer.h" // For nrfy_timer_event_enable, nrfy_timer_publish_set etc.
 }
 
+#include <app.hpp>
 #include <errors.hpp>
 #include <foot_sensor.hpp>
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL); // NOLINT
 
+#define US_PER_SECOND 1000000UL
 #define SAADC_CHANNEL_COUNT 8
-#define SAADC_SAMPLE_RATE_HZ 10 // Desired frequency for SAADC sampling
-// ADJUSTMENT: Simplified TIME_TO_WAIT_US calculation to directly use SAADC_SAMPLE_RATE_HZ
-#define TIME_TO_WAIT_US (uint32_t)(1000000UL / SAADC_SAMPLE_RATE_HZ)
+#define SAADC_SAMPLE_RATE_HZ_NORMAL 2        // normal sampling rate (50 Hz)
+#define SAADC_SAMPLE_RATE_HZ_CALIBRATION 100 // Higher rate for quick calibration (1000 Hz = 1 ms period)
 
-// ADJUSTMENT: SAADC_BUFFER_SIZE is set to SAADC_CHANNEL_COUNT.
+#define TIME_TO_WAIT_US_NORMAL (uint32_t)(US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_NORMAL)
+// New definition for calibration
+#define TIME_TO_WAIT_US_CALIBRATION (uint32_t)(US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_CALIBRATION)
+
+// SAADC_BUFFER_SIZE is set to SAADC_CHANNEL_COUNT.
 // This means the SAADC_EVENT_DONE will trigger after one complete set of 8 channel readings.
-#define SAADC_BUFFER_SIZE SAADC_CHANNEL_COUNT // This will be 8
-#define SAADC_IRQ_PRIORITY 1                  // Lower number means higher priority
-#define BUFFER_COUNT 2UL                      // For double buffering
-#define SAMPLING_ITERATIONS UINT16_MAX
+#define SAADC_BUFFER_SIZE SAADC_CHANNEL_COUNT
+#define SAADC_IRQ_PRIORITY 1           // Lower number means higher priority
+#define BUFFER_COUNT 2UL               // For double buffering
+#define SAMPLING_ITERATIONS UINT16_MAX // Continue sampling, never stop
 
 #define TIMER_INSTANCE_ID 0
 
@@ -87,7 +90,7 @@ static int16_t saadc_buffer[BUFFER_COUNT][SAADC_BUFFER_SIZE] __aligned(4);
 static int16_t saadc_offset[SAADC_CHANNEL_COUNT]; // Stores the zero-point offset for each channel
 static bool calibration_done = false;             // Flag to indicate if calibration has been performed
 static uint16_t calibration_sample_counter = 0;   // Counts samples collected during calibration
-const uint16_t CALIBRATION_SAMPLES_TO_AVG = 100;   // Number of samples to average for calibration
+const uint16_t CALIBRATION_SAMPLES_TO_AVG = 100;  // Number of samples to average for calibration
 
 // Use int32_t for the sum to prevent overflow during averaging, as raw values are positive.
 static int32_t calibration_sum[SAADC_CHANNEL_COUNT] = {0};
@@ -95,7 +98,7 @@ static int32_t calibration_sum[SAADC_CHANNEL_COUNT] = {0};
 static const nrfx_dppi_t m_dppi_instance = NRFX_DPPI_INSTANCE(0);
 
 // Timer instance for triggering SAADC
-nrfx_timer_t timer_inst = NRFX_TIMER_INSTANCE(0); // Using TIMER0, confirm TIMER_INSTANCE_ID matches if different
+nrfx_timer_t timer_inst = NRFX_TIMER_INSTANCE(0); // Using TIMER0
 
 // ADJUSTMENT: Two DPPI channel variables for distinct connections
 uint8_t dppi_channel_timer_saadc;      // For Timer COMPARE0 -> SAADC SAMPLE
@@ -157,50 +160,49 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
     static int32_t calibration_sum[SAADC_CHANNEL_COUNT] = {0};
 
     uint16_t samples_number = 0;
-    // MODIFICATION: Changed 'uint16_t *data' to 'int16_t *data'
+
+    int16_t *raw_adc_data = NULL;
+
     // to match the buffer type and handle potential negative calibrated values.
     int16_t *data = NULL;
 
-    switch(p_event->type)
+    switch (p_event->type)
     {
         case NRFX_SAADC_EVT_CALIBRATEDONE:
-            LOG_INF("SAADC event: CALIBRATEDONE");
             status = nrfx_saadc_mode_trigger();
             NRFX_ASSERT(status == NRFX_SUCCESS);
             break;
 
         case NRFX_SAADC_EVT_READY:
-            LOG_INF("SAADC event: READY");
             nrfx_dppi_channel_enable(&m_dppi_instance, dppi_channel_timer_saadc);
-            LOG_DBG("SAADC sampling DPPI channel %u enabled.", dppi_channel_timer_saadc);
             break;
 
         case NRFX_SAADC_EVT_BUF_REQ:
             status = nrfx_saadc_buffer_set(saadc_buffer[buffer_index], SAADC_BUFFER_SIZE);
             NRFX_ASSERT(status == NRFX_SUCCESS);
-            LOG_DBG("Provided buffer %u (%p) for next conversion.", buffer_index, saadc_buffer[buffer_index]);
             buffer_index = (buffer_index + 1) % BUFFER_COUNT;
-            // MODIFICATION: Removed the 'if (++buf_req_evt_counter < SAMPLING_ITERATIONS)' block here
-            // to allow truly continuous sampling without a software limit.
             break;
 
         case NRFX_SAADC_EVT_DONE:
-            LOG_INF("SAADC event: DONE");
-
             samples_number = p_event->data.done.size;
-            // MODIFICATION: Explicitly cast to int16_t* here as well.
-            data = (int16_t *)p_event->data.done.p_buffer;
+            // Assign the buffer to our new uint16_t pointer
+            raw_adc_data = (int16_t *)p_event->data.done.p_buffer;
 
-            // NEW BLOCK FOR CALIBRATION LOGIC:
             if (!calibration_done)
             {
+                if (calibration_sample_counter == 0)
+                {
+                    LOG_INF("Calibrating...");
+                }
                 // Calibration phase: collect and average samples
                 if (calibration_sample_counter < CALIBRATION_SAMPLES_TO_AVG)
                 {
-                    LOG_DBG("Calibrating... Sample set %u/%u", calibration_sample_counter + 1, CALIBRATION_SAMPLES_TO_AVG);
+                    LOG_DBG("Calibrating... Sample set %u/%u", calibration_sample_counter + 1,
+                            CALIBRATION_SAMPLES_TO_AVG);
                     for (uint16_t i = 0; i < samples_number; i++)
                     {
-                        calibration_sum[i] += data[i]; // Add raw value to sum
+                        // Use raw_adc_data[i] for summation
+                        calibration_sum[i] += raw_adc_data[i];
                     }
                     calibration_sample_counter++;
 
@@ -209,23 +211,49 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                         // All calibration samples collected, calculate offsets
                         for (uint16_t i = 0; i < samples_number; i++)
                         {
+                            // Offset itself can be negative if calibration point is high, so int16_t is fine.
                             saadc_offset[i] = (int16_t)(calibration_sum[i] / CALIBRATION_SAMPLES_TO_AVG);
-                            LOG_INF("Channel %u calibrated offset: %d", i, saadc_offset[i]);
                         }
                         // Set flag to true: calibration is complete
                         calibration_done = true;
                         LOG_INF("SAADC calibration complete. Readings will now be offset.");
+                        // Adjust timer to normal sampling rate after calibration
+                        nrfx_timer_disable(&timer_inst);
+                        uint32_t ticks = nrfx_timer_us_to_ticks(&timer_inst, TIME_TO_WAIT_US_NORMAL);
+                        nrfx_timer_extended_compare(&timer_inst, NRF_TIMER_CC_CHANNEL0, ticks,
+                                                    NRF_TIMER_SHORT_COMPARE0_CLEAR_MASK, false);
+                        nrfx_timer_clear(&timer_inst); // Keep this clear to restart timer from 0 with new compare value
+                        nrfx_timer_enable(&timer_inst);
+                        LOG_INF("Switched SAADC sampling rate to %u Hz (normal operation).",
+                                SAADC_SAMPLE_RATE_HZ_NORMAL);
                     }
                 }
             }
-            else // MODIFICATION: New 'else' block for normal operation after calibration
+            else // Normal operation after calibration
             {
-                // Calibration is done, process normal samples and apply offset
+                // Create the generic message structure directly on the stack.
+                generic_message_t msg;
+
+                msg.sender = SENDER_FOOT_SENSOR_THREAD;
+                msg.type = MSG_TYPE_FOOT_SAMPLES;
+
+                // Populate the foot sensor data directly into the message's union member.
                 for (uint16_t i = 0; i < samples_number; i++)
                 {
                     // Apply calibration offset: subtract the stored offset from the raw value
-                    int16_t calibrated_value = data[i] - saadc_offset[i];
-                    LOG_INF("[Sample %u] value == %d (raw: %d)", i, calibrated_value, data[i]);
+                    int16_t calibrated_value = raw_adc_data[i] - saadc_offset[i];
+                    msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
+                }
+
+                // Send the message to the Bluetooth queue.
+                int put_ret = k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT); // Use K_NO_WAIT or K_MSEC(timeout)
+
+                if (put_ret != 0)
+                {
+                    LOG_ERR("Failed to put foot sensor message into queue: %d. Data dropped.", put_ret);
+                }
+                else
+                {
                 }
             }
             break;
@@ -282,12 +310,10 @@ static void init_timer(void)
 {
     nrfx_err_t err;
 
-    // FIX: Use the global timer_inst directly instead of a local variable
     uint32_t base_frequency = NRF_TIMER_BASE_FREQUENCY_GET(timer_inst.p_reg);
-    // Configure the timer frequency to 4 MHz (source clock for TIMER0 if TIMER_INSTANCE_ID is 0)
     nrfx_timer_config_t timer_config = NRFX_TIMER_DEFAULT_CONFIG(base_frequency);
     timer_config.bit_width = NRF_TIMER_BIT_WIDTH_32;
-    timer_config.p_context = NULL; // FIX: No context needed as handler is NULL and DPPI is used
+    timer_config.p_context = NULL;
     timer_config.interrupt_priority = NRFX_TIMER_DEFAULT_CONFIG_IRQ_PRIORITY;
 
     // Initialize the global timer instance with the configuration. Handler is NULL as DPPI is used.
@@ -298,10 +324,10 @@ static void init_timer(void)
         return;
     }
 
-    nrfx_timer_clear(&timer_inst); // FIX: Use global timer_inst
+    nrfx_timer_clear(&timer_inst);
 
     // Calculate ticks for the desired sample rate (e.g., 1000 Hz)
-    uint32_t ticks = nrfx_timer_us_to_ticks(&timer_inst, TIME_TO_WAIT_US); // FIX: Use global timer_inst
+    uint32_t ticks = nrfx_timer_us_to_ticks(&timer_inst, TIME_TO_WAIT_US_CALIBRATION);
 
     // Set up compare channel 0: generate an event when timer reaches 'ticks', and clear timer on match.
     // Set 'false' for last argument if you only want DPPI trigger, not an interrupt.
@@ -312,10 +338,10 @@ static void init_timer(void)
     // This line is redundant if compare is configured with 'clear_on_match = true'
     // However, in nrfx_timer_compare's last argument, it's boolean `interrupt_enable`, not `clear_on_match`.
     // So keeping one clear before enable is fine.
-    // nrfx_timer_clear(&timer_inst); // FIX: Use global timer_inst - this one is now redundant for clarity.
+    nrfx_timer_clear(&timer_inst);
 
     // Enable the timer.
-    nrfx_timer_enable(&timer_inst); // FIX: Use global timer_inst
+    nrfx_timer_enable(&timer_inst);
 }
 
 // --- Initialize DPPI and link timer event to SAADC sample task ---
@@ -324,11 +350,6 @@ void init_dppi(void)
     nrfx_err_t err;
 
     LOG_INF("Init DPPI");
-
-    // REMOVED: nrfx_dppi_init() call
-    // If your nrfx version is older than 3.8.0, this function doesn't exist.
-    // The DPPI peripheral typically doesn't need an explicit 'nrfx_dppi_init()' call
-    // in older versions; it's handled implicitly or by system init.
 
     // Allocate DPPI channel for Timer COMPARE0 -> SAADC SAMPLE
     err = nrfx_dppi_channel_alloc(&m_dppi_instance, &dppi_channel_timer_saadc);
@@ -379,7 +400,7 @@ static void init_saadc(void)
         all_nrfx_channels[i].channel_index = (uint8_t)i;
     }
 
-    // 4. Call nrfx_saadc_channels_config ONCE with the array of all configurations.
+    // Call nrfx_saadc_channels_config ONCE with the array of all configurations.
     err = nrfx_saadc_channels_config(all_nrfx_channels, SAADC_CHANNEL_COUNT);
     if (err != NRFX_SUCCESS)
     {
@@ -387,27 +408,23 @@ static void init_saadc(void)
         return;
     }
 
-    // 5. Set up advanced mode for external triggering and continuous sampling.
+    // Set up advanced mode for external triggering and continuous sampling.
     nrfx_saadc_adv_config_t adv_config = NRFX_SAADC_DEFAULT_ADV_CONFIG;
     adv_config.internal_timer_cc = 0;
     adv_config.start_on_end = true;                               // External trigger from timer/DPPI
     uint32_t channel_mask = nrfx_saadc_channels_configured_get(); // Gets mask of all 8 configured channels
 
     // Pass your saadc_event_handler to process events.
-    err = nrfx_saadc_advanced_mode_set(channel_mask,
-                                       NRF_SAADC_RESOLUTION_14BIT,      
-                                       &adv_config, saadc_event_handler); 
+    err = nrfx_saadc_advanced_mode_set(channel_mask, NRF_SAADC_RESOLUTION_14BIT, &adv_config, saadc_event_handler);
     if (err != NRFX_SUCCESS)
     {
         LOG_ERR("SAADC advanced mode set failed: %d", err);
         return;
     }
 
-    // 6. Enable the SAADC peripheral after all configuration.
+    // Enable the SAADC peripheral after all configuration.
     nrfy_saadc_enable(NRF_SAADC);
 
-    // FIX: Provide BOTH initial buffers to the SAADC driver for double buffering.
-    // This is the correct way to do it for a ping-pong handler like yours.
     err = nrfx_saadc_buffer_set(saadc_buffer[0], SAADC_BUFFER_SIZE);
     if (err != NRFX_SUCCESS)
     {

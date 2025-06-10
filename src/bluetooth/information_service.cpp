@@ -9,6 +9,8 @@
  *
  */
 
+#include <cstddef>
+#include <cstdint>
 #define MODULE bluetooth
 
 #include <errors.hpp>
@@ -26,6 +28,7 @@
 #include <cstring>
 
 #include "hardware_data.pb.h"
+#include <app.hpp>
 #include <ble_services.hpp>
 #include <util.hpp>
 
@@ -36,6 +39,7 @@ static uint32_t previous_error_bitfield_data = 0; // Store the previous value of
 static bool init_status_bt_update = false;        // A flag to force the first update
 
 static uint8_t charge_status = 0;
+static foot_samples_t foot_sensor_char_value = {0};
 
 static bool status_subscribed = true;
 static bool meta_status_subscribed = true;
@@ -46,12 +50,15 @@ static char meta_req_id[util::max_path_length] = {0};
 static uint8_t ct[10];
 static uint8_t ct_update = 0;
 
+// --- Global variables for Current Time Service Notifications ---
+static struct bt_conn *current_time_conn_active = NULL; // Stores the connection object for notifications
+static bool current_time_notifications_enabled = false; // Flag to track CCC state
+
 // FWD Declarations
 // clang-format off
 
 //Current Time Characteristic
 static ssize_t jis_read_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static ssize_t jis_write_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, const void* buf, uint16_t len, uint16_t offset, uint8_t flags);
 static void jis_current_time_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 // Status Characteristic
 static ssize_t jis_status_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -71,6 +78,10 @@ static ssize_t jis_req_id_meta_read(struct bt_conn* conn, const struct bt_gatt_a
     uint16_t offset);
 static void jis_req_id_meta_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 
+// Foot Sensor Characteristic
+static ssize_t jis_foot_sensor_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+
 // UUID Defines
 static struct bt_uuid_128 SENSING_INFO_SERVICE_UUID =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eaa, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
@@ -89,6 +100,9 @@ static struct bt_uuid_128 CHARGE_STATUS_UUID =
 static struct bt_uuid_128 req_id_meta_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eae, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
+static struct bt_uuid_128 foot_sensor_samples =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eaf, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));    
+
 
 BT_GATT_SERVICE_DEFINE(
     info_service, BT_GATT_PRIMARY_SERVICE(&SENSING_INFO_SERVICE_UUID),
@@ -96,7 +110,7 @@ BT_GATT_SERVICE_DEFINE(
     BT_GATT_CHARACTERISTIC(BT_UUID_CTS_CURRENT_TIME,
                             BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
                             BT_GATT_PERM_READ_ENCRYPT,
-                            jis_read_current_time, jis_write_current_time,
+                            jis_read_current_time, NULL,
                             ct),
     BT_GATT_CCC(jis_current_time_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
@@ -107,6 +121,14 @@ BT_GATT_SERVICE_DEFINE(
                             jis_status_read, nullptr,
                             static_cast<void *>(&error_bitfield_data)),
     BT_GATT_CCC(jis_status_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Foot Sensor samples Characteristic
+    BT_GATT_CHARACTERISTIC(&foot_sensor_samples.uuid,
+                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                            BT_GATT_PERM_READ_ENCRYPT,
+                            jis_foot_sensor_read, nullptr,
+                            static_cast<void *>(&foot_sensor_char_value)),
+    BT_GATT_CCC(jis_foot_sensor_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
 
  // Meta Logs available Characteristic
@@ -287,6 +309,25 @@ void jis_clear_err_status_notify(err_t new_device_status)
     }
 }
 
+void jis_foot_sensor_notify(const foot_samples_t *samples_data)
+{
+    // 1. Check for an active BLE connection
+
+    // 3. Update the characteristic's internal value storage.
+    // This step is important if you want subsequent 'read' requests to reflect the latest data.
+    // It's a copy because 'samples_data' is from the message queue and might be overwritten
+    // by the producer or freed soon after this function.
+    memcpy(&foot_sensor_char_value, samples_data, sizeof(foot_samples_t));
+
+    if (status_subscribed)
+    {
+        auto *status_gatt =
+            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
+        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_char_value),
+                       sizeof(foot_sensor_char_value));
+    }
+}
+
 /**
  * @brief
  *
@@ -301,6 +342,13 @@ static void jis_status_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t
     LOG_DBG("Status CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
+static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Foot Sensor CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
 /**
  * @brief
  *
@@ -308,45 +356,60 @@ static void jis_status_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t
  * @param value
  *
  */
-static void jis_current_time_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+void jis_current_time_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
     ARG_UNUSED(attr);
-    /* TODO: Handle value */
-    LOG_DBG("Current TIme CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+    status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Time CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
+
 
 static ssize_t jis_read_current_time(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                                      uint16_t offset)
 {
-    // To develop
+    // 1. Request cts.cpp to update its internal Current Time characteristic buffer.
+    // This ensures the buffer contains the latest calendar time.
+    update_cts_characteristic_buffer();
 
-    const char *value = static_cast<const char *>(attr->user_data);
+    // 2. Get a pointer to the updated buffer and its size from cts.cpp.
+    const void *cts_value_ptr = get_current_time_char_value_ptr();
+    size_t cts_value_size = get_current_time_char_value_size();
 
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(ct));
-}
-
-static ssize_t jis_write_current_time(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-                                      uint16_t len, uint16_t offset, uint8_t flags)
-{
-    ARG_UNUSED(conn);
-    ARG_UNUSED(flags);
-    uint8_t *value = static_cast<uint8_t *>(attr->user_data);
-
-    if (offset + len > sizeof(ct))
-    {
-        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+    // 3. Check if the time is valid before attempting to read.
+    // (This check depends on how update_cts_characteristic_buffer handles unsynced time.
+    // If it zeros the buffer, checking the first byte might be sufficient,
+    // or you could have a separate flag/function in cts.cpp to check sync status).
+    // For simplicity, let's assume if cts_value_size is 0 or the pointer is null, it's invalid.
+    if (cts_value_ptr == nullptr || cts_value_size == 0) {
+        LOG_WRN("Current Time characteristic data is not ready or valid.");
+        // Return 0 bytes read or an error code if appropriate.
+        // A common practice for GATT reads is to return 0 bytes if data is unavailable.
+        return 0;
     }
 
-    std::memcpy(value + offset, buf, len);
-    ct_update = 1U;
-
-    return len;
+    // 4. Use bt_gatt_attr_read to send the content of the prepared buffer.
+    // This function handles the copying of data from `cts_value_ptr` to `buf`
+    // respecting `len` and `offset`.
+    return bt_gatt_attr_read(conn, attr, buf, len, offset,
+                             cts_value_ptr, cts_value_size);
 }
+
 static ssize_t jis_status_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                                uint16_t offset)
 {
     auto *value = static_cast<uint16_t *>(attr->user_data);
     return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(error_bitfield_data));
+}
+
+static ssize_t jis_foot_sensor_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                     void *buf, uint16_t len, uint16_t offset)
+{
+    // Cast attr->user_data to the correct type (foot_samples_t *).
+    // This 'attr->user_data' is actually a pointer to your global 'foot_sensor_char_value'.
+    const foot_samples_t *value_to_read = static_cast<const foot_samples_t *>(attr->user_data);
+    
+    // Ensure that sizeof(foot_samples_t) is used, not sizeof(error_bitfield_data)
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, value_to_read, sizeof(foot_samples_t));
 }
 
 /**

@@ -47,7 +47,19 @@
 #include <events/bluetooth_state_event.h>
 #include <events/data_event.h>
 
+#include <app.hpp>
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
+
+
+/********************************** BTH THREAD ********************************/
+static constexpr int bluetooth_stack_size = CONFIG_BLUETOOTH_MODULE_STACK_SIZE;
+static constexpr int bluetooth_priority = CONFIG_BLUETOOTH_MODULE_PRIORITY;
+K_THREAD_STACK_DEFINE(bluetooth_stack_area, bluetooth_stack_size);
+static struct k_thread bluetooth_thread_data;
+static k_tid_t bluetooth_tid;
+const char *get_sender_name(sender_type_t sender);
+void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/);
 
 static uint8_t ble_status_connected = 0;
 static bool ble_id_has_changed = false;
@@ -368,7 +380,108 @@ err_t bt_module_init(void)
         LOG_ERR("BLE Failed to enter advertising mode");
     }
 
+    bluetooth_tid =
+        k_thread_create(&bluetooth_thread_data, bluetooth_stack_area, K_THREAD_STACK_SIZEOF(bluetooth_stack_area),
+                        bluetooth_process, nullptr, nullptr, nullptr, bluetooth_priority, 0, K_NO_WAIT);
+
     return err_t::NO_ERROR;
+}
+
+void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
+{
+    // Declare a generic_message_t structure to hold the received message
+    generic_message_t msg;
+    int ret;
+
+    init_rtc_time();
+
+    while (true)
+    {
+        // Wait indefinitely for a message to appear in the queue.
+        // K_FOREVER makes the thread block until a message is available.
+        ret = k_msgq_get(&bluetooth_msgq, &msg, K_FOREVER);
+
+        uint32_t debug=get_current_epoch_time();
+        LOG_WRN("debug time=%d",debug);
+
+        if (ret == 0)
+        { // Message successfully received
+            LOG_DBG("Received message from: %s, type: %d", get_sender_name(msg.sender), msg.type);
+
+            // Handle the message based on its type
+            switch (msg.type)
+            {
+                case MSG_TYPE_FOOT_SAMPLES: {
+                    // Directly access the data from the union member
+                    foot_samples_t *foot_data = &msg.data.foot_samples; // Get pointer to data within the message
+                    
+                 //   for (int i = 0; i < NUM_FOOT_SENSOR_CHANNELS; i++) {
+                      //  LOG_INF("  Channel %d: %u", i, foot_data->values[i]);
+                   // }
+                    jis_foot_sensor_notify(foot_data);
+                    break;
+                }
+
+                // Similarly for BHI360 messages:
+                case MSG_TYPE_BHI360_3D_MAPPING: {
+                    bhi360_3d_mapping_t *mapping_data = &msg.data.bhi360_3d_mapping;
+                    LOG_INF("Received BHI360 3D Mapping from %s: Accel(%.2f,%.2f,%.2f), Gyro(%.2f,%.2f,%.2f) @ %llu us",
+                            get_sender_name(msg.sender),
+                            (double)mapping_data->accel_x, (double)mapping_data->accel_y, (double)mapping_data->accel_z,
+                            (double)mapping_data->gyro_x, (double)mapping_data->gyro_y, (double)mapping_data->gyro_z,
+                            mapping_data->timestamp_us);
+                    // REMOVE k_mem_slab_free
+                    break;
+                }
+
+                case MSG_TYPE_BHI360_STEP_COUNT: {
+                    bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
+                    LOG_INF("Received BHI360 Step Count from %s: Steps=%u, ActivityDuration=%u s",
+                            get_sender_name(msg.sender), step_data->step_count, step_data->activity_duration_s);
+                    // REMOVE k_mem_slab_free
+                    break;
+                }
+
+                case MSG_TYPE_COMMAND: {
+                    // If you send commands via char arrays in the union
+                    char *command_str = msg.data.command_str;
+                    LOG_INF("Received Command from %s: '%s'", get_sender_name(msg.sender), command_str);
+                    break;
+                }
+
+                default:
+                    LOG_WRN("Unknown message type received (%d) from %s", msg.type, get_sender_name(msg.sender));
+                    // If an unknown type, and data_ptr is not NULL, it might be a memory leak
+                    // if it was allocated from a slab that we don't know how to free.
+                    // This scenario should ideally not happen with well-defined message types.
+                    break;
+            }
+        }
+        else
+        {
+            // This else block is generally not reached with K_FOREVER, as it implies a timeout or error.
+            // But it's good practice to have it for other k_msgq_get timeout values.
+            LOG_ERR("Failed to get message from queue: %d", ret);
+        }
+    }
+}
+
+// Helper function to get sender name for logging (re-defined here for clarity, or put in common utility)
+const char *get_sender_name(sender_type_t sender)
+{
+    switch (sender)
+    {
+        case SENDER_FOOT_SENSOR_THREAD:
+            return "Foot Sensor Thread";
+        case SENDER_BHI360_THREAD:
+            return "BHI360 Thread";
+        case SENDER_UI_THREAD:
+            return "UI Thread";
+        case SENDER_NONE:
+            return "None/Unknown";
+        default:
+            return "Invalid Sender";
+    }
 }
 
 /**

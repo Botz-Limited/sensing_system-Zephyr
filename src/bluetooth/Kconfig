@@ -106,4 +106,12 @@ config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
 	int "Duration the system with advertise for"
 	default 60
 
+config BLUETOOTH_MODULE_STACK_SIZE
+	int "BTH  module thread stack size"
+	default 3072
+
+config BLUETOOTH_MODULE_PRIORITY
+	int "BTH module thread priority"
+	default 4
+
 endif # BLUETOOTH_MODULE

@@ -51,6 +51,10 @@ static uint32_t swap_to_little_endian(uint32_t value);
 
 static void cs_delete_log_hw_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 static void cs_delete_log_meta_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+static ssize_t write_set_time_control_vnd(struct bt_conn *conn,
+                                          const struct bt_gatt_attr *attr,
+                                          const void *buf, uint16_t len,
+                                          uint16_t offset, uint8_t flags);
 
 void cs_delete_log_meta_control_command_notify(uint32_t stu);
 
@@ -143,6 +147,7 @@ static struct bt_uuid_128 delete_log_meta_command_uuid =
  */
 static struct bt_uuid_128 set_time_command_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b681, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+    
 
 /**
  * @brief Control Service GATT Declaration
@@ -163,11 +168,19 @@ BT_GATT_SERVICE_DEFINE(
 
     // Command Point Characteristic
 
+    // time characteristics
+    BT_GATT_CHARACTERISTIC(&set_time_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_WRITE_ENCRYPT, nullptr,
+                           write_set_time_control_vnd, static_cast<void *>(&set_time_control)),
+
+
+
     // deleting the meta data logs
     BT_GATT_CHARACTERISTIC(&delete_log_meta_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT, read_delete_meta_log_control_vnd,
                            write_delete_meta_log_control_vnd, static_cast<void *>(&delete_log_meta_control)),
-    BT_GATT_CCC(cs_delete_log_meta_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));
+    BT_GATT_CCC(cs_delete_log_meta_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+);
 
 /**
  * @brief Notifies subscribed devices about the metadata log deletion command.
@@ -238,4 +251,37 @@ static uint32_t swap_to_little_endian(uint32_t value)
 {
     return ((value << 24) & 0xFF000000) | ((value << 8) & 0x00FF0000) | ((value >> 8) & 0x0000FF00) |
            ((value >> 24) & 0x000000FF);
+}
+
+static ssize_t write_set_time_control_vnd(struct bt_conn *conn,
+                                          const struct bt_gatt_attr *attr,
+                                          const void *buf, uint16_t len,
+                                          uint16_t offset, uint8_t flags) {
+  ARG_UNUSED(conn);
+  ARG_UNUSED(flags);
+  uint32_t *value = static_cast<uint32_t *>(attr->user_data);
+  uint32_t temp_value = 0;
+
+  if ((offset + len) > VND_MAX_LEN) {
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+  }
+
+  // This line copies the contents of the buffer buf of length len to the memory
+  // pointed to by value starting at the offset offset.
+  std::memcpy(value + offset, buf, len);
+
+  if (is_little_endian) 
+  { 
+    temp_value = swap_to_little_endian(*value);
+  } 
+  else 
+  { 
+    // the system is big endian, no need to convert
+    temp_value = *value;
+  }
+
+  // Save epoch time to RTC
+  set_current_time_from_epoch((temp_value));
+
+  return len;
 }

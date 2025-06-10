@@ -37,6 +37,10 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_APP_MODULE_LOG_LEVEL); // NOLINT
 
 void initializing_entry();
 
+K_MSGQ_DEFINE(bluetooth_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+
+// Add other slab definitions here as needed
+
 /********************************** APP THREAD ********************************/
 static constexpr int app_stack_size = CONFIG_APP_MODULE_STACK_SIZE;
 static constexpr int app_priority = CONFIG_APP_MODULE_PRIORITY;
@@ -107,7 +111,7 @@ void app_entry(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
     while (true)
     {
-        //TODO develop thread
+        // TODO develop thread
         k_msleep(app_wait_timer);
     }
 }

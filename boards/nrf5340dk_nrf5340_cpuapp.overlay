@@ -13,6 +13,7 @@
 
     aliases {
         bhi360 = &bhi360;
+        rtc0 = &rtc0;
     };
 
 
@@ -83,9 +84,14 @@
     status = "disabled";
 };
 
+&rtc0 {
+    status = "okay";
+};
+
 &uart2 {
 	status = "disabled";
 };
+
 
 &spi2 {
 	compatible = "nordic,nrf-spim";

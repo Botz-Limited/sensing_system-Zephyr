@@ -14,7 +14,6 @@
 
 #include <stdint.h>
 
-
 enum class err_t
 {
     NO_ERROR = 0,
@@ -27,13 +26,14 @@ enum class err_t
     I2C_ERROR = -20,
     BATTERY_DISCONNECTION_ERROR = -21,
     MOTION_ERROR = -22,
+    RTC_ERROR = -23,
 
     // File related errors continue from here
-    FILE_SYSTEM_ERROR = -22,
-    PROTO_ENCODE_ERROR = -23,
-    FILE_SYSTEM_NO_FILES = -24,
-    FILE_SYSTEM_STORAGE_FULL = -25,
-    FLASH_FAILURE = -26,
+    FILE_SYSTEM_ERROR = -24,
+    PROTO_ENCODE_ERROR = -25,
+    FILE_SYSTEM_NO_FILES = -26,
+    FILE_SYSTEM_STORAGE_FULL = -27,
+    FLASH_FAILURE = -28,
 };
 
 #endif // APP_INCLUDE_ERRORS_H_
