@@ -214,7 +214,8 @@ uint32_t get_current_epoch_time()
 {
     if (last_synced_epoch_time_s == 0) {
         LOG_WRN("RTC not yet synchronized. Returning 0.");
-        return 0;
+        //assigned default time 
+        set_current_time_from_epoch(1749574850);
     }
 
     uint32_t current_rtc_ticks_val;

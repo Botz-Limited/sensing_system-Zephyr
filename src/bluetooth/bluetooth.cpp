@@ -58,7 +58,7 @@ static constexpr int bluetooth_priority = CONFIG_BLUETOOTH_MODULE_PRIORITY;
 K_THREAD_STACK_DEFINE(bluetooth_stack_area, bluetooth_stack_size);
 static struct k_thread bluetooth_thread_data;
 static k_tid_t bluetooth_tid;
-const char *get_sender_name(sender_type_t sender);
+
 void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/);
 
 static uint8_t ble_status_connected = 0;
@@ -401,9 +401,6 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         // K_FOREVER makes the thread block until a message is available.
         ret = k_msgq_get(&bluetooth_msgq, &msg, K_FOREVER);
 
-        uint32_t debug=get_current_epoch_time();
-        LOG_WRN("debug time=%d",debug);
-
         if (ret == 0)
         { // Message successfully received
             LOG_DBG("Received message from: %s, type: %d", get_sender_name(msg.sender), msg.type);
@@ -414,10 +411,6 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_FOOT_SAMPLES: {
                     // Directly access the data from the union member
                     foot_samples_t *foot_data = &msg.data.foot_samples; // Get pointer to data within the message
-                    
-                 //   for (int i = 0; i < NUM_FOOT_SENSOR_CHANNELS; i++) {
-                      //  LOG_INF("  Channel %d: %u", i, foot_data->values[i]);
-                   // }
                     jis_foot_sensor_notify(foot_data);
                     break;
                 }
@@ -425,12 +418,11 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 // Similarly for BHI360 messages:
                 case MSG_TYPE_BHI360_3D_MAPPING: {
                     bhi360_3d_mapping_t *mapping_data = &msg.data.bhi360_3d_mapping;
-                    LOG_INF("Received BHI360 3D Mapping from %s: Accel(%.2f,%.2f,%.2f), Gyro(%.2f,%.2f,%.2f) @ %llu us",
+                    LOG_INF("Received BHI360 3D Mapping from %s: Accel(%.2f,%.2f,%.2f), Gyro(%.2f,%.2f,%.2f)",
                             get_sender_name(msg.sender),
                             (double)mapping_data->accel_x, (double)mapping_data->accel_y, (double)mapping_data->accel_z,
-                            (double)mapping_data->gyro_x, (double)mapping_data->gyro_y, (double)mapping_data->gyro_z,
-                            mapping_data->timestamp_us);
-                    // REMOVE k_mem_slab_free
+                            (double)mapping_data->gyro_x, (double)mapping_data->gyro_y, (double)mapping_data->gyro_z);
+
                     break;
                 }
 
@@ -438,7 +430,27 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
                     LOG_INF("Received BHI360 Step Count from %s: Steps=%u, ActivityDuration=%u s",
                             get_sender_name(msg.sender), step_data->step_count, step_data->activity_duration_s);
-                    // REMOVE k_mem_slab_free
+
+                    break;
+                }
+
+                case MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE: {
+                    // Access the new_hardware_log_file data from the union
+                    new_log_info_msg_t *log_info = &msg.data.new_hardware_log_file;
+                    LOG_INF("Received NEW FOOT LOG FILE notification from %s:", get_sender_name(msg.sender));
+                    LOG_INF("  File Path: %s", log_info->file_path);
+                    jis_foot_sensor_log_available_notify(log_info->file_sequence_id);
+                    jis_foot_sensor_req_id_path_notify(log_info->file_path);
+                    break;
+                }
+
+                case MSG_TYPE_NEW_BHI360_LOG_FILE: {
+                    // Access the new_hardware_log_file data from the union
+                    new_log_info_msg_t *log_info = &msg.data.new_hardware_log_file;
+                    LOG_INF("Received NEW BH360 LOG FILE notification from %s:", get_sender_name(msg.sender));
+                    LOG_INF("  File Path: %s", log_info->file_path);
+                    jis_bhi360_log_available_notify(log_info->file_sequence_id);
+                    jis_bhi360_req_id_path_notify(log_info->file_path);
                     break;
                 }
 
@@ -466,23 +478,6 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
     }
 }
 
-// Helper function to get sender name for logging (re-defined here for clarity, or put in common utility)
-const char *get_sender_name(sender_type_t sender)
-{
-    switch (sender)
-    {
-        case SENDER_FOOT_SENSOR_THREAD:
-            return "Foot Sensor Thread";
-        case SENDER_BHI360_THREAD:
-            return "BHI360 Thread";
-        case SENDER_UI_THREAD:
-            return "UI Thread";
-        case SENDER_NONE:
-            return "None/Unknown";
-        default:
-            return "Invalid Sender";
-    }
-}
 
 /**
  * @brief Starts Bluetooth advertising.

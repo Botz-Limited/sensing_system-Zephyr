@@ -38,6 +38,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_APP_MODULE_LOG_LEVEL); // NOLINT
 void initializing_entry();
 
 K_MSGQ_DEFINE(bluetooth_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 
 // Add other slab definitions here as needed
 
@@ -113,6 +114,24 @@ void app_entry(void * /*unused*/, void * /*unused*/, void * /*unused*/)
     {
         // TODO develop thread
         k_msleep(app_wait_timer);
+    }
+}
+
+// Helper function to get sender name for logging (re-defined here for clarity, or put in common utility)
+const char *get_sender_name(sender_type_t sender)
+{
+    switch (sender)
+    {
+        case SENDER_FOOT_SENSOR_THREAD:
+            return "Foot Sensor Thread";
+        case SENDER_BHI360_THREAD:
+            return "BHI360 Thread";
+        case SENDER_BTH:
+            return "UI Thread";
+        case SENDER_NONE:
+            return "None/Unknown";
+        default:
+            return "Invalid Sender";
     }
 }
 

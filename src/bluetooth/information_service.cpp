@@ -2,16 +2,17 @@
  * @file information_service.cpp
  * @author
  * @brief
- * @version 2.4.1
+ * @version 1.0.1
  * @date 2025-05-12
  *
  * @copyright Botz Innovation 2025
  *
  */
 
+#define MODULE bluetooth
+
 #include <cstddef>
 #include <cstdint>
-#define MODULE bluetooth
 
 #include <errors.hpp>
 #include <stdbool.h>
@@ -27,7 +28,6 @@
 
 #include <cstring>
 
-#include "hardware_data.pb.h"
 #include <app.hpp>
 #include <ble_services.hpp>
 #include <util.hpp>
@@ -42,10 +42,13 @@ static uint8_t charge_status = 0;
 static foot_samples_t foot_sensor_char_value = {0};
 
 static bool status_subscribed = true;
-static bool meta_status_subscribed = true;
-static uint32_t log_available_meta = 0;
+static bool foot_sensor_log_available_subscribed = true;
+static uint32_t foot_sensor_log_available = 0;
+static char foot_sensor_req_id_path[util::max_path_length] = {0};
 
-static char meta_req_id[util::max_path_length] = {0};
+static bool bhi360_log_available_subscribed = true;          // New subscription flag for BHI360 log availability
+static uint32_t bhi360_log_available = 0;                    // New variable for BHI360 log availability ID
+static char bhi360_req_id_path[util::max_path_length] = {0}; // New variable for BHI360 log file path
 
 static uint8_t ct[10];
 static uint8_t ct_update = 0;
@@ -64,19 +67,23 @@ static void jis_current_time_ccc_cfg_changed(const struct bt_gatt_attr* attr, ui
 static ssize_t jis_status_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_status_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 
-// Meta Log available Characteristic
-static ssize_t jis_log_available_meta_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static void jis_log_available_meta_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-// Battery Status Characteristic
+// Foot Sensor Log available Characteristic
+static ssize_t jis_foot_sensor_log_available_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_foot_sensor_log_available_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+
 static ssize_t jis_charge_status_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_charge_status_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 //Req ID
-static ssize_t jis_req_id_hw_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len,
-    uint16_t offset);
-static void jis_req_id_hw_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-static ssize_t jis_req_id_meta_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len,
-    uint16_t offset);
-static void jis_req_id_meta_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+static ssize_t jis_foot_sensor_req_id_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len,
+uint16_t offset);
+static void jis_foot_sensor_req_id_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value); 
+
+static ssize_t jis_bhi360_log_available_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_bhi360_log_available_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+// New: BHI360 Req ID/Path Characteristic
+static ssize_t jis_bhi360_req_id_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len,
+  uint16_t offset);
+static void jis_bhi360_req_id_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 
 // Foot Sensor Characteristic
 static ssize_t jis_foot_sensor_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -90,18 +97,27 @@ static struct bt_uuid_128 STATUS_UUID =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eab, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 
-static struct bt_uuid_128 log_available_meta_uuid =
+// Foot Sensor Log Available UUID
+static struct bt_uuid_128 foot_sensor_log_available_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eac, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 static struct bt_uuid_128 CHARGE_STATUS_UUID =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ead, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 
-static struct bt_uuid_128 req_id_meta_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eae, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+// Foot Sensor Request ID/Path UUID (renamed from req_id_meta_uuid)
+static struct bt_uuid_128 foot_sensor_req_id_path_uuid =
+     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eae, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 static struct bt_uuid_128 foot_sensor_samples =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eaf, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));    
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eaf, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));   
+    
+static struct bt_uuid_128 bhi360_log_available_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb0, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97)); 
+
+// New: BHI360 Request ID/Path UUID (choose a new unique UUID)
+static struct bt_uuid_128 bhi360_req_id_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb1, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97)); 
 
 
 BT_GATT_SERVICE_DEFINE(
@@ -131,13 +147,13 @@ BT_GATT_SERVICE_DEFINE(
     BT_GATT_CCC(jis_foot_sensor_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
 
- // Meta Logs available Characteristic
-    BT_GATT_CHARACTERISTIC(&log_available_meta_uuid.uuid,
-                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                            BT_GATT_PERM_READ_ENCRYPT,
-                            jis_log_available_meta_read, nullptr,
-                             static_cast<void *>(&log_available_meta)),
-    BT_GATT_CCC(jis_log_available_meta_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+// Foot Sensor Logs available Characteristic 
+    BT_GATT_CHARACTERISTIC(&foot_sensor_log_available_uuid.uuid,
+                    BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                     BT_GATT_PERM_READ_ENCRYPT,
+                     jis_foot_sensor_log_available_read, nullptr,
+                static_cast<void *>(&foot_sensor_log_available)),
+    BT_GATT_CCC(jis_foot_sensor_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // Battery Status Characteristic
     BT_GATT_CHARACTERISTIC(&CHARGE_STATUS_UUID.uuid,
@@ -148,13 +164,29 @@ BT_GATT_SERVICE_DEFINE(
     BT_GATT_CCC(jis_charge_status_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
 
-// Meta Req Id Characteristic
-    BT_GATT_CHARACTERISTIC(&req_id_meta_uuid.uuid,
-                            BT_GATT_CHRC_READ,
+// Foot Sensor Request ID/Path Characteristic
+     BT_GATT_CHARACTERISTIC(&foot_sensor_req_id_path_uuid.uuid,
+                     BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY, // Added NOTIFY to this characteristic as it might be useful
+                  BT_GATT_PERM_READ_ENCRYPT,
+                   jis_foot_sensor_req_id_read, nullptr,
+                  foot_sensor_req_id_path),
+        BT_GATT_CCC(jis_foot_sensor_req_id_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // BHI360 Logs available Characteristic
+            BT_GATT_CHARACTERISTIC(&bhi360_log_available_uuid.uuid,
+                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
                             BT_GATT_PERM_READ_ENCRYPT,
-                            jis_req_id_meta_read, nullptr,
-                            meta_req_id),
-    BT_GATT_CCC(jis_req_id_meta_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));
+                            jis_bhi360_log_available_read, nullptr,
+                            static_cast<void *>(&bhi360_log_available)),
+    BT_GATT_CCC(jis_bhi360_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // BHI360 Request ID/Path Characteristic
+    BT_GATT_CHARACTERISTIC(&bhi360_req_id_path_uuid.uuid,
+                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                            BT_GATT_PERM_READ_ENCRYPT,
+                            jis_bhi360_req_id_read, nullptr,
+                            bhi360_req_id_path),
+    BT_GATT_CCC(jis_bhi360_req_id_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));        
 
 // clang-format on
 /**
@@ -167,42 +199,6 @@ void jis_set_err_status_notify(err_t new_device_status)
 {
     switch (new_device_status)
     {
-
-        case err_t::FILE_SYSTEM_ERROR:
-            //   set Fault Storage
-            error_bitfield_data |= ErrorStatus_storage_persistent_fault_bit;
-            LOG_INF("set storage fault");
-            break;
-
-        case err_t::BATTERY_FAULT:
-            //   set Fault Battery
-            error_bitfield_data |= ErrorStatus_battery_adc_persistent_fault_bit;
-            LOG_INF("set battery/charger fault");
-            break;
-
-        case err_t::BATTERY_DISCONNECTION_ERROR:
-            // set Battery disconnection fault
-            error_bitfield_data |= ErrorStatus_battery_disconnection_persistent_fault_bit;
-            LOG_INF("set battery disconnection fault");
-            break;
-
-        case err_t::BLUETOOTH_ERROR:
-            //  set bluetooth error
-            error_bitfield_data |= ErrorStatus_bt_persistent_fault_bit;
-            LOG_INF("set BT fault");
-            break;
-
-        case err_t::DFU_ERROR:
-            //  set DFU error
-            error_bitfield_data |= ErrorStatus_dfu_persistent_fault_bit;
-            LOG_INF("set dfu fault");
-            break;
-
-        case err_t::FLASH_FAILURE:
-            //  set flash error
-            error_bitfield_data |= ErrorStatus_flash_persistent_fault_bit;
-            LOG_INF("Set Flash read/write failure");
-            break;
 
         default:
             LOG_WRN("UNKNOWN device fault status reported: %d", (int)new_device_status);
@@ -240,45 +236,8 @@ void jis_set_err_status_notify(err_t new_device_status)
  */
 void jis_clear_err_status_notify(err_t new_device_status)
 {
-
     switch (new_device_status)
     {
-
-        case err_t::FILE_SYSTEM_ERROR:
-            //   Clear Fault Storage
-            error_bitfield_data &= ~ErrorStatus_storage_persistent_fault_bit;
-            LOG_DBG("Clear storage fault");
-            break;
-
-        case err_t::BATTERY_FAULT:
-            // Clear Fault Battery
-            error_bitfield_data &= ~ErrorStatus_battery_adc_persistent_fault_bit;
-            LOG_DBG("Clear battery/charger fault");
-            break;
-
-        case err_t::BATTERY_DISCONNECTION_ERROR:
-            // Clear Battery disconnection
-            error_bitfield_data &= ~ErrorStatus_battery_disconnection_persistent_fault_bit;
-            LOG_DBG("Clear battery disconnection fault");
-            break;
-
-        case err_t::BLUETOOTH_ERROR:
-            //  Clear Fault Bluetooth
-            error_bitfield_data &= ~ErrorStatus_bt_persistent_fault_bit;
-            LOG_DBG("clear BT error");
-            break;
-
-        case err_t::DFU_ERROR:
-            //  set load cell error
-            error_bitfield_data &= ~ErrorStatus_dfu_persistent_fault_bit;
-            LOG_DBG("clear dfu fault");
-            break;
-
-        case err_t::FLASH_FAILURE:
-            //  set flash error
-            error_bitfield_data &= ~ErrorStatus_flash_persistent_fault_bit;
-            LOG_INF("Clear Flash read/write failure");
-            break;
 
         default:
             LOG_WRN("UNKNOWN device clear status reported: %d", (int)new_device_status);
@@ -311,13 +270,14 @@ void jis_clear_err_status_notify(err_t new_device_status)
 
 void jis_foot_sensor_notify(const foot_samples_t *samples_data)
 {
-    // 1. Check for an active BLE connection
+    // 1. Get the current epoch timestamp from your RTC module
+    uint32_t current_epoch = get_current_epoch_time();
 
-    // 3. Update the characteristic's internal value storage.
-    // This step is important if you want subsequent 'read' requests to reflect the latest data.
-    // It's a copy because 'samples_data' is from the message queue and might be overwritten
-    // by the producer or freed soon after this function.
-    memcpy(&foot_sensor_char_value, samples_data, sizeof(foot_samples_t));
+    foot_samples_t temp_foot_data;
+
+    memcpy(temp_foot_data.values, samples_data->values, sizeof(samples_data->values));
+
+    memcpy(&foot_sensor_char_value, &temp_foot_data, sizeof(foot_samples_t));
 
     if (status_subscribed)
     {
@@ -363,7 +323,6 @@ void jis_current_time_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t 
     LOG_DBG("Time CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
-
 static ssize_t jis_read_current_time(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                                      uint16_t offset)
 {
@@ -380,7 +339,8 @@ static ssize_t jis_read_current_time(struct bt_conn *conn, const struct bt_gatt_
     // If it zeros the buffer, checking the first byte might be sufficient,
     // or you could have a separate flag/function in cts.cpp to check sync status).
     // For simplicity, let's assume if cts_value_size is 0 or the pointer is null, it's invalid.
-    if (cts_value_ptr == nullptr || cts_value_size == 0) {
+    if (cts_value_ptr == nullptr || cts_value_size == 0)
+    {
         LOG_WRN("Current Time characteristic data is not ready or valid.");
         // Return 0 bytes read or an error code if appropriate.
         // A common practice for GATT reads is to return 0 bytes if data is unavailable.
@@ -390,8 +350,7 @@ static ssize_t jis_read_current_time(struct bt_conn *conn, const struct bt_gatt_
     // 4. Use bt_gatt_attr_read to send the content of the prepared buffer.
     // This function handles the copying of data from `cts_value_ptr` to `buf`
     // respecting `len` and `offset`.
-    return bt_gatt_attr_read(conn, attr, buf, len, offset,
-                             cts_value_ptr, cts_value_size);
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, cts_value_ptr, cts_value_size);
 }
 
 static ssize_t jis_status_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
@@ -401,13 +360,13 @@ static ssize_t jis_status_read(struct bt_conn *conn, const struct bt_gatt_attr *
     return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(error_bitfield_data));
 }
 
-static ssize_t jis_foot_sensor_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                                     void *buf, uint16_t len, uint16_t offset)
+static ssize_t jis_foot_sensor_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
+                                    uint16_t offset)
 {
     // Cast attr->user_data to the correct type (foot_samples_t *).
     // This 'attr->user_data' is actually a pointer to your global 'foot_sensor_char_value'.
     const foot_samples_t *value_to_read = static_cast<const foot_samples_t *>(attr->user_data);
-    
+
     // Ensure that sizeof(foot_samples_t) is used, not sizeof(error_bitfield_data)
     return bt_gatt_attr_read(conn, attr, buf, len, offset, value_to_read, sizeof(foot_samples_t));
 }
@@ -475,63 +434,222 @@ static ssize_t jis_charge_status_read(struct bt_conn *conn, const struct bt_gatt
     return bt_gatt_attr_read(conn, attr, buf, len, offset, static_cast<void *>(&charge_status), sizeof(charge_status));
 }
 
-void cs_log_available_meta_notify(uint32_t stu)
+void jis_foot_sensor_log_available_notify(uint32_t log_id) 
 {
-    log_available_meta = stu;
-    LOG_DBG("Meta_ID: %u, status Notified: %s", log_available_meta, meta_status_subscribed ? "true" : "false");
-    if (meta_status_subscribed)
+    foot_sensor_log_available = log_id; 
+    LOG_DBG("Foot Sensor Log ID: %u, notifications enabled: %s", foot_sensor_log_available,
+            foot_sensor_log_available_subscribed ? "true" : "false"); 
+    if (foot_sensor_log_available_subscribed)                         
     {
-        auto *status_gatt =
-            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &log_available_meta_uuid.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&log_available_meta), sizeof(log_available_meta));
+        auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count,
+                                                 &foot_sensor_log_available_uuid.uuid); 
+        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_log_available),
+                       sizeof(foot_sensor_log_available)); 
     }
-}
-
-static void jis_log_available_meta_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
-{
-    ARG_UNUSED(attr);
-    meta_status_subscribed = value == BT_GATT_CCC_NOTIFY;
-}
-
-static ssize_t jis_log_available_meta_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
-                                           uint16_t len, uint16_t offset)
-{
-    auto *value = static_cast<uint8_t *>(attr->user_data);
-    LOG_DBG("log_available_meta_read : %d", log_available_meta);
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(log_available_meta));
 }
 
 /**
- * @brief Notify the subscribed clients of the change in the request ID metadata.
+ * @brief CCC change callback for the Foot Sensor Log Available Characteristic.
  *
- * This function copies the provided `stu` string into the `meta_req_id` buffer. If there is a
- * subscription to the request ID metadata notification (i.e., `meta_status_subscribed` is true),
- * it looks up the GATT attribute by UUID and sends a notification to subscribed clients with the
- * updated `meta_req_id`.
+ * Updates the `foot_sensor_log_available_subscribed` flag based on the CCC value.
  *
- * @param stu The string containing the new request ID metadata. It is copied into the `meta_req_id` buffer.
- *
+ * @param attr The GATT attribute that triggered the callback.
+ * @param value The new CCC value.
  */
-void cs_req_id_meta_notify(const char *stu)
+static void jis_foot_sensor_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) // Renamed
+{
+    ARG_UNUSED(attr);
+    foot_sensor_log_available_subscribed = value == BT_GATT_CCC_NOTIFY; // Renamed
+}
+
+/**
+ * @brief Read callback for the Foot Sensor Log Available Characteristic.
+ *
+ * @param conn The connection object.
+ * @param attr The GATT attribute being read.
+ * @param buf The buffer to store the read data.
+ * @param len The maximum length of data to read.
+ * @param offset The offset from which to start reading.
+ * @return ssize_t The number of bytes read on success, or a negative error code.
+ */
+static ssize_t jis_foot_sensor_log_available_read(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                  void *buf, // Renamed
+                                                  uint16_t len, uint16_t offset)
+{
+    auto *value = static_cast<uint32_t *>(attr->user_data);                    // Changed to uint32_t for ID
+    LOG_DBG("foot_sensor_log_available_read : %u", foot_sensor_log_available); // Renamed and format specifier
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(foot_sensor_log_available)); // Renamed
+}
+
+/**
+ * @brief Notifies subscribed clients of the current foot sensor log file path.
+ *
+ * This function copies the provided `file_path` string into the
+ * `foot_sensor_req_id_path` buffer and sends a GATT notification to subscribed
+ * Bluetooth clients if notifications for this characteristic are enabled.
+ *
+ * @param file_path The string containing the new foot sensor log file path.
+ */
+void jis_foot_sensor_req_id_path_notify(const char *file_path) // Renamed from cs_req_id_meta_notify
 {
     // clear buffer before writing the new value
-    std::memset(meta_req_id, 0, sizeof(meta_req_id));
-    std::strcpy(meta_req_id, stu);
-    if (meta_status_subscribed)
+    std::memset(foot_sensor_req_id_path, 0, sizeof(foot_sensor_req_id_path));              // Renamed
+    std::strncpy(foot_sensor_req_id_path, file_path, sizeof(foot_sensor_req_id_path) - 1); // Using strncpy for safety
+    foot_sensor_req_id_path[sizeof(foot_sensor_req_id_path) - 1] = '\0';                   // Ensure null termination
+
+    if (foot_sensor_log_available_subscribed) // Re-using this flag for consistency, consider separate flag for this too
     {
-        auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &req_id_meta_uuid.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&meta_req_id), sizeof(meta_req_id));
+        auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count,
+                                                 &foot_sensor_req_id_path_uuid.uuid); // Renamed
+        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_req_id_path),
+                       sizeof(foot_sensor_req_id_path)); // Renamed
     }
 }
 
-static void jis_req_id_meta_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+/**
+ * @brief CCC change callback for the Foot Sensor Request ID/Path Characteristic.
+ *
+ * Updates the `foot_sensor_req_id_path_subscribed` flag based on the CCC value.
+ * (Note: Assuming a new dedicated subscription flag for this characteristic for clarity).
+ *
+ * @param attr The GATT attribute that triggered the callback.
+ * @param value The new CCC value.
+ */
+static void jis_foot_sensor_req_id_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) // Renamed
 {
     ARG_UNUSED(attr);
-    meta_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    // For consistency and clarity, ideally, you'd have a separate `foot_sensor_req_id_path_subscribed` flag.
+    // For now, I'm setting `foot_sensor_log_available_subscribed` as a placeholder,
+    // but you should introduce a dedicated flag like `static bool foot_sensor_req_id_path_subscribed = false;`
+    // and manage it here.
+    foot_sensor_log_available_subscribed = value == BT_GATT_CCC_NOTIFY; // Temporary, replace with dedicated flag
+    LOG_DBG("Foot Sensor Req ID/Path CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
-static ssize_t jis_req_id_meta_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
-                                    uint16_t offset)
+/**
+ * @brief Read callback for the Foot Sensor Request ID/Path Characteristic.
+ *
+ * @param conn The connection object.
+ * @param attr The GATT attribute being read.
+ * @param buf The buffer to store the read data.
+ * @param len The maximum length of data to read.
+ * @param offset The offset from which to start reading.
+ * @return ssize_t The number of bytes read on success, or a negative error code.
+ */
+static ssize_t jis_foot_sensor_req_id_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                           uint16_t len, // Renamed
+                                           uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(meta_req_id));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(foot_sensor_req_id_path)); // Renamed
+}
+
+/**
+ * @brief Notifies subscribed clients about the availability of BHI360 log files.
+ *
+ * This function updates the `bhi360_log_available` variable with the
+ * provided log ID and sends a GATT notification to subscribed Bluetooth clients
+ * if notifications for this characteristic are enabled.
+ *
+ * @param log_id The ID of the newly available BHI360 log file.
+ */
+void jis_bhi360_log_available_notify(uint32_t log_id)
+{
+    bhi360_log_available = log_id;
+    LOG_DBG("BHI360 Log ID: %u, notifications enabled: %s", bhi360_log_available,
+            bhi360_log_available_subscribed ? "true" : "false");
+    if (bhi360_log_available_subscribed)
+    {
+        auto *status_gatt =
+            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_log_available_uuid.uuid);
+        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&bhi360_log_available), sizeof(bhi360_log_available));
+    }
+}
+
+/**
+ * @brief CCC change callback for the BHI360 Log Available Characteristic.
+ *
+ * Updates the `bhi360_log_available_subscribed` flag based on the CCC value.
+ *
+ * @param attr The GATT attribute that triggered the callback.
+ * @param value The new CCC value.
+ */
+static void jis_bhi360_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    bhi360_log_available_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("BHI360 Log Available CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+/**
+ * @brief Read callback for the BHI360 Log Available Characteristic.
+ *
+ * @param conn The connection object.
+ * @param attr The GATT attribute being read.
+ * @param buf The buffer to store the read data.
+ * @param len The maximum length of data to read.
+ * @param offset The offset from which to start reading.
+ * @return ssize_t The number of bytes read on success, or a negative error code.
+ */
+static ssize_t jis_bhi360_log_available_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                    uint16_t len, uint16_t offset)
+{
+    auto *value = static_cast<uint32_t *>(attr->user_data);
+    LOG_DBG("bhi360_log_available_read : %u", bhi360_log_available);
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(bhi360_log_available));
+}
+
+/**
+ * @brief Notifies subscribed clients of the current BHI360 log file path.
+ *
+ * This function copies the provided `file_path` string into the
+ * `bhi360_req_id_path` buffer and sends a GATT notification to subscribed
+ * Bluetooth clients if notifications for this characteristic are enabled.
+ *
+ * @param file_path The string containing the new BHI360 log file path.
+ */
+void jis_bhi360_req_id_path_notify(const char *file_path)
+{
+    // clear buffer before writing the new value
+    std::memset(bhi360_req_id_path, 0, sizeof(bhi360_req_id_path));
+    std::strncpy(bhi360_req_id_path, file_path, sizeof(bhi360_req_id_path) - 1);
+    bhi360_req_id_path[sizeof(bhi360_req_id_path) - 1] = '\0'; // Ensure null termination
+
+    if (bhi360_log_available_subscribed) // Use the dedicated BHI360 subscription flag
+    {
+        auto *status_gatt =
+            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_req_id_path_uuid.uuid);
+        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&bhi360_req_id_path), sizeof(bhi360_req_id_path));
+    }
+}
+
+/**
+ * @brief CCC change callback for the BHI360 Request ID/Path Characteristic.
+ *
+ * Updates the `bhi360_req_id_path_subscribed` flag based on the CCC value.
+ *
+ * @param attr The GATT attribute that triggered the callback.
+ * @param value The new CCC value.
+ */
+static void jis_bhi360_req_id_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    bhi360_log_available_subscribed =
+        value == BT_GATT_CCC_NOTIFY; // Using the same flag for now, consider dedicated if logic differs
+    LOG_DBG("BHI360 Req ID/Path CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+/**
+ * @brief Read callback for the BHI360 Request ID/Path Characteristic.
+ *
+ * @param conn The connection object.
+ * @param attr The GATT attribute being read.
+ * @param buf The buffer to store the read data.
+ * @param len The maximum length of data to read.
+ * @param offset The offset from which to start reading.
+ * @return ssize_t The number of bytes read on success, or a negative error code.
+ */
+static ssize_t jis_bhi360_req_id_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
+                uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_req_id_path));
 }

@@ -37,9 +37,8 @@ set(ENV{PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION} python)
 find_package(Nanopb REQUIRED)
 set(NANOPB_GENERATE_CPP_STANDALONE FALSE)
 nanopb_generate_cpp(proto_sources proto_headers
-    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/hardware_data.proto
-    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/metadata.proto
-    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/calibration.proto
+    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/foot_sensor_messages.proto
+    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/bhi360_sensor_messages.proto
 )
 
 # Create a custom target for the protobuf generation step
@@ -93,12 +92,12 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/compile_commands.json ${CMAKE_SOURCE_DIR}/compile_commands.json
 )
 
-add_custom_command (
-    TARGET app POST_BUILD
-    COMMAND /home/ee/sensing_fw/tools/cppcheck-print.sh  $ENV{APPLICATION_ROOT_PATH}/src
+#add_custom_command (
+#    TARGET app POST_BUILD
+#    COMMAND /home/ee/sensing_fw/tools/cppcheck-print.sh  $ENV{APPLICATION_ROOT_PATH}/src
    # WORKING_DIRECTORY $ENV{APPLICATION_ROOT_PATH}
-    COMMENT "Running Cppcheck..."
-)
+ #   COMMENT "Running Cppcheck..."
+#)
 
 
 

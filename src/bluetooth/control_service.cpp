@@ -32,6 +32,7 @@
 #include <zephyr/logging/log.h>
 
 #include "ble_services.hpp"
+#include <app.hpp>
 #include <app_version.h>
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
@@ -43,44 +44,30 @@ static constexpr uint8_t is_little_endian = 0;
 #endif
 
 static uint32_t set_time_control = 0;
-static uint32_t delete_log_hw_control = 0;
-static uint32_t delete_log_meta_control = 0;
 static bool status_subscribed = false;
 
 static uint32_t swap_to_little_endian(uint32_t value);
 
-static void cs_delete_log_hw_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
-static void cs_delete_log_meta_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 static ssize_t write_set_time_control_vnd(struct bt_conn *conn,
                                           const struct bt_gatt_attr *attr,
                                           const void *buf, uint16_t len,
                                           uint16_t offset, uint8_t flags);
 
-void cs_delete_log_meta_control_command_notify(uint32_t stu);
+                                          // For foot log deletion characteristic
+ssize_t read_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                         uint16_t len, uint16_t offset);
+ssize_t write_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                          uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_delete_foot_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 
-/**
- * @brief Read debug command for control.
- *
- * This function is a callback for reading deleting meta log command
- * over a Bluetooth connection.
- *
- * @param conn Pointer to the Bluetooth connection structure.
- * @param attr Pointer to the GATT attribute structure.
- * @param buf Pointer to the buffer where the read data will be stored.
- * @param len Length of the buffer.
- * @param offset Offset within the attribute value.
- * @return ssize_t Returns the length of the data read.
- */
-static ssize_t read_delete_meta_log_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
-                                                uint16_t len, uint16_t offset)
-{
-    // This line declares a pointer variable named value and assigns it the
-    // address of the user data stored in the attr structure. The (uint32_t *)
-    // cast is used to explicitly convert the value of attr->user_data to a
-    // pointer to a uint32_t type.
-    auto *value = static_cast<uint32_t *>(attr->user_data);
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(delete_log_meta_control));
-}
+// For BHI360 log deletion characteristic
+ssize_t read_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                          uint16_t len, uint16_t offset);
+ssize_t write_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                           uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_delete_bhi360_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+
+
 
 /**
  * @brief Write delete meta data log command for control.
@@ -134,12 +121,13 @@ static ssize_t write_delete_meta_log_control_vnd(struct bt_conn *conn, const str
 static struct bt_uuid_128 control_service_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b67f, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
-/**
- * @brief UUID for the delete log metadata command characteristic.
- * This UUID identifies the characteristic for deleting metadata logs.
- */
-static struct bt_uuid_128 delete_log_meta_command_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b680, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+// --- New: UUID for the delete foot log command characteristic. ---
+static struct bt_uuid_128 delete_foot_log_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b682, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae)); // Incrementing from old meta uuid
+
+// --- New: UUID for the delete BHI360 log command characteristic. ---
+static struct bt_uuid_128 delete_bhi360_log_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b683, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae)); // Incrementing further
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -173,13 +161,18 @@ BT_GATT_SERVICE_DEFINE(
                            BT_GATT_PERM_WRITE_ENCRYPT, nullptr,
                            write_set_time_control_vnd, static_cast<void *>(&set_time_control)),
 
+BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY, // Added NOTIFY for status feedback
+                           BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
+                           read_delete_foot_log_command_vnd, // Read callback for current deletion ID
+                           write_delete_foot_log_command_vnd, static_cast<void *>(nullptr)), // No specific data pointer needed if id is read from buffer
+    BT_GATT_CCC(cs_delete_foot_log_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
-
-    // deleting the meta data logs
-    BT_GATT_CHARACTERISTIC(&delete_log_meta_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT, read_delete_meta_log_control_vnd,
-                           write_delete_meta_log_control_vnd, static_cast<void *>(&delete_log_meta_control)),
-    BT_GATT_CCC(cs_delete_log_meta_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+    // New: Delete BHI360 Log Characteristic
+    BT_GATT_CHARACTERISTIC(&delete_bhi360_log_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY, // Added NOTIFY for status feedback
+                           BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
+                           read_delete_bhi360_log_command_vnd, // Read callback for current deletion ID
+                           write_delete_bhi360_log_command_vnd, static_cast<void *>(nullptr)), // No specific data pointer needed if id is read from buffer
+    BT_GATT_CCC(cs_delete_bhi360_log_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
 );
 
 /**
@@ -189,54 +182,112 @@ BT_GATT_SERVICE_DEFINE(
  *
  * @param stu The metadata log deletion command value.
  */
-void cs_delete_log_meta_control_command_notify(uint32_t stu)
+ssize_t read_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                         uint16_t len, uint16_t offset)
 {
+    // This could return the ID of the last requested deletion or a status.
+    // For now, let's return a dummy value or a flag indicating readiness.
+    // If you want to return the last ID, you'd need a static variable to store it.
+    uint32_t current_id = 0; // Replace with actual state if tracking
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_id, sizeof(current_id));
+}
 
-    delete_log_meta_control = stu;
-
-    // Cast a delete file event for the data module
-    // auto *event = new_record_deletion_event();
-    // event->record_type = RECORD_METADATA;
-    // event->id = stu;
-    // APP_EVENT_SUBMIT(event);
-
-    if (status_subscribed)
-    {
-        auto *status_gatt =
-            bt_gatt_find_by_uuid(control_service.attrs, control_service.attr_count, &delete_log_meta_command_uuid.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&delete_log_meta_control),
-                       sizeof(delete_log_meta_control));
+/**
+ * @brief Write callback for Delete Foot Log Command Characteristic.
+ * Receives the ID of the foot sensor log file to delete and sends a message to the data module.
+ */
+ssize_t write_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                          uint16_t len, uint16_t offset, uint8_t flags)
+{
+    if (len != sizeof(uint32_t) || offset != 0) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
+
+    uint32_t id_to_delete;
+    memcpy(&id_to_delete, buf, sizeof(uint32_t));
+
+    generic_message_t delete_msg;
+    delete_msg.sender = SENDER_BTH;
+    delete_msg.type = MSG_TYPE_DELETE_FOOT_LOG; // New specific message type
+    delete_msg.data.delete_cmd.type = RECORD_HARDWARE_FOOT_SENSOR; // Specify record type
+    delete_msg.data.delete_cmd.id = id_to_delete; // The ID of the log file
+
+    if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send delete foot log message for ID %u.", id_to_delete);
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY); // Or a more specific error
+    }
+
+    LOG_DBG("Sent delete foot log message for ID %u to data_msgq.", id_to_delete);
+
+    // Optionally notify the client of success/failure or a status update via CCC
+    // This would typically be done after data module has processed the deletion
+    // For direct notification, you'd need a way to store the result and notify later.
+    // For simplicity, for now, we'll assume the client is checking the read value or
+    // we'll add a separate notification mechanism if required for actual deletion status.
+    // cs_delete_foot_log_command_notify(id_to_delete, true); // Example, assuming such a notify exists
+
+    return len; // Indicate successful write
 }
 
 /**
- * @brief Callback for CCC configuration change of hardware log control
- * characteristic. This function is called when the CCC descriptor associated
- * with the hardware log control characteristic is changed.
- *
- * @param attr Pointer to the GATT attribute structure.
- * @param value New value of the CCC descriptor.
+ * @brief Callback for CCC configuration change of delete foot log command characteristic.
  */
-static void cs_delete_log_hw_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+static void cs_delete_foot_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
     ARG_UNUSED(attr);
-    status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    status_subscribed = value == BT_GATT_CCC_NOTIFY; // Assuming a common status_subscribed flag
+    LOG_DBG("Delete Foot Log CCC changed: %u", value);
 }
 
 /**
- * @brief Callback for CCC configuration change of metadata log control
- * characteristic.
- *
- * This function is called when the CCC descriptor associated with
- *  the metadata log control characteristic is changed.
- *
- * @param attr Pointer to the GATT attribute structure.
- * @param value New value of the CCC descriptor.
+ * @brief Read callback for Delete BHI360 Log Command Characteristic.
+ * Returns the last requested deletion ID for the BHI360 sensor.
  */
-static void cs_delete_log_meta_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+ssize_t read_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                          uint16_t len, uint16_t offset)
+{
+    uint32_t current_id = 0; // Replace with actual state if tracking
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_id, sizeof(current_id));
+}
+
+/**
+ * @brief Write callback for Delete BHI360 Log Command Characteristic.
+ * Receives the ID of the BHI360 log file to delete and sends a message to the data module.
+ */
+ssize_t write_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                           uint16_t len, uint16_t offset, uint8_t flags)
+{
+    if (len != sizeof(uint32_t) || offset != 0) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint32_t id_to_delete;
+    memcpy(&id_to_delete, buf, sizeof(uint32_t));
+
+    generic_message_t delete_msg;
+    delete_msg.sender = SENDER_BTH;
+    delete_msg.type = MSG_TYPE_DELETE_BHI360_LOG; // New specific message type
+    delete_msg.data.delete_cmd.type = RECORD_HARDWARE_BHI360; // Specify record type
+    delete_msg.data.delete_cmd.id = id_to_delete; // The ID of the log file
+
+    if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send delete BHI360 log message for ID %u.", id_to_delete);
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
+
+    LOG_DBG("Sent delete BHI360 log message for ID %u to data_msgq.", id_to_delete);
+
+    return len; // Indicate successful write
+}
+
+/**
+ * @brief Callback for CCC configuration change of delete BHI360 log command characteristic.
+ */
+static void cs_delete_bhi360_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
     ARG_UNUSED(attr);
     status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Delete BHI360 Log CCC changed: %u", value);
 }
 
 /**

@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package sensor_data_messages;
+
+// --- Enums (BHI360 Specific) ---
+enum BHI360MessageType {
+  BHI360_UNKNOWN_MESSAGE_TYPE = 0; // Default value, should always be 0
+  BHI360_3D_DATA = 1;
+  BHI360_STEP_COUNTER_DATA = 2;
+}
+
+// --- Message for 3D Vector Data (specific to BHI360) ---
+message Vector3f {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}
+
+// --- BHI360 3D Sensor Data Message ---
+message BHI360_3D_Data {
+  Vector3f acceleration = 2;
+  Vector3f angular_velocity = 3;
+}
+
+// --- BHI360 Step Counter Data Message ---
+message BHI360_StepCounterData {
+  uint32 step_count = 2;
+  uint32 activity_duration_s = 3;
+}
+
+// BHI360 specific message for logging session metadata
+message BHI360SensingData {
+  string firmware_version = 1;
+  uint32 sampling_frequency = 2;
+  BHI360MessageType message_type = 3; // Uses BHI360MessageType
+}
+
+// BHI360 specific message for marking the end of a logging session
+message BHI360SessionEnd {
+  uint64 uptime_ms = 1;
+}
+
+// --- Main Wrapper Message for BHI360 logs ---
+// Renamed to be unique for BHI360 logs
+message BHI360LogMessage {
+  oneof payload {
+    BHI360_3D_Data bhi360_3d = 2;
+    BHI360_StepCounterData bhi360_step_counter = 3;
+    BHI360SensingData sensing_data = 4;
+    BHI360SessionEnd session_end = 5;
+  }
+}

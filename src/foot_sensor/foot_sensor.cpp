@@ -250,7 +250,18 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
 
                 if (put_ret != 0)
                 {
-                    LOG_ERR("Failed to put foot sensor message into queue: %d. Data dropped.", put_ret);
+                    LOG_ERR("Failed to put foot sensor message into BTH queue: %d. Data dropped.", put_ret);
+                }
+                else
+                {
+                }
+
+                // Send the message to the Data queue.
+                put_ret = k_msgq_put(&data_msgq, &msg, K_NO_WAIT); // Use K_NO_WAIT or K_MSEC(timeout)
+
+                if (put_ret != 0)
+                {
+                    LOG_ERR("Failed to put foot sensor message into Data queue: %d. Data dropped.", put_ret);
                 }
                 else
                 {
