@@ -43,15 +43,25 @@ static foot_samples_t foot_sensor_char_value = {0};
 
 static bool status_subscribed = true;
 static bool foot_sensor_log_available_subscribed = true;
-static uint32_t foot_sensor_log_available = 0;
+static uint8_t foot_sensor_log_available = 0;
 static char foot_sensor_req_id_path[util::max_path_length] = {0};
 
 static bool bhi360_log_available_subscribed = true;          // New subscription flag for BHI360 log availability
-static uint32_t bhi360_log_available = 0;                    // New variable for BHI360 log availability ID
+static uint8_t bhi360_log_available = 0;                     // New variable for BHI360 log availability ID
 static char bhi360_req_id_path[util::max_path_length] = {0}; // New variable for BHI360 log file path
 
 static uint8_t ct[10];
 static uint8_t ct_update = 0;
+
+// --- BHI360 Data Set Characteristics ---
+// 1: 3D Mapping, 2: Step Count, 3: (placeholder, update as needed)
+static bhi360_3d_mapping_t bhi360_data1_value = {0};
+static bhi360_step_count_t bhi360_data2_value = {0};
+static int bhi360_data3_value = 0; // Placeholder, update to your third struct if needed
+static bool bhi360_data1_subscribed = false;
+static bool bhi360_data2_subscribed = false;
+static bool bhi360_data3_subscribed = false;
+
 
 // --- Global variables for Current Time Service Notifications ---
 static struct bt_conn *current_time_conn_active = NULL; // Stores the connection object for notifications
@@ -59,6 +69,18 @@ static bool current_time_notifications_enabled = false; // Flag to track CCC sta
 
 // FWD Declarations
 // clang-format off
+// BHI360 Data Set Characteristics
+static ssize_t jis_bhi360_data1_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_bhi360_data1_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_bhi360_data1_notify(const bhi360_3d_mapping_t* data);
+
+static ssize_t jis_bhi360_data2_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
+
+static ssize_t jis_bhi360_data3_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_bhi360_data3_notify(const int* data); // Placeholder, update to your third struct if needed
 
 //Current Time Characteristic
 static ssize_t jis_read_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -119,12 +141,19 @@ static struct bt_uuid_128 bhi360_log_available_uuid =
 static struct bt_uuid_128 bhi360_req_id_path_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb1, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97)); 
 
+// BHI360 Data Set UUIDs
+static struct bt_uuid_128 bhi360_data1_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb2, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 bhi360_data2_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb3, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 bhi360_data3_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb4, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 BT_GATT_SERVICE_DEFINE(
     info_service, BT_GATT_PRIMARY_SERVICE(&SENSING_INFO_SERVICE_UUID),
     // Current Ttime Characteristic
     BT_GATT_CHARACTERISTIC(BT_UUID_CTS_CURRENT_TIME,
-                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                            BT_GATT_CHRC_READ,
                             BT_GATT_PERM_READ_ENCRYPT,
                             jis_read_current_time, NULL,
                             ct),
@@ -157,7 +186,7 @@ BT_GATT_SERVICE_DEFINE(
 
     // Battery Status Characteristic
     BT_GATT_CHARACTERISTIC(&CHARGE_STATUS_UUID.uuid,
-                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                            BT_GATT_CHRC_READ,
                             BT_GATT_PERM_READ_ENCRYPT,
                             jis_charge_status_read, nullptr,
                             static_cast<void *>(&charge_status)),
@@ -186,7 +215,29 @@ BT_GATT_SERVICE_DEFINE(
                             BT_GATT_PERM_READ_ENCRYPT,
                             jis_bhi360_req_id_read, nullptr,
                             bhi360_req_id_path),
-    BT_GATT_CCC(jis_bhi360_req_id_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));        
+    BT_GATT_CCC(jis_bhi360_req_id_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // --- BHI360 Data Set Characteristics ---
+    BT_GATT_CHARACTERISTIC(&bhi360_data1_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_bhi360_data1_read, nullptr,
+        static_cast<void *>(&bhi360_data1_value)),
+    BT_GATT_CCC(jis_bhi360_data1_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    BT_GATT_CHARACTERISTIC(&bhi360_data2_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_bhi360_data2_read, nullptr,
+        static_cast<void *>(&bhi360_data2_value)),
+    BT_GATT_CCC(jis_bhi360_data2_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    BT_GATT_CHARACTERISTIC(&bhi360_data3_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_bhi360_data3_read, nullptr,
+        static_cast<void *>(&bhi360_data3_value)),
+    BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));
 
 // clang-format on
 /**
@@ -434,17 +485,17 @@ static ssize_t jis_charge_status_read(struct bt_conn *conn, const struct bt_gatt
     return bt_gatt_attr_read(conn, attr, buf, len, offset, static_cast<void *>(&charge_status), sizeof(charge_status));
 }
 
-void jis_foot_sensor_log_available_notify(uint32_t log_id) 
+void jis_foot_sensor_log_available_notify(uint8_t log_id)
 {
-    foot_sensor_log_available = log_id; 
+    foot_sensor_log_available = log_id;
     LOG_DBG("Foot Sensor Log ID: %u, notifications enabled: %s", foot_sensor_log_available,
-            foot_sensor_log_available_subscribed ? "true" : "false"); 
-    if (foot_sensor_log_available_subscribed)                         
+            foot_sensor_log_available_subscribed ? "true" : "false");
+    if (foot_sensor_log_available_subscribed)
     {
-        auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count,
-                                                 &foot_sensor_log_available_uuid.uuid); 
+        auto *status_gatt =
+            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_log_available_uuid.uuid);
         bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_log_available),
-                       sizeof(foot_sensor_log_available)); 
+                       sizeof(foot_sensor_log_available));
     }
 }
 
@@ -476,7 +527,7 @@ static ssize_t jis_foot_sensor_log_available_read(struct bt_conn *conn, const st
                                                   void *buf, // Renamed
                                                   uint16_t len, uint16_t offset)
 {
-    auto *value = static_cast<uint32_t *>(attr->user_data);                    // Changed to uint32_t for ID
+    auto *value = static_cast<uint8_t *>(attr->user_data);                     // Changed to uint32_t for ID
     LOG_DBG("foot_sensor_log_available_read : %u", foot_sensor_log_available); // Renamed and format specifier
     return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(foot_sensor_log_available)); // Renamed
 }
@@ -552,11 +603,9 @@ static ssize_t jis_foot_sensor_req_id_read(struct bt_conn *conn, const struct bt
  *
  * @param log_id The ID of the newly available BHI360 log file.
  */
-void jis_bhi360_log_available_notify(uint32_t log_id)
+void jis_bhi360_log_available_notify(uint8_t log_id)
 {
     bhi360_log_available = log_id;
-    LOG_DBG("BHI360 Log ID: %u, notifications enabled: %s", bhi360_log_available,
-            bhi360_log_available_subscribed ? "true" : "false");
     if (bhi360_log_available_subscribed)
     {
         auto *status_gatt =
@@ -591,9 +640,9 @@ static void jis_bhi360_log_available_ccc_cfg_changed(const struct bt_gatt_attr *
  * @return ssize_t The number of bytes read on success, or a negative error code.
  */
 static ssize_t jis_bhi360_log_available_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
-                    uint16_t len, uint16_t offset)
+                                             uint16_t len, uint16_t offset)
 {
-    auto *value = static_cast<uint32_t *>(attr->user_data);
+    auto *value = static_cast<uint8_t *>(attr->user_data);
     LOG_DBG("bhi360_log_available_read : %u", bhi360_log_available);
     return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(bhi360_log_available));
 }
@@ -649,7 +698,63 @@ static void jis_bhi360_req_id_ccc_cfg_changed(const struct bt_gatt_attr *attr, u
  * @return ssize_t The number of bytes read on success, or a negative error code.
  */
 static ssize_t jis_bhi360_req_id_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
-                uint16_t offset)
+                                      uint16_t offset)
 {
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_req_id_path));
 }
+
+// --- BHI360 Data Set 1 ---
+static void jis_bhi360_data1_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    bhi360_data1_subscribed = value == BT_GATT_CCC_NOTIFY;
+}
+static ssize_t jis_bhi360_data1_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_data1_value));
+}
+void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
+{
+    memcpy(&bhi360_data1_value, data, sizeof(bhi360_data1_value));
+    if (bhi360_data1_subscribed) {
+        auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data1_uuid.uuid);
+        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data1_value), sizeof(bhi360_data1_value));
+    }
+}
+// --- BHI360 Data Set 2 ---
+static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    bhi360_data2_subscribed = value == BT_GATT_CCC_NOTIFY;
+}
+static ssize_t jis_bhi360_data2_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_data2_value));
+}
+void jis_bhi360_data2_notify(const bhi360_step_count_t *data)
+{
+    memcpy(&bhi360_data2_value, data, sizeof(bhi360_data2_value));
+    if (bhi360_data2_subscribed) {
+        auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data2_uuid.uuid);
+        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data2_value), sizeof(bhi360_data2_value));
+    }
+}
+// --- BHI360 Data Set 3 ---
+static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    bhi360_data3_subscribed = value == BT_GATT_CCC_NOTIFY;
+}
+static ssize_t jis_bhi360_data3_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_data3_value));
+}
+void jis_bhi360_data3_notify(const int *data)
+{
+    bhi360_data3_value = *data;
+    if (bhi360_data3_subscribed) {
+        auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data3_uuid.uuid);
+        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data3_value), sizeof(bhi360_data3_value));
+    }
+}
+

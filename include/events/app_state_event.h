@@ -31,7 +31,7 @@ APP_EVENT_TYPE_DECLARE(app_state_event);
 
 typedef enum {
     RECORD_NONE = 0,
-    RECORD_METADATA = 1, // Retained for compatibility if needed elsewhere
+    RECORD_METADATA = 1,
     RECORD_HARDWARE_FOOT_SENSOR = 2,
     RECORD_HARDWARE_BHI360 = 3,
     // Add other record types as needed
@@ -42,14 +42,17 @@ typedef enum {
 typedef enum
 {
     MSG_TYPE_NONE,
+    MSG_TYPE_STATUS,
     MSG_TYPE_FOOT_SAMPLES,
     MSG_TYPE_BHI360_3D_MAPPING,
+    MSG_TYPE_BHI360_LINEAR_ACCEL,
     MSG_TYPE_BHI360_STEP_COUNT,
+    MSG_TYPE_BHI360_LOG_RECORD,
     MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE,
     MSG_TYPE_NEW_BHI360_LOG_FILE,
     MSG_TYPE_COMMAND, // Generic command string
-    MSG_TYPE_DELETE_FOOT_LOG, // New: Specific message type for deleting foot sensor logs
-    MSG_TYPE_DELETE_BHI360_LOG, // New: Specific message type for deleting BHI360 logs
+    MSG_TYPE_DELETE_FOOT_LOG, // Specific message type for deleting foot sensor logs
+    MSG_TYPE_DELETE_BHI360_LOG, // Specific message type for deleting BHI360 logs
 } msg_type_t;
 
 // Define sender types

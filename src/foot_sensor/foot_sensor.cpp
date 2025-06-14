@@ -58,7 +58,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL); // NOLINT
 
 #define US_PER_SECOND 1000000UL
 #define SAADC_CHANNEL_COUNT 8
-#define SAADC_SAMPLE_RATE_HZ_NORMAL 2        // normal sampling rate (50 Hz)
+#define SAADC_SAMPLE_RATE_HZ_NORMAL 10        // normal sampling rate (10 Hz)
 #define SAADC_SAMPLE_RATE_HZ_CALIBRATION 100 // Higher rate for quick calibration (1000 Hz = 1 ms period)
 
 #define TIME_TO_WAIT_US_NORMAL (uint32_t)(US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_NORMAL)
@@ -82,6 +82,8 @@ static void init_timer(void);
 static void calibrate_saadc_channels(void);
 void init_dppi(void);
 void TIMER0_IRQHandler(void);
+
+static bool logging_active = false; // Tracks current logging state
 
 // ADJUSTMENT: Added __aligned(4) for DMA-safe memory alignment
 static int16_t saadc_buffer[BUFFER_COUNT][SAADC_BUFFER_SIZE] __aligned(4);
@@ -231,7 +233,6 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
             }
             else // Normal operation after calibration
             {
-                // Create the generic message structure directly on the stack.
                 generic_message_t msg;
 
                 msg.sender = SENDER_FOOT_SENSOR_THREAD;
@@ -240,31 +241,54 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                 // Populate the foot sensor data directly into the message's union member.
                 for (uint16_t i = 0; i < samples_number; i++)
                 {
-                    // Apply calibration offset: subtract the stored offset from the raw value
                     int16_t calibrated_value = raw_adc_data[i] - saadc_offset[i];
                     msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
                 }
 
-                // Send the message to the Bluetooth queue.
-                int put_ret = k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT); // Use K_NO_WAIT or K_MSEC(timeout)
+                // --- Auto start/stop logging based on channel 8 (index 7) ---
+                uint16_t channel8_value = msg.data.foot_samples.values[7];
 
-                if (put_ret != 0)
+                // Start logging if above threshold and not already active
+                if (!logging_active && channel8_value > ACTIVATE_LOGGING_THRESHOLD)
                 {
-                    LOG_ERR("Failed to put foot sensor message into BTH queue: %d. Data dropped.", put_ret);
-                }
-                else
-                {
-                }
+                    generic_message_t cmd_msg = {};
+                    cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
+                    cmd_msg.type = MSG_TYPE_COMMAND;
+                    strncpy(cmd_msg.data.command_str, "START_LOGGING", sizeof(cmd_msg.data.command_str) - 1);
+                    cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
 
-                // Send the message to the Data queue.
-                put_ret = k_msgq_put(&data_msgq, &msg, K_NO_WAIT); // Use K_NO_WAIT or K_MSEC(timeout)
+                    int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+                    if (cmd_ret == 0)
+                    {
+                        LOG_INF("Auto-sent START_LOGGING command (channel 8 value: %u)", channel8_value);
+                        logging_active = true;
+                    }
+                    else
+                    {
+                        LOG_ERR("Failed to send START_LOGGING command: %d", cmd_ret);
+                    };
 
-                if (put_ret != 0)
-                {
-                    LOG_ERR("Failed to put foot sensor message into Data queue: %d. Data dropped.", put_ret);
                 }
-                else
+                // Stop logging if below threshold and currently active
+                else if (logging_active && channel8_value < ACTIVATE_LOGGING_THRESHOLD)
                 {
+                    generic_message_t cmd_msg = {};
+                    cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
+                    cmd_msg.type = MSG_TYPE_COMMAND;
+                    strncpy(cmd_msg.data.command_str, "STOP_LOGGING", sizeof(cmd_msg.data.command_str) - 1);
+                    cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
+
+                  //  int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+                  int cmd_ret =0;
+                    if (cmd_ret == 0)
+                    {
+                        LOG_INF("Auto-sent STOP_LOGGING command (channel 8 value: %u)", channel8_value);
+                        logging_active = false;
+                    }
+                    else
+                    {
+                        LOG_ERR("Failed to send STOP_LOGGING command: %d", cmd_ret);
+                    }
                 }
             }
             break;

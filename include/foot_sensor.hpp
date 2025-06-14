@@ -14,4 +14,6 @@
 #include <zephyr/kernel.h>
 
 
+#define ACTIVATE_LOGGING_THRESHOLD 50
+
 #endif // APP_INCLUDE_FOOT_SENSOR_HEADER_

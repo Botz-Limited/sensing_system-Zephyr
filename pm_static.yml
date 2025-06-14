@@ -17,7 +17,7 @@ littlefs_storage:
     - tfm_storage
     - end
   region: external_flash
-  size: 0x6e2000
+  size: 0x6e0000
 mcuboot:
   address: 0x0
   end_address: 0x20000

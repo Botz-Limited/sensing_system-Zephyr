@@ -35,6 +35,10 @@
 #include <app.hpp>
 #include <app_version.h>
 
+#ifndef VND_MAX_LEN
+#define VND_MAX_LEN 4
+#endif
+
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -69,45 +73,7 @@ static void cs_delete_bhi360_log_ccc_cfg_changed(const struct bt_gatt_attr *attr
 
 
 
-/**
- * @brief Write delete meta data log command for control.
- *
- * This function is a callback for writing delete meta data control
- * over a Bluetooth connection.
- *
- * @param conn Pointer to the Bluetooth connection structure.
- * @param attr Pointer to the GATT attribute structure.
- * @param buf Pointer to the data buffer containing the command.
- * @param len Length of the data buffer.
- * @param offset Offset within the attribute value.
- * @param flags Flags indicating GATT write operation.
- * @return ssize_t Returns the length of the data written.
- */
 
-// We cast the void * pointer attr->user_data to uint32_t because the
-// characteristic send to the FW an unsigned big endian 32 bit bit number
-// representing the file id to be deleted.
-static ssize_t write_delete_meta_log_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-                                                 uint16_t len, uint16_t offset, uint8_t flags)
-{
-
-    ARG_UNUSED(conn);
-    ARG_UNUSED(flags);
-    uint32_t *value = static_cast<uint32_t *>(attr->user_data);
-
-    if ((offset + len) > VND_MAX_LEN)
-    {
-        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-    }
-
-    // This line copies the contents of the buffer buf of length len to the memory
-    // pointed to by value starting at the offset offset.
-    memcpy(value + offset, buf, len);
-
-    cs_delete_log_meta_control_command_notify(*value);
-
-    return len;
-}
 
 /**
  * @file
@@ -188,7 +154,7 @@ ssize_t read_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_g
     // This could return the ID of the last requested deletion or a status.
     // For now, let's return a dummy value or a flag indicating readiness.
     // If you want to return the last ID, you'd need a static variable to store it.
-    uint32_t current_id = 0; // Replace with actual state if tracking
+    uint8_t current_id = 0; // Replace with actual state if tracking
     return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_id, sizeof(current_id));
 }
 
@@ -199,12 +165,12 @@ ssize_t read_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_g
 ssize_t write_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
                                           uint16_t len, uint16_t offset, uint8_t flags)
 {
-    if (len != sizeof(uint32_t) || offset != 0) {
+    if (len != sizeof(uint8_t) || offset != 0) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
 
-    uint32_t id_to_delete;
-    memcpy(&id_to_delete, buf, sizeof(uint32_t));
+    uint8_t id_to_delete;
+    memcpy(&id_to_delete, buf, sizeof(uint8_t));
 
     generic_message_t delete_msg;
     delete_msg.sender = SENDER_BTH;
@@ -212,12 +178,14 @@ ssize_t write_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_
     delete_msg.data.delete_cmd.type = RECORD_HARDWARE_FOOT_SENSOR; // Specify record type
     delete_msg.data.delete_cmd.id = id_to_delete; // The ID of the log file
 
+    LOG_WRN("Sent delete foot log message for ID %u to data_msgq.", id_to_delete);
+
     if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
         LOG_ERR("Failed to send delete foot log message for ID %u.", id_to_delete);
         return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY); // Or a more specific error
     }
 
-    LOG_DBG("Sent delete foot log message for ID %u to data_msgq.", id_to_delete);
+    
 
     // Optionally notify the client of success/failure or a status update via CCC
     // This would typically be done after data module has processed the deletion
@@ -246,7 +214,7 @@ static void cs_delete_foot_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, 
 ssize_t read_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                                           uint16_t len, uint16_t offset)
 {
-    uint32_t current_id = 0; // Replace with actual state if tracking
+    uint8_t current_id = 0; // Replace with actual state if tracking
     return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_id, sizeof(current_id));
 }
 
@@ -257,18 +225,20 @@ ssize_t read_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt
 ssize_t write_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
                                            uint16_t len, uint16_t offset, uint8_t flags)
 {
-    if (len != sizeof(uint32_t) || offset != 0) {
+    if (len != sizeof(uint8_t) || offset != 0) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
 
-    uint32_t id_to_delete;
-    memcpy(&id_to_delete, buf, sizeof(uint32_t));
+    uint8_t id_to_delete;
+    memcpy(&id_to_delete, buf, sizeof(uint8_t));
 
     generic_message_t delete_msg;
     delete_msg.sender = SENDER_BTH;
     delete_msg.type = MSG_TYPE_DELETE_BHI360_LOG; // New specific message type
     delete_msg.data.delete_cmd.type = RECORD_HARDWARE_BHI360; // Specify record type
     delete_msg.data.delete_cmd.id = id_to_delete; // The ID of the log file
+
+    LOG_WRN("Sent delete foot log message for ID %u to data_msgq.", id_to_delete);
 
     if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
         LOG_ERR("Failed to send delete BHI360 log message for ID %u.", id_to_delete);

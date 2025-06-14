@@ -1,10 +1,12 @@
 #define MODULE data
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/flash.h>
@@ -60,9 +62,14 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
 static bool encode_foot_sensor_readings_callback(pb_ostream_t *stream, const pb_field_t *field, void *const *arg);
 static bool encode_string_callback(pb_ostream_t *stream, const pb_field_t *field, void *const *arg);
 
+err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, uint8_t max_files, uint8_t delete_count);
+int close_all_files_in_directory(const char *dir_path);
+err_t delete_oldest_log_file_checked(const char *file_prefix, const char *dir_path);
+int delete_all_files_in_directory(const char *dir_path);
+
 int delete_oldest_log_files(const char *file_prefix, const char *dir_path);
-err_t delete_by_type_and_id(record_type_t type, uint32_t id);
-err_t type_and_id_to_path(record_type_t type, uint32_t id, char path[]);
+err_t delete_by_type_and_id(record_type_t type, uint8_t id);
+err_t type_and_id_to_path(record_type_t type, uint8_t id, char path[]);
 
 err_t start_foot_sensor_logging();
 err_t end_foot_sensor_logging();
@@ -75,8 +82,10 @@ static struct fs_file_t foot_sensor_log_file;
 static struct fs_file_t bhi360_log_file;
 
 // --- Sequence number counter for foot sensor log ---
-static uint16_t next_foot_sensor_file_sequence = 0;
-static uint32_t next_bhi360_file_sequence = 0;
+static uint8_t next_foot_sensor_file_sequence = 0;
+static uint8_t next_bhi360_file_sequence = 0;
+
+static bool logging_active = false; // Tracks current logging state
 
 // Thread
 static struct k_thread data_thread_data;
@@ -134,9 +143,9 @@ static uint32_t get_next_file_sequence(const char *dir_path_param, const char *f
         if (std::strncmp(entry.name, file_prefix, strlen(file_prefix)) == 0)
         {
             char *num_str_start = entry.name + strlen(file_prefix);
-            uint32_t current_seq;
+            uint8_t current_seq; // Changed to uint8_t
             // Assuming ".pb" extension
-            if (std::sscanf(num_str_start, "%u.pb", &current_seq) == 1)
+            if (std::sscanf(num_str_start, "%hhu.pb", &current_seq) == 1) // Changed %u to %hhu
             {
                 if (current_seq >= max_seq)
                 {
@@ -237,20 +246,82 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 {
     k_thread_name_set(data_tid, "data");
 
-    // TODO: Start files from command?
-    err_t start_status = start_foot_sensor_logging();
-    if (start_status != err_t::NO_ERROR)
+    // --- Initial notification of existing log files to BTH module ---
+    generic_message_t log_info_msg;
+    log_info_msg.sender = SENDER_DATA;
+
+    // For testing only
+    // delete_all_files_in_directory("/lfs1/hardware");
+
+    // Notify about latest FOOT sensor log file
+    uint8_t current_foot_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
+    uint8_t latest_foot_log_id_to_report = (current_foot_seq > 0) ? (current_foot_seq - 1) : 0;
+
+    log_info_msg.type = MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE;
+    log_info_msg.data.new_hardware_log_file.file_sequence_id = latest_foot_log_id_to_report;
+    if (latest_foot_log_id_to_report > 0)
     {
-        LOG_ERR("Failed to start foot sensor data logging: %d. Data processing halted.", (int)start_status);
-        return;
+        type_and_id_to_path(RECORD_HARDWARE_FOOT_SENSOR, latest_foot_log_id_to_report,
+                            log_info_msg.data.new_hardware_log_file.file_path);
+    }
+    else
+    {
+        strncpy(log_info_msg.data.new_hardware_log_file.file_path, "",
+                sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1);
+        log_info_msg.data.new_hardware_log_file
+            .file_path[sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+    }
+    if (k_msgq_put(&bluetooth_msgq, &log_info_msg, K_NO_WAIT) != 0)
+    {
+        LOG_ERR("Failed to put initial foot sensor log notification message.");
+    }
+    else
+    {
+        LOG_DBG("Initial foot sensor log notification sent (ID: %u).", latest_foot_log_id_to_report);
     }
 
-    err_t start_bhi360_status = start_bhi360_logging(); // New: Call for BHI360 logging
-    if (start_bhi360_status != err_t::NO_ERROR)
+    // Notify about latest BHI360 log file
+    uint8_t current_bhi360_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
+    uint8_t latest_bhi360_log_id_to_report = (current_bhi360_seq > 0) ? (current_bhi360_seq - 1) : 0;
+
+    log_info_msg.type = MSG_TYPE_NEW_BHI360_LOG_FILE;
+    log_info_msg.data.new_hardware_log_file.file_sequence_id = latest_bhi360_log_id_to_report;
+    if (latest_bhi360_log_id_to_report > 0)
     {
-        LOG_ERR("Failed to start BHI360 data logging: %d. Data processing halted.", (int)start_bhi360_status);
-        return;
+        type_and_id_to_path(RECORD_HARDWARE_BHI360, latest_bhi360_log_id_to_report,
+                            log_info_msg.data.new_hardware_log_file.file_path);
     }
+    else
+    {
+        strncpy(log_info_msg.data.new_hardware_log_file.file_path, "",
+                sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1);
+        log_info_msg.data.new_hardware_log_file
+            .file_path[sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+    }
+    if (k_msgq_put(&bluetooth_msgq, &log_info_msg, K_NO_WAIT) != 0)
+    {
+        LOG_ERR("Failed to put initial BHI360 log notification message.");
+    }
+    else
+    {
+        LOG_DBG("Initial BHI360 log notification sent (ID: %u).", latest_bhi360_log_id_to_report);
+    }
+
+    // To limit the amount fo files to 200
+    //  For foot sensor logs
+    // cap_and_reindex_log_files(foot_sensor_file_prefix, hardware_dir_path, 200, 1);
+    // cap_and_reindex_log_files(bhi360_file_prefix, hardware_dir_path, 200, 1);
+
+    // To delete the oldest foot sensor log
+    // delete_oldest_log_file_checked(foot_sensor_file_prefix, hardware_dir_path);
+
+    // TODO: Start files from command?
+    //  err_t start_status = start_foot_sensor_logging();
+    //   if (start_status != err_t::NO_ERROR)
+    //  {
+    //     LOG_ERR("Failed to start foot sensor data logging: %d. Data processing halted.", (int)start_status);
+    //    return;
+    // }
 
     generic_message_t msg;
     int ret;
@@ -267,95 +338,105 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
             {
                 case MSG_TYPE_FOOT_SAMPLES: {
                     const foot_samples_t *foot_data = &msg.data.foot_samples;
-
-                    // Create FootSensorLogMessage
-                    sensor_data_messages_FootSensorLogMessage foot_log_msg =
-                        sensor_data_messages_FootSensorLogMessage_init_default;
-                    foot_log_msg.which_payload = sensor_data_messages_FootSensorLogMessage_foot_sensor_tag;
-
-                    // Populate FootSensorData fields
-                    foot_log_msg.payload.foot_sensor.readings.funcs.encode = &encode_foot_sensor_readings_callback;
-                    foot_log_msg.payload.foot_sensor.readings.arg = (void *)foot_data;
-
-                    err_t write_status = write_foot_sensor_protobuf_data(&foot_log_msg);
-                    if (write_status != err_t::NO_ERROR)
+                    if (logging_active == true)
                     {
-                        LOG_ERR("Failed to write foot sensor data to file: %d", (int)write_status);
+                        // Create FootSensorLogMessage
+                        sensor_data_messages_FootSensorLogMessage foot_log_msg =
+                            sensor_data_messages_FootSensorLogMessage_init_default;
+                        foot_log_msg.which_payload = sensor_data_messages_FootSensorLogMessage_foot_sensor_tag;
+
+                        // Populate FootSensorData fields
+                        foot_log_msg.payload.foot_sensor.readings.funcs.encode = &encode_foot_sensor_readings_callback;
+                        foot_log_msg.payload.foot_sensor.readings.arg = (void *)foot_data;
+
+                        err_t write_status = write_foot_sensor_protobuf_data(&foot_log_msg);
+                        if (write_status != err_t::NO_ERROR)
+                        {
+                            LOG_ERR("Failed to write foot sensor data to file: %d", (int)write_status);
+                        }
+                        jis_foot_sensor_notify(foot_data);
                     }
-                    jis_foot_sensor_notify(foot_data);
                     break;
                 }
 
                 case MSG_TYPE_BHI360_3D_MAPPING: {
                     const bhi360_3d_mapping_t *bhi360_3d_data = &msg.data.bhi360_3d_mapping;
-
-                    sensor_data_messages_BHI360LogMessage bhi360_log_msg =
-                        sensor_data_messages_BHI360LogMessage_init_default;
-                    bhi360_log_msg.which_payload = sensor_data_messages_BHI360LogMessage_bhi360_3d_tag;
-
-                    // Populate BHI360 3D data fields
-                    bhi360_log_msg.payload.bhi360_3d.has_acceleration = true;
-                    bhi360_log_msg.payload.bhi360_3d.acceleration.x = bhi360_3d_data->accel_x;
-                    bhi360_log_msg.payload.bhi360_3d.acceleration.y = bhi360_3d_data->accel_y;
-                    bhi360_log_msg.payload.bhi360_3d.acceleration.z = bhi360_3d_data->accel_z;
-
-                    bhi360_log_msg.payload.bhi360_3d.has_angular_velocity = true;
-                    bhi360_log_msg.payload.bhi360_3d.angular_velocity.x = bhi360_3d_data->gyro_x;
-                    bhi360_log_msg.payload.bhi360_3d.angular_velocity.y = bhi360_3d_data->gyro_y;
-                    bhi360_log_msg.payload.bhi360_3d.angular_velocity.z = bhi360_3d_data->gyro_z;
-
-                    err_t write_status = write_bhi360_protobuf_data(&bhi360_log_msg);
-                    if (write_status != err_t::NO_ERROR)
+                    if (logging_active == true)
                     {
-                        LOG_ERR("Failed to write BHI360 3D data to file: %d", (int)write_status);
+                        sensor_data_messages_BHI360LogMessage bhi360_log_msg =
+                            sensor_data_messages_BHI360LogMessage_init_default;
+                        bhi360_log_msg.which_payload = sensor_data_messages_BHI360LogMessage_bhi360_3d_tag;
+
+                        // Populate BHI360 3D data fields
+                        bhi360_log_msg.payload.bhi360_3d.has_acceleration = true;
+                        bhi360_log_msg.payload.bhi360_3d.acceleration.x = bhi360_3d_data->accel_x;
+                        bhi360_log_msg.payload.bhi360_3d.acceleration.y = bhi360_3d_data->accel_y;
+                        bhi360_log_msg.payload.bhi360_3d.acceleration.z = bhi360_3d_data->accel_z;
+
+                        bhi360_log_msg.payload.bhi360_3d.has_angular_velocity = true;
+                        bhi360_log_msg.payload.bhi360_3d.angular_velocity.x = bhi360_3d_data->gyro_x;
+                        bhi360_log_msg.payload.bhi360_3d.angular_velocity.y = bhi360_3d_data->gyro_y;
+                        bhi360_log_msg.payload.bhi360_3d.angular_velocity.z = bhi360_3d_data->gyro_z;
+
+                        err_t write_status = write_bhi360_protobuf_data(&bhi360_log_msg);
+                        if (write_status != err_t::NO_ERROR)
+                        {
+                            LOG_ERR("Failed to write BHI360 3D data to file: %d", (int)write_status);
+                        }
+                        // No BLE notification for BHI360 data yet.
                     }
-                    // No BLE notification for BHI360 data yet.
                     break;
                 }
 
                 case MSG_TYPE_BHI360_STEP_COUNT: {
                     const bhi360_step_count_t *step_count_data = &msg.data.bhi360_step_count;
-
-                    sensor_data_messages_BHI360LogMessage bhi360_log_msg =
-                        sensor_data_messages_BHI360LogMessage_init_default;
-                    bhi360_log_msg.which_payload = sensor_data_messages_BHI360LogMessage_bhi360_step_counter_tag;
-
-                    // Populate BHI360 Step Count data fields
-                    bhi360_log_msg.payload.bhi360_step_counter.step_count = step_count_data->step_count;
-                    bhi360_log_msg.payload.bhi360_step_counter.activity_duration_s =
-                        step_count_data->activity_duration_s;
-
-                    err_t write_status = write_bhi360_protobuf_data(&bhi360_log_msg);
-                    if (write_status != err_t::NO_ERROR)
+                    if (logging_active == true)
                     {
-                        LOG_ERR("Failed to write BHI360 Step Count data to file: %d", (int)write_status);
+                        sensor_data_messages_BHI360LogMessage bhi360_log_msg =
+                            sensor_data_messages_BHI360LogMessage_init_default;
+                        bhi360_log_msg.which_payload = sensor_data_messages_BHI360LogMessage_bhi360_step_counter_tag;
+
+                        // Populate BHI360 Step Count data fields
+                        bhi360_log_msg.payload.bhi360_step_counter.step_count = step_count_data->step_count;
+                        bhi360_log_msg.payload.bhi360_step_counter.activity_duration_s =
+                            step_count_data->activity_duration_s;
+
+                        err_t write_status = write_bhi360_protobuf_data(&bhi360_log_msg);
+                        if (write_status != err_t::NO_ERROR)
+                        {
+                            LOG_ERR("Failed to write BHI360 Step Count data to file: %d", (int)write_status);
+                        }
+                        // No BLE notification for BHI360 data yet
                     }
-                    // No BLE notification for BHI360 data yet
                     break;
                 }
 
                 case MSG_TYPE_COMMAND: {
                     LOG_INF("Received generic command: %s", msg.data.command_str);
-                    if (strcmp(msg.data.command_str, "START_LOGGING") == 0)
+                    if ((strcmp(msg.data.command_str, "START_LOGGING") == 0) && !logging_active)
                     {
                         LOG_INF("Command: Starting all logging.");
                         err_t foot_status = start_foot_sensor_logging();
                         err_t bhi360_status = start_bhi360_logging();
+                        logging_active = true;
 
                         if (foot_status != err_t::NO_ERROR)
                         {
                             LOG_ERR("Failed to start foot sensor logging from command: %d", (int)foot_status);
+                            logging_active = false;
                         }
                         if (bhi360_status != err_t::NO_ERROR)
                         {
                             LOG_ERR("Failed to start BHI360 logging from command: %d", (int)bhi360_status);
+                            logging_active = false;
                         }
                     }
-                    else if (strcmp(msg.data.command_str, "STOP_LOGGING") == 0)
+                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING") == 0) && logging_active)
                     {
                         LOG_INF("Command: Stopping all logging.");
                         err_t foot_status = end_foot_sensor_logging();
                         err_t bhi360_status = end_bhi360_logging();
+                        logging_active = false;
 
                         if (foot_status != err_t::NO_ERROR)
                         {
@@ -376,7 +457,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_DELETE_FOOT_LOG: {
                     LOG_INF("Received DELETE FOOT LOG command for ID: %u", msg.data.delete_cmd.id);
-                    err_t delete_status = delete_by_type_and_id(RECORD_HARDWARE_FOOT_SENSOR, msg.data.delete_cmd.id);
+                    err_t delete_status =
+                        delete_by_type_and_id(RECORD_HARDWARE_FOOT_SENSOR, (uint8_t)msg.data.delete_cmd.id);
                     if (delete_status != err_t::NO_ERROR)
                     {
                         LOG_ERR("Failed to delete foot sensor log file with ID %u: %d", msg.data.delete_cmd.id,
@@ -391,7 +473,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_DELETE_BHI360_LOG: { // New: Handle BHI360 delete messages
                     LOG_INF("Received DELETE BHI360 LOG command for ID: %u", msg.data.delete_cmd.id);
-                    err_t delete_status = delete_by_type_and_id(RECORD_HARDWARE_BHI360, msg.data.delete_cmd.id);
+                    err_t delete_status =
+                        delete_by_type_and_id(RECORD_HARDWARE_BHI360, (uint8_t)msg.data.delete_cmd.id);
                     if (delete_status != err_t::NO_ERROR)
                     {
                         LOG_ERR("Failed to delete BHI360 log file with ID %u: %d", msg.data.delete_cmd.id,
@@ -440,13 +523,13 @@ err_t mount_file_system(struct fs_mount_t *mount)
     }
 
     // Use hardware_dir_path from data.hpp
-    int err_ls = lsdir(hardware_dir_path);
-    if (err_ls < 0)
-    {
-        LOG_ERR("FAIL: lsdir %s: %d", mount->mnt_point, err_ls);
-        return err_t::DATA_ERROR;
-    }
-
+    //   int err_ls = lsdir(hardware_dir_path);
+    /*    if (err_ls < 0)
+        {
+            LOG_ERR("FAIL: lsdir %s: %d", mount->mnt_point, err_ls);
+            return err_t::DATA_ERROR;
+        }
+    */
     return err_t::NO_ERROR;
 }
 
@@ -484,7 +567,7 @@ static err_t littlefs_flash_erase(unsigned int id)
 
 int delete_oldest_log_files(const char *file_prefix, const char *dir_path_param)
 {
-    uint32_t log_id = 0;
+    uint8_t log_id = 0;
     int res = 0;
     fs_dir_t dirp;
     static fs_dirent entry;
@@ -543,7 +626,7 @@ int delete_oldest_log_files(const char *file_prefix, const char *dir_path_param)
             std::strncpy(temp_name, entry.name, sizeof(temp_name));
             temp_name[sizeof(temp_name) - 1] = '\0';
             strremove(temp_name, file_prefix);
-            std::sscanf(temp_name, "%u", &log_id);
+            std::sscanf(temp_name, "%hhu", &log_id);
         }
     }
     fs_closedir(&dirp);
@@ -602,84 +685,91 @@ err_t close_directory(fs_dir_t *dirp)
     return err_t::NO_ERROR;
 }
 
-uint32_t find_oldest_log_file(const char *file_prefix, record_type_t record_type, char *file_path)
+uint8_t find_oldest_log_file(const char *file_prefix, record_type_t record_type, char *file_path)
 {
     fs_dir_t dirp{};
     static fs_dirent entry{};
 
     char dir_path_buf[util::max_path_length]{};
-    // Only foot sensor logs are handled now
-    if (record_type == RECORD_HARDWARE_FOOT_SENSOR)
+    // Determine directory based on record type
+    if (record_type == RECORD_HARDWARE_FOOT_SENSOR || record_type == RECORD_HARDWARE_BHI360)
     {
         std::strcpy(dir_path_buf, hardware_dir_path);
     }
     else
     {
         LOG_ERR("find_oldest_log_file: Unsupported or unimplemented record_type %d", (int)record_type);
-        return (uint32_t)(err_t::DATA_ERROR);
+        return (uint8_t)(err_t::DATA_ERROR);
     }
 
     fs_dir_t_init(&dirp);
 
-    int res = 0;
-
-    res = fs_opendir(&dirp, dir_path_buf);
+    int res = fs_opendir(&dirp, dir_path_buf);
     if (res != 0)
     {
-        if ((res == -ENOENT) || (res == -EINVAL) || (res == -EACCES))
-        {
-            LOG_ERR("Error opening dir %s [%d] (fatal)", dir_path_buf, res);
-            return (uint32_t)(err_t::DATA_ERROR);
-        }
-        LOG_WRN("Open dir failed. No retry.");
+        LOG_ERR("Error opening dir %s [%d]", dir_path_buf, res);
+        return (uint8_t)(err_t::DATA_ERROR);
     }
 
-    if (res < 0)
+    uint8_t oldest_id_found = UINT8_MAX; // Use UINT8_MAX as initial "no ID found yet" for comparison
+    bool found_any_matching_file = false;
+    char temp_oldest_file_name[util::max_path_length] = {0}; // To store the actual filename of the oldest
+
+    while (true)
     {
-        LOG_ERR("Error opening dir %s: %d", dir_path_buf, res);
-        return (uint32_t)(err_t::DATA_ERROR);
-    }
+        res = fs_readdir(&dirp, &entry);
+        k_msleep(readdir_micro_sleep_ms); // Small delay to yield if necessary
 
-    res = fs_readdir(&dirp, &entry);
-    k_msleep(readdir_micro_sleep_ms);
-
-    if (res != 0 || entry.name[0] == '\0')
-    {
-        if (res < 0)
+        if (res != 0 || entry.name[0] == '\0')
         {
-            LOG_ERR("Error reading first entry in dir %s [%d]", dir_path_buf, res);
+            // End of directory or error
+            break;
         }
-        else
+
+        // Check if it's a file and matches the prefix and extension
+        size_t name_len = std::strlen(entry.name);
+        size_t prefix_len = std::strlen(file_prefix);
+        size_t ext_len = std::strlen(".pb");
+
+        if (entry.type == FS_DIR_ENTRY_FILE &&
+            name_len > (prefix_len + ext_len) && // Ensure enough length for prefix, id, and .pb
+            std::strncmp(entry.name, file_prefix, prefix_len) == 0 &&
+            std::strcmp(entry.name + name_len - ext_len, ".pb") == 0)
         {
-            LOG_INF("Directory %s is empty.", dir_path_buf);
+            char *num_str_start = entry.name + prefix_len;
+            uint8_t current_id = 0;
+            if (std::sscanf(num_str_start, "%hhu.pb", &current_id) == 1)
+            {
+                if (!found_any_matching_file || current_id < oldest_id_found)
+                {
+                    oldest_id_found = current_id;
+                    std::strncpy(temp_oldest_file_name, entry.name, sizeof(temp_oldest_file_name) - 1);
+                    temp_oldest_file_name[sizeof(temp_oldest_file_name) - 1] = '\0';
+                    found_any_matching_file = true;
+                }
+            }
+            else
+            {
+                LOG_WRN("find_oldest_log_file: Skipping non-conforming file name '%s' for prefix '%s'", entry.name,
+                        file_prefix);
+            }
         }
-        close_directory(&dirp);
-        return (uint32_t)(err_t::DATA_ERROR);
     }
+    fs_closedir(&dirp);
 
-    char file_name[util::max_path_length] = {};
-    std::strcpy(file_name, entry.name);
-
-    close_directory(&dirp);
-
-    std::strcpy(file_path, dir_path_buf);
-    std::strcat(file_path, "/");
-    std::strcat(file_path, file_name);
-
-    char file_id_str[util::max_path_length];
-    std::strncpy(file_id_str, file_name, sizeof(file_id_str) - 1);
-    file_id_str[sizeof(file_id_str) - 1] = '\0';
-    strremove(file_id_str, file_prefix);
-
-    uint32_t record_id = 0;
-    if (std::sscanf(file_id_str, "%u.pb", &record_id) != 1)
+    if (found_any_matching_file)
     {
-        LOG_ERR("Failed to parse sequence ID from filename: %s", file_name);
-        return (uint32_t)(err_t::DATA_ERROR);
+        // Construct the full path of the oldest file found
+        snprintk(file_path, util::max_path_length, "%s/%s", dir_path_buf, temp_oldest_file_name);
+        LOG_DBG("Oldest file found for prefix '%s': %s (ID: %u)", file_prefix, file_path, oldest_id_found);
+        return oldest_id_found; // Return the actual ID found
     }
-
-    LOG_DBG("Oldest file found: %s (Sequence ID: %u)", file_path, record_id);
-    return record_id;
+    else
+    {
+        LOG_INF("No log files found for prefix '%s' in directory '%s'.", file_prefix, dir_path_buf);
+        // If no matching files, return DATA_ERROR to signify "not found"
+        return (uint8_t)err_t::DATA_ERROR;
+    }
 }
 
 static void strremove(char *str, const char *sub)
@@ -737,7 +827,7 @@ err_t start_foot_sensor_logging()
     }
 
     // --- Initialize Foot Sensor Log File ---
-    next_foot_sensor_file_sequence = get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
+    next_foot_sensor_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
     snprintk(foot_sensor_file_path, sizeof(foot_sensor_file_path), "%s/%s%03u.pb", hardware_dir_path,
              foot_sensor_file_prefix, next_foot_sensor_file_sequence);
     fs_file_t_init(&foot_sensor_log_file);
@@ -760,7 +850,7 @@ err_t start_foot_sensor_logging()
         string_callback_arg_t fw_version_arg = {.str = firmware_version_str};
         header_msg.payload.sensing_data.firmware_version.funcs.encode = &encode_string_callback;
         header_msg.payload.sensing_data.firmware_version.arg = &fw_version_arg;
-        header_msg.payload.sensing_data.sampling_frequency = 100; // Example: Foot sensor sampling frequency
+        header_msg.payload.sensing_data.sampling_frequency = 100; // Foot sensor sampling frequency
         header_msg.payload.sensing_data.message_type = sensor_data_messages_FootSensorMessageType_FOOT_SENSOR_DATA;
 
         pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
@@ -898,7 +988,7 @@ err_t start_bhi360_logging()
     // }
 
     // --- Initialize BHI360 Log File ---
-    next_bhi360_file_sequence = get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
+    next_bhi360_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
     snprintk(bhi360_file_path, sizeof(bhi360_file_path), "%s/%s%03u.pb", hardware_dir_path, bhi360_file_prefix,
              next_bhi360_file_sequence);
     fs_file_t_init(&bhi360_log_file);
@@ -1096,7 +1186,7 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
     return err_t::NO_ERROR;
 }
 
-err_t type_and_id_to_path(record_type_t type, uint32_t id, char path[])
+err_t type_and_id_to_path(record_type_t type, uint8_t id, char path[])
 {
     switch (type)
     {
@@ -1114,41 +1204,484 @@ err_t type_and_id_to_path(record_type_t type, uint32_t id, char path[])
     return err_t::NO_ERROR;
 }
 
-err_t delete_by_type_and_id(record_type_t type, uint32_t id)
+err_t delete_by_type_and_id(record_type_t type, uint8_t id)
 {
     char path_to_delete[util::max_path_length] = {};
 
     err_t err = type_and_id_to_path(type, id, path_to_delete);
     if (err != err_t::NO_ERROR)
     {
+        LOG_ERR("Failed to get path for deletion for type %d, ID %u: %d", (int)type, id, (int)err);
         return err;
     }
     LOG_WRN("Attempting to delete file: %s", path_to_delete);
     int ret = fs_unlink(path_to_delete);
     if (ret != 0)
     {
-        LOG_ERR("Failed to delete file '%s'. Error %d", path_to_delete, ret);
-        return err_t::FILE_SYSTEM_NO_FILES;
+        if (ret == -ENOENT)
+        {
+            LOG_WRN("File '%s' not found for deletion. Maybe already deleted?", path_to_delete);
+            return err_t::NO_ERROR;
+        }
+        else
+        {
+            LOG_ERR("Failed to delete file '%s'. Error %d", path_to_delete, ret);
+            return err_t::FILE_SYSTEM_NO_FILES;
+        }
     }
     LOG_INF("Successfully deleted file: %s", path_to_delete);
 
     char oldest_file_path[util::max_path_length];
-    uint32_t oldest_file_seq = 0;
+    uint8_t temp_oldest_file_seq;           // Temporary to hold uint32_t return from find_oldest_log_file
+    uint8_t oldest_file_seq_for_notify = 0; // The uint8_t ID to send in notification
 
     if (type == RECORD_HARDWARE_FOOT_SENSOR)
     {
-        oldest_file_seq = find_oldest_log_file(foot_sensor_file_prefix, RECORD_HARDWARE_FOOT_SENSOR, oldest_file_path);
-        if (oldest_file_seq == (uint32_t)err_t::DATA_ERROR)
+        temp_oldest_file_seq =
+            find_oldest_log_file(foot_sensor_file_prefix, RECORD_HARDWARE_FOOT_SENSOR, oldest_file_path);
+        if (temp_oldest_file_seq == (uint32_t)err_t::DATA_ERROR)
         {
-            LOG_INF("Foot sensor directory empty or error finding oldest file after deletion.");
+            LOG_INF(
+                "Foot sensor directory empty or error finding oldest file after deletion. No oldest file to report.");
+            oldest_file_seq_for_notify = 0;
+            generic_message_t foot_log_info_msg;
+            foot_log_info_msg.sender = SENDER_DATA;
+            foot_log_info_msg.type = MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE;
+            foot_log_info_msg.data.new_hardware_log_file.file_sequence_id = oldest_file_seq_for_notify;
+            strncpy(foot_log_info_msg.data.new_hardware_log_file.file_path, "",
+                    sizeof(foot_log_info_msg.data.new_hardware_log_file.file_path) - 1);
+            foot_log_info_msg.data.new_hardware_log_file
+                .file_path[sizeof(foot_log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+            if (k_msgq_put(&bluetooth_msgq, &foot_log_info_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to put empty foot sensor log notification message.");
+            }
+            else
+            {
+                LOG_DBG("Sent empty foot sensor log notification.");
+            }
         }
         else
         {
-            type_and_id_to_path(RECORD_HARDWARE_FOOT_SENSOR, oldest_file_seq, oldest_file_path);
-            LOG_INF("New oldest foot sensor log file: %s (Seq: %u)", oldest_file_path, oldest_file_seq);
+            oldest_file_seq_for_notify = (uint8_t)temp_oldest_file_seq;
+            LOG_INF("New oldest foot sensor log file: %s (Seq: %u)", oldest_file_path, oldest_file_seq_for_notify);
+            generic_message_t foot_log_info_msg;
+            foot_log_info_msg.sender = SENDER_DATA;
+            foot_log_info_msg.type = MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE;
+            foot_log_info_msg.data.new_hardware_log_file.file_sequence_id = oldest_file_seq_for_notify;
+            strncpy(foot_log_info_msg.data.new_hardware_log_file.file_path, oldest_file_path,
+                    sizeof(foot_log_info_msg.data.new_hardware_log_file.file_path) - 1);
+            foot_log_info_msg.data.new_hardware_log_file
+                .file_path[sizeof(foot_log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+            if (k_msgq_put(&bluetooth_msgq, &foot_log_info_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to put new oldest foot sensor log notification message.");
+            }
+            else
+            {
+                LOG_DBG("Sent new oldest foot sensor log notification (ID: %u).", oldest_file_seq_for_notify);
+            }
+        }
+    }
+    else if (type == RECORD_HARDWARE_BHI360)
+    {
+        temp_oldest_file_seq = find_oldest_log_file(bhi360_file_prefix, RECORD_HARDWARE_BHI360, oldest_file_path);
+        if (temp_oldest_file_seq == (uint32_t)err_t::DATA_ERROR)
+        {
+            LOG_INF("BHI360 directory empty or error finding oldest file after deletion. No oldest file to report.");
+            oldest_file_seq_for_notify = 0;
+            generic_message_t bhi360_log_info_msg;
+            bhi360_log_info_msg.sender = SENDER_DATA;
+            bhi360_log_info_msg.type = MSG_TYPE_NEW_BHI360_LOG_FILE;
+            bhi360_log_info_msg.data.new_hardware_log_file.file_sequence_id = oldest_file_seq_for_notify;
+            strncpy(bhi360_log_info_msg.data.new_hardware_log_file.file_path, "",
+                    sizeof(bhi360_log_info_msg.data.new_hardware_log_file.file_path) - 1);
+            bhi360_log_info_msg.data.new_hardware_log_file
+                .file_path[sizeof(bhi360_log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+            if (k_msgq_put(&bluetooth_msgq, &bhi360_log_info_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to put empty BHI360 log notification message.");
+            }
+            else
+            {
+                LOG_DBG("Sent empty BHI360 log notification.");
+            }
+        }
+        else
+        {
+            oldest_file_seq_for_notify = (uint8_t)temp_oldest_file_seq;
+            LOG_INF("New oldest BHI360 log file: %s (Seq: %u)", oldest_file_path, oldest_file_seq_for_notify);
+            generic_message_t bhi360_log_info_msg;
+            bhi360_log_info_msg.sender = SENDER_DATA;
+            bhi360_log_info_msg.type = MSG_TYPE_NEW_BHI360_LOG_FILE;
+            bhi360_log_info_msg.data.new_hardware_log_file.file_sequence_id = oldest_file_seq_for_notify;
+            strncpy(bhi360_log_info_msg.data.new_hardware_log_file.file_path, oldest_file_path,
+                    sizeof(bhi360_log_info_msg.data.new_hardware_log_file.file_path) - 1);
+            bhi360_log_info_msg.data.new_hardware_log_file
+                .file_path[sizeof(bhi360_log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+            if (k_msgq_put(&bluetooth_msgq, &bhi360_log_info_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to put new oldest BHI360 log notification message.");
+            }
+            else
+            {
+                LOG_DBG("Sent new oldest BHI360 log notification (ID: %u).", oldest_file_seq_for_notify);
+            }
         }
     }
     return err_t::NO_ERROR;
+}
+
+// Helper struct for sorting
+struct LogFileEntry
+{
+    uint8_t id;
+    char name[util::max_path_length];
+};
+
+// Cap and reindex log files for a given prefix and directory
+err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, uint8_t max_files, uint8_t delete_count)
+{
+    std::vector<LogFileEntry> log_files;
+    fs_dir_t dirp;
+    static fs_dirent entry;
+
+    fs_dir_t_init(&dirp);
+
+    int res = fs_opendir(&dirp, dir_path);
+    if (res != 0)
+    {
+        LOG_ERR("Opend dir Error");
+        if (res == -ENOENT)
+        {
+            // Directory doesn't exist, nothing to do
+            LOG_ERR("Directory do not exist");
+            return err_t::NO_ERROR;
+        }
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+    LOG_WRN("dir path=%s", dir_path);
+    // 1. Collect all matching files
+    while (true)
+    {
+        res = fs_readdir(&dirp, &entry);
+        if (res != 0 || entry.name[0] == '\0')
+            break;
+
+        size_t prefix_len = strlen(file_prefix);
+        size_t ext_len = strlen(".pb");
+        size_t name_len = strlen(entry.name);
+
+        if (entry.type == FS_DIR_ENTRY_FILE && name_len > (prefix_len + ext_len) &&
+            strncmp(entry.name, file_prefix, prefix_len) == 0 && strcmp(entry.name + name_len - ext_len, ".pb") == 0)
+        {
+            uint8_t id = 0;
+            if (sscanf(entry.name + prefix_len, "%hhu.pb", &id) == 1)
+            {
+                LogFileEntry lfe;
+                lfe.id = id;
+                strncpy(lfe.name, entry.name, sizeof(lfe.name) - 1);
+                lfe.name[sizeof(lfe.name) - 1] = '\0';
+                log_files.push_back(lfe);
+            }
+        }
+    }
+    fs_closedir(&dirp);
+
+    // 2. Sort by ID
+    std::sort(log_files.begin(), log_files.end(),
+              [](const LogFileEntry &a, const LogFileEntry &b) { return a.id < b.id; });
+
+    // 3. If too many files, delete the oldest
+    if (log_files.size() > max_files)
+    {
+        uint8_t to_delete = std::min<uint8_t>(delete_count, log_files.size() - max_files + delete_count);
+        for (uint8_t i = 0; i < to_delete; ++i)
+        {
+            // Use a large buffer for file system operations
+            char full_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
+            int written = snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, log_files[i].name);
+            if (written < 0 || written >= (int)sizeof(full_path))
+            {
+                LOG_ERR("Internal path buffer too small for deleting: '%s/%s'", dir_path, log_files[i].name);
+                continue; // Skip this file, but continue with others
+            }
+            int del_res = fs_unlink(full_path);
+            if (del_res != 0)
+            {
+                LOG_ERR("Failed to unlink %s: %d", full_path, del_res);
+            }
+        }
+        // Remove deleted entries from vector
+        log_files.erase(log_files.begin(), log_files.begin() + to_delete);
+    }
+
+    // 4. Reindex: shift IDs down so the lowest is 0, next is 1, etc.
+    // To avoid overwriting, rename to a temporary name first
+    for (size_t i = 0; i < log_files.size(); ++i)
+    {
+        uint8_t new_id = static_cast<uint8_t>(i);
+        if (log_files[i].id == new_id)
+            continue;
+
+        // Step 1: Rename to temp name (use large buffer)
+        char old_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
+        char temp_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
+        int written_old = snprintf(old_path, sizeof(old_path), "%s/%s", dir_path, log_files[i].name);
+        int written_temp = snprintf(temp_path, sizeof(temp_path), "%s/.tmp_%s", dir_path, log_files[i].name);
+        if (written_old < 0 || written_old >= (int)sizeof(old_path) || written_temp < 0 ||
+            written_temp >= (int)sizeof(temp_path))
+        {
+            LOG_ERR("Internal path buffer too small for renaming: '%s/%s'", dir_path, log_files[i].name);
+            continue;
+        }
+
+        int ren_res = fs_rename(old_path, temp_path);
+        if (ren_res != 0)
+        {
+            LOG_ERR("Failed to rename %s to %s: %d", old_path, temp_path, ren_res);
+        }
+
+        // Step 2: Prepare new name (for BLE/external, use small buffer if needed)
+        char new_name[util::max_path_length];
+        int written_new = snprintf(new_name, sizeof(new_name), "%s%03u.pb", file_prefix, new_id);
+        if (written_new < 0 || written_new >= (int)sizeof(new_name))
+        {
+            LOG_ERR("Name buffer too small for new name: '%s%03u.pb'", file_prefix, new_id);
+            continue;
+        }
+        strncpy(log_files[i].name, new_name, sizeof(log_files[i].name) - 1);
+        log_files[i].name[sizeof(log_files[i].name) - 1] = '\0';
+    }
+
+    // Step 3: Rename from temp to final name
+    for (const auto &lfe : log_files)
+    {
+        char temp_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
+        char final_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
+        int written_temp = snprintf(temp_path, sizeof(temp_path), "%s/.tmp_%s", dir_path, lfe.name);
+        int written_final = snprintf(final_path, sizeof(final_path), "%s/%s", dir_path, lfe.name);
+        if (written_temp < 0 || written_temp >= (int)sizeof(temp_path) || written_final < 0 ||
+            written_final >= (int)sizeof(final_path))
+        {
+            LOG_ERR("Internal path buffer too small for final rename: '%s/.tmp_%s' or '%s/%s'", dir_path, lfe.name,
+                    dir_path, lfe.name);
+            continue;
+        }
+
+        // Only rename if temp file exists
+        fs_file_t temp_file;
+        fs_file_t_init(&temp_file);
+        if (fs_open(&temp_file, temp_path, FS_O_READ) == 0)
+        {
+            LOG_WRN("Renaming");
+            fs_close(&temp_file);
+            int ren_res = fs_rename(temp_path, final_path);
+            if (ren_res != 0)
+            {
+                LOG_ERR("Failed to rename %s to %s: %d", temp_path, final_path, ren_res);
+            }
+        }
+    }
+
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Delete the oldest log file matching the prefix in the directory, using large internal buffer for file ops.
+ *        BLE/external buffers remain small for transmission.
+ */
+err_t delete_oldest_log_file_checked(const char *file_prefix, const char *dir_path)
+{
+    fs_dir_t dirp;
+    static fs_dirent entry;
+    fs_dir_t_init(&dirp);
+
+    int res = fs_opendir(&dirp, dir_path);
+    if (res != 0)
+    {
+        if (res == -ENOENT)
+        {
+            // Directory doesn't exist, nothing to delete
+            return err_t::FILE_SYSTEM_NO_FILES;
+        }
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    uint8_t oldest_id = UINT8_MAX;
+    char oldest_name[util::max_path_length] = {0};
+    size_t prefix_len = strlen(file_prefix);
+    size_t ext_len = strlen(".pb");
+
+    // Find the oldest file (lowest id)
+    while (true)
+    {
+        res = fs_readdir(&dirp, &entry);
+        if (res != 0 || entry.name[0] == '\0')
+            break;
+
+        size_t name_len = strlen(entry.name);
+        if (entry.type == FS_DIR_ENTRY_FILE && name_len > (prefix_len + ext_len) &&
+            strncmp(entry.name, file_prefix, prefix_len) == 0 && strcmp(entry.name + name_len - ext_len, ".pb") == 0)
+        {
+            uint8_t id = 0;
+            if (sscanf(entry.name + prefix_len, "%hhu.pb", &id) == 1)
+            {
+                if (id < oldest_id)
+                {
+                    oldest_id = id;
+                    strncpy(oldest_name, entry.name, sizeof(oldest_name) - 1);
+                    oldest_name[sizeof(oldest_name) - 1] = '\0';
+                }
+            }
+        }
+    }
+    fs_closedir(&dirp);
+
+    if (oldest_id == UINT8_MAX)
+    {
+        // No file found
+        return err_t::FILE_SYSTEM_NO_FILES;
+    }
+
+    // Use a large buffer for file system operations
+    char full_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
+    int written = snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, oldest_name);
+    if (written < 0 || written >= (int)sizeof(full_path))
+    {
+        LOG_ERR("Internal path buffer too small for deleting oldest: '%s/%s'", dir_path, oldest_name);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+    int del_res = fs_unlink(full_path);
+    if (del_res != 0)
+    {
+        LOG_ERR("Failed to unlink %s: %d", full_path, del_res);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+    LOG_INF("Deleted oldest log file: %s (ID: %u)", full_path, oldest_id);
+    return err_t::NO_ERROR;
+}
+
+// Utility: Close all files in a directory by opening and closing each file.
+// This does NOT track already-open handles elsewhere in the code.
+int close_all_files_in_directory(const char *dir_path)
+{
+    struct fs_dir_t dirp;
+    static struct fs_dirent entry;
+    int closed_count = 0;
+
+    fs_dir_t_init(&dirp);
+
+    int res = fs_opendir(&dirp, dir_path);
+    if (res != 0)
+    {
+        LOG_ERR("Failed to open directory %s: %d", dir_path, res);
+        return res;
+    }
+
+    while (true)
+    {
+        res = fs_readdir(&dirp, &entry);
+        if (res != 0 || entry.name[0] == '\0')
+        {
+            break;
+        }
+
+        if (entry.type == FS_DIR_ENTRY_FILE)
+        {
+            char file_path[256];
+            int written = snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry.name);
+            if (written < 0 || written >= (int)sizeof(file_path))
+            {
+                LOG_ERR("Path buffer too small for %s/%s", dir_path, entry.name);
+                continue;
+            }
+
+            struct fs_file_t file;
+            fs_file_t_init(&file);
+            int open_res = fs_open(&file, file_path, FS_O_RDWR);
+            if (open_res == 0)
+            {
+                fs_close(&file);
+                closed_count++;
+                LOG_INF("Closed file: %s", file_path);
+            }
+            else if (open_res == -EACCES)
+            {
+                // File may be open elsewhere or not accessible for write
+                LOG_WRN("Could not open file for closing (may be open elsewhere): %s", file_path);
+            }
+            else
+            {
+                LOG_WRN("Could not open file %s: %d", file_path, open_res);
+            }
+        }
+    }
+
+    fs_closedir(&dirp);
+    LOG_INF("Closed %d files in directory %s", closed_count, dir_path);
+    return closed_count;
+}
+
+/**
+ * @brief Deletes all files in the specified directory.
+ *
+ * @param dir_path Path to the directory.
+ * @return Number of files deleted, or negative error code on failure.
+ */
+int delete_all_files_in_directory(const char *dir_path)
+{
+    struct fs_dir_t dirp;
+    static struct fs_dirent entry;
+    int deleted_count = 0;
+
+    fs_dir_t_init(&dirp);
+
+    int res = fs_opendir(&dirp, dir_path);
+    if (res != 0)
+    {
+        LOG_ERR("Failed to open directory %s: %d", dir_path, res);
+        return res;
+    }
+
+    while (true)
+    {
+        res = fs_readdir(&dirp, &entry);
+        if (res != 0 || entry.name[0] == '\0')
+        {
+            break;
+        }
+
+        if (entry.type == FS_DIR_ENTRY_FILE)
+        {
+            char file_path[256];
+            int written = snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry.name);
+            if (written < 0 || written >= (int)sizeof(file_path))
+            {
+                LOG_ERR("Path buffer too small for %s/%s", dir_path, entry.name);
+                continue;
+            }
+
+            int del_res = fs_unlink(file_path);
+            if (del_res == 0)
+            {
+                deleted_count++;
+                LOG_INF("Deleted file: %s", file_path);
+            }
+            else
+            {
+                LOG_ERR("Failed to delete file %s: %d", file_path, del_res);
+            }
+        }
+    }
+
+    fs_closedir(&dirp);
+    LOG_INF("Deleted %d files in directory %s", deleted_count, dir_path);
+    return deleted_count;
 }
 
 static bool app_event_handler(const struct app_event_header *aeh)

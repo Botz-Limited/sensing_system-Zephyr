@@ -17,7 +17,7 @@ menu "SENSING"
 
     config MAX_PATH_LEN
         int "Max File Path Length"
-        default 255
+        default 29
         help
            This option sets the buffer length for paths in the file system.
 

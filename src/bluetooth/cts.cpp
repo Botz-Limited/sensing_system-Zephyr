@@ -36,6 +36,7 @@
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
+
 // --- RTC Configuration Defines ---
 // Ensure 'rtc0' alias is correctly defined in your board's devicetree or overlay file
 #define RTC_NODE DT_ALIAS(rtc0)

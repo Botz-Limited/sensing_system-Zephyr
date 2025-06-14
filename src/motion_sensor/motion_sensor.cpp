@@ -8,6 +8,7 @@
  *
  */
 
+#include <hal/nrf_spim.h>
 #include <zephyr/arch/arm/arch.h>
 #define MODULE motion_sensor
 
@@ -21,15 +22,8 @@
 #include <app_event_manager.h>
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
-#include <hal/nrf_gpio.h>
-#include <helpers/nrfx_reset_reason.h>
+#include <app.hpp>
 #include <motion_sensor.hpp>
-#include <nrfx.h>
-#include <nrfx_gpiote.h>
-#include <drivers/src/prs/nrfx_prs.h>
-#include <zephyr/irq.h>
-#include <zephyr/sys/util.h>
-#include <nrfx_spim.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
@@ -39,7 +33,10 @@
 
 #include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2.h"
 #include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.h"
+#include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/firmware/bhi360/BHI360_Aux_BMM150.fw.h"
+extern "C" {
 #include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/common.h"
+}
 
 #include <errors.hpp>
 
@@ -48,47 +45,42 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_LOG_DEFAULT_LEVEL); // NOLINT
 
-static const struct device *const bhi360_dev = DEVICE_DT_GET(DT_ALIAS(bhi360));
+// Get BHI360 device from device tree
+#define BHI360_NODE DT_NODELABEL(bhi360)
+static const struct device *const bhi360_dev = DEVICE_DT_GET(BHI360_NODE);
 
-/* Uncomment to upload firmware to flash instead of RAM */
-// #define UPLOAD_FIRMWARE_TO_FLASH
+// SPI config
+static struct spi_config bhi360_spi_cfg = {
+    .frequency = 8000000,
+    .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | NRF_SPIM_MODE_0,
+    .slave = 0,
+    .cs = NULL // We'll use Zephyr's GPIO API for manual CS if needed
+};
 
-#ifdef UPLOAD_FIRMWARE_TO_FLASH
-#include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/firmware/bhi260ap/BHI260AP-flash.fw.h"
-#else
-#include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/firmware/bhi360/BHI360_Aux_BMM150.fw.h"
+// INT and RESET GPIOs from device tree
+#if DT_NODE_HAS_PROP(BHI360_NODE, int_gpios)
+static const struct gpio_dt_spec bhi360_int = GPIO_DT_SPEC_GET(BHI360_NODE, int_gpios);
+#endif
+#if DT_NODE_HAS_PROP(BHI360_NODE, reset_gpios)
+static const struct gpio_dt_spec bhi360_reset = GPIO_DT_SPEC_GET(BHI360_NODE, reset_gpios);
 #endif
 
-#define WORK_BUFFER_SIZE 2048
 #define QUAT_SENSOR_ID BHY2_SENSOR_ID_RV  // Use Rotation Vector sensor ID
 #define LACC_SENSOR_ID BHY2_SENSOR_ID_ACC // Use Linear Acceleration sensor ID
-#define MAX_IMU_COUNT 1                   // Maximum number of IMUs supported
+#define STEP_COUNTER_SENSOR_ID BHY2_SENSOR_ID_STC // Use Step Counter sensor ID
 
-// Global array of IMU devices - define your CS pins here
-static imu_device_t imu_devices[] = {{.cs_pin = NRF_GPIO_PIN_MAP(1, 6), // First IMU CS pin (P1.6)
-                                      .initialized = false,
-                                      .name = "IMU_1"}};
-
-#define NUM_IMUS (sizeof(imu_devices) / sizeof(imu_devices[0]))
-
-// Global device structures
-static const struct device *spi_dev;
-static const struct device *cs_gpio_dev;
 static struct bhy2_dev bhy2;
 
-enum bhy2_intf intf;
+// Semaphore for interrupt-driven FIFO processing
+static struct k_sem bhi360_int_sem;
 
-// Add new function declarations
+// Forward declarations
+static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
 static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
-static void parse_quaternion(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
-static void parse_linear_acceleration(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
-static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
-static void motion_sensor_init();
 static void print_api_error(int8_t rslt, struct bhy2_dev *dev);
 static int8_t upload_firmware(struct bhy2_dev *dev);
 static void bhi360_delay_us(uint32_t period_us, void *intf_ptr);
-static bool initialize_imu(imu_device_t *imu);
-void motion_sensor_initializing_entry();
+static void bhi360_int_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
 
 /********************************** Motion Sensor THREAD ********************************/
 static constexpr int motion_sensor_stack_size = CONFIG_MOTION_SENSOR_MODULE_STACK_SIZE;
@@ -96,70 +88,274 @@ static constexpr int motion_sensor_priority = CONFIG_MOTION_SENSOR_MODULE_PRIORI
 K_THREAD_STACK_DEFINE(motion_sensor_stack_area, motion_sensor_stack_size);
 static struct k_thread motion_sensor_thread_data;
 static k_tid_t motion_sensor_tid;
-void motion_sensor_process(void * /*unused*/, void * /*unused*/, void * /*unused*/);
+void motion_sensor_process(void *, void *, void *);
+
+// GPIO callback struct
+#if DT_NODE_HAS_PROP(BHI360_NODE, int_gpios)
+static struct gpio_callback bhi360_int_cb;
+#endif
 
 void motion_sensor_initializing_entry()
 {
-
-    // To initialise message que here
-
     LOG_INF("Motion Sensor initializing_entry done ");
 }
 
 static void motion_sensor_init()
 {
-
     motion_sensor_initializing_entry();
-
-    // Init Imu
-
-    setup_SPI(&imu_devices[0]); // Setup SPI for each IMU
-
-
-//    initialize_imu(&imu_devices[0]);
-
-    // Initialise Task
-
+    LOG_INF("Starting BHI360 full initialization sequence");
+    if (!device_is_ready(bhi360_dev))
+    {
+        LOG_ERR("BHI360 device not ready");
+        return;
+    }
+#if DT_NODE_HAS_PROP(BHI360_NODE, reset_gpios)
+    if (gpio_is_ready_dt(&bhi360_reset))
+    {
+        gpio_pin_configure_dt(&bhi360_reset, GPIO_OUTPUT_ACTIVE);
+        gpio_pin_set_dt(&bhi360_reset, 1);
+        k_msleep(1);
+        gpio_pin_set_dt(&bhi360_reset, 0);
+        k_msleep(10);
+        gpio_pin_set_dt(&bhi360_reset, 1);
+        k_msleep(10);
+    }
+#endif
+#if DT_NODE_HAS_PROP(BHI360_NODE, int_gpios)
+    if (gpio_is_ready_dt(&bhi360_int))
+    {
+        gpio_pin_configure_dt(&bhi360_int, GPIO_INPUT);
+        gpio_pin_interrupt_configure_dt(&bhi360_int, GPIO_INT_EDGE_TO_ACTIVE);
+        gpio_init_callback(&bhi360_int_cb, bhi360_int_handler, BIT(bhi360_int.pin));
+        gpio_add_callback(bhi360_int.port, &bhi360_int_cb);
+        LOG_INF("BHI360 INT pin interrupt configured");
+    }
+#endif
+    k_sem_init(&bhi360_int_sem, 0, 1);
+    int8_t rslt;
+    uint8_t product_id = 0;
+    uint16_t version = 0;
+    uint8_t hintr_ctrl, hif_ctrl, boot_status;
+    // 1. Initialize BHI360 driver
+    rslt =
+        bhy2_init(BHY2_SPI_INTERFACE, bhi360_spi_read, bhi360_spi_write, bhi360_delay_us, BHY2_RD_WR_LEN, NULL, &bhy2);
+    if (rslt != BHY2_OK)
+    {
+        LOG_ERR("BHI360: Initialization failed");
+        return;
+    }
+    // 2. Soft reset
+    rslt = bhy2_soft_reset(&bhy2);
+    if (rslt != BHY2_OK)
+    {
+        LOG_ERR("BHI360: Soft reset failed");
+        return;
+    }
+    // 3. Product ID check with retries
+    bool id_read_success = false;
+    for (int retry = 0; retry < 20; retry++)
+    {
+        rslt = bhy2_get_product_id(&product_id, &bhy2);
+        if (rslt == BHY2_OK && product_id == BHY2_PRODUCT_ID)
+        {
+            LOG_INF("BHI360: Product ID verified on attempt %d", retry + 1);
+            id_read_success = true;
+            break;
+        }
+        k_msleep(10);
+    }
+    if (!id_read_success)
+    {
+        LOG_ERR("BHI360: Failed to verify product ID");
+        return;
+    }
+    // 4. Configure FIFO and interrupts (enable INT output)
+    hintr_ctrl = 0; // Enable all INT outputs
+    rslt = bhy2_set_host_interrupt_ctrl(hintr_ctrl, &bhy2);
+    hif_ctrl = 0;
+    rslt = bhy2_set_host_intf_ctrl(hif_ctrl, &bhy2);
+    // 5. Check boot status and upload firmware
+    rslt = bhy2_get_boot_status(&boot_status, &bhy2);
+    if (boot_status & BHY2_BST_HOST_INTERFACE_READY)
+    {
+        LOG_INF("BHI360: Uploading firmware");
+        rslt = upload_firmware(&bhy2);
+        if (rslt != BHY2_OK)
+        {
+            LOG_ERR("BHI360: Firmware upload failed");
+            return;
+        }
+        // 6. Boot from RAM and verify
+        rslt = bhy2_boot_from_ram(&bhy2);
+        rslt = bhy2_get_kernel_version(&version, &bhy2);
+        if (rslt != BHY2_OK || version == 0)
+        {
+            LOG_ERR("BHI360: Boot failed");
+            return;
+        }
+        LOG_INF("BHI360: Boot successful, kernel version %u", version);
+        // 7. Update virtual sensor list
+        LOG_INF("BHI360: Updating virtual sensor list");
+        rslt = bhy2_update_virtual_sensor_list(&bhy2);
+        print_api_error(rslt, &bhy2);
+        // 8. Register callbacks
+        LOG_INF("BHI360: Registering callbacks");
+        float sample_rate = 20.0; // Example: 20 Hz for all sensors
+        uint32_t report_latency_ms = 0;
+        // Configure quaternion sensor
+        LOG_INF("BHI360: Configuring quaternion sensor...");
+        rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, sample_rate, report_latency_ms, &bhy2);
+        print_api_error(rslt, &bhy2);
+        // Configure linear acceleration sensor
+        LOG_INF("BHI360: Configuring linear acceleration sensor...");
+        rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, sample_rate, report_latency_ms, &bhy2);
+        print_api_error(rslt, &bhy2);
+        // Configure step counter sensor
+        LOG_INF("BHI360: Configuring step counter sensor...");
+        rslt = bhy2_set_virt_sensor_cfg(STEP_COUNTER_SENSOR_ID, sample_rate, report_latency_ms, &bhy2);
+        print_api_error(rslt, &bhy2);
+        // Register a single callback for all sensors
+        rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, &bhy2);
+        print_api_error(rslt, &bhy2);
+        rslt = bhy2_register_fifo_parse_callback(LACC_SENSOR_ID, parse_all_sensors, NULL, &bhy2);
+        print_api_error(rslt, &bhy2);
+        rslt = bhy2_register_fifo_parse_callback(STEP_COUNTER_SENSOR_ID, parse_all_sensors, NULL, &bhy2);
+        print_api_error(rslt, &bhy2);
+        rslt = bhy2_register_fifo_parse_callback(BHY2_SYS_ID_META_EVENT, parse_meta_event, NULL, &bhy2);
+        print_api_error(rslt, &bhy2);
+        LOG_INF("BHI360: Initialization complete");
+    }
+    else
+    {
+        LOG_ERR("BHI360: Host interface not ready");
+        return;
+    }
+    // Start the motion sensor thread
     motion_sensor_tid = k_thread_create(&motion_sensor_thread_data, motion_sensor_stack_area,
                                         K_THREAD_STACK_SIZEOF(motion_sensor_stack_area), motion_sensor_process, nullptr,
                                         nullptr, nullptr, motion_sensor_priority, 0, K_NO_WAIT);
-
     LOG_INF("Motion Sensor Module Initialised");
 }
 
-void motion_sensor_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
+void motion_sensor_process(void *, void *, void *)
 {
-
-    intf = BHY2_SPI_INTERFACE;
-
-    k_thread_name_set(motion_sensor_tid, "Motion_Sensor"); // sets the name of the thread
-
-    if (imu_devices[0].initialized)
-    {
-        LOG_ERR("IMU not active");
-        return;
-    }
-
+    k_thread_name_set(motion_sensor_tid, "Motion_Sensor");
     module_set_state(MODULE_STATE_READY);
-
+    uint8_t work_buffer[WORK_BUFFER_SIZE];
     while (true)
     {
+        // Wait for interrupt
+        k_sem_take(&bhi360_int_sem, K_FOREVER);
+        // Process FIFO
+        int8_t rslt = bhy2_get_and_process_fifo(work_buffer, sizeof(work_buffer), &bhy2);
+        if (rslt != BHY2_OK)
+        {
+            LOG_WRN("BHI360: FIFO processing error");
+        }
+    }
+}
 
+static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref)
+{
+    ARG_UNUSED(callback_ref);
+    // Static variables to hold the latest values
+    static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0, latest_quat_w = 0, latest_quat_accuracy = 0;
+    static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;
+    static uint32_t latest_step_count = 0;
+    static uint64_t latest_timestamp = 0;
 
-        //    if (!imu_devices[0].initialized)
-        //    {
-        //        continue;
-        //    }
+    bool updated = false;
 
-          //  uint8_t work_buffer[WORK_BUFFER_SIZE];
-          //  int8_t rslt = bhy2_get_and_process_fifo(work_buffer, sizeof(work_buffer), &imu_devices[0].bhy2);
-          //  if (rslt != BHY2_OK)
-          //  {
-           //     LOG_WRN("%s: FIFO processing error", imu_devices[0].name);
-           // }
-        
+    switch (callback_info->sensor_id) {
+        case QUAT_SENSOR_ID: {
+            struct bhy2_data_quaternion data;
+            if (callback_info->data_size != 11) {
+                LOG_ERR("Quaternion: invalid data size: %d", callback_info->data_size);
+                return;
+            }
+            bhy2_parse_quaternion(callback_info->data_ptr, &data);
+            latest_quat_x = (float)data.x / 16384.0f;
+            latest_quat_y = (float)data.y / 16384.0f;
+            latest_quat_z = (float)data.z / 16384.0f;
+            latest_quat_w = (float)data.w / 16384.0f;
+            latest_quat_accuracy = (float)data.accuracy;
+            latest_timestamp = *callback_info->time_stamp * 15625;
+            updated = true;
+            break;
+        }
+        case LACC_SENSOR_ID: {
+            struct bhy2_data_xyz data;
+            bhy2_parse_xyz(callback_info->data_ptr, &data);
+            latest_lacc_x = (float)data.x;
+            latest_lacc_y = (float)data.y;
+            latest_lacc_z = (float)data.z;
+            updated = true;
+            break;
+        }
+        case STEP_COUNTER_SENSOR_ID: {
+            if (callback_info->data_size < 4) {
+                LOG_ERR("Step counter: invalid data size: %d", callback_info->data_size);
+                return;
+            }
+            latest_step_count = (callback_info->data_ptr[0]) |
+                                (callback_info->data_ptr[1] << 8) |
+                                (callback_info->data_ptr[2] << 16) |
+                                (callback_info->data_ptr[3] << 24);
+            updated = true;
+            break;
+        }
+        default:
+            LOG_WRN("Unknown sensor ID: %u", callback_info->sensor_id);
+            break;
+    }
 
-        k_msleep(motion_sensor_timer);
+    // After any update, pack and send the combined record
+    if (updated) {
+        // Send combined log record to data module
+        bhi360_log_record_t record{};
+        record.quat_x = latest_quat_x;
+        record.quat_y = latest_quat_y;
+        record.quat_z = latest_quat_z;
+        record.quat_w = latest_quat_w;
+        record.quat_accuracy = latest_quat_accuracy;
+        record.lacc_x = latest_lacc_x;
+        record.lacc_y = latest_lacc_y;
+        record.lacc_z = latest_lacc_z;
+        record.step_count = latest_step_count;
+        record.timestamp = latest_timestamp;
+        generic_message_t msg{};
+        msg.sender = SENDER_BHI360_THREAD;
+        msg.type = MSG_TYPE_BHI360_LOG_RECORD;
+        msg.data.bhi360_log_record = record;
+        k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
+
+        // Send individual values to Bluetooth module
+        // Quaternion (3D mapping)
+        generic_message_t qmsg{};
+        qmsg.sender = SENDER_BHI360_THREAD;
+        qmsg.type = MSG_TYPE_BHI360_3D_MAPPING;
+        qmsg.data.bhi360_3d_mapping.gyro_x = latest_quat_x;
+        qmsg.data.bhi360_3d_mapping.gyro_y = latest_quat_y;
+        qmsg.data.bhi360_3d_mapping.gyro_z = latest_quat_z;
+        // Optionally add .accel_x/y/z if you want to use them for something else
+        k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
+
+        // Linear acceleration
+        generic_message_t lmsg{};
+        lmsg.sender = SENDER_BHI360_THREAD;
+        lmsg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
+        lmsg.data.bhi360_linear_accel.x = latest_lacc_x;
+        lmsg.data.bhi360_linear_accel.y = latest_lacc_y;
+        lmsg.data.bhi360_linear_accel.z = latest_lacc_z;
+        k_msgq_put(&bluetooth_msgq, &lmsg, K_NO_WAIT);
+
+        // Step count
+        generic_message_t smsg{};
+        smsg.sender = SENDER_BHI360_THREAD;
+        smsg.type = MSG_TYPE_BHI360_STEP_COUNT;
+        smsg.data.bhi360_step_count.step_count = latest_step_count;
+        smsg.data.bhi360_step_count.activity_duration_s = 0; // Fill if available
+        k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
     }
 }
 
@@ -176,75 +372,25 @@ static void print_api_error(int8_t rslt, struct bhy2_dev *dev)
     }
 }
 
-// Update callback functions to use IMU context
-static void parse_quaternion(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref)
-{
-    imu_device_t *imu = (imu_device_t *)callback_ref;
-    struct bhy2_data_quaternion data;
-    uint32_t s, ns;
-    LOG_INF("%s Quaternion: x: %f, y: %f, z: %f, w: %f",
-            imu->name,
-            data.x / 16384.0f,
-            data.y / 16384.0f,
-            data.z / 16384.0f,
-            data.w / 16384.0f);
-    
-    if (callback_info->data_size != 11) { // Check for valid payload size
-        LOG_ERR("Invalid data size: %d", callback_info->data_size);
-        return;
-    }
-
-    bhy2_parse_quaternion(callback_info->data_ptr, &data);
-
-    uint64_t timestamp = *callback_info->time_stamp;
-    timestamp = timestamp * 15625; // Convert to nanoseconds
-    s = (uint32_t)(timestamp / UINT64_C(1000000000));
-    ns = (uint32_t)(timestamp - (s * UINT64_C(1000000000)));
-
-    LOG_INF("SID: %u; T: %u.%09u; x: %f, y: %f, z: %f, w: %f; acc: %.2f",
-            callback_info->sensor_id,
-            s,
-            ns,
-            data.x / 16384.0f,
-            data.y / 16384.0f,
-            data.z / 16384.0f,
-            data.w / 16384.0f,
-            ((data.accuracy * 180.0f) / 16384.0f) / 3.141592653589793f);
-}
-
-static void parse_linear_acceleration(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref) {
-    imu_device_t *imu = (imu_device_t *)callback_ref;
-    struct bhy2_data_xyz data;
-    bhy2_parse_xyz(callback_info->data_ptr, &data);
-    LOG_INF("%s Linear Acceleration: x: %d, y: %d, z: %d",
-            imu->name,
-            data.x,
-            data.y,
-            data.z);
-}
-
 static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref)
 {
     (void)callback_ref;
     uint8_t meta_event_type = callback_info->data_ptr[0];
     uint8_t byte1 = callback_info->data_ptr[1];
     uint8_t byte2 = callback_info->data_ptr[2];
-    uint8_t *accuracy = (uint8_t *)callback_ref;
     char *event_text;
-
     if (callback_info->sensor_id == BHY2_SYS_ID_META_EVENT)
     {
-        event_text = "[META EVENT]";
+        event_text = (char *)"[META EVENT]";
     }
     else if (callback_info->sensor_id == BHY2_SYS_ID_META_EVENT_WU)
     {
-        event_text = "[META EVENT WAKE UP]";
+        event_text = (char *)"[META EVENT WAKE UP]";
     }
     else
     {
         return;
     }
-
     switch (meta_event_type)
     {
         case BHY2_META_EVENT_FLUSH_COMPLETE:
@@ -261,11 +407,6 @@ static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_in
             break;
         case BHY2_META_EVENT_SENSOR_STATUS:
             LOG_INF("%s Accuracy for sensor id %u changed to %u\r\n", event_text, byte1, byte2);
-            if (accuracy)
-            {
-                *accuracy = byte2;
-            }
-
             break;
         case BHY2_META_EVENT_BSX_DO_STEPS_MAIN:
             LOG_INF("%s BSX event (do steps main)\r\n", event_text);
@@ -308,18 +449,15 @@ static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_in
     }
 }
 
-
 static int8_t upload_firmware(struct bhy2_dev *dev)
 {
     uint32_t incr = 256; /* Max command packet size */
     uint32_t len = sizeof(bhy2_firmware_image);
     int8_t rslt = BHY2_OK;
-
     if ((incr % 4) != 0) /* Round off to higher 4 bytes */
     {
         incr = ((incr >> 2) + 1) << 2;
     }
-
     for (uint32_t i = 0; (i < len) && (rslt == BHY2_OK); i += incr)
     {
         if (incr > (len - i)) /* If last payload */
@@ -330,188 +468,38 @@ static int8_t upload_firmware(struct bhy2_dev *dev)
                 incr = ((incr >> 2) + 1) << 2;
             }
         }
-
 #ifdef UPLOAD_FIRMWARE_TO_FLASH
         rslt = bhy2_upload_firmware_to_flash_partly(&bhy2_firmware_image[i], i, incr, dev);
 #else
         rslt = bhy2_upload_firmware_to_ram_partly(&bhy2_firmware_image[i], len, i, incr, dev);
 #endif
-
-        LOG_INF("%.2f%% complete", (float)(i + incr) / (float)len * 100.0f);
+       LOG_INF("%.2f%% complete", (double)((float)(i + incr) / (float)len * 100.0f));
     }
-
     return rslt;
 }
-
-// Add error check macro
-#define APP_ERROR_CHECK(err_code)                                                                                      \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        if (err_code != NRFX_SUCCESS)                                                                                  \
-        {                                                                                                              \
-            LOG_ERR("Error %d at line %d", err_code, __LINE__);                                                        \
-        }                                                                                                              \
-    } while (0)
-
 
 // Delay function for BHY2 driver
 static void bhi360_delay_us(uint32_t period_us, void *intf_ptr)
 {
+    ARG_UNUSED(intf_ptr);
     k_usleep(period_us);
 }
 
-// Function to initialize a single IMU
-static bool initialize_imu(imu_device_t *imu)
+// GPIO interrupt handler for BHI360 INT pin
+static void bhi360_int_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
 {
-    int8_t rslt;
-    uint8_t product_id = 0;
-    uint16_t version = 0;
-    uint8_t hintr_ctrl, hif_ctrl, boot_status;
-
-    LOG_INF("%s: Starting initialization", imu->name);
-
-    // Configure CS pin
-    nrf_gpio_cfg_output(imu->cs_pin);
-    nrf_gpio_pin_clear(imu->cs_pin);
-    k_sleep(K_USEC(1));
-
-    // Initialize BHY2 device
-    rslt = bhy2_init(BHY2_SPI_INTERFACE, bhi360_spi_read, bhi360_spi_write, bhi360_delay_us, BHY2_RD_WR_LEN,
-                     imu, // Pass IMU struct as interface pointer
-                     &imu->bhy2);
-    if (rslt != BHY2_OK)
-    {
-        LOG_ERR("%s: Initialization failed", imu->name);
-        return false;
-    }
-
-    // Soft reset
-    rslt = bhy2_soft_reset(&imu->bhy2);
-    if (rslt != BHY2_OK)
-    {
-        LOG_ERR("%s: Soft reset failed", imu->name);
-        return false;
-    }
-
-    // Product ID check with retries
-    bool id_read_success = false;
-    for (int retry = 0; retry < 20; retry++)
-    {
-        rslt = bhy2_get_product_id(&product_id, &imu->bhy2);
-        if (rslt == BHY2_OK && product_id == BHY2_PRODUCT_ID)
-        {
-            LOG_INF("%s: Product ID verified on attempt %d", imu->name, retry + 1);
-            id_read_success = true;
-            break;
-        }
-        k_msleep(10);
-    }
-
-    if (!id_read_success)
-    {
-        LOG_ERR("%s: Failed to verify product ID", imu->name);
-        return false;
-    }
-
-    // Configure FIFO and interrupts
-    hintr_ctrl = BHY2_ICTL_DISABLE_STATUS_FIFO | BHY2_ICTL_DISABLE_DEBUG;
-    rslt = bhy2_set_host_interrupt_ctrl(hintr_ctrl, &imu->bhy2);
-
-    hif_ctrl = 0;
-    rslt = bhy2_set_host_intf_ctrl(hif_ctrl, &imu->bhy2);
-
-    // Check boot status and upload firmware
-    rslt = bhy2_get_boot_status(&boot_status, &imu->bhy2);
-    if (boot_status & BHY2_BST_HOST_INTERFACE_READY)
-    {
-        LOG_INF("%s: Uploading firmware", imu->name);
-        rslt = upload_firmware(&imu->bhy2);
-        if (rslt != BHY2_OK)
-        {
-            LOG_ERR("%s: Firmware upload failed", imu->name);
-            return false;
-        }
-
-        // Boot from RAM and verify
-        rslt = bhy2_boot_from_ram(&imu->bhy2);
-        rslt = bhy2_get_kernel_version(&version, &imu->bhy2);
-        if (rslt != BHY2_OK || version == 0)
-        {
-            LOG_ERR("%s: Boot failed", imu->name);
-            return false;
-        }
-        LOG_INF("%s: Boot successful, kernel version %u", imu->name, version);
-
-        // Update virtual sensor list first
-        LOG_INF("%s: Updating virtual sensor list", imu->name);
-        rslt = bhy2_update_virtual_sensor_list(&imu->bhy2);
-        print_api_error(rslt, &imu->bhy2);
-
-        // Register callbacks
-        LOG_INF("%s: Registering callbacks", imu->name);
-
-        // Configure sensors
-        float sample_rate = 100.0;
-        uint32_t report_latency_ms = 0;
-
-        // Configure quaternion sensor
-        LOG_INF("%s: Configuring quaternion sensor...", imu->name);
-        rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, sample_rate, report_latency_ms, &imu->bhy2);
-        print_api_error(rslt, &imu->bhy2);
-        LOG_INF("%s: Enable Quaternion at %.2fHz", imu->name, sample_rate);
-
-        // Configure linear acceleration sensor
-        LOG_INF("%s: Configuring linear acceleration sensor...", imu->name);
-        rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, sample_rate, report_latency_ms, &imu->bhy2);
-        print_api_error(rslt, &imu->bhy2);
-        LOG_INF("%s: Enable Linear Acceleration at %.2fHz", imu->name, sample_rate);
-
-        rslt = bhy2_register_fifo_parse_callback(BHY2_SYS_ID_META_EVENT, parse_meta_event, imu, &imu->bhy2);
-        print_api_error(rslt, &imu->bhy2);
-
-        // Check quaternion availability
-        LOG_INF("%s: Checking quaternion sensor availability...", imu->name);
-        if (!bhy2_is_sensor_available(QUAT_SENSOR_ID, &imu->bhy2))
-        {
-            LOG_ERR("%s: Quaternion sensor not available!", imu->name);
-        }
-        else
-        {
-            LOG_INF("%s: Quaternion sensor is available", imu->name);
-            rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_quaternion, imu, &imu->bhy2);
-            print_api_error(rslt, &imu->bhy2);
-        }
-
-        // Check linear acceleration availability
-        LOG_INF("%s: Checking linear acceleration sensor availability...", imu->name);
-        if (!bhy2_is_sensor_available(LACC_SENSOR_ID, &imu->bhy2))
-        {
-            LOG_ERR("%s: Linear acceleration sensor not available!", imu->name);
-        }
-        else
-        {
-            LOG_INF("%s: Linear acceleration sensor is available", imu->name);
-            rslt = bhy2_register_fifo_parse_callback(LACC_SENSOR_ID, parse_linear_acceleration, imu, &imu->bhy2);
-            print_api_error(rslt, &imu->bhy2);
-        }
-
-        imu->initialized = true;
-        LOG_INF("%s: Initialization complete", imu->name);
-        return true;
-    }
-
-    LOG_ERR("%s: Host interface not ready", imu->name);
-    return false;
+    ARG_UNUSED(dev);
+    ARG_UNUSED(cb);
+    ARG_UNUSED(pins);
+    k_sem_give(&bhi360_int_sem);
 }
 
-// Return type dictates if event is consumed. False = Not Consumed, True =
-// Consumed.
+// Return type dictates if event is consumed. False = Not Consumed, True = Consumed.
 static bool app_event_handler(const struct app_event_header *aeh)
 {
     if (is_module_state_event(aeh))
     {
         auto *event = cast_module_state_event(aeh);
-
         if (check_state(event, MODULE_ID(motion_sensor), MODULE_STATE_READY))
         {
             motion_sensor_init();

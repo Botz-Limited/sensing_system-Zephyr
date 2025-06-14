@@ -46,7 +46,6 @@
 #include <events/app_state_event.h>
 #include <events/bluetooth_state_event.h>
 #include <events/data_event.h>
-
 #include <app.hpp>
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
@@ -463,9 +462,6 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 default:
                     LOG_WRN("Unknown message type received (%d) from %s", msg.type, get_sender_name(msg.sender));
-                    // If an unknown type, and data_ptr is not NULL, it might be a memory leak
-                    // if it was allocated from a slab that we don't know how to free.
-                    // This scenario should ideally not happen with well-defined message types.
                     break;
             }
         }

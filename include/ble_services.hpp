@@ -21,10 +21,15 @@ void jis_set_err_status_notify(err_t new_device_status);
 void jis_clear_err_status_notify(err_t new_device_status);
 void jis_charge_status_notify(uint8_t new_charge_status);
 void jis_foot_sensor_notify(const foot_samples_t *samples_data);
-void jis_foot_sensor_log_available_notify(uint32_t log_id);
+void jis_foot_sensor_log_available_notify(uint8_t log_id);
 void jis_foot_sensor_req_id_path_notify(const char *file_path);
-void jis_bhi360_log_available_notify(uint32_t log_id);
+void jis_bhi360_log_available_notify(uint8_t log_id);
 void jis_bhi360_req_id_path_notify(const char *file_path);
+
+// BHI360 Bluetooth notify functions
+void jis_bhi360_quaternion_notify(const float* quat);
+void jis_bhi360_linear_accel_notify(const float* lacc);
+void jis_bhi360_step_count_notify(uint32_t step_count);
 
 void cs_log_data_notify(uint8_t stu);
 void cts_notify(void);

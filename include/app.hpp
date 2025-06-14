@@ -27,7 +27,7 @@ void app_log(const char *fmt, ...);
 struct foot_samples_t {
     uint16_t values[NUM_FOOT_SENSOR_CHANNELS]; // This array will now hold 8 uint16_t values
     // ... any other fields ...
-} __packed;
+};
 
 // Structures for BHI360 data (unchanged)
 typedef struct
@@ -39,22 +39,35 @@ typedef struct
 
 typedef struct
 {
+    float x, y, z;
+} bhi360_linear_accel_t; // Size: 12 bytes
+
+typedef struct
+{
     uint32_t step_count;
     uint32_t activity_duration_s;
 } bhi360_step_count_t; // Size: 8 bytes
+
+typedef struct
+{
+    float quat_x, quat_y, quat_z, quat_w, quat_accuracy;
+    float lacc_x, lacc_y, lacc_z;
+    uint32_t step_count;
+    uint64_t timestamp;
+} bhi360_log_record_t;
 
 // If you send commands, define a max size for the command string
 #define MAX_COMMAND_STRING_LEN 32 // Example max length for a command string
 typedef char command_data_t[MAX_COMMAND_STRING_LEN];
 
 typedef struct {
-    uint16_t file_sequence_id;
+    uint8_t file_sequence_id;
     char file_path[MAX_FILE_PATH_LEN];
 } new_log_info_msg_t;
 
 typedef struct {
     record_type_t type; // e.g., RECORD_HARDWARE_FOOT_SENSOR
-    uint32_t id;        // The sequence ID of the file to delete
+    uint8_t id;        // The sequence ID of the file to delete
 } delete_log_command_t;
 
 // Generic message wrapper with Union ---
@@ -67,7 +80,9 @@ typedef struct
     union {
         foot_samples_t foot_samples;
         bhi360_3d_mapping_t bhi360_3d_mapping;
+        bhi360_linear_accel_t bhi360_linear_accel;
         bhi360_step_count_t bhi360_step_count;
+        bhi360_log_record_t bhi360_log_record;
         new_log_info_msg_t new_hardware_log_file;
         command_data_t command_str; // For command messages
         delete_log_command_t delete_cmd;

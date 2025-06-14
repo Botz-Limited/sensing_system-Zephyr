@@ -27,6 +27,10 @@ namespace util
 constexpr std::size_t max_path_length = CONFIG_MAX_PATH_LEN;
 constexpr int post_turn_off_assert_sleep_s = 1;
 
+#ifndef UTIL_MAX_INTERNAL_PATH_LENGTH
+#define UTIL_MAX_INTERNAL_PATH_LENGTH 64 // or whatever is safe for your filesystem
+#endif
+
 inline void turn_off_then_assert_on_failure(const gpio_dt_spec *sleep_enable_pin)
 {
     gpio_pin_set_dt(sleep_enable_pin, 1);

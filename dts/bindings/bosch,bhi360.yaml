@@ -1,0 +1,21 @@
+description: Bosch BHI360 IMU Sensor
+
+compatible: "bosch,bhi360"
+
+include: spi-device.yaml
+
+properties:
+  int-gpios:
+    type: phandle-array
+    required: true
+    description: Interrupt GPIO for BHI360
+
+  reset-gpios:
+    type: phandle-array
+    required: false
+    description: Optional reset GPIO for BHI360
+
+  label:
+    required: true
+    type: string
+    description: Human readable string describing the device

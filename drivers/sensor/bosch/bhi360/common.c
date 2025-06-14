@@ -14,7 +14,7 @@ LOG_MODULE_DECLARE(motion_sensor);
 #define SPIM_NODE DT_NODELABEL(spi2)
 
 // Define SPI instance
-const nrfx_spim_t m_spi = NRFX_SPIM_INSTANCE(2); // Using SPIM2
+const nrfx_spim_t m_spi = NRFX_SPIM_INSTANCE(1); // Using SPIM1
 
 void setup_SPI(imu_device_t *imu)
 {
@@ -161,3 +161,6 @@ const char *get_sensor_name(uint8_t sensor_id)
             return "Unknown sensor";
     }
 }
+
+#include <zephyr/device.h>
+#include <zephyr/init.h>

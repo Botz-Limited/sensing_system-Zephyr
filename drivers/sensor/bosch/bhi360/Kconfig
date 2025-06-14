@@ -4,8 +4,8 @@
 menuconfig BHI360
     bool "Bosch Sensortec GmbH BHI360"
     default y
+    depends on DT_HAS_BOSCH_BHI360_ENABLED
     select SPI
-    select NRFX_SPIM0
     help
       Enable driver for Bosch Sensortec GmbH BHI360
 

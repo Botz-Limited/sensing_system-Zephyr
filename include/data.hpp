@@ -18,6 +18,7 @@
 #include <util.hpp>
 
 #include <events/data_event.h>
+#include <events/app_state_event.h>
 #include <events/record_id_event.h>
 
 #define data_wait_timer 2000
@@ -28,7 +29,7 @@ static constexpr int readdir_micro_sleep_ms = 1;
 static constexpr int empty_path_id = 0;
 
 err_t delete_directory(const char *path);
-uint32_t find_oldest_log_file(const char *file_prefix, record_type_t record_type, char *file_path);
+uint8_t find_oldest_log_file(const char *file_prefix, record_type_t record_type, char *file_path);
 
 
 // File prefixes for each sensor type
