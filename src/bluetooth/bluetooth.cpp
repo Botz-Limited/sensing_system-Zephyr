@@ -421,7 +421,16 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             get_sender_name(msg.sender),
                             (double)mapping_data->accel_x, (double)mapping_data->accel_y, (double)mapping_data->accel_z,
                             (double)mapping_data->gyro_x, (double)mapping_data->gyro_y, (double)mapping_data->gyro_z);
+                    jis_bhi360_data1_notify(mapping_data);
+                    break;
+                }
 
+                case MSG_TYPE_BHI360_LINEAR_ACCEL: {
+                    bhi360_linear_accel_t *lacc_data = &msg.data.bhi360_linear_accel;
+                    LOG_INF("Received BHI360 Linear Accel from %s: (%.2f,%.2f,%.2f)",
+                            get_sender_name(msg.sender),
+                            (double)lacc_data->x, (double)lacc_data->y, (double)lacc_data->z);
+                    jis_bhi360_data3_notify(lacc_data);
                     break;
                 }
 
@@ -429,7 +438,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
                     LOG_INF("Received BHI360 Step Count from %s: Steps=%u, ActivityDuration=%u s",
                             get_sender_name(msg.sender), step_data->step_count, step_data->activity_duration_s);
-
+                    jis_bhi360_data2_notify(step_data);
                     break;
                 }
 

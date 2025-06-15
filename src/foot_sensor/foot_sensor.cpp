@@ -26,6 +26,7 @@
 #include <app_event_manager.h>
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
+#include <events/foot_sensor_event.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -53,26 +54,28 @@ extern "C"
 #include <app.hpp>
 #include <errors.hpp>
 #include <foot_sensor.hpp>
+#include <status_codes.h>
+#include <ble_services.hpp>
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL); // NOLINT
 
-#define US_PER_SECOND 1000000UL
-#define SAADC_CHANNEL_COUNT 8
-#define SAADC_SAMPLE_RATE_HZ_NORMAL 10        // normal sampling rate (10 Hz)
-#define SAADC_SAMPLE_RATE_HZ_CALIBRATION 100 // Higher rate for quick calibration (1000 Hz = 1 ms period)
+static constexpr uint32_t US_PER_SECOND = 1000000UL;
+static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
+static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_NORMAL = 1;        // normal sampling rate (10 Hz)
+static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_CALIBRATION = 100; // Higher rate for quick calibration (1000 Hz = 1 ms period)
 
-#define TIME_TO_WAIT_US_NORMAL (uint32_t)(US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_NORMAL)
+static constexpr uint32_t TIME_TO_WAIT_US_NORMAL = US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_NORMAL;
 // New definition for calibration
-#define TIME_TO_WAIT_US_CALIBRATION (uint32_t)(US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_CALIBRATION)
+static constexpr uint32_t TIME_TO_WAIT_US_CALIBRATION = US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_CALIBRATION;
 
 // SAADC_BUFFER_SIZE is set to SAADC_CHANNEL_COUNT.
 // This means the SAADC_EVENT_DONE will trigger after one complete set of 8 channel readings.
-#define SAADC_BUFFER_SIZE SAADC_CHANNEL_COUNT
-#define SAADC_IRQ_PRIORITY 1           // Lower number means higher priority
-#define BUFFER_COUNT 2UL               // For double buffering
-#define SAMPLING_ITERATIONS UINT16_MAX // Continue sampling, never stop
+static constexpr uint8_t SAADC_BUFFER_SIZE = SAADC_CHANNEL_COUNT;
+static constexpr uint8_t SAADC_IRQ_PRIORITY = 1;           // Lower number means higher priority
+static constexpr uint8_t BUFFER_COUNT = 2;               // For double buffering
+static constexpr uint16_t SAMPLING_ITERATIONS = UINT16_MAX; // Continue sampling, never stop
 
-#define TIMER_INSTANCE_ID 0
+static constexpr uint8_t TIMER_INSTANCE_ID = 0;
 
 // Forward declarations
 static void saadc_event_handler(nrfx_saadc_evt_t const *p_event);
@@ -108,7 +111,7 @@ uint8_t dppi_channel_saadc_continuous; // For SAADC END -> SAADC START
 
 // Define foot_sensor_timer. Assuming it's a duration in ms for k_msleep.
 // You might want to get this from Kconfig or another source.
-#define foot_sensor_timer 1000 // Default to 1000ms (1 second) if not defined
+static constexpr uint16_t foot_sensor_timer = 1000; // Default to 1000ms (1 second) if not defined
 
 // This function is currently empty, kept as is.
 void foot_sensor_initializing_entry();
@@ -208,87 +211,42 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                     }
                     calibration_sample_counter++;
 
-                    if (calibration_sample_counter == CALIBRATION_SAMPLES_TO_AVG)
+                    // All calibration samples collected, calculate offsets
+                    for (uint16_t i = 0; i < samples_number; i++)
                     {
-                        // All calibration samples collected, calculate offsets
-                        for (uint16_t i = 0; i < samples_number; i++)
-                        {
-                            // Offset itself can be negative if calibration point is high, so int16_t is fine.
-                            saadc_offset[i] = (int16_t)(calibration_sum[i] / CALIBRATION_SAMPLES_TO_AVG);
-                        }
-                        // Set flag to true: calibration is complete
-                        calibration_done = true;
-                        LOG_INF("SAADC calibration complete. Readings will now be offset.");
-                        // Adjust timer to normal sampling rate after calibration
-                        nrfx_timer_disable(&timer_inst);
-                        uint32_t ticks = nrfx_timer_us_to_ticks(&timer_inst, TIME_TO_WAIT_US_NORMAL);
-                        nrfx_timer_extended_compare(&timer_inst, NRF_TIMER_CC_CHANNEL0, ticks,
-                                                    NRF_TIMER_SHORT_COMPARE0_CLEAR_MASK, false);
-                        nrfx_timer_clear(&timer_inst); // Keep this clear to restart timer from 0 with new compare value
-                        nrfx_timer_enable(&timer_inst);
-                        LOG_INF("Switched SAADC sampling rate to %u Hz (normal operation).",
-                                SAADC_SAMPLE_RATE_HZ_NORMAL);
+                        // Offset itself can be negative if calibration point is high, so int16_t is fine.
+                        saadc_offset[i] = (int16_t)(calibration_sum[i] / CALIBRATION_SAMPLES_TO_AVG);
                     }
+                    // Set flag to true: calibration is complete
+                    calibration_done = true;
+                    LOG_INF("SAADC calibration complete. Readings will now be offset.");
+                    // Adjust timer to normal sampling rate after calibration
+                    nrfx_timer_disable(&timer_inst);
+                    uint32_t ticks = nrfx_timer_us_to_ticks(&timer_inst, TIME_TO_WAIT_US_NORMAL);
+                    nrfx_timer_extended_compare(&timer_inst, NRF_TIMER_CC_CHANNEL0, ticks,
+                                                NRF_TIMER_SHORT_COMPARE0_CLEAR_MASK, false);
+                    nrfx_timer_clear(&timer_inst); // Keep this clear to restart timer from 0 with new compare value
+                    nrfx_timer_enable(&timer_inst);
+                    LOG_INF("Switched SAADC sampling rate to %u Hz (normal operation).", SAADC_SAMPLE_RATE_HZ_NORMAL);
                 }
             }
             else // Normal operation after calibration
             {
-                generic_message_t msg;
-
-                msg.sender = SENDER_FOOT_SENSOR_THREAD;
-                msg.type = MSG_TYPE_FOOT_SAMPLES;
-
-                // Populate the foot sensor data directly into the message's union member.
-                for (uint16_t i = 0; i < samples_number; i++)
+                if (logging_active)
                 {
-                    int16_t calibrated_value = raw_adc_data[i] - saadc_offset[i];
-                    msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
-                }
+                    generic_message_t msg;
 
-                // --- Auto start/stop logging based on channel 8 (index 7) ---
-                uint16_t channel8_value = msg.data.foot_samples.values[7];
+                    msg.sender = SENDER_FOOT_SENSOR_THREAD;
+                    msg.type = MSG_TYPE_FOOT_SAMPLES;
 
-                // Start logging if above threshold and not already active
-                if (!logging_active && channel8_value > ACTIVATE_LOGGING_THRESHOLD)
-                {
-                    generic_message_t cmd_msg = {};
-                    cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
-                    cmd_msg.type = MSG_TYPE_COMMAND;
-                    strncpy(cmd_msg.data.command_str, "START_LOGGING", sizeof(cmd_msg.data.command_str) - 1);
-                    cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
-
-                    int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
-                    if (cmd_ret == 0)
+                    // Populate the foot sensor data directly into the message's union member.
+                    for (uint16_t i = 0; i < samples_number; i++)
                     {
-                        LOG_INF("Auto-sent START_LOGGING command (channel 8 value: %u)", channel8_value);
-                        logging_active = true;
+                        int16_t calibrated_value = raw_adc_data[i] - saadc_offset[i];
+                        msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
                     }
-                    else
-                    {
-                        LOG_ERR("Failed to send START_LOGGING command: %d", cmd_ret);
-                    };
 
-                }
-                // Stop logging if below threshold and currently active
-                else if (logging_active && channel8_value < ACTIVATE_LOGGING_THRESHOLD)
-                {
-                    generic_message_t cmd_msg = {};
-                    cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
-                    cmd_msg.type = MSG_TYPE_COMMAND;
-                    strncpy(cmd_msg.data.command_str, "STOP_LOGGING", sizeof(cmd_msg.data.command_str) - 1);
-                    cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
-
-                  //  int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
-                  int cmd_ret =0;
-                    if (cmd_ret == 0)
-                    {
-                        LOG_INF("Auto-sent STOP_LOGGING command (channel 8 value: %u)", channel8_value);
-                        logging_active = false;
-                    }
-                    else
-                    {
-                        LOG_ERR("Failed to send STOP_LOGGING command: %d", cmd_ret);
-                    }
+                    k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
                 }
             }
             break;
@@ -498,6 +456,7 @@ void TIMER0_IRQHandler(void)
 }
 
 // Return type dictates if event is consumed. False = Not Consumed, True = Consumed.
+
 static bool app_event_handler(const struct app_event_header *aeh)
 {
     if (is_module_state_event(aeh))
@@ -511,6 +470,56 @@ static bool app_event_handler(const struct app_event_header *aeh)
         }
         return false;
     }
+    if (is_foot_sensor_start_activity_event(aeh))
+    {
+        // Trigger the same logic as auto-start logging
+        if (!logging_active)
+        {
+            generic_message_t cmd_msg = {};
+            cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
+            cmd_msg.type = MSG_TYPE_COMMAND;
+            strncpy(cmd_msg.data.command_str, "START_LOGGING_FOOT_SENSOR", sizeof(cmd_msg.data.command_str) - 1);
+            cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
+            cmd_msg.sampling_frequency = SAADC_SAMPLE_RATE_HZ_NORMAL;
+            strncpy(cmd_msg.fw_version, CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION, sizeof(cmd_msg.fw_version) - 1);
+            cmd_msg.fw_version[sizeof(cmd_msg.fw_version) - 1] = '\0';
+
+            int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+            if (cmd_ret == 0)
+            {
+                LOG_INF("Sent START_LOGGING_FOOT_SENSOR command (via event)");
+                logging_active = true;
+            }
+            else
+            {
+                LOG_ERR("Failed to send START_LOGGING_FOOT_SENSOR command: %d", cmd_ret);
+            }
+        }
+        return false;
+    }
+    if (is_foot_sensor_stop_activity_event(aeh))
+    {
+        LOG_INF("Received foot_sensor_stop_activity_event");
+        if (logging_active)
+        {
+            generic_message_t cmd_msg = {};
+            cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
+            cmd_msg.type = MSG_TYPE_COMMAND;
+            strncpy(cmd_msg.data.command_str, "STOP_LOGGING_FOOT_SENSOR", sizeof(cmd_msg.data.command_str) - 1);
+            cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
+            int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+            if (cmd_ret == 0)
+            {
+                LOG_INF("Sent STOP_LOGGING_FOOT_SENSOR command (via event)");
+                logging_active = false;
+            }
+            else
+            {
+                LOG_ERR("Failed to send STOP_LOGGING_FOOT_SENSOR command: %d", cmd_ret);
+            }
+        }
+        return false;
+    }
     return false;
 }
 
@@ -518,3 +527,5 @@ APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, module_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);
+APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_start_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_stop_activity_event);

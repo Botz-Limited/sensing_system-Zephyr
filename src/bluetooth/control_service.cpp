@@ -95,6 +95,20 @@ static struct bt_uuid_128 delete_foot_log_command_uuid =
 static struct bt_uuid_128 delete_bhi360_log_command_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b683, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae)); // Incrementing further
 
+// --- New: UUID for the start activity characteristic. ---
+static struct bt_uuid_128 start_activity_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b684, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
+// --- New: UUID for the stop activity characteristic. ---
+static struct bt_uuid_128 stop_activity_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b685, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
+// Forward declarations for start/stop activity handlers
+static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_stop_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+
 /**
  * @brief UUID for the set time command characteristic.
  * This UUID identifies the characteristic for setting the device's time.
@@ -127,18 +141,30 @@ BT_GATT_SERVICE_DEFINE(
                            BT_GATT_PERM_WRITE_ENCRYPT, nullptr,
                            write_set_time_control_vnd, static_cast<void *>(&set_time_control)),
 
-BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY, // Added NOTIFY for status feedback
+BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE, // Added NOTIFY for status feedback
                            BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
                            read_delete_foot_log_command_vnd, // Read callback for current deletion ID
                            write_delete_foot_log_command_vnd, static_cast<void *>(nullptr)), // No specific data pointer needed if id is read from buffer
     BT_GATT_CCC(cs_delete_foot_log_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // New: Delete BHI360 Log Characteristic
-    BT_GATT_CHARACTERISTIC(&delete_bhi360_log_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY, // Added NOTIFY for status feedback
+    BT_GATT_CHARACTERISTIC(&delete_bhi360_log_command_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE, // Added NOTIFY for status feedback
                            BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
                            read_delete_bhi360_log_command_vnd, // Read callback for current deletion ID
                            write_delete_bhi360_log_command_vnd, static_cast<void *>(nullptr)), // No specific data pointer needed if id is read from buffer
-    BT_GATT_CCC(cs_delete_bhi360_log_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+    BT_GATT_CCC(cs_delete_bhi360_log_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // New: Start Activity Characteristic
+    BT_GATT_CHARACTERISTIC(&start_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_WRITE_ENCRYPT,
+                           nullptr, write_start_activity_command_vnd, nullptr),
+    BT_GATT_CCC(cs_start_activity_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // New: Stop Activity Characteristic
+    BT_GATT_CHARACTERISTIC(&stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
+                           BT_GATT_PERM_WRITE_ENCRYPT,
+                           nullptr, write_stop_activity_command_vnd, nullptr),
+    BT_GATT_CCC(cs_stop_activity_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
 );
 
 /**
@@ -272,6 +298,85 @@ static uint32_t swap_to_little_endian(uint32_t value)
 {
     return ((value << 24) & 0xFF000000) | ((value << 8) & 0x00FF0000) | ((value >> 8) & 0x0000FF00) |
            ((value >> 24) & 0x000000FF);
+}
+
+// --- Start Activity Characteristic Handlers ---
+static bool start_activity_status_subscribed = false;
+static bool stop_activity_status_subscribed = false;
+
+#include <app_event_manager.h>
+#include <events/foot_sensor_event.h>
+#include <events/motion_sensor_event.h>
+
+static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t value = *((const uint8_t *)buf);
+
+    if (value == 1) {
+        struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+
+        struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+
+        LOG_INF("Submitted start activity events for foot sensor and motion sensor (input=1).");
+    } else {
+        LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
+    }
+
+    return len;
+}
+
+static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    start_activity_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Start Activity CCC changed: %u", value);
+}
+
+// --- Stop Activity Characteristic Handlers ---
+static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t value = *((const uint8_t *)buf);
+
+    if (value == 1) {
+        struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+
+        struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+
+        LOG_INF("Submitted stop activity events for foot sensor and motion sensor (input=1).");
+    } else {
+        LOG_WRN("Stop activity characteristic write ignored (input=%u).", value);
+    }
+
+    return len;
+}
+
+static void cs_stop_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    stop_activity_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Stop Activity CCC changed: %u", value);
 }
 
 static ssize_t write_set_time_control_vnd(struct bt_conn *conn,

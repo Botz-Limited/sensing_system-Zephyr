@@ -19,11 +19,14 @@
 #include <cstdio>
 #include <cstring>
 
+#include <app.hpp>
 #include <app_event_manager.h>
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
-#include <app.hpp>
+#include <events/motion_sensor_event.h>
 #include <motion_sensor.hpp>
+#include <status_codes.h>
+#include <ble_services.hpp>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
@@ -34,14 +37,15 @@
 #include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2.h"
 #include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.h"
 #include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/firmware/bhi360/BHI360_Aux_BMM150.fw.h"
-extern "C" {
+extern "C"
+{
 #include "/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/common.h"
 }
 
 #include <errors.hpp>
 
-#define BHY2_RD_WR_LEN 256
-#define WORK_BUFFER_SIZE 2048
+static constexpr uint16_t BHY2_RD_WR_LEN = 256;
+static constexpr uint16_t WORK_BUFFER_SIZE = 2048;
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_LOG_DEFAULT_LEVEL); // NOLINT
 
@@ -57,6 +61,9 @@ static struct spi_config bhi360_spi_cfg = {
     .cs = NULL // We'll use Zephyr's GPIO API for manual CS if needed
 };
 
+static bool logging_active = false; // Tracks current logging state
+static float configured_sample_rate = 20.0f; // Tracks the configured sample rate (Hz)
+
 // INT and RESET GPIOs from device tree
 #if DT_NODE_HAS_PROP(BHI360_NODE, int_gpios)
 static const struct gpio_dt_spec bhi360_int = GPIO_DT_SPEC_GET(BHI360_NODE, int_gpios);
@@ -65,9 +72,9 @@ static const struct gpio_dt_spec bhi360_int = GPIO_DT_SPEC_GET(BHI360_NODE, int_
 static const struct gpio_dt_spec bhi360_reset = GPIO_DT_SPEC_GET(BHI360_NODE, reset_gpios);
 #endif
 
-#define QUAT_SENSOR_ID BHY2_SENSOR_ID_RV  // Use Rotation Vector sensor ID
-#define LACC_SENSOR_ID BHY2_SENSOR_ID_ACC // Use Linear Acceleration sensor ID
-#define STEP_COUNTER_SENSOR_ID BHY2_SENSOR_ID_STC // Use Step Counter sensor ID
+static constexpr uint8_t QUAT_SENSOR_ID = BHY2_SENSOR_ID_RV;          // Use Rotation Vector sensor ID
+static constexpr uint8_t LACC_SENSOR_ID = BHY2_SENSOR_ID_ACC;         // Use Linear Acceleration sensor ID
+static constexpr uint8_t STEP_COUNTER_SENSOR_ID = BHY2_SENSOR_ID_STC; // Use Step Counter sensor ID
 
 static struct bhy2_dev bhy2;
 
@@ -107,6 +114,13 @@ static void motion_sensor_init()
     if (!device_is_ready(bhi360_dev))
     {
         LOG_ERR("BHI360 device not ready");
+        return;
+    }
+    // Additional check: try to read product ID to verify device presence
+    uint8_t probe_product_id = 0;
+    int8_t probe_rslt = bhy2_get_product_id(&probe_product_id, &bhy2);
+    if (probe_rslt != BHY2_OK || probe_product_id != BHY2_PRODUCT_ID) {
+        LOG_ERR("BHI360 hardware not detected or not responding (probe_rslt=%d, id=0x%02X)", probe_rslt, probe_product_id);
         return;
     }
 #if DT_NODE_HAS_PROP(BHI360_NODE, reset_gpios)
@@ -201,6 +215,7 @@ static void motion_sensor_init()
         // 8. Register callbacks
         LOG_INF("BHI360: Registering callbacks");
         float sample_rate = 20.0; // Example: 20 Hz for all sensors
+        configured_sample_rate = sample_rate; // Store the configured sample rate
         uint32_t report_latency_ms = 0;
         // Configure quaternion sensor
         LOG_INF("BHI360: Configuring quaternion sensor...");
@@ -266,10 +281,12 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
 
     bool updated = false;
 
-    switch (callback_info->sensor_id) {
+    switch (callback_info->sensor_id)
+    {
         case QUAT_SENSOR_ID: {
             struct bhy2_data_quaternion data;
-            if (callback_info->data_size != 11) {
+            if (callback_info->data_size != 11)
+            {
                 LOG_ERR("Quaternion: invalid data size: %d", callback_info->data_size);
                 return;
             }
@@ -293,14 +310,13 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             break;
         }
         case STEP_COUNTER_SENSOR_ID: {
-            if (callback_info->data_size < 4) {
+            if (callback_info->data_size < 4)
+            {
                 LOG_ERR("Step counter: invalid data size: %d", callback_info->data_size);
                 return;
             }
-            latest_step_count = (callback_info->data_ptr[0]) |
-                                (callback_info->data_ptr[1] << 8) |
-                                (callback_info->data_ptr[2] << 16) |
-                                (callback_info->data_ptr[3] << 24);
+            latest_step_count = (callback_info->data_ptr[0]) | (callback_info->data_ptr[1] << 8) |
+                                (callback_info->data_ptr[2] << 16) | (callback_info->data_ptr[3] << 24);
             updated = true;
             break;
         }
@@ -310,7 +326,8 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
     }
 
     // After any update, pack and send the combined record
-    if (updated) {
+    if (updated)
+    {
         // Send combined log record to data module
         bhi360_log_record_t record{};
         record.quat_x = latest_quat_x;
@@ -323,39 +340,42 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
         record.lacc_z = latest_lacc_z;
         record.step_count = latest_step_count;
         record.timestamp = latest_timestamp;
-        generic_message_t msg{};
-        msg.sender = SENDER_BHI360_THREAD;
-        msg.type = MSG_TYPE_BHI360_LOG_RECORD;
-        msg.data.bhi360_log_record = record;
-        k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
+        if (logging_active == true)
+        {
+            generic_message_t msg{};
+            msg.sender = SENDER_BHI360_THREAD;
+            msg.type = MSG_TYPE_BHI360_LOG_RECORD;
+            msg.data.bhi360_log_record = record;
+            k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
 
-        // Send individual values to Bluetooth module
-        // Quaternion (3D mapping)
-        generic_message_t qmsg{};
-        qmsg.sender = SENDER_BHI360_THREAD;
-        qmsg.type = MSG_TYPE_BHI360_3D_MAPPING;
-        qmsg.data.bhi360_3d_mapping.gyro_x = latest_quat_x;
-        qmsg.data.bhi360_3d_mapping.gyro_y = latest_quat_y;
-        qmsg.data.bhi360_3d_mapping.gyro_z = latest_quat_z;
-        // Optionally add .accel_x/y/z if you want to use them for something else
-        k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
+            // Send individual values to Bluetooth module
+            // Quaternion (3D mapping)
+            generic_message_t qmsg{};
+            qmsg.sender = SENDER_BHI360_THREAD;
+            qmsg.type = MSG_TYPE_BHI360_3D_MAPPING;
+            qmsg.data.bhi360_3d_mapping.gyro_x = latest_quat_x;
+            qmsg.data.bhi360_3d_mapping.gyro_y = latest_quat_y;
+            qmsg.data.bhi360_3d_mapping.gyro_z = latest_quat_z;
+            // Optionally add .accel_x/y/z if you want to use them for something else
+            k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
 
-        // Linear acceleration
-        generic_message_t lmsg{};
-        lmsg.sender = SENDER_BHI360_THREAD;
-        lmsg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
-        lmsg.data.bhi360_linear_accel.x = latest_lacc_x;
-        lmsg.data.bhi360_linear_accel.y = latest_lacc_y;
-        lmsg.data.bhi360_linear_accel.z = latest_lacc_z;
-        k_msgq_put(&bluetooth_msgq, &lmsg, K_NO_WAIT);
+            // Linear acceleration
+            generic_message_t lmsg{};
+            lmsg.sender = SENDER_BHI360_THREAD;
+            lmsg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
+            lmsg.data.bhi360_linear_accel.x = latest_lacc_x;
+            lmsg.data.bhi360_linear_accel.y = latest_lacc_y;
+            lmsg.data.bhi360_linear_accel.z = latest_lacc_z;
+            k_msgq_put(&bluetooth_msgq, &lmsg, K_NO_WAIT);
 
-        // Step count
-        generic_message_t smsg{};
-        smsg.sender = SENDER_BHI360_THREAD;
-        smsg.type = MSG_TYPE_BHI360_STEP_COUNT;
-        smsg.data.bhi360_step_count.step_count = latest_step_count;
-        smsg.data.bhi360_step_count.activity_duration_s = 0; // Fill if available
-        k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
+            // Step count
+            generic_message_t smsg{};
+            smsg.sender = SENDER_BHI360_THREAD;
+            smsg.type = MSG_TYPE_BHI360_STEP_COUNT;
+            smsg.data.bhi360_step_count.step_count = latest_step_count;
+            smsg.data.bhi360_step_count.activity_duration_s = 0; // Fill if available
+            k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
+        }
     }
 }
 
@@ -473,7 +493,7 @@ static int8_t upload_firmware(struct bhy2_dev *dev)
 #else
         rslt = bhy2_upload_firmware_to_ram_partly(&bhy2_firmware_image[i], len, i, incr, dev);
 #endif
-       LOG_INF("%.2f%% complete", (double)((float)(i + incr) / (float)len * 100.0f));
+        LOG_INF("%.2f%% complete", (double)((float)(i + incr) / (float)len * 100.0f));
     }
     return rslt;
 }
@@ -495,14 +515,67 @@ static void bhi360_int_handler(const struct device *dev, struct gpio_callback *c
 }
 
 // Return type dictates if event is consumed. False = Not Consumed, True = Consumed.
+
 static bool app_event_handler(const struct app_event_header *aeh)
 {
     if (is_module_state_event(aeh))
     {
         auto *event = cast_module_state_event(aeh);
-        if (check_state(event, MODULE_ID(motion_sensor), MODULE_STATE_READY))
+        if (check_state(event, MODULE_ID(foot_sensor), MODULE_STATE_READY))
         {
             motion_sensor_init();
+        }
+        return false;
+    }
+    if (is_motion_sensor_start_activity_event(aeh))
+    {
+        // Trigger the same logic as auto-start logging for BHI360
+        if (!logging_active)
+        {
+            generic_message_t cmd_msg = {};
+            cmd_msg.sender = SENDER_BHI360_THREAD;
+            cmd_msg.type = MSG_TYPE_COMMAND;
+            strncpy(cmd_msg.data.command_str, "START_LOGGING_BHI360", sizeof(cmd_msg.data.command_str) - 1);
+            cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
+            // Use the actual BHI360 sample rate here
+            cmd_msg.sampling_frequency = configured_sample_rate;
+            strncpy(cmd_msg.fw_version, CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION, sizeof(cmd_msg.fw_version) - 1);
+            cmd_msg.fw_version[sizeof(cmd_msg.fw_version) - 1] = '\0';
+
+            LOG_INF("Motion sensor sending stop command: '%s', type: %d", cmd_msg.data.command_str, cmd_msg.type);
+            int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+            if (cmd_ret == 0)
+            {
+                LOG_INF("Sent START_LOGGING_BHI360 command (via event)");
+                logging_active = true;
+            }
+            else
+            {
+                LOG_ERR("Failed to send START_LOGGING_BHI360 command: %d", cmd_ret);
+            }
+        }
+        return false;
+    }
+    if (is_motion_sensor_stop_activity_event(aeh))
+    {
+        LOG_INF("Received motion_sensor_stop_activity_event");
+        if (logging_active)
+        {
+            generic_message_t cmd_msg = {};
+            cmd_msg.sender = SENDER_BHI360_THREAD;
+            cmd_msg.type = MSG_TYPE_COMMAND;
+            strncpy(cmd_msg.data.command_str, "STOP_LOGGING_BHI360", sizeof(cmd_msg.data.command_str) - 1);
+            cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
+            int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+            if (cmd_ret == 0)
+            {
+                LOG_INF("Sent STOP_LOGGING_BHI360 command (via event)");
+                logging_active = false;
+            }
+            else
+            {
+                LOG_ERR("Failed to send STOP_LOGGING_BHI360 command: %d", cmd_ret);
+            }
         }
         return false;
     }
@@ -513,3 +586,5 @@ APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, module_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);
+APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_start_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_stop_activity_event);

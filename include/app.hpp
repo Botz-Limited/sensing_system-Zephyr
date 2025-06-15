@@ -77,6 +77,9 @@ typedef struct
 {
     sender_type_t sender;
     msg_type_t type;
+    // Metadata for command messages (ignored for sensor data)
+    char fw_version[32];
+    uint32_t sampling_frequency;
     union {
         foot_samples_t foot_samples;
         bhi360_3d_mapping_t bhi360_3d_mapping;

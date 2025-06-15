@@ -1,0 +1,201 @@
+BHI360 Virtual Sensor Features: Enable/Disable Commands
+=====================================================
+
+For each feature, use the following commands:
+
+Enable:
+    bhy2_set_virt_sensor_cfg(SENSOR_ID, sample_rate, report_latency_ms, &bhy2);
+    // e.g. bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STC, 25.0f, 0, &bhy2);
+
+Disable:
+    bhy2_set_virt_sensor_cfg(SENSOR_ID, 0.0f, 0, &bhy2);
+    // e.g. bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STC, 0.0f, 0, &bhy2);
+
+List of Features (Sensor IDs) and Example Commands:
+--------------------------------------------------
+
+Accelerometer passthrough (BHY2_SENSOR_ID_ACC_PASS)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_PASS, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_PASS, 0.0f, 0, &bhy2);
+
+Accelerometer uncalibrated (BHY2_SENSOR_ID_ACC_RAW)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_RAW, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_RAW, 0.0f, 0, &bhy2);
+
+Accelerometer corrected (BHY2_SENSOR_ID_ACC)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC, 0.0f, 0, &bhy2);
+
+Accelerometer offset (BHY2_SENSOR_ID_ACC_BIAS)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_BIAS, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_BIAS, 0.0f, 0, &bhy2);
+
+Accelerometer corrected wake up (BHY2_SENSOR_ID_ACC_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_WU, 0.0f, 0, &bhy2);
+
+Accelerometer uncalibrated wake up (BHY2_SENSOR_ID_ACC_RAW_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_RAW_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ACC_RAW_WU, 0.0f, 0, &bhy2);
+
+Virtual Sensor ID for Accelerometer (BHY2_SENSOR_ID_SI_ACCEL)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_SI_ACCEL, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_SI_ACCEL, 0.0f, 0, &bhy2);
+
+Gyroscope passthrough (BHY2_SENSOR_ID_GYRO_PASS)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_PASS, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_PASS, 0.0f, 0, &bhy2);
+
+Gyroscope uncalibrated (BHY2_SENSOR_ID_GYRO_RAW)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_RAW, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_RAW, 0.0f, 0, &bhy2);
+
+Gyroscope corrected (BHY2_SENSOR_ID_GYRO)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO, 0.0f, 0, &bhy2);
+
+Gyroscope offset (BHY2_SENSOR_ID_GYRO_BIAS)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_BIAS, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_BIAS, 0.0f, 0, &bhy2);
+
+Gyroscope wake up (BHY2_SENSOR_ID_GYRO_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_WU, 0.0f, 0, &bhy2);
+
+Gyroscope uncalibrated wake up (BHY2_SENSOR_ID_GYRO_RAW_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_RAW_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GYRO_RAW_WU, 0.0f, 0, &bhy2);
+
+Virtual Sensor ID for Gyroscope (BHY2_SENSOR_ID_SI_GYROS)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_SI_GYROS, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_SI_GYROS, 0.0f, 0, &bhy2);
+
+Magnetometer passthrough (BHY2_SENSOR_ID_MAG_PASS)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_PASS, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_PASS, 0.0f, 0, &bhy2);
+
+Magnetometer uncalibrated (BHY2_SENSOR_ID_MAG_RAW)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_RAW, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_RAW, 0.0f, 0, &bhy2);
+
+Magnetometer corrected (BHY2_SENSOR_ID_MAG)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG, 0.0f, 0, &bhy2);
+
+Magnetometer offset (BHY2_SENSOR_ID_MAG_BIAS)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_BIAS, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_BIAS, 0.0f, 0, &bhy2);
+
+Magnetometer wake up (BHY2_SENSOR_ID_MAG_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_WU, 0.0f, 0, &bhy2);
+
+Magnetometer uncalibrated wake up (BHY2_SENSOR_ID_MAG_RAW_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_RAW_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MAG_RAW_WU, 0.0f, 0, &bhy2);
+
+Gravity vector (BHY2_SENSOR_ID_GRA)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GRA, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GRA, 0.0f, 0, &bhy2);
+
+Gravity vector wake up (BHY2_SENSOR_ID_GRA_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GRA_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GRA_WU, 0.0f, 0, &bhy2);
+
+Linear acceleration (BHY2_SENSOR_ID_LACC)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_LACC, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_LACC, 0.0f, 0, &bhy2);
+
+Linear acceleration wake up (BHY2_SENSOR_ID_LACC_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_LACC_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_LACC_WU, 0.0f, 0, &bhy2);
+
+Rotation vector (BHY2_SENSOR_ID_RV)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_RV, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_RV, 0.0f, 0, &bhy2);
+
+Rotation vector wake up (BHY2_SENSOR_ID_RV_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_RV_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_RV_WU, 0.0f, 0, &bhy2);
+
+Game rotation vector (BHY2_SENSOR_ID_GAMERV)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GAMERV, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GAMERV, 0.0f, 0, &bhy2);
+
+Game rotation vector wake up (BHY2_SENSOR_ID_GAMERV_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GAMERV_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GAMERV_WU, 0.0f, 0, &bhy2);
+
+Geo-magnetic rotation vector (BHY2_SENSOR_ID_GEORV)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GEORV, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GEORV, 0.0f, 0, &bhy2);
+
+Geo-magnetic rotation vector wake up (BHY2_SENSOR_ID_GEORV_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GEORV_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GEORV_WU, 0.0f, 0, &bhy2);
+
+Orientation (BHY2_SENSOR_ID_ORI)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ORI, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ORI, 0.0f, 0, &bhy2);
+
+Orientation wake up (BHY2_SENSOR_ID_ORI_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ORI_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_ORI_WU, 0.0f, 0, &bhy2);
+
+Tilt detector (BHY2_SENSOR_ID_TILT_DETECTOR)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_TILT_DETECTOR, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_TILT_DETECTOR, 0.0f, 0, &bhy2);
+
+Step detector (BHY2_SENSOR_ID_STD)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STD, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STD, 0.0f, 0, &bhy2);
+
+Step counter (BHY2_SENSOR_ID_STC)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STC, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STC, 0.0f, 0, &bhy2);
+
+Step counter wake up (BHY2_SENSOR_ID_STC_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STC_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STC_WU, 0.0f, 0, &bhy2);
+
+Significant motion (BHY2_SENSOR_ID_SIG)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_SIG, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_SIG, 0.0f, 0, &bhy2);
+
+Wake gesture (BHY2_SENSOR_ID_WAKE_GESTURE)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_WAKE_GESTURE, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_WAKE_GESTURE, 0.0f, 0, &bhy2);
+
+Glance gesture (BHY2_SENSOR_ID_GLANCE_GESTURE)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GLANCE_GESTURE, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_GLANCE_GESTURE, 0.0f, 0, &bhy2);
+
+Pickup gesture (BHY2_SENSOR_ID_PICKUP_GESTURE)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_PICKUP_GESTURE, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_PICKUP_GESTURE, 0.0f, 0, &bhy2);
+
+Activity recognition (BHY2_SENSOR_ID_AR)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_AR, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_AR, 0.0f, 0, &bhy2);
+
+Wrist tilt gesture (BHY2_SENSOR_ID_WRIST_TILT_GESTURE)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_WRIST_TILT_GESTURE, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_WRIST_TILT_GESTURE, 0.0f, 0, &bhy2);
+
+Device orientation (BHY2_SENSOR_ID_DEVICE_ORI)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_DEVICE_ORI, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_DEVICE_ORI, 0.0f, 0, &bhy2);
+
+Device orientation wake up (BHY2_SENSOR_ID_DEVICE_ORI_WU)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_DEVICE_ORI_WU, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_DEVICE_ORI_WU, 0.0f, 0, &bhy2);
+
+Stationary detect (BHY2_SENSOR_ID_STATIONARY_DET)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STATIONARY_DET, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_STATIONARY_DET, 0.0f, 0, &bhy2);
+
+Motion detect (BHY2_SENSOR_ID_MOTION_DET)
+  Enable:  bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MOTION_DET, sample_rate, report_latency_ms, &bhy2);
+  Disable: bhy2_set_virt_sensor_cfg(BHY2_SENSOR_ID_MOTION_DET, 0.0f, 0, &bhy2);
+
+// ... (and so on for all other features listed in the header)

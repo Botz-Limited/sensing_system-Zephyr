@@ -21,7 +21,7 @@
 #include <events/app_state_event.h>
 #include <events/record_id_event.h>
 
-#define data_wait_timer 2000
+constexpr uint32_t data_wait_timer = 2000;
 
 constexpr uint32_t one_epoch_day_secs = 86400;
 constexpr uint32_t one_epoch_week_secs = 604800;

@@ -31,11 +31,12 @@
 #include <app.hpp>
 #include <ble_services.hpp>
 #include <util.hpp>
+#include <status_codes.h>
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
-static uint32_t error_bitfield_data = 0;
-static uint32_t previous_error_bitfield_data = 0; // Store the previous value of error_bitfield_data
+static uint32_t device_status_bitfield = 0;
+static uint32_t previous_device_status_bitfield = 0; // Store the previous value
 static bool init_status_bt_update = false;        // A flag to force the first update
 
 static uint8_t charge_status = 0;
@@ -57,7 +58,7 @@ static uint8_t ct_update = 0;
 // 1: 3D Mapping, 2: Step Count, 3: (placeholder, update as needed)
 static bhi360_3d_mapping_t bhi360_data1_value = {0};
 static bhi360_step_count_t bhi360_data2_value = {0};
-static int bhi360_data3_value = 0; // Placeholder, update to your third struct if needed
+static bhi360_linear_accel_t bhi360_data3_value = {}; // Now holds linear acceleration struct
 static bool bhi360_data1_subscribed = false;
 static bool bhi360_data2_subscribed = false;
 static bool bhi360_data3_subscribed = false;
@@ -164,7 +165,7 @@ BT_GATT_SERVICE_DEFINE(
                             BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
                             BT_GATT_PERM_READ_ENCRYPT,
                             jis_status_read, nullptr,
-                            static_cast<void *>(&error_bitfield_data)),
+                            static_cast<void *>(&device_status_bitfield)),
     BT_GATT_CCC(jis_status_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // Foot Sensor samples Characteristic
@@ -246,36 +247,18 @@ BT_GATT_SERVICE_DEFINE(
  * @param status
  *
  */
-void jis_set_err_status_notify(err_t new_device_status)
+// Set and notify device status (bitfield)
+void set_device_status(uint32_t new_status)
 {
-    switch (new_device_status)
-    {
-
-        default:
-            LOG_WRN("UNKNOWN device fault status reported: %d", (int)new_device_status);
-            break;
-    }
-
-    // Check if error_bitfield_data has changed, update BT, only if there is difference in value
-    if (((!init_status_bt_update) && (error_bitfield_data != 0)) ||
-        ((error_bitfield_data != previous_error_bitfield_data) && (error_bitfield_data != 0)))
-    {
-        if (status_subscribed)
-        {
+    if (device_status_bitfield != new_status || !init_status_bt_update) {
+        device_status_bitfield = new_status;
+        if (status_subscribed) {
             auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &STATUS_UUID.uuid);
-            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&error_bitfield_data),
-                           sizeof(error_bitfield_data));
-            LOG_DBG(" Set Fault status: status user data: 0x%X\n", error_bitfield_data);
+            bt_gatt_notify(nullptr, status_gatt, &device_status_bitfield, sizeof(device_status_bitfield));
+            LOG_DBG("Device status updated and notified: 0x%08X", device_status_bitfield);
         }
-
-        // Update the previous value, after reporting the error
-        previous_error_bitfield_data = error_bitfield_data;
+        previous_device_status_bitfield = device_status_bitfield;
         init_status_bt_update = true;
-    }
-
-    else
-    {
-        LOG_WRN("Errors reported but are disabled due to FCT Login");
     }
 }
 
@@ -289,31 +272,30 @@ void jis_clear_err_status_notify(err_t new_device_status)
 {
     switch (new_device_status)
     {
-
         default:
             LOG_WRN("UNKNOWN device clear status reported: %d", (int)new_device_status);
             break;
     }
-    // Check if error_bitfield_data has changed or update it if its the first time
-    if (!init_status_bt_update || error_bitfield_data != previous_error_bitfield_data)
+    // Check if device_status_bitfield has changed or update it if its the first time
+    if (!init_status_bt_update || device_status_bitfield != previous_device_status_bitfield)
     {
         if (status_subscribed)
         {
             auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &STATUS_UUID.uuid);
-            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&error_bitfield_data),
-                           sizeof(error_bitfield_data));
-            LOG_INF("Clear Bit field Data: 0x%X\n", error_bitfield_data);
+            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&device_status_bitfield),
+                           sizeof(device_status_bitfield));
+            LOG_INF("Clear Bit field Data: 0x%X\n", device_status_bitfield);
             // create the critical error event and fill in the status
         }
 
-        previous_error_bitfield_data = error_bitfield_data; // Update the previous value
+        previous_device_status_bitfield = device_status_bitfield; // Update the previous value
 
         // All monitored bits are cleared, allow system reset to be cleared
         // Don't clear it at the first time, the static variable is cleared in the warm reboot.
-        if ((error_bitfield_data == 0) && (init_status_bt_update))
+        if ((device_status_bitfield == 0) && (init_status_bt_update))
         {
-            LOG_WRN("error_bitfield_data %d, previous_error_bitfield_data: %d init_status_bt_update: %d",
-                    error_bitfield_data, previous_error_bitfield_data, init_status_bt_update);
+            LOG_WRN("device_status_bitfield %d, previous_device_status_bitfield: %d init_status_bt_update: %d",
+                    device_status_bitfield, previous_device_status_bitfield, init_status_bt_update);
         }
         init_status_bt_update = true;
     }
@@ -407,8 +389,8 @@ static ssize_t jis_read_current_time(struct bt_conn *conn, const struct bt_gatt_
 static ssize_t jis_status_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                                uint16_t offset)
 {
-    auto *value = static_cast<uint16_t *>(attr->user_data);
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, value, sizeof(error_bitfield_data));
+    // Always return the current device status bitfield
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &device_status_bitfield, sizeof(device_status_bitfield));
 }
 
 static ssize_t jis_foot_sensor_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
@@ -747,14 +729,14 @@ static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr *attr, ui
 }
 static ssize_t jis_bhi360_data3_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_data3_value));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_linear_accel_t));
 }
-void jis_bhi360_data3_notify(const int *data)
+void jis_bhi360_data3_notify(const bhi360_linear_accel_t *data)
 {
-    bhi360_data3_value = *data;
+    memcpy(&bhi360_data3_value, data, sizeof(bhi360_linear_accel_t));
     if (bhi360_data3_subscribed) {
         auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data3_uuid.uuid);
-        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data3_value), sizeof(bhi360_data3_value));
+        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data3_value), sizeof(bhi360_linear_accel_t));
     }
 }
 

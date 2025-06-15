@@ -26,7 +26,13 @@ void jis_foot_sensor_req_id_path_notify(const char *file_path);
 void jis_bhi360_log_available_notify(uint8_t log_id);
 void jis_bhi360_req_id_path_notify(const char *file_path);
 
+// Device status setter (bitfield)
+void set_device_status(uint32_t new_status);
+
 // BHI360 Bluetooth notify functions
+void jis_bhi360_data1_notify(const bhi360_3d_mapping_t* data);
+void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
+void jis_bhi360_data3_notify(const bhi360_linear_accel_t* data);
 void jis_bhi360_quaternion_notify(const float* quat);
 void jis_bhi360_linear_accel_notify(const float* lacc);
 void jis_bhi360_step_count_notify(uint32_t step_count);

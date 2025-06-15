@@ -28,6 +28,20 @@ message BHI360_StepCounterData {
   uint32 activity_duration_s = 3;
 }
 
+// --- BHI360 Combined Log Record (matches bhi360_log_record_t) ---
+message BHI360LogRecord {
+  float quat_x = 1;
+  float quat_y = 2;
+  float quat_z = 3;
+  float quat_w = 4;
+  float quat_accuracy = 5;
+  float lacc_x = 6;
+  float lacc_y = 7;
+  float lacc_z = 8;
+  uint32 step_count = 9;
+  uint64 timestamp = 10;
+}
+
 // BHI360 specific message for logging session metadata
 message BHI360SensingData {
   string firmware_version = 1;
@@ -48,5 +62,6 @@ message BHI360LogMessage {
     BHI360_StepCounterData bhi360_step_counter = 3;
     BHI360SensingData sensing_data = 4;
     BHI360SessionEnd session_end = 5;
+    BHI360LogRecord bhi360_log_record = 6; // New: packed log record
   }
 }

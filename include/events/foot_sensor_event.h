@@ -24,6 +24,18 @@ struct foot_sensor_state_event
 
 APP_EVENT_TYPE_DECLARE(foot_sensor_state_event);
 
+// Event for foot sensor start activity trigger
+struct foot_sensor_start_activity_event {
+    struct app_event_header header;
+};
+APP_EVENT_TYPE_DECLARE(foot_sensor_start_activity_event);
+
+// Event for foot sensor stop activity trigger
+struct foot_sensor_stop_activity_event {
+    struct app_event_header header;
+};
+APP_EVENT_TYPE_DECLARE(foot_sensor_stop_activity_event);
+
 #ifdef __cplusplus
 }
 #endif
