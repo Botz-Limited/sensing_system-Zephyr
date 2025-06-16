@@ -35,10 +35,6 @@
 #include <app.hpp>
 #include <app_version.h>
 
-#ifndef VND_MAX_LEN
-#define VND_MAX_LEN 4
-#endif
-
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__

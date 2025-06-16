@@ -116,6 +116,7 @@ RUN apt-get -y update && \
 	unzip \
 	valgrind \
 	wget \
+	doxygen \
 	xz-utils 
 
 # Install multi-lib gcc (x86 only) + fix for missing asm/errno.h:

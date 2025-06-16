@@ -19,11 +19,11 @@
 
 void app_log(const char *fmt, ...);
 
-#define MAX_FILE_PATH_LEN 64
+static constexpr uint8_t MAX_FILE_PATH_LEN = 64;
 
 
 // Define a structure for foot sensor samples
-#define NUM_FOOT_SENSOR_CHANNELS 8
+static constexpr uint8_t NUM_FOOT_SENSOR_CHANNELS = 8;
 struct foot_samples_t {
     uint16_t values[NUM_FOOT_SENSOR_CHANNELS]; // This array will now hold 8 uint16_t values
     // ... any other fields ...
@@ -57,7 +57,7 @@ typedef struct
 } bhi360_log_record_t;
 
 // If you send commands, define a max size for the command string
-#define MAX_COMMAND_STRING_LEN 32 // Example max length for a command string
+static constexpr uint8_t MAX_COMMAND_STRING_LEN = 32; // Example max length for a command string
 typedef char command_data_t[MAX_COMMAND_STRING_LEN];
 
 typedef struct {
@@ -95,7 +95,7 @@ typedef struct
 // Define the message queue parameters based on the new generic_message_t size
 // Ensure CONFIG_MSG_Q_MAX_SIZE_BYTES in Kconfig is at least sizeof(generic_message_t)
 #define MSG_QUEUE_MESSAGE_SIZE sizeof(generic_message_t)
-#define MSG_QUEUE_DEPTH 10 // Adjust if necessary
+static constexpr uint8_t MSG_QUEUE_DEPTH = 10; // Adjust if necessary
 
 // --- MESSAGE QUEUE DECLARATION (unchanged) ---
 extern struct k_msgq bluetooth_msgq;

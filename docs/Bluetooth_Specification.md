@@ -51,6 +51,28 @@ This device exposes several Bluetooth Low Energy (BLE) GATT services for control
 | BHI360 Step Count                 | `**0c372eb3**-27eb-437e-bef4-775aefaf3c97`    | Read, Notify       | Read (encrypted)    | bhi360_step_count_t      | Little-endian | BHI360 step count and duration. |
 | BHI360 Linear Accel               | `**0c372eb4**-27eb-437e-bef4-775aefaf3c97`    | Read, Notify       | Read (encrypted)    | bhi360_linear_accel_t    | Little-endian | BHI360 linear acceleration. |
 
+**Status Characteristic Bitfield:**
+
+The Status characteristic is a 32-bit bitfield (uint32_t) that encodes the current device status and error conditions. Each bit represents a specific status or error flag. Multiple bits may be set simultaneously to indicate combined states. The bit definitions are as follows:
+
+- **Bit 0 (0x00000001): STATUS_ERROR** – Indicates a device error condition.
+- **Bit 1 (0x00000002): STATUS_CALIBRATING** – Device is currently calibrating.
+- **Bit 2 (0x00000004): STATUS_READY** – Device is ready for operation.
+- **Bit 3 (0x00000008): STATUS_IDLE** – Device is idle.
+
+Additional bits may be defined in future firmware versions.
+
+**Bitfield Usage and Examples:**
+- The bitfield can be interpreted by checking which bits are set. For example:
+    - `0x00000001` (only Bit 0 set): Device is in an error state.
+    - `0x00000006` (Bits 1 and 2 set): Device is calibrating and ready.
+    - `0x0000000C` (Bits 2 and 3 set): Device is ready and idle.
+    - `0x00000000`: No status or error flags are set (normal state).
+- Multiple bits may be set at once to indicate combined statuses (e.g., calibrating and error).
+- Integrators should mask and interpret each bit individually to determine the current device state and error conditions.
+
+Refer to the firmware header `status_codes.h` for the latest bit definitions.
+
 **Notes:**
 - All characteristics use encrypted read and notify permissions.
 - After a log file is deleted, the device will update the "Log Available" and "Req ID/Path" characteristics to point to the newest (latest) closed log file. Open files (currently being written to) are never sent.

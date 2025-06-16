@@ -1,12 +1,14 @@
 /**
  * @file foot_sensor.cpp
- * @author Giorgio Guglielmino
- * @version 1.0.1
- * @date 2025-05-16
+ * @author
+ * @brief
+ * @version 1.0.0
+ * @date 2025-05-12
  *
- * @copyright Copyright (c) 2025
+ * @copyright Botz Innovation 2025
  *
  */
+ 
 #define MODULE foot_sensor
 
 #include <cstddef>

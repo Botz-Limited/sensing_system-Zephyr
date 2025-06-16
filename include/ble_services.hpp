@@ -56,10 +56,10 @@ size_t get_current_time_char_value_size(void);
 
 
 
-#define VND_MAX_LEN 20
-#define BLE_ADVERTISING_TIMEOUT_MS 30000
+static constexpr uint8_t VND_MAX_LEN = 20;
+static constexpr uint16_t BLE_ADVERTISING_TIMEOUT_MS = 30000;
 
-#define bluetooth_timer 1000
+static constexpr uint16_t bluetooth_timer = 1000;
 
 
 #endif // APP_INCLUDE_BLE_SERVICES_HEADER_

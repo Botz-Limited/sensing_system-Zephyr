@@ -42,7 +42,7 @@ LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 #define RTC_NODE DT_ALIAS(rtc0)
 
 // Max value of the RTC counter (24-bit for nRF RTC). Used for wraparound calculations.
-#define RTC_MAX_VALUE ((1U << 24) - 1)
+static constexpr uint32_t RTC_MAX_VALUE = (1U << 24) - 1;
 
 // --- Global Time Tracking Variables ---
 static const struct device *const rtc_dev = DEVICE_DT_GET(RTC_NODE);

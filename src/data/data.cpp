@@ -1,3 +1,14 @@
+/**
+ * @file data.cpp
+ * @author
+ * @brief
+ * @version 1.0.0
+ * @date 2025-05-12
+ *
+ * @copyright Botz Innovation 2025
+ *
+ */
+
 #define MODULE data
 
 #include <algorithm>

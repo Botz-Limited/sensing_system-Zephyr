@@ -43,9 +43,9 @@ extern "C"
  *****************************************************************************************************************************************************
  */
 
-#define MAX_PACKETS 10  // Maximum number of packets
-#define MAX_PAYLOAD_SIZE 128  // Maximum payload size
-#define INPUT_BUFFER_SIZE (MAX_PAYLOAD_SIZE * 10)  // Input buffer size (10x the chunk size)
+static constexpr uint8_t MAX_PACKETS = 10;  // Maximum number of packets
+static constexpr uint8_t MAX_PAYLOAD_SIZE = 128;  // Maximum payload size
+static constexpr uint16_t INPUT_BUFFER_SIZE = MAX_PAYLOAD_SIZE * 10;  // Input buffer size (10x the chunk size)
 
 /**
  *****************************************************************************************************************************************************

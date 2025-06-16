@@ -5,5 +5,6 @@ rsource "app_events/Kconfig"
 rsource "foot_sensor/Kconfig"
 rsource "motion_sensor/Kconfig"
 rsource "packetizer/Kconfig"
+rsource "battery/Kconfig"
 
 

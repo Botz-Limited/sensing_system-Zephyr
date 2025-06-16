@@ -1,0 +1,4 @@
+tests:
+  foot_sensor.test:
+    platform_allow: native_posix
+    tags: foot_sensor

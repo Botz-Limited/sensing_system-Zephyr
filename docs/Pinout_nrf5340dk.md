@@ -1,0 +1,117 @@
+
+**Pinout and Peripheral Assignment Reference for Custom and DK Hardware**
+
+## Analog Inputs (Foot Sensor, SAADC)
+
+| Channel | nRF SAADC Input | Physical Pin | Usage         |
+|---------|-----------------|--------------|---------------|
+| 0       | AIN0            | P0.04        | Foot Sensor   |
+| 1       | AIN1            | P0.05        | Foot Sensor   |
+| 2       | AIN2            | P0.28        | Foot Sensor   |
+| 3       | AIN3            | P0.29        | Foot Sensor   |
+| 4       | AIN4            | P0.30        | Foot Sensor   |
+| 5       | AIN5            | P0.31        | Foot Sensor   |
+| 6       | AIN6            | P0.02        | Foot Sensor   |
+| 7       | AIN7            | P0.03        | Foot Sensor   |
+
+---
+
+## SPI1 (Motion Sensor, BHI360)
+
+| Signal | Pin (Port, Number) | Usage/Comment         |
+|--------|--------------------|-----------------------|
+| SCK    | P0.25              | SPI1 SCK              |
+| MOSI   | P0.06              | SPI1 MOSI             |
+| MISO   | P0.07              | SPI1 MISO             |
+| CS     | P1.6               | SPI1 CS (BHI360)      |
+| INT    | P1.2               | BHI360 INT            |
+| RESET  | P1.3               | BHI360 RESET (opt.)   |
+
+---
+
+## SPI4 (Possible to connect the Wifi Nrf7002)
+
+| Signal | Pin (Port, Number) | Usage/Comment         |
+|--------|--------------------|-----------------------|
+| SCK    | P1.15              | SPI4 SCK              |
+| MOSI   | P1.13              | SPI4 MOSI             |
+| MISO   | P1.14              | SPI4 MISO             |
+| CS     | P1.12 (D10)        | SPI4 CS (Arduino D10) |
+
+---
+
+## I2C1
+
+| Signal | Pin (Port, Number) | Usage/Comment         |
+|--------|--------------------|-----------------------|
+| SDA    | P1.2               | I2C1 SDA              |
+| SCL    | P1.3               | I2C1 SCL              |
+
+
+ **I2C Availability:** Only I2C1 (TWIM1, SDA: P1.2, SCL: P1.3) is configured in this project. I2C0 (TWIM0), I2C2 (TWIM2), and I2C3 (TWIM3) are free to use and can be mapped to any available GPIOs in th the custom board.
+
+---
+
+
+
+## UARTs
+
+### UART0
+| Signal | Pin (Port, Number) | Usage/Comment         |
+|--------|--------------------|-----------------------|
+| TX     | P0.20              | UART0 TX              |
+| RX     | P0.22              | UART0 RX              |
+| RTS    | P0.19              | UART0 RTS             |
+| CTS    | P0.21              | UART0 CTS             |
+
+### UART1
+| Signal | Pin (Port, Number) | Usage/Comment         |
+|--------|--------------------|-----------------------|
+| TX     | P1.1               | UART1 TX              |
+| RX     | P1.0               | UART1 RX              |
+| RTS    | P0.11              | UART1 RTS             |
+| CTS    | P0.10              | UART1 CTS             |
+
+### UART2
+| Signal | Pin (Port, Number) | Usage/Comment         |
+|--------|--------------------|-----------------------|
+| TX     | P1.11              | UART2 TX              |
+| RX     | P1.10              | UART2 RX              |
+
+**Note:**
+- Some UARTs share pins with other peripherals (SPI, I2C, etc.) and cannot be used simultaneously with those peripherals due to hardware limitations on the nRF5340. Always check the nRF5340 documentation and the device tree for conflicts before enabling multiple UARTs or overlapping peripherals.
+
+---
+
+## QSPI (External Flash)
+
+| Signal | Pin (Port, Number) | Usage/Comment         |
+|--------|--------------------|-----------------------|
+| SCK    | P0.17              | QSPI SCK              |
+| CSN    | P0.18              | QSPI CSN              |
+| IO0    | P0.13              | QSPI IO0              |
+| IO1    | P0.14              | QSPI IO1              |
+| IO2    | P0.15              | QSPI IO2              |
+| IO3    | P0.16              | QSPI IO3              |
+
+---
+
+## Other Notable Pins (These pins will be available to use in a custom PCB)
+
+| Function         | Pin (Port, Number) | Usage/Comment         |
+|------------------|--------------------|-----------------------|
+| Green LED 0      | P0.28              | Onboard LED           |
+| Green LED 1      | P0.29              | Onboard LED           |
+| Green LED 2      | P0.30              | Onboard LED           |
+| Green LED 3      | P0.31              | Onboard LED           |
+| Button 0         | P0.23              | Onboard Button        |
+| Button 1         | P0.24              | Onboard Button        |
+| Button 2         | P0.08              | Onboard Button        |
+| Button 3         | P0.09              | Onboard Button        |
+
+---
+
+## Notes
+
+- Adding a multiplexer, it will need to assign additional GPIOs for the mux select lines.
+- **I2C Availability:** Only I2C1 (TWIM1, SDA: P1.2, SCL: P1.3) is used in this project. I2C0 (TWIM0), I2C2 (TWIM2), and I2C3 (TWIM3) are free to use and can be mapped to any available GPIOs in thr custom board/device tree.
