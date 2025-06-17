@@ -157,7 +157,7 @@ BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | B
     BT_GATT_CCC(cs_start_activity_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // New: Stop Activity Characteristic
-    BT_GATT_CHARACTERISTIC(&stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
+    BT_GATT_CHARACTERISTIC(&stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_WRITE_ENCRYPT,
                            nullptr, write_stop_activity_command_vnd, nullptr),
     BT_GATT_CCC(cs_stop_activity_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)

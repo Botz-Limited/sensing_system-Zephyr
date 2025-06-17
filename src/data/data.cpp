@@ -95,6 +95,29 @@ err_t end_bhi360_logging();
 static struct fs_file_t foot_sensor_log_file;
 static struct fs_file_t bhi360_log_file;
 
+// --- Batch Write Buffers ---
+constexpr size_t FLASH_PAGE_SIZE = 256;
+constexpr size_t PROTOBUF_ENCODE_BUFFER_SIZE = 64;
+static uint8_t foot_sensor_write_buffer[FLASH_PAGE_SIZE];
+static size_t foot_sensor_write_buffer_pos = 0;
+static uint8_t bhi360_write_buffer[FLASH_PAGE_SIZE];
+static size_t bhi360_write_buffer_pos = 0;
+
+static void flush_foot_sensor_buffer() {
+    if (foot_sensor_write_buffer_pos > 0) {
+        fs_write(&foot_sensor_log_file, foot_sensor_write_buffer, foot_sensor_write_buffer_pos);
+        fs_sync(&foot_sensor_log_file);
+        foot_sensor_write_buffer_pos = 0;
+    }
+}
+static void flush_bhi360_buffer() {
+    if (bhi360_write_buffer_pos > 0) {
+        fs_write(&bhi360_log_file, bhi360_write_buffer, bhi360_write_buffer_pos);
+        fs_sync(&bhi360_log_file);
+        bhi360_write_buffer_pos = 0;
+    }
+}
+
 // --- Sequence number counter for foot sensor log ---
 static uint8_t next_foot_sensor_file_sequence = 0;
 static uint8_t next_bhi360_file_sequence = 0;
@@ -269,7 +292,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
     log_info_msg.sender = SENDER_DATA;
 
     // For testing only
-   //  delete_all_files_in_directory("/lfs1/hardware");
+    // delete_all_files_in_directory("/lfs1/hardware");
 
     // Notify about latest FOOT sensor log file
     uint8_t current_foot_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
@@ -547,10 +570,12 @@ err_t mount_file_system(struct fs_mount_t *mount)
         return err_t::DATA_ERROR;
     }
 
-    err_t rc = littlefs_flash_erase((uintptr_t)mount->storage_dev);
-    if (rc != err_t::NO_ERROR)
-    {
-        return err_t::DATA_ERROR;
+    // Conditionally erase flash if config is enabled
+    if (IS_ENABLED(CONFIG_APP_WIPE_STORAGE)) {
+        err_t rc = littlefs_flash_erase((uintptr_t)mount->storage_dev);
+        if (rc != err_t::NO_ERROR) {
+            return err_t::DATA_ERROR;
+        }
     }
 
     int ret = fs_mount(mount);
@@ -561,13 +586,9 @@ err_t mount_file_system(struct fs_mount_t *mount)
     }
 
     // Use hardware_dir_path from data.hpp
-    //   int err_ls = lsdir(hardware_dir_path);
-    /*    if (err_ls < 0)
-        {
-            LOG_ERR("FAIL: lsdir %s: %d", mount->mnt_point, err_ls);
-            return err_t::DATA_ERROR;
-        }
-    */
+    //For testing, list files in the directory
+      int err_ls = lsdir(hardware_dir_path);
+
     return err_t::NO_ERROR;
 }
 
@@ -867,6 +888,9 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
 
     // --- Initialize Foot Sensor Log File ---
     next_foot_sensor_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
+    if (next_foot_sensor_file_sequence == 0) {
+        next_foot_sensor_file_sequence = 1;
+    }
     snprintk(foot_sensor_file_path, sizeof(foot_sensor_file_path), "%s/%s%03u.pb", hardware_dir_path,
              foot_sensor_file_prefix, next_foot_sensor_file_sequence);
     fs_file_t_init(&foot_sensor_log_file);
@@ -881,7 +905,7 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
     {
         LOG_INF("Opened new foot sensor log file: %s", foot_sensor_file_path);
 
-        uint8_t buffer[64]; // Sufficient for SensingData message
+        uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE]; // Sufficient for SensingData message
         sensor_data_messages_FootSensorLogMessage header_msg = sensor_data_messages_FootSensorLogMessage_init_default;
         header_msg.which_payload = sensor_data_messages_FootSensorLogMessage_sensing_data_tag;
 
@@ -951,6 +975,9 @@ err_t end_foot_sensor_logging()
             overall_status = err_foot_write;
         }
 
+        // Flush any remaining buffered data
+        flush_foot_sensor_buffer();
+
         int ret_foot_close = fs_close(&foot_sensor_log_file);
         if (ret_foot_close != 0)
         {
@@ -1003,7 +1030,6 @@ err_t end_foot_sensor_logging()
         }
     }
 
-   
     return overall_status;
 }
 
@@ -1036,6 +1062,9 @@ err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
 
     // --- Initialize BHI360 Log File ---
     next_bhi360_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
+    if (next_bhi360_file_sequence == 0) {
+        next_bhi360_file_sequence = 1;
+    }
     snprintk(bhi360_file_path, sizeof(bhi360_file_path), "%s/%s%03u.pb", hardware_dir_path, bhi360_file_prefix,
              next_bhi360_file_sequence);
     fs_file_t_init(&bhi360_log_file);
@@ -1050,7 +1079,7 @@ err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
     {
         LOG_INF("Opened new BHI360 log file: %s", bhi360_file_path);
 
-        uint8_t buffer[64]; // Sufficient for SensingData message for BHI360
+        uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE]; // Sufficient for SensingData message for BHI360
         sensor_data_messages_BHI360LogMessage header_msg = sensor_data_messages_BHI360LogMessage_init_default;
         header_msg.which_payload = sensor_data_messages_BHI360LogMessage_sensing_data_tag;
 
@@ -1120,6 +1149,9 @@ err_t end_bhi360_logging()
             overall_status = err_bhi360_write;
         }
 
+        // Flush any remaining buffered data
+        flush_bhi360_buffer();
+
         int ret_bhi360_close = fs_close(&bhi360_log_file);
         if (ret_bhi360_close != 0)
         {
@@ -1182,7 +1214,7 @@ err_t end_bhi360_logging()
  */
 static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSensorLogMessage *sensor_msg)
 {
-    uint8_t buffer[64]; // Ensure this buffer is large enough for any FootSensorLogMessage
+    uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE]; // Ensure this buffer is large enough for any FootSensorLogMessage
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
     bool status = pb_encode(&stream, sensor_data_messages_FootSensorLogMessage_fields, sensor_msg);
@@ -1192,21 +1224,20 @@ static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSens
         return err_t::PROTO_ENCODE_ERROR;
     }
 
-    int ret = fs_write(&foot_sensor_log_file, buffer, stream.bytes_written);
-    if (ret < 0)
-    {
-        LOG_ERR("Foot sensor fs_write error: %d", ret);
-        return err_t::FILE_SYSTEM_ERROR;
+    // Batch buffering logic
+    if (foot_sensor_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE) {
+        flush_foot_sensor_buffer();
+    }
+    memcpy(&foot_sensor_write_buffer[foot_sensor_write_buffer_pos], buffer, stream.bytes_written);
+    foot_sensor_write_buffer_pos += stream.bytes_written;
+
+    // Optionally, flush immediately for header or session end messages
+    if (sensor_msg->which_payload == sensor_data_messages_FootSensorLogMessage_sensing_data_tag ||
+        sensor_msg->which_payload == sensor_data_messages_FootSensorLogMessage_session_end_tag) {
+        flush_foot_sensor_buffer();
     }
 
-    ret = fs_sync(&foot_sensor_log_file);
-    if (ret != 0)
-    {
-        LOG_ERR("FAIL: sync foot sensor data %s: %d", foot_sensor_file_path, ret);
-        return err_t::FILE_SYSTEM_ERROR;
-    }
-
-    LOG_DBG("Foot sensor data written to file (%u bytes).", stream.bytes_written);
+    LOG_DBG("Foot sensor data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written, (unsigned)foot_sensor_write_buffer_pos, FLASH_PAGE_SIZE);
     return err_t::NO_ERROR;
 }
 
@@ -1218,9 +1249,7 @@ static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSens
  */
 static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMessage *sensor_msg)
 {
-    // BHI360 messages can be larger due to multiple float fields, ensure buffer is sufficient
-    // BHI360_3D_Data_size is typically around 45 bytes, SessionEnd is smaller. 64 bytes is generally safe.
-    uint8_t buffer[64];
+    uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
     bool status = pb_encode(&stream, sensor_data_messages_BHI360LogMessage_fields, sensor_msg);
@@ -1230,21 +1259,20 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
         return err_t::PROTO_ENCODE_ERROR;
     }
 
-    int ret = fs_write(&bhi360_log_file, buffer, stream.bytes_written);
-    if (ret < 0)
-    {
-        LOG_ERR("BHI360 fs_write error: %d", ret);
-        return err_t::FILE_SYSTEM_ERROR;
+    // Batch buffering logic
+    if (bhi360_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE) {
+        flush_bhi360_buffer();
+    }
+    memcpy(&bhi360_write_buffer[bhi360_write_buffer_pos], buffer, stream.bytes_written);
+    bhi360_write_buffer_pos += stream.bytes_written;
+
+    // Optionally, flush immediately for header or session end messages
+    if (sensor_msg->which_payload == sensor_data_messages_BHI360LogMessage_sensing_data_tag ||
+        sensor_msg->which_payload == sensor_data_messages_BHI360LogMessage_session_end_tag) {
+        flush_bhi360_buffer();
     }
 
-    ret = fs_sync(&bhi360_log_file);
-    if (ret != 0)
-    {
-        LOG_ERR("FAIL: sync BHI360 data %s: %d", bhi360_file_path, ret);
-        return err_t::FILE_SYSTEM_ERROR;
-    }
-
-    LOG_DBG("BHI360 data written to file (%u bytes).", stream.bytes_written);
+    LOG_DBG("BHI360 data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written, (unsigned)bhi360_write_buffer_pos, FLASH_PAGE_SIZE);
     return err_t::NO_ERROR;
 }
 
@@ -1492,21 +1520,23 @@ err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, u
         log_files.erase(log_files.begin(), log_files.begin() + to_delete);
     }
 
-    // 4. Reindex remaining files to ensure IDs are contiguous and <= 255
-    for (size_t i = 0; i < log_files.size(); ++i) {
-        uint8_t new_id = (uint8_t)i;
-        if (log_files[i].id != new_id) {
-            char old_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
-            char new_name[32];
-            char new_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
-            snprintf(old_path, sizeof(old_path), "%s/%s", dir_path, log_files[i].name);
-            snprintf(new_name, sizeof(new_name), "%s%03u.pb", file_prefix, new_id);
-            snprintf(new_path, sizeof(new_path), "%s/%s", dir_path, new_name);
-            int rename_res = fs_rename(old_path, new_path);
-            if (rename_res != 0) {
-                LOG_ERR("Failed to rename %s to %s: %d", old_path, new_path, rename_res);
-            } else {
-                LOG_INF("Renamed %s to %s", old_path, new_path);
+    // 4. Reindex only if more than 255 files
+    if (log_files.size() > 255) {
+        for (size_t i = 0; i < log_files.size(); ++i) {
+            uint8_t new_id = (uint8_t)(i + 1); // Start from 1, not 0
+            if (log_files[i].id != new_id) {
+                char old_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
+                char new_name[32];
+                char new_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
+                snprintf(old_path, sizeof(old_path), "%s/%s", dir_path, log_files[i].name);
+                snprintf(new_name, sizeof(new_name), "%s%03u.pb", file_prefix, new_id);
+                snprintf(new_path, sizeof(new_path), "%s/%s", dir_path, new_name);
+                int rename_res = fs_rename(old_path, new_path);
+                if (rename_res != 0) {
+                    LOG_ERR("Failed to rename %s to %s: %d", old_path, new_path, rename_res);
+                } else {
+                    LOG_INF("Renamed %s to %s", old_path, new_path);
+                }
             }
         }
     }

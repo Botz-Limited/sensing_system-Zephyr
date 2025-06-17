@@ -28,6 +28,10 @@ menu "SENSING"
             This option will clear the set_uart calibration boolean and also clear write protection to the
             jlink header, DO NOT leave enabled in production.
 
+    config PRIMARY_DEVICE
+    bool "Build as primary device (connects to phone)"
+    default y        
+
     endmenu    
         
     rsource "src/Kconfig"

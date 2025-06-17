@@ -1,0 +1,22 @@
+cmake:
+  board:
+    name: native_sim
+    path:
+     - /home/ee/ncs/zephyr/boards/native/native_sim
+    qualifiers: native
+    revision: 
+  images:
+   - name: data
+     source-dir: /home/ee/sensing_fw/tests/data
+     type: MAIN
+  kconfig:
+    files:
+     - /home/ee/sensing_fw/tests/data/build/_sysbuild/empty.conf
+     - /home/ee/sensing_fw/tests/data/build/_sysbuild/empty.conf
+    user-files:
+     - /home/ee/sensing_fw/tests/data/build/_sysbuild/empty.conf
+version: 0.1.0
+west:
+  command: /opt/venv/bin/west build -b native_sim -p
+  topdir: /home/ee/ncs
+  version: 1.4.0
