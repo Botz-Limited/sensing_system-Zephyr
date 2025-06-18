@@ -587,7 +587,7 @@ err_t mount_file_system(struct fs_mount_t *mount)
 
     // Use hardware_dir_path from data.hpp
     //For testing, list files in the directory
-      int err_ls = lsdir(hardware_dir_path);
+   //   int err_ls = lsdir(hardware_dir_path);
 
     return err_t::NO_ERROR;
 }

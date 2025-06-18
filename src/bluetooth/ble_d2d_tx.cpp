@@ -1,10 +1,10 @@
-#include "ble_d2d_tx.h"
+#include "ble_d2d_tx.hpp"
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(bluetooth, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
+LOG_MODULE_REGISTER(ble_d2d_tx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // D2D TX Service UUID: 75ad68d6-200c-437d-98b5-061862076c5f
 static struct bt_uuid_128 d2d_tx_service_uuid =
@@ -47,10 +47,11 @@ void ble_d2d_tx_init(void) {
 int ble_d2d_tx_send_status(uint32_t status) {
     if (!d2d_conn || !d2d_status_handle) return -ENOTCONN;
     struct bt_gatt_write_params params = {
+        .func = NULL,
         .handle = d2d_status_handle,
+        .offset = 0,
         .data = &status,
         .length = sizeof(status),
-        .func = NULL,
     };
     return bt_gatt_write(d2d_conn, &params);
 }

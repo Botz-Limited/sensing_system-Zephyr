@@ -29,8 +29,17 @@ menu "SENSING"
             jlink header, DO NOT leave enabled in production.
 
     config PRIMARY_DEVICE
-    bool "Build as primary device (connects to phone)"
-    default y        
+        bool "Build as primary device (connects to phone)"
+        default y
+
+    config SECONDARY_DEVICE
+        bool
+        default !PRIMARY_DEVICE
+        select BT_CENTRAL if !PRIMARY_DEVICE
+        select BT_OBSERVER if !PRIMARY_DEVICE
+        select BT_GATT_CLIENT if !PRIMARY_DEVICE
+        select BT_PERIPHERAL if !PRIMARY_DEVICE   
+        select BT_PRIVACY if !PRIMARY_DEVICE      
 
     endmenu    
         

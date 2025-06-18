@@ -1,8 +1,8 @@
-#include "ble_d2d_rx.h"
+#include "ble_d2d_rx.hpp"
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(bluetooth, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
+LOG_MODULE_REGISTER(ble_d2d_rx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // D2D RX Service UUID: e060ca1f-3115-4ad6-9709-8c5ff3bf558b
 static struct bt_uuid_128 d2d_rx_service_uuid =

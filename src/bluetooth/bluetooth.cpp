@@ -20,7 +20,6 @@
 
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
-#include <zephyr/sys/printk.h>
 
 #include "zephyr/bluetooth/services/bas.h"
 #include "zephyr/settings/settings.h"
@@ -40,16 +39,18 @@
 #include <zephyr/sys/reboot.h>
 #include <zephyr/types.h>
 
+#include <app.hpp>
 #include <app_event_manager.h>
 #include <caf/events/module_state_event.h>
 #include <errors.hpp>
 #include <events/app_state_event.h>
 #include <events/bluetooth_state_event.h>
 #include <events/data_event.h>
-#include <app.hpp>
+
+#include "ble_d2d_rx.hpp"
+#include "ble_d2d_tx.hpp"
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
-
 
 /********************************** BTH THREAD ********************************/
 static constexpr int bluetooth_stack_size = CONFIG_BLUETOOTH_MODULE_STACK_SIZE;
@@ -57,6 +58,201 @@ static constexpr int bluetooth_priority = CONFIG_BLUETOOTH_MODULE_PRIORITY;
 K_THREAD_STACK_DEFINE(bluetooth_stack_area, bluetooth_stack_size);
 static struct k_thread bluetooth_thread_data;
 static k_tid_t bluetooth_tid;
+
+// --- D2D Connection Tracking and Callbacks ---
+#include "ble_d2d_rx.hpp"
+#include "ble_d2d_tx.hpp"
+
+static struct bt_conn *d2d_conn = nullptr;
+static void start_scan(void);
+
+
+static void d2d_connected(struct bt_conn *conn, uint8_t err)
+{
+    if (!err)
+    {
+        d2d_conn = conn;
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        LOG_INF("Secondary device connected!\n");
+        char addr_str[BT_ADDR_LE_STR_LEN];
+        bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
+        LOG_INF("Connected device address: %s\n", addr_str);
+#else
+        LOG_INF("Connected to primary device!\n");
+#endif
+    }
+}
+
+static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
+{
+    if (conn == d2d_conn)
+    {
+        d2d_conn = nullptr;
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        LOG_INF("Secondary device disconnected!\n");
+#else
+        LOG_INF("Disconnected from primary device!\n");
+        // Restart scanning after disconnection
+        start_scan();
+#endif
+    }
+}
+
+// For secondary (central) role: scanning and connecting
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
+static struct bt_conn *conn = NULL;
+
+// Use more conservative connection parameters
+static const struct bt_conn_le_create_param create_param = {
+    .options = BT_CONN_LE_OPT_NONE,
+    .interval = BT_GAP_SCAN_FAST_INTERVAL,
+    .window = BT_GAP_SCAN_FAST_WINDOW,
+    .interval_coded = 0,
+    .window_coded = 0,
+    .timeout = 0,
+};
+
+static const struct bt_le_conn_param conn_param = {
+    .interval_min = BT_GAP_INIT_CONN_INT_MIN,
+    .interval_max = BT_GAP_INIT_CONN_INT_MAX,
+    .latency = 0,
+    .timeout = 400,
+};
+
+// Target device name to look for
+static const char target_device_name[] = "SensingG_Primary";
+
+// Target service UUID: 5cb36a14-ca69-4d97-89a8-001ffc9ec8cd
+static const uint8_t target_service_uuid[16] = {
+    0x5c, 0xb3, 0x6a, 0x14, 0xca, 0x69, 0x4d, 0x97,
+    0x89, 0xa8, 0x00, 0x1f, 0xfc, 0x9e, 0xc8, 0xcd
+};
+
+// Helper function to check if advertisement contains our target name
+static bool adv_data_has_name(struct net_buf_simple *ad, const char *name)
+{
+    if (!ad || !name) return false;
+    
+    size_t name_len = strlen(name);
+    size_t i = 0;
+    
+    while (i + 1 < ad->len) {
+        uint8_t len = ad->data[i];
+        if (len == 0 || (i + len >= ad->len)) break;
+        
+        uint8_t type = ad->data[i + 1];
+        
+        // Check for complete or shortened local name
+        if (type == BT_DATA_NAME_COMPLETE || type == BT_DATA_NAME_SHORTENED) {
+            size_t data_len = len - 1; // Subtract type byte
+            if (data_len >= name_len && 
+                memcmp(&ad->data[i + 2], name, name_len) == 0) {
+                return true;
+            }
+        }
+        i += len + 1;
+    }
+    return false;
+}
+
+// Helper function to check if advertisement contains our target UUID
+static bool adv_data_has_uuid(struct net_buf_simple *ad)
+{
+    if (!ad) return false;
+    
+    size_t i = 0;
+    while (i + 1 < ad->len) {
+        uint8_t len = ad->data[i];
+        if (len == 0 || (i + len >= ad->len)) break;
+        
+        uint8_t type = ad->data[i + 1];
+        
+        // Check for 128-bit UUID
+        if (type == BT_DATA_UUID128_ALL || type == BT_DATA_UUID128_SOME) {
+            // Check all 128-bit UUIDs in this field
+            for (size_t j = i + 2; j + 15 < i + 1 + len; j += 16) {
+                if (memcmp(&ad->data[j], target_service_uuid, 16) == 0) {
+                    return true;
+                }
+            }
+        }
+        i += len + 1;
+    }
+    return false;
+}
+
+static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, struct net_buf_simple *ad)
+{
+    char addr_str[BT_ADDR_LE_STR_LEN];
+    bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+    LOG_INF("[SCAN] Device found: %s, RSSI: %d, type: %u, adv data len: %u", addr_str, rssi, type, ad ? ad->len : 0);
+    
+    // Check if this is our target device by name AND UUID
+    bool has_name = ad && adv_data_has_name(ad, target_device_name);
+    bool has_uuid = ad && adv_data_has_uuid(ad);
+    
+    if (!has_name && !has_uuid) {
+        LOG_INF("[SCAN] Skipping device: neither name nor UUID match");
+        return;
+    }
+    
+    if (has_name && has_uuid) {
+        LOG_INF("[SCAN] Perfect match! Found 'SensingG_Primary' with correct UUID at %s", addr_str);
+    } else if (has_name) {
+        LOG_INF("[SCAN] Found device with matching name 'SensingG_Primary' at %s", addr_str);
+    } else if (has_uuid) {
+        LOG_INF("[SCAN] Found device with matching UUID at %s", addr_str);
+    }
+    
+    if (type != BT_GAP_ADV_TYPE_ADV_IND && type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
+        LOG_WRN("[SCAN] Advertiser is not connectable (type: %u)", type);
+        return;
+    }
+    
+    // Check if we already have a connection object and clean it up
+    if (conn) {
+        LOG_WRN("[SCAN] Cleaning up existing connection object");
+        bt_conn_unref(conn);
+        conn = NULL;
+    }
+    
+    int err = bt_le_scan_stop();
+    if (err) {
+        LOG_ERR("[SCAN] Failed to stop scan: %d", err);
+    }
+    
+    // Small delay to ensure scan is fully stopped
+    k_msleep(10);
+    
+    err = bt_conn_le_create(addr, &create_param, &conn_param, &conn);
+    if (err) {
+        if (err == -EINVAL) {
+            LOG_ERR("[SCAN] Failed to create connection: -EINVAL (invalid argument). Possible address type or advertising type mismatch.");
+        } else if (err == -ENOTSUP) {
+            LOG_ERR("[SCAN] Failed to create connection: -ENOTSUP (operation not supported). Check if advertiser is connectable.");
+        } else {
+            LOG_ERR("[SCAN] Failed to create connection: %d", err);
+        }
+        conn = NULL;
+        start_scan();
+    } else {
+        LOG_INF("[SCAN] Connection initiated to %s", addr_str);
+    }
+}
+
+static void start_scan(void)
+{
+    struct bt_le_scan_param scan_param = {
+        .type = BT_HCI_LE_SCAN_ACTIVE,
+        .options = BT_LE_SCAN_OPT_NONE,
+        .interval = 0x0010,
+        .window = 0x0010,
+    };
+
+    bt_le_scan_start(&scan_param, device_found);
+}
+#endif
 
 void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/);
 
@@ -119,7 +315,6 @@ static const struct bt_data ad[] = {
  */
 static void pairing_complete(struct bt_conn *conn, bool bonded)
 {
-    ARG_UNUSED(conn);
     local_conn = conn;
     LOG_INF("Pairing Complete (%sbonded)", bonded ? "" : "not ");
     k_timer_stop(&ble_timer);
@@ -207,11 +402,17 @@ static bool is_connection_bonded(struct bt_conn *conn)
  */
 static void connected(struct bt_conn *conn, uint8_t err)
 {
-    ARG_UNUSED(conn);
-
     if (err != 0)
     {
         LOG_ERR("Connection failed (err 0x%02x)", err);
+        char addr_str[BT_ADDR_LE_STR_LEN];
+        bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
+        LOG_ERR("Failed to connect to: %s", addr_str);
+        
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // If we're in central mode and connection failed, restart scanning
+        start_scan();
+#endif
     }
     else
     {
@@ -230,17 +431,19 @@ static void connected(struct bt_conn *conn, uint8_t err)
             LOG_ERR("failed to set security (err %d)\n", ret);
         }
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         ret = bt_le_adv_stop();
         if (ret != 0)
         {
-            LOG_ERR("Failed to stop (err 0x%02x)", ret);
+            LOG_ERR("Failed to stop advertising (err 0x%02x)", ret);
         }
 
         err_t error = ble_start_hidden();
         if (error != err_t::NO_ERROR)
         {
-            LOG_ERR("Failed to start %d", (int)error);
+            LOG_ERR("Failed to start hidden advertising %d", (int)error);
         }
+#endif
     }
 }
 
@@ -326,8 +529,11 @@ static void ble_set_power_off()
 
 int set_bluetooth_name()
 {
-    int err = bt_set_name("SensingG");
-
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    int err = bt_set_name("SensingG_Primary");
+#else
+    int err = bt_set_name("SensingG_Secondary");
+#endif
     return err;
 }
 
@@ -370,6 +576,15 @@ err_t bt_module_init(void)
         return err_t::BLUETOOTH_ERROR;
     }
 
+    static struct bt_conn_cb d2d_conn_callbacks = {
+    .connected = d2d_connected,
+    .disconnected = d2d_disconnected,
+};
+
+    bt_conn_cb_register(&d2d_conn_callbacks);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    ble_d2d_rx_init(); // Accept commands from secondary
     if (bt_start_advertising(0) == err_t::NO_ERROR)
     {
         LOG_INF("BLE Started Advertising");
@@ -378,6 +593,12 @@ err_t bt_module_init(void)
     {
         LOG_ERR("BLE Failed to enter advertising mode");
     }
+#else
+    ble_d2d_tx_init(); // Prepare to send data to primary
+    start_scan();      // Start scanning for primary device
+    // Do NOT start advertising or initialize control/info services here
+    return err_t::NO_ERROR;
+#endif
 
     bluetooth_tid =
         k_thread_create(&bluetooth_thread_data, bluetooth_stack_area, K_THREAD_STACK_SIZEOF(bluetooth_stack_area),
@@ -418,17 +639,16 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_BHI360_3D_MAPPING: {
                     bhi360_3d_mapping_t *mapping_data = &msg.data.bhi360_3d_mapping;
                     LOG_INF("Received BHI360 3D Mapping from %s: Accel(%.2f,%.2f,%.2f), Gyro(%.2f,%.2f,%.2f)",
-                            get_sender_name(msg.sender),
-                            (double)mapping_data->accel_x, (double)mapping_data->accel_y, (double)mapping_data->accel_z,
-                            (double)mapping_data->gyro_x, (double)mapping_data->gyro_y, (double)mapping_data->gyro_z);
+                            get_sender_name(msg.sender), (double)mapping_data->accel_x, (double)mapping_data->accel_y,
+                            (double)mapping_data->accel_z, (double)mapping_data->gyro_x, (double)mapping_data->gyro_y,
+                            (double)mapping_data->gyro_z);
                     jis_bhi360_data1_notify(mapping_data);
                     break;
                 }
 
                 case MSG_TYPE_BHI360_LINEAR_ACCEL: {
                     bhi360_linear_accel_t *lacc_data = &msg.data.bhi360_linear_accel;
-                    LOG_INF("Received BHI360 Linear Accel from %s: (%.2f,%.2f,%.2f)",
-                            get_sender_name(msg.sender),
+                    LOG_INF("Received BHI360 Linear Accel from %s: (%.2f,%.2f,%.2f)", get_sender_name(msg.sender),
                             (double)lacc_data->x, (double)lacc_data->y, (double)lacc_data->z);
                     jis_bhi360_data3_notify(lacc_data);
                     break;
@@ -482,7 +702,6 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         }
     }
 }
-
 
 /**
  * @brief Starts Bluetooth advertising.
