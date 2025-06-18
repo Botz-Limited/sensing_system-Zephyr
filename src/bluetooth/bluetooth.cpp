@@ -49,6 +49,11 @@
 
 #include "ble_d2d_rx.hpp"
 #include "ble_d2d_tx.hpp"
+#include "ble_d2d_file_transfer.hpp"
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "fota_proxy.hpp"
+#include "file_proxy.hpp"
+#endif
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
@@ -77,6 +82,15 @@ static void d2d_connected(struct bt_conn *conn, uint8_t err)
         char addr_str[BT_ADDR_LE_STR_LEN];
         bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
         LOG_INF("Connected device address: %s\n", addr_str);
+        
+        // Set the secondary connection for FOTA proxy
+        fota_proxy_set_secondary_conn(conn);
+        
+        // Set the secondary connection for file proxy
+        file_proxy_set_secondary_conn(conn);
+        
+        // Initialize D2D file client for this connection
+        ble_d2d_file_client_init(conn);
 #else
         LOG_INF("Connected to primary device!\n");
 #endif
@@ -90,6 +104,12 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
         d2d_conn = nullptr;
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         LOG_INF("Secondary device disconnected!\n");
+        
+        // Clear the secondary connection for FOTA proxy
+        fota_proxy_set_secondary_conn(NULL);
+        
+        // Clear the secondary connection for file proxy
+        file_proxy_set_secondary_conn(NULL);
 #else
         LOG_INF("Disconnected from primary device!\n");
         // Restart scanning after disconnection
@@ -121,7 +141,7 @@ static const struct bt_le_conn_param conn_param = {
 };
 
 // Target device name to look for
-static const char target_device_name[] = "SensingG_Primary";
+static const char target_device_name[] = "SensingGR";
 
 // Target service UUID: 5cb36a14-ca69-4d97-89a8-001ffc9ec8cd
 static const uint8_t target_service_uuid[16] = {
@@ -198,9 +218,9 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, st
     }
     
     if (has_name && has_uuid) {
-        LOG_INF("[SCAN] Perfect match! Found 'SensingG_Primary' with correct UUID at %s", addr_str);
+        LOG_INF("[SCAN] Perfect match! Found 'SensingGR' with correct UUID at %s", addr_str);
     } else if (has_name) {
-        LOG_INF("[SCAN] Found device with matching name 'SensingG_Primary' at %s", addr_str);
+        LOG_INF("[SCAN] Found device with matching name 'SensingGR' at %s", addr_str);
     } else if (has_uuid) {
         LOG_INF("[SCAN] Found device with matching UUID at %s", addr_str);
     }
@@ -530,9 +550,9 @@ static void ble_set_power_off()
 int set_bluetooth_name()
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    int err = bt_set_name("SensingG_Primary");
+    int err = bt_set_name("SensingGR");
 #else
-    int err = bt_set_name("SensingG_Secondary");
+    int err = bt_set_name("SensingGL");
 #endif
     return err;
 }
@@ -555,6 +575,7 @@ err_t bt_module_init(void)
         return err_t::BLUETOOTH_ERROR;
     }
 
+    // Load settings first to ensure ID address is available
     err = settings_load();
     if (err != 0)
     {
@@ -562,10 +583,14 @@ err_t bt_module_init(void)
         return err_t::BLUETOOTH_ERROR;
     }
 
+    // Small delay to ensure settings are fully loaded
+    k_msleep(10);
+
+    // Now set the Bluetooth name after settings are loaded
     int err_name = set_bluetooth_name();
     if (err_name != 0)
     {
-        LOG_ERR("Failed to Set Name");
+        LOG_ERR("Failed to Set Name (err %d)", err_name);
         return err_t::BLUETOOTH_ERROR;
     }
 
@@ -585,6 +610,23 @@ err_t bt_module_init(void)
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     ble_d2d_rx_init(); // Accept commands from secondary
+    
+    // Initialize FOTA proxy service for primary device
+    int fota_err = fota_proxy_init();
+    if (fota_err != 0) {
+        LOG_ERR("Failed to initialize FOTA proxy: %d", fota_err);
+    } else {
+        LOG_INF("FOTA proxy service initialized");
+    }
+    
+    // Initialize file proxy service for primary device
+    int file_err = file_proxy_init();
+    if (file_err != 0) {
+        LOG_ERR("Failed to initialize file proxy: %d", file_err);
+    } else {
+        LOG_INF("File proxy service initialized");
+    }
+    
     if (bt_start_advertising(0) == err_t::NO_ERROR)
     {
         LOG_INF("BLE Started Advertising");
@@ -595,6 +637,7 @@ err_t bt_module_init(void)
     }
 #else
     ble_d2d_tx_init(); // Prepare to send data to primary
+    ble_d2d_file_transfer_init(); // Initialize D2D file transfer service
     start_scan();      // Start scanning for primary device
     // Do NOT start advertising or initialize control/info services here
     return err_t::NO_ERROR;
@@ -686,6 +729,16 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // If you send commands via char arrays in the union
                     char *command_str = msg.data.command_str;
                     LOG_INF("Received Command from %s: '%s'", get_sender_name(msg.sender), command_str);
+                    break;
+                }
+
+                case MSG_TYPE_FOTA_PROGRESS: {
+                    // Handle FOTA progress updates
+                    fota_progress_msg_t *progress = &msg.data.fota_progress;
+                    LOG_INF("Received FOTA Progress: active=%d, status=%d, percent=%d%%, bytes=%u/%u",
+                            progress->is_active, progress->status, progress->percent_complete,
+                            progress->bytes_received, progress->total_size);
+                    jis_fota_progress_notify(progress);
                     break;
                 }
 

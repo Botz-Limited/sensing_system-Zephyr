@@ -53,6 +53,7 @@ typedef enum
     MSG_TYPE_COMMAND, // Generic command string
     MSG_TYPE_DELETE_FOOT_LOG, // Specific message type for deleting foot sensor logs
     MSG_TYPE_DELETE_BHI360_LOG, // Specific message type for deleting BHI360 logs
+    MSG_TYPE_FOTA_PROGRESS, // FOTA progress updates
 } msg_type_t;
 
 // Define sender types

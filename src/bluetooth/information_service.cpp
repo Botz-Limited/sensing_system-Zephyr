@@ -63,6 +63,9 @@ static bool bhi360_data1_subscribed = false;
 static bool bhi360_data2_subscribed = false;
 static bool bhi360_data3_subscribed = false;
 
+// FOTA progress tracking
+static fota_progress_msg_t fota_progress_value = {0};
+static bool fota_progress_subscribed = false;
 
 // --- Global variables for Current Time Service Notifications ---
 static struct bt_conn *current_time_conn_active = NULL; // Stores the connection object for notifications
@@ -112,6 +115,11 @@ static void jis_bhi360_req_id_ccc_cfg_changed(const struct bt_gatt_attr* attr, u
 static ssize_t jis_foot_sensor_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 
+// FOTA Progress Characteristic
+static ssize_t jis_fota_progress_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_fota_progress_notify(const fota_progress_msg_t* progress);
+
 // UUID Defines
 static struct bt_uuid_128 SENSING_INFO_SERVICE_UUID =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eaa, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
@@ -149,6 +157,10 @@ static struct bt_uuid_128 bhi360_data2_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb3, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 static struct bt_uuid_128 bhi360_data3_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb4, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// FOTA Progress UUID
+static struct bt_uuid_128 fota_progress_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb5, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 BT_GATT_SERVICE_DEFINE(
     info_service, BT_GATT_PRIMARY_SERVICE(&SENSING_INFO_SERVICE_UUID),
@@ -238,7 +250,15 @@ BT_GATT_SERVICE_DEFINE(
         BT_GATT_PERM_READ_ENCRYPT,
         jis_bhi360_data3_read, nullptr,
         static_cast<void *>(&bhi360_data3_value)),
-    BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));
+    BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // FOTA Progress Characteristic
+    BT_GATT_CHARACTERISTIC(&fota_progress_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_fota_progress_read, nullptr,
+        static_cast<void *>(&fota_progress_value)),
+    BT_GATT_CCC(jis_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));
 
 // clang-format on
 /**
@@ -737,6 +757,36 @@ void jis_bhi360_data3_notify(const bhi360_linear_accel_t *data)
     if (bhi360_data3_subscribed) {
         auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data3_uuid.uuid);
         bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data3_value), sizeof(bhi360_linear_accel_t));
+    }
+}
+
+// --- FOTA Progress ---
+static void jis_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    fota_progress_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("FOTA Progress CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_fota_progress_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(fota_progress_value));
+}
+
+void jis_fota_progress_notify(const fota_progress_msg_t *progress)
+{
+    memcpy(&fota_progress_value, progress, sizeof(fota_progress_value));
+    
+    LOG_DBG("FOTA Progress: active=%d, status=%d, percent=%d%%, bytes=%u/%u", 
+            fota_progress_value.is_active,
+            fota_progress_value.status,
+            fota_progress_value.percent_complete,
+            fota_progress_value.bytes_received,
+            fota_progress_value.total_size);
+    
+    if (fota_progress_subscribed) {
+        auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &fota_progress_uuid.uuid);
+        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&fota_progress_value), sizeof(fota_progress_value));
     }
 }
 

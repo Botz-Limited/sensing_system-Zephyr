@@ -70,6 +70,16 @@ typedef struct {
     uint8_t id;        // The sequence ID of the file to delete
 } delete_log_command_t;
 
+// FOTA progress structure
+typedef struct {
+    bool is_active;
+    uint8_t status; // 0=idle, 1=in_progress, 2=pending, 3=confirmed, 4=error
+    uint8_t percent_complete;
+    uint32_t bytes_received;
+    uint32_t total_size;
+    int32_t error_code;
+} fota_progress_msg_t;
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -89,6 +99,7 @@ typedef struct
         new_log_info_msg_t new_hardware_log_file;
         command_data_t command_str; // For command messages
         delete_log_command_t delete_cmd;
+        fota_progress_msg_t fota_progress;
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 
