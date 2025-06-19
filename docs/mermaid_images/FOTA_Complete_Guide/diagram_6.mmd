@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant Phone
+    participant Primary
+    participant Secondary
+    
+    Phone->>Primary: Set Target = SECONDARY
+    Phone->>Primary: List files
+    Primary->>Secondary: D2D: List
+    Secondary-->>Primary: File list
+    Primary-->>Phone: Notify: Files
+    
+    Phone->>Primary: Read file ID 5
+    Primary->>Secondary: D2D: Read
+    loop File chunks
+        Secondary-->>Primary: Data
+        Primary-->>Phone: Notify: Data
+    end

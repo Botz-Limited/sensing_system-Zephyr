@@ -1,0 +1,14 @@
+graph TB
+    subgraph "Data Flow"
+        SEC[Secondary Sensors] -->|"Notify"| SECTX[D2D TX Service]
+        SECTX -->|"BLE"| PRIMRX[Primary D2D Client]
+        PRIMRX -->|"Internal"| PRIMINFO[Information Service]
+        PRIMINFO -->|"Notify"| PHONE[Mobile App]
+    end
+    
+    subgraph "Command Flow"
+        PHONE2[Mobile App] -->|"Write"| PRIMCTRL[Control Service]
+        PRIMCTRL -->|"Internal"| PRIMD2D[D2D TX Client]
+        PRIMD2D -->|"BLE Write"| SECRX[D2D RX Service]
+        SECRX -->|"Execute"| SECDEV[Secondary Device]
+    end

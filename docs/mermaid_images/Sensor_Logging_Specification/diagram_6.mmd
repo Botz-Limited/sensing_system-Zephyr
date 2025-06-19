@@ -1,0 +1,17 @@
+graph TD
+    subgraph "50Hz Sensors"
+        Q[Quaternion]
+        L[Linear Accel]
+        G[Gyroscope]
+    end
+    
+    subgraph "5Hz Sensor"
+        S[Step Counter]
+    end
+    
+    Q --> SYNC{All Updated?}
+    L --> SYNC
+    G --> SYNC
+    
+    SYNC -->|Yes| LOG[Log Record]
+    S -->|Latest Value| LOG

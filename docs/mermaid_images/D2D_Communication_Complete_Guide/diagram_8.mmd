@@ -1,0 +1,15 @@
+graph LR
+    subgraph "Primary Device"
+        A[File Transfer Client]
+    end
+    
+    subgraph "Secondary Device"
+        B[File Transfer Service]
+        C[Log Files]
+    end
+    
+    A -->|List Files| B
+    A -->|Read File| B
+    A -->|Delete File| B
+    A -->|Get File Info| B
+    B --> C

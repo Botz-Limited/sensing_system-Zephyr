@@ -1,0 +1,21 @@
+graph LR
+    subgraph "Secondary Device"
+        A[Float Data<br/>quat: 0.7071]
+        B[Fixed-Point<br/>quat: 7071]
+    end
+    
+    subgraph "Primary Device"
+        C[D2D RX]
+        D[BLE Notify]
+    end
+    
+    subgraph "Mobile App"
+        E[Receive]
+        F[Convert Back<br/>quat: 0.7071]
+    end
+    
+    A -->|Convert| B
+    B -->|15 bytes| C
+    C --> D
+    D -->|15 bytes| E
+    E --> F

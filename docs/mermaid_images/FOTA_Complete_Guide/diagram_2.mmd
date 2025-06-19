@@ -1,0 +1,15 @@
+sequenceDiagram
+    participant Phone
+    participant Primary
+    
+    Phone->>Primary: Connect BLE
+    Phone->>Primary: Subscribe to Progress
+    Phone->>Primary: Upload firmware
+    loop Progress Updates
+        Primary-->>Phone: Progress: X%
+    end
+    Primary-->>Phone: Status: Pending
+    Primary->>Primary: Auto-reset
+    Phone->>Primary: Reconnect
+    Phone->>Primary: Confirm image
+    Primary-->>Phone: Status: Confirmed

@@ -1,0 +1,23 @@
+graph TB
+    subgraph "Mobile App"
+        APP[BLE Client]
+    end
+    
+    subgraph "Primary Device"
+        PROXY[File Proxy Service]
+        D2D_C[D2D Client]
+    end
+    
+    subgraph "Secondary Device"
+        D2D_S[D2D Server]
+        LOGS[Log Files]
+    end
+    
+    APP -->|"1. Request"| PROXY
+    PROXY -->|"2. Forward"| D2D_C
+    D2D_C -->|"3. D2D Transfer"| D2D_S
+    D2D_S -->|"4. Read"| LOGS
+    LOGS -->|"5. Data"| D2D_S
+    D2D_S -->|"6. Response"| D2D_C
+    D2D_C -->|"7. Forward"| PROXY
+    PROXY -->|"8. Send"| APP

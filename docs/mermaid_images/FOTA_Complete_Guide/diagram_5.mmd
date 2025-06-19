@@ -1,0 +1,10 @@
+sequenceDiagram
+    participant Phone
+    participant Primary
+    
+    Phone->>Primary: Read Log Available
+    Primary-->>Phone: Log ID
+    Phone->>Primary: Read File Path
+    Primary-->>Phone: "/lfs/foot_5.bin"
+    Phone->>Primary: SMP Download
+    Primary-->>Phone: File data

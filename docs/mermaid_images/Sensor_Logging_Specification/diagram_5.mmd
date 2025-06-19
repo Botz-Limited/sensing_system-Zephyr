@@ -1,0 +1,8 @@
+graph TD
+    A[Start Logging] --> B[Write Header<br/>fw=1.0.0, freq=20Hz]
+    B --> C[Packet 1<br/>readings=array, delta=0]
+    C --> D[Packet 2<br/>readings=array, delta=50]
+    D --> E[Packet 3<br/>readings=array, delta=49]
+    E --> F[...]
+    F --> G[Stop Logging]
+    G --> H[Write Session End<br/>uptime=3600000]

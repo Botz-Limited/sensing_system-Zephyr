@@ -1,0 +1,13 @@
+graph LR
+    subgraph "Float Format (Old)"
+        F1[55 bytes/record<br/>@ 50Hz]
+        F2[10 MB/hour]
+    end
+    
+    subgraph "Fixed-Point Format (New)"
+        X1[32 bytes/record<br/>@ 50Hz]
+        X2[5.8 MB/hour]
+    end
+    
+    F1 -->|"-42%"| X1
+    F2 -->|"-42%"| X2

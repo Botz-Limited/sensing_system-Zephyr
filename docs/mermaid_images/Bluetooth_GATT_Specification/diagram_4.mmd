@@ -1,0 +1,11 @@
+sequenceDiagram
+    participant App
+    participant Primary
+    participant Secondary
+    
+    App->>Primary: Write Command
+    Primary->>Primary: Process locally
+    Primary->>Secondary: Forward via D2D
+    Secondary->>Secondary: Execute command
+    Secondary-->>Primary: Acknowledge
+    Primary-->>App: Notify status

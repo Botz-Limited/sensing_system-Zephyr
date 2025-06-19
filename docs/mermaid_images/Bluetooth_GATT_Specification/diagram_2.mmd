@@ -1,0 +1,15 @@
+graph LR
+    subgraph "Primary Device (Right)"
+        P1[Phone Services]
+        P2[D2D Central]
+        P3[Proxy Services]
+    end
+    
+    subgraph "Secondary Device (Left)"
+        S1[D2D Peripheral]
+        S2[Sensor Services]
+    end
+    
+    PHONE[Mobile App] <-->|"Direct BLE"| P1
+    P2 <-->|"D2D BLE"| S1
+    P3 -->|"Relay"| P2

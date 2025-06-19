@@ -1,0 +1,12 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Updating: Start FOTA
+    Updating --> PrimaryComplete: Primary done
+    Updating --> SecondaryComplete: Secondary done
+    PrimaryComplete --> WaitingForSecondary: Reset command
+    SecondaryComplete --> BothComplete: Primary was waiting
+    WaitingForSecondary --> BothComplete: Secondary reports done
+    BothComplete --> Reset: Schedule reset
+    Reset --> [*]
+    
+    WaitingForSecondary --> Reset: 30s timeout

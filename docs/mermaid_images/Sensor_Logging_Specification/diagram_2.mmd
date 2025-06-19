@@ -1,0 +1,38 @@
+graph TB
+    subgraph "Sensors"
+        FOOT[Foot Pressure<br/>8 channels @ 20Hz]
+        BHI[BHI360 IMU<br/>Motion @ 50Hz<br/>Steps @ 5Hz]
+    end
+    
+    subgraph "Processing"
+        CONV[Fixed-Point<br/>Converter]
+        TIME[Delta Timestamp<br/>Generator]
+        PROTO[Protobuf<br/>Encoder]
+    end
+    
+    subgraph "Storage"
+        FS[LittleFS<br/>/lfs1/hardware/]
+        FOOT_LOG[foot_XXX.pb]
+        BHI_LOG[bhi360_XXX.pb]
+    end
+    
+    subgraph "Access"
+        BLE[BLE Services]
+        SMP[SMP Server]
+        SHELL[Shell Commands]
+    end
+    
+    FOOT --> CONV
+    BHI --> CONV
+    CONV --> TIME
+    TIME --> PROTO
+    PROTO --> FS
+    FS --> FOOT_LOG
+    FS --> BHI_LOG
+    
+    FOOT_LOG --> BLE
+    BHI_LOG --> BLE
+    FOOT_LOG --> SMP
+    BHI_LOG --> SMP
+    FOOT_LOG --> SHELL
+    BHI_LOG --> SHELL

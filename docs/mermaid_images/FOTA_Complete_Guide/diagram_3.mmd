@@ -1,0 +1,16 @@
+sequenceDiagram
+    participant Phone
+    participant Primary
+    participant Secondary
+    
+    Phone->>Primary: Set target = SECONDARY
+    Phone->>Primary: Start FOTA (size)
+    loop Send Firmware
+        Phone->>Primary: Data chunks
+        Primary->>Secondary: Forward via SMP
+    end
+    Phone->>Primary: End FOTA
+    Primary->>Secondary: Finalize
+    Phone->>Primary: Reset command
+    Primary->>Secondary: Reset
+    Secondary->>Secondary: Boot new firmware

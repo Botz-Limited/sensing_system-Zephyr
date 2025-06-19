@@ -1,0 +1,20 @@
+sequenceDiagram
+    participant App
+    participant Primary
+    participant Secondary
+    
+    App->>Primary: Set Target = Secondary
+    App->>Primary: Start + Size
+    Primary->>Secondary: Init FOTA
+    
+    loop Firmware Chunks
+        App->>Primary: Data Chunk
+        Primary->>Secondary: Forward Data
+        Secondary-->>Primary: ACK
+        Primary-->>App: Progress Update
+    end
+    
+    App->>Primary: End Command
+    Primary->>Secondary: Finalize
+    Secondary->>Secondary: Reboot
+    Primary-->>App: Complete

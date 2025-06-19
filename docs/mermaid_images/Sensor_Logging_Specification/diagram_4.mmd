@@ -1,0 +1,21 @@
+sequenceDiagram
+    participant Decoder
+    participant File
+    
+    Decoder->>File: Read Header
+    File-->>Decoder: sampling_frequency
+    
+    Note over Decoder: absolute_time = 0
+    
+    loop For each packet
+        Decoder->>File: Read Packet
+        File-->>Decoder: delta_ms, data
+        
+        alt First packet
+            Note over Decoder: absolute_time = 0
+        else Subsequent packets
+            Note over Decoder: absolute_time += delta_ms
+        end
+        
+        Note over Decoder: Process data with absolute_time
+    end
