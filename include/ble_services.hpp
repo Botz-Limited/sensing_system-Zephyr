@@ -37,6 +37,9 @@ void jis_bhi360_quaternion_notify(const float* quat);
 void jis_bhi360_linear_accel_notify(const float* lacc);
 void jis_bhi360_step_count_notify(uint32_t step_count);
 
+// FOTA progress notify function
+void jis_fota_progress_notify(const fota_progress_msg_t* progress);
+
 void cs_log_data_notify(uint8_t stu);
 void cts_notify(void);
 void cs_log_available_hw_notify(uint32_t stu);
@@ -61,5 +64,17 @@ static constexpr uint16_t BLE_ADVERTISING_TIMEOUT_MS = 30000;
 
 static constexpr uint16_t bluetooth_timer = 1000;
 
+// Helper function to send error status to Bluetooth module
+static inline void send_error_to_bluetooth(sender_type_t sender, err_t error_code, bool is_set)
+{
+    generic_message_t msg;
+    msg.sender = sender;
+    msg.type = MSG_TYPE_ERROR_STATUS;
+    msg.data.error_status.error_code = error_code;
+    msg.data.error_status.is_set = is_set;
+    
+    // Send to queue, ignore if full (non-blocking)
+    k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT);
+}
 
 #endif // APP_INCLUDE_BLE_SERVICES_HEADER_

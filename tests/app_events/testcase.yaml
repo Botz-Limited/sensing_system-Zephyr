@@ -1,0 +1,4 @@
+tests:
+  app_events.unit:
+    platform_allow: native_posix
+    tags: app_events unit events

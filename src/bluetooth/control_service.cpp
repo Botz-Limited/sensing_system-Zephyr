@@ -35,6 +35,10 @@
 #include <app.hpp>
 #include <app_version.h>
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "ble_d2d_tx.hpp"
+#endif
+
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -207,7 +211,10 @@ ssize_t write_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_
         return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY); // Or a more specific error
     }
 
-    
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device
+    ble_d2d_tx_send_delete_foot_log_command(id_to_delete);
+    #endif
 
     // Optionally notify the client of success/failure or a status update via CCC
     // This would typically be done after data module has processed the deletion
@@ -267,6 +274,11 @@ ssize_t write_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct b
         return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
     }
 
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device
+    ble_d2d_tx_send_delete_bhi360_log_command(id_to_delete);
+    #endif
+
     LOG_DBG("Sent delete BHI360 log message for ID %u to data_msgq.", id_to_delete);
 
     return len; // Indicate successful write
@@ -324,6 +336,11 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
         struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
         APP_EVENT_SUBMIT(motion_evt);
 
+        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device
+        ble_d2d_tx_send_start_activity_command(value);
+        #endif
+
         LOG_INF("Submitted start activity events for foot sensor and motion sensor (input=1).");
     } else {
         LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
@@ -359,6 +376,11 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn, const struc
 
         struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
         APP_EVENT_SUBMIT(motion_evt);
+
+        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device
+        ble_d2d_tx_send_stop_activity_command(value);
+        #endif
 
         LOG_INF("Submitted stop activity events for foot sensor and motion sensor (input=1).");
     } else {
@@ -404,6 +426,11 @@ static ssize_t write_set_time_control_vnd(struct bt_conn *conn,
 
   // Save epoch time to RTC
   set_current_time_from_epoch((temp_value));
+
+  #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+  // Forward the command to secondary device
+  ble_d2d_tx_send_set_time_command(temp_value);
+  #endif
 
   return len;
 }

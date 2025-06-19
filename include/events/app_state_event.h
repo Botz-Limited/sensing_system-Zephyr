@@ -54,6 +54,7 @@ typedef enum
     MSG_TYPE_DELETE_FOOT_LOG, // Specific message type for deleting foot sensor logs
     MSG_TYPE_DELETE_BHI360_LOG, // Specific message type for deleting BHI360 logs
     MSG_TYPE_FOTA_PROGRESS, // FOTA progress updates
+    MSG_TYPE_ERROR_STATUS, // Error status updates from modules
 } msg_type_t;
 
 // Define sender types
@@ -64,6 +65,7 @@ typedef enum
     SENDER_BHI360_THREAD,
     SENDER_BTH, // Bluetooth
     SENDER_DATA,
+    SENDER_D2D_SECONDARY, // D2D data from secondary device
 } sender_type_t;
 #ifdef __cplusplus
 }

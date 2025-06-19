@@ -66,9 +66,15 @@ constexpr uint8_t sleep_timer_ms = CONFIG_RETRY_SLEEP_TIMER;
 // --- RTC Counter Callback Function (Optional for simple timekeeping) ---
 // This specific callback is not used in the current time calculation logic,
 // as time is derived from counter_get_value() directly.
+// Currently unused - kept for future RTC implementation
+__attribute__((unused))
 static void rtc_counter_callback(const struct device *dev, void *user_data,
-                                 uint32_t ticks, uint32_t status)
+uint32_t ticks, uint32_t status)
 {
+ARG_UNUSED(dev);
+ARG_UNUSED(user_data);
+ARG_UNUSED(ticks);
+ARG_UNUSED(status);
     // LOG_DBG("RTC callback: ticks=%u, status=%u", ticks, status);
 }
 

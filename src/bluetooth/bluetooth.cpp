@@ -47,12 +47,14 @@
 #include <events/bluetooth_state_event.h>
 #include <events/data_event.h>
 
+#include "ble_d2d_file_transfer.hpp"
 #include "ble_d2d_rx.hpp"
 #include "ble_d2d_tx.hpp"
-#include "ble_d2d_file_transfer.hpp"
+#include "bluetooth_debug.hpp"
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-#include "fota_proxy.hpp"
 #include "file_proxy.hpp"
+#include "fota_proxy.hpp"
+#include "ble_d2d_rx_client.hpp"
 #endif
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
@@ -71,26 +73,54 @@ static k_tid_t bluetooth_tid;
 static struct bt_conn *d2d_conn = nullptr;
 static void start_scan(void);
 
-
 static void d2d_connected(struct bt_conn *conn, uint8_t err)
 {
     if (!err)
     {
         d2d_conn = conn;
+        
+        // Request MTU exchange for D2D connection
+        static struct bt_gatt_exchange_params d2d_exchange_params;
+        d2d_exchange_params.func = [](struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params) {
+            if (!err) {
+                uint16_t mtu = bt_gatt_get_mtu(conn);
+                LOG_INF("D2D MTU exchange successful: %u", mtu);
+            } else {
+                LOG_WRN("D2D MTU exchange failed: %d", err);
+            }
+        };
+        
+        int ret = bt_gatt_exchange_mtu(conn, &d2d_exchange_params);
+        if (ret) {
+            LOG_WRN("Failed to initiate D2D MTU exchange: %d", ret);
+        }
+        
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         LOG_INF("Secondary device connected!\n");
         char addr_str[BT_ADDR_LE_STR_LEN];
-        bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
-        LOG_INF("Connected device address: %s\n", addr_str);
-        
+        const bt_addr_le_t *addr = bt_conn_get_dst(conn);
+        if (addr)
+        {
+            bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+            LOG_INF("Connected device address: %s\n", addr_str);
+        }
+        else
+        {
+            LOG_WRN("Failed to get connected device address");
+        }
+
         // Set the secondary connection for FOTA proxy
         fota_proxy_set_secondary_conn(conn);
-        
+
         // Set the secondary connection for file proxy
         file_proxy_set_secondary_conn(conn);
-        
+
         // Initialize D2D file client for this connection
         ble_d2d_file_client_init(conn);
+        
+        // Start discovery of secondary device's TX service
+        k_sleep(K_MSEC(100)); // Small delay to ensure connection is stable
+        d2d_rx_client_start_discovery(conn);
 #else
         LOG_INF("Connected to primary device!\n");
 #endif
@@ -104,12 +134,15 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
         d2d_conn = nullptr;
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         LOG_INF("Secondary device disconnected!\n");
-        
+
         // Clear the secondary connection for FOTA proxy
         fota_proxy_set_secondary_conn(NULL);
-        
+
         // Clear the secondary connection for file proxy
         file_proxy_set_secondary_conn(NULL);
+        
+        // Clear D2D RX client
+        d2d_rx_client_disconnected();
 #else
         LOG_INF("Disconnected from primary device!\n");
         // Restart scanning after disconnection
@@ -144,30 +177,32 @@ static const struct bt_le_conn_param conn_param = {
 static const char target_device_name[] = "SensingGR";
 
 // Target service UUID: 5cb36a14-ca69-4d97-89a8-001ffc9ec8cd
-static const uint8_t target_service_uuid[16] = {
-    0x5c, 0xb3, 0x6a, 0x14, 0xca, 0x69, 0x4d, 0x97,
-    0x89, 0xa8, 0x00, 0x1f, 0xfc, 0x9e, 0xc8, 0xcd
-};
+static const uint8_t target_service_uuid[16] = {0x5c, 0xb3, 0x6a, 0x14, 0xca, 0x69, 0x4d, 0x97,
+                                                0x89, 0xa8, 0x00, 0x1f, 0xfc, 0x9e, 0xc8, 0xcd};
 
 // Helper function to check if advertisement contains our target name
 static bool adv_data_has_name(struct net_buf_simple *ad, const char *name)
 {
-    if (!ad || !name) return false;
-    
+    if (!ad || !name)
+        return false;
+
     size_t name_len = strlen(name);
     size_t i = 0;
-    
-    while (i + 1 < ad->len) {
+
+    while (i + 1 < ad->len)
+    {
         uint8_t len = ad->data[i];
-        if (len == 0 || (i + len >= ad->len)) break;
-        
+        if (len == 0 || (i + len >= ad->len))
+            break;
+
         uint8_t type = ad->data[i + 1];
-        
+
         // Check for complete or shortened local name
-        if (type == BT_DATA_NAME_COMPLETE || type == BT_DATA_NAME_SHORTENED) {
+        if (type == BT_DATA_NAME_COMPLETE || type == BT_DATA_NAME_SHORTENED)
+        {
             size_t data_len = len - 1; // Subtract type byte
-            if (data_len >= name_len && 
-                memcmp(&ad->data[i + 2], name, name_len) == 0) {
+            if (data_len >= name_len && memcmp(&ad->data[i + 2], name, name_len) == 0)
+            {
                 return true;
             }
         }
@@ -179,20 +214,26 @@ static bool adv_data_has_name(struct net_buf_simple *ad, const char *name)
 // Helper function to check if advertisement contains our target UUID
 static bool adv_data_has_uuid(struct net_buf_simple *ad)
 {
-    if (!ad) return false;
-    
+    if (!ad)
+        return false;
+
     size_t i = 0;
-    while (i + 1 < ad->len) {
+    while (i + 1 < ad->len)
+    {
         uint8_t len = ad->data[i];
-        if (len == 0 || (i + len >= ad->len)) break;
-        
+        if (len == 0 || (i + len >= ad->len))
+            break;
+
         uint8_t type = ad->data[i + 1];
-        
+
         // Check for 128-bit UUID
-        if (type == BT_DATA_UUID128_ALL || type == BT_DATA_UUID128_SOME) {
+        if (type == BT_DATA_UUID128_ALL || type == BT_DATA_UUID128_SOME)
+        {
             // Check all 128-bit UUIDs in this field
-            for (size_t j = i + 2; j + 15 < i + 1 + len; j += 16) {
-                if (memcmp(&ad->data[j], target_service_uuid, 16) == 0) {
+            for (size_t j = i + 2; j + 15 < i + 1 + len; j += 16)
+            {
+                if (memcmp(&ad->data[j], target_service_uuid, 16) == 0)
+                {
                     return true;
                 }
             }
@@ -207,56 +248,75 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, st
     char addr_str[BT_ADDR_LE_STR_LEN];
     bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
     LOG_INF("[SCAN] Device found: %s, RSSI: %d, type: %u, adv data len: %u", addr_str, rssi, type, ad ? ad->len : 0);
-    
+
     // Check if this is our target device by name AND UUID
     bool has_name = ad && adv_data_has_name(ad, target_device_name);
     bool has_uuid = ad && adv_data_has_uuid(ad);
-    
-    if (!has_name && !has_uuid) {
+
+    if (!has_name && !has_uuid)
+    {
         LOG_INF("[SCAN] Skipping device: neither name nor UUID match");
         return;
     }
-    
-    if (has_name && has_uuid) {
+
+    if (has_name && has_uuid)
+    {
         LOG_INF("[SCAN] Perfect match! Found 'SensingGR' with correct UUID at %s", addr_str);
-    } else if (has_name) {
+    }
+    else if (has_name)
+    {
         LOG_INF("[SCAN] Found device with matching name 'SensingGR' at %s", addr_str);
-    } else if (has_uuid) {
+    }
+    else if (has_uuid)
+    {
         LOG_INF("[SCAN] Found device with matching UUID at %s", addr_str);
     }
-    
-    if (type != BT_GAP_ADV_TYPE_ADV_IND && type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
+
+    if (type != BT_GAP_ADV_TYPE_ADV_IND && type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND)
+    {
         LOG_WRN("[SCAN] Advertiser is not connectable (type: %u)", type);
         return;
     }
-    
+
     // Check if we already have a connection object and clean it up
-    if (conn) {
+    if (conn)
+    {
         LOG_WRN("[SCAN] Cleaning up existing connection object");
         bt_conn_unref(conn);
         conn = NULL;
     }
-    
+
     int err = bt_le_scan_stop();
-    if (err) {
+    if (err)
+    {
         LOG_ERR("[SCAN] Failed to stop scan: %d", err);
     }
-    
+
     // Small delay to ensure scan is fully stopped
     k_msleep(10);
-    
+
     err = bt_conn_le_create(addr, &create_param, &conn_param, &conn);
-    if (err) {
-        if (err == -EINVAL) {
-            LOG_ERR("[SCAN] Failed to create connection: -EINVAL (invalid argument). Possible address type or advertising type mismatch.");
-        } else if (err == -ENOTSUP) {
-            LOG_ERR("[SCAN] Failed to create connection: -ENOTSUP (operation not supported). Check if advertiser is connectable.");
-        } else {
+    if (err)
+    {
+        if (err == -EINVAL)
+        {
+            LOG_ERR("[SCAN] Failed to create connection: -EINVAL (invalid argument). Possible address type or "
+                    "advertising type mismatch.");
+        }
+        else if (err == -ENOTSUP)
+        {
+            LOG_ERR("[SCAN] Failed to create connection: -ENOTSUP (operation not supported). Check if advertiser is "
+                    "connectable.");
+        }
+        else
+        {
             LOG_ERR("[SCAN] Failed to create connection: %d", err);
         }
         conn = NULL;
         start_scan();
-    } else {
+    }
+    else
+    {
         LOG_INF("[SCAN] Connection initiated to %s", addr_str);
     }
 }
@@ -277,7 +337,8 @@ static void start_scan(void)
 void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/);
 
 static uint8_t ble_status_connected = 0;
-static bool ble_id_has_changed = false;
+// Currently unused - kept for future BLE ID change handling
+__attribute__((unused)) static bool ble_id_has_changed = false;
 
 struct check_bond_data
 {
@@ -426,9 +487,17 @@ static void connected(struct bt_conn *conn, uint8_t err)
     {
         LOG_ERR("Connection failed (err 0x%02x)", err);
         char addr_str[BT_ADDR_LE_STR_LEN];
-        bt_addr_le_to_str(bt_conn_get_dst(conn), addr_str, sizeof(addr_str));
-        LOG_ERR("Failed to connect to: %s", addr_str);
-        
+        const bt_addr_le_t *addr = bt_conn_get_dst(conn);
+        if (addr)
+        {
+            bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
+            LOG_ERR("Failed to connect to: %s", addr_str);
+        }
+        else
+        {
+            LOG_ERR("Failed to connect: unable to get address");
+        }
+
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // If we're in central mode and connection failed, restart scanning
         start_scan();
@@ -436,6 +505,24 @@ static void connected(struct bt_conn *conn, uint8_t err)
     }
     else
     {
+        // Request MTU exchange to avoid small MTU issues
+        static struct bt_gatt_exchange_params exchange_params;
+        exchange_params.func = [](struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params) {
+            if (!err) {
+                uint16_t mtu = bt_gatt_get_mtu(conn);
+                LOG_INF("MTU exchange successful: %u", mtu);
+            } else {
+                LOG_WRN("MTU exchange failed: %d", err);
+            }
+        };
+        
+        int mtu_ret = bt_gatt_exchange_mtu(conn, &exchange_params);
+        if (mtu_ret) {
+            LOG_WRN("Failed to initiate MTU exchange: %d", mtu_ret);
+        } else {
+            LOG_DBG("MTU exchange initiated");
+        }
+
         // Only send a connected event if the connection is already bonded
         bool bonded = is_connection_bonded(conn);
         if (bonded)
@@ -444,6 +531,11 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
         LOG_INF("Connected");
         ble_status_connected = 1;
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Debug information service status
+        bt_debug_info_service_status(conn);
+#endif
 
         int ret = bt_conn_set_security(conn, BT_SECURITY_L2);
         if (ret != 0)
@@ -520,11 +612,32 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 {
     char addr[BT_ADDR_LE_STR_LEN];
 
-    bt_addr_le_to_str(bt_conn_get_dst(conn), addr, sizeof(addr));
+    const bt_addr_le_t *dst_addr = bt_conn_get_dst(conn);
+    if (dst_addr)
+    {
+        bt_addr_le_to_str(dst_addr, addr, sizeof(addr));
+    }
+    else
+    {
+        strncpy(addr, "unknown", sizeof(addr) - 1);
+        addr[sizeof(addr) - 1] = '\0';
+    }
 
     if (err == 0)
     {
         LOG_INF("Security changed: %s level %u\n", addr, level);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Check if we now have proper security for encrypted characteristics
+        if (level >= BT_SECURITY_L2)
+        {
+            LOG_INF("Security level sufficient for encrypted characteristics");
+            bt_debug_info_service_status(conn);
+        }
+        else
+        {
+            LOG_WRN("Security level %u is insufficient for encrypted characteristics (need >= L2)", level);
+        }
+#endif
     }
     else
     {
@@ -544,7 +657,8 @@ BT_CONN_CB_DEFINE(conn_callbacks) = {
 
 };
 
-static void ble_set_power_off()
+// Currently unused - kept for future power management
+__attribute__((unused)) static void ble_set_power_off()
 {}
 
 int set_bluetooth_name()
@@ -602,31 +716,37 @@ err_t bt_module_init(void)
     }
 
     static struct bt_conn_cb d2d_conn_callbacks = {
-    .connected = d2d_connected,
-    .disconnected = d2d_disconnected,
-};
+        .connected = d2d_connected,
+        .disconnected = d2d_disconnected,
+    };
 
     bt_conn_cb_register(&d2d_conn_callbacks);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     ble_d2d_rx_init(); // Accept commands from secondary
-    
+
     // Initialize FOTA proxy service for primary device
     int fota_err = fota_proxy_init();
-    if (fota_err != 0) {
+    if (fota_err != 0)
+    {
         LOG_ERR("Failed to initialize FOTA proxy: %d", fota_err);
-    } else {
+    }
+    else
+    {
         LOG_INF("FOTA proxy service initialized");
     }
-    
+
     // Initialize file proxy service for primary device
     int file_err = file_proxy_init();
-    if (file_err != 0) {
+    if (file_err != 0)
+    {
         LOG_ERR("Failed to initialize file proxy: %d", file_err);
-    } else {
+    }
+    else
+    {
         LOG_INF("File proxy service initialized");
     }
-    
+
     if (bt_start_advertising(0) == err_t::NO_ERROR)
     {
         LOG_INF("BLE Started Advertising");
@@ -636,9 +756,9 @@ err_t bt_module_init(void)
         LOG_ERR("BLE Failed to enter advertising mode");
     }
 #else
-    ble_d2d_tx_init(); // Prepare to send data to primary
+    ble_d2d_tx_init();            // Prepare to send data to primary
     ble_d2d_file_transfer_init(); // Initialize D2D file transfer service
-    start_scan();      // Start scanning for primary device
+    start_scan();                 // Start scanning for primary device
     // Do NOT start advertising or initialize control/info services here
     return err_t::NO_ERROR;
 #endif
@@ -674,7 +794,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_FOOT_SAMPLES: {
                     // Directly access the data from the union member
                     foot_samples_t *foot_data = &msg.data.foot_samples; // Get pointer to data within the message
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_foot_sensor_notify(foot_data);
+#endif
                     break;
                 }
 
@@ -685,7 +807,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             get_sender_name(msg.sender), (double)mapping_data->accel_x, (double)mapping_data->accel_y,
                             (double)mapping_data->accel_z, (double)mapping_data->gyro_x, (double)mapping_data->gyro_y,
                             (double)mapping_data->gyro_z);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_bhi360_data1_notify(mapping_data);
+#endif
                     break;
                 }
 
@@ -693,7 +817,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     bhi360_linear_accel_t *lacc_data = &msg.data.bhi360_linear_accel;
                     LOG_INF("Received BHI360 Linear Accel from %s: (%.2f,%.2f,%.2f)", get_sender_name(msg.sender),
                             (double)lacc_data->x, (double)lacc_data->y, (double)lacc_data->z);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_bhi360_data3_notify(lacc_data);
+#endif
                     break;
                 }
 
@@ -701,7 +827,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
                     LOG_INF("Received BHI360 Step Count from %s: Steps=%u, ActivityDuration=%u s",
                             get_sender_name(msg.sender), step_data->step_count, step_data->activity_duration_s);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_bhi360_data2_notify(step_data);
+#endif
                     break;
                 }
 
@@ -710,8 +838,10 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     new_log_info_msg_t *log_info = &msg.data.new_hardware_log_file;
                     LOG_INF("Received NEW FOOT LOG FILE notification from %s:", get_sender_name(msg.sender));
                     LOG_INF("  File Path: %s", log_info->file_path);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_foot_sensor_log_available_notify(log_info->file_sequence_id);
                     jis_foot_sensor_req_id_path_notify(log_info->file_path);
+#endif
                     break;
                 }
 
@@ -720,8 +850,10 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     new_log_info_msg_t *log_info = &msg.data.new_hardware_log_file;
                     LOG_INF("Received NEW BH360 LOG FILE notification from %s:", get_sender_name(msg.sender));
                     LOG_INF("  File Path: %s", log_info->file_path);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_bhi360_log_available_notify(log_info->file_sequence_id);
                     jis_bhi360_req_id_path_notify(log_info->file_path);
+#endif
                     break;
                 }
 
@@ -736,9 +868,28 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // Handle FOTA progress updates
                     fota_progress_msg_t *progress = &msg.data.fota_progress;
                     LOG_INF("Received FOTA Progress: active=%d, status=%d, percent=%d%%, bytes=%u/%u",
-                            progress->is_active, progress->status, progress->percent_complete,
-                            progress->bytes_received, progress->total_size);
+                            progress->is_active, progress->status, progress->percent_complete, progress->bytes_received,
+                            progress->total_size);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_fota_progress_notify(progress);
+#endif
+                    break;
+                }
+
+                case MSG_TYPE_ERROR_STATUS: {
+                    // Handle error status updates from other modules
+                    error_status_msg_t *error_status = &msg.data.error_status;
+                    LOG_INF("Received Error Status from %s: error_code=%d, is_set=%s", 
+                            get_sender_name(msg.sender), 
+                            (int)error_status->error_code,
+                            error_status->is_set ? "SET" : "CLEAR");
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    if (error_status->is_set) {
+                        jis_set_err_status_notify(error_status->error_code);
+                    } else {
+                        jis_clear_err_status_notify(error_status->error_code);
+                    }
+#endif
                     break;
                 }
 
@@ -772,6 +923,8 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
  * parameter. It is used to propagate the error code from the advertising start
  * operation to the caller.
  */
+// Only used by primary device
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 err_t bt_start_advertising(int err)
 {
 
@@ -792,6 +945,7 @@ err_t bt_start_advertising(int err)
     }
     return err_t::NO_ERROR;
 }
+#endif // CONFIG_PRIMARY_DEVICE
 
 /**
  * @brief Starts hidden Bluetooth Low Energy (BLE) advertising.
@@ -877,7 +1031,8 @@ static void ble_timer_handler_function(struct k_work *work)
  * devices. Logging information is provided to indicate that the bonds are being
  * reset.
  */
-err_t ble_reset_bonds()
+// Currently unused - kept for future bond management
+__attribute__((unused)) err_t ble_reset_bonds()
 {
     LOG_INF("Reset bonds");
     k_timer_stop(&ble_timer);

@@ -170,9 +170,6 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
 
     int16_t *raw_adc_data = NULL;
 
-    // to match the buffer type and handle potential negative calibrated values.
-    int16_t *data = NULL;
-
     switch (p_event->type)
     {
         case NRFX_SAADC_EVT_CALIBRATEDONE:
@@ -194,6 +191,12 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
             samples_number = p_event->data.done.size;
             // Assign the buffer to our new uint16_t pointer
             raw_adc_data = (int16_t *)p_event->data.done.p_buffer;
+            
+            // Validate pointer before use
+            if (!raw_adc_data) {
+                LOG_ERR("SAADC buffer pointer is NULL");
+                break;
+            }
 
             if (!calibration_done)
             {
@@ -293,6 +296,8 @@ static void calibrate_saadc_channels(void)
 }
 
 // --- Timer handler (empty as per your use case, now marked with ARG_UNUSED) ---
+// Currently unused - DPPI handles the direct trigger
+__attribute__((unused))
 static void timer_handler(nrf_timer_event_t event_type, void *p_context)
 {
     ARG_UNUSED(event_type);

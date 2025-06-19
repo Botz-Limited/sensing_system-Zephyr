@@ -31,6 +31,7 @@ menu "SENSING"
     config PRIMARY_DEVICE
         bool "Build as primary device (connects to phone)"
         default y
+        select BT_GATT_CLIENT  # Primary needs GATT client for D2D TX
 
     config SECONDARY_DEVICE
         bool

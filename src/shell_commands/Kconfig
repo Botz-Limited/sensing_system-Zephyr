@@ -1,0 +1,13 @@
+config LOG_DECODER_SHELL_CMD
+    bool "Enable log decoder shell commands"
+    default y
+    depends on SHELL
+    depends on FILE_SYSTEM
+    help
+      Enable shell commands for log file management and decoding.
+      Commands include:
+        - log list: List all log files
+        - log decode foot: Decode latest foot sensor log
+        - log decode bhi360: Decode latest BHI360 log
+        - log decode file <path>: Decode specific file
+        - log delete_all: Delete all log files

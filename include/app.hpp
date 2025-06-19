@@ -16,6 +16,7 @@
 #include <events/data_event.h>
 #include <zephyr/kernel.h>
 #include <time.h>
+#include <errors.hpp>
 
 void app_log(const char *fmt, ...);
 
@@ -80,6 +81,12 @@ typedef struct {
     int32_t error_code;
 } fota_progress_msg_t;
 
+// Error status structure for reporting module errors
+typedef struct {
+    err_t error_code;  // The error code from errors.hpp
+    bool is_set;       // true = set error, false = clear error
+} error_status_msg_t;
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -100,6 +107,7 @@ typedef struct
         command_data_t command_str; // For command messages
         delete_log_command_t delete_cmd;
         fota_progress_msg_t fota_progress;
+        error_status_msg_t error_status;
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

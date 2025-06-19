@@ -17,6 +17,9 @@ LOG_MODULE_REGISTER(fota_proxy, LOG_LEVEL_INF);
 #define FOTA_PROXY_BUF_SIZE 512
 #define FOTA_PROXY_MTU_SIZE 244
 
+// Global flag for D2D secondary FOTA completion
+bool d2d_secondary_fota_complete = false;
+
 // State management
 static struct {
     struct bt_conn *secondary_conn;
@@ -28,6 +31,10 @@ static struct {
     uint8_t data_buffer[FOTA_PROXY_BUF_SIZE];
     size_t data_len;
     bool dfu_initialized;
+    // Synchronization fields for coordinated updates
+    bool primary_complete;
+    bool secondary_complete;
+    bool waiting_for_secondary;
 } fota_proxy_state = {
     .secondary_conn = NULL,
     .current_target = FOTA_TARGET_PRIMARY,
@@ -38,15 +45,20 @@ static struct {
     .data_buffer = {0},
     .data_len = 0,
     .dfu_initialized = false,
+    .primary_complete = false,
+    .secondary_complete = false,
+    .waiting_for_secondary = false,
 };
 
 // Work queue for async operations
 static struct k_work fota_work;
 static struct k_work_delayable fota_timeout_work;
+static struct k_work_delayable fota_reset_work;
 
 // Forward declarations
 static void fota_proxy_work_handler(struct k_work *work);
 static void fota_proxy_timeout_handler(struct k_work *work);
+static void fota_proxy_reset_handler(struct k_work *work);
 static int forward_to_secondary(uint8_t cmd, const uint8_t *data, size_t len);
 
 // GATT characteristic values
@@ -102,6 +114,11 @@ static ssize_t fota_proxy_command_write(struct bt_conn *conn,
                 fota_proxy_state.transferred_size = 0;
                 fota_proxy_state.is_active = true;
                 fota_proxy_state.status = FOTA_PROXY_STATUS_IN_PROGRESS;
+                
+                // Reset completion flags
+                fota_proxy_state.primary_complete = false;
+                fota_proxy_state.secondary_complete = false;
+                fota_proxy_state.waiting_for_secondary = false;
                 
                 LOG_INF("Starting FOTA update, total size: %u bytes", fota_proxy_state.total_size);
                 
@@ -169,16 +186,52 @@ static ssize_t fota_proxy_command_write(struct bt_conn *conn,
 
         case FOTA_PROXY_CMD_RESET:
             LOG_INF("Reset command received for target: %d", fota_proxy_state.current_target);
-            if (fota_proxy_state.current_target == FOTA_TARGET_SECONDARY && 
-                fota_proxy_state.secondary_conn) {
-                // For secondary device, we would need to send a reset command
-                // This would require implementing a custom characteristic on the secondary
-                // or using the MCUmgr OS management group if available
-                LOG_WRN("Secondary device reset not implemented in this version");
+            
+            if (fota_proxy_state.current_target == FOTA_TARGET_ALL) {
+                // For ALL target, need to coordinate reset
+                fota_proxy_state.primary_complete = true;
+                
+                // Check if secondary already completed via D2D flag
+                if (d2d_secondary_fota_complete) {
+                    fota_proxy_state.secondary_complete = true;
+                    d2d_secondary_fota_complete = false; // Reset flag
+                }
+                
+                if (fota_proxy_state.secondary_complete) {
+                    // Both devices are ready, safe to reset
+                    LOG_INF("Both devices complete, scheduling reset");
+                    fota_proxy_state.status = FOTA_PROXY_STATUS_BOTH_COMPLETE;
+                    k_work_schedule(&fota_reset_work, K_SECONDS(2));
+                } else {
+                    // Wait for secondary to complete
+                    fota_proxy_state.waiting_for_secondary = true;
+                    fota_proxy_state.status = FOTA_PROXY_STATUS_WAITING_SECONDARY;
+                    LOG_INF("Waiting for secondary device to complete FOTA...");
+                    
+                    // Set a timeout in case secondary fails
+                    k_work_schedule(&fota_reset_work, K_SECONDS(30));
+                }
             } else if (fota_proxy_state.current_target == FOTA_TARGET_PRIMARY) {
-                // Reset primary after a delay
-                k_sleep(K_SECONDS(1));
-                sys_reboot(SYS_REBOOT_WARM);
+                // Primary only, reset after delay
+                LOG_INF("Primary-only update, scheduling reset");
+                k_work_schedule(&fota_reset_work, K_SECONDS(2));
+            } else if (fota_proxy_state.current_target == FOTA_TARGET_SECONDARY) {
+                // Secondary only, no reset needed on primary
+                LOG_INF("Secondary-only update, no primary reset needed");
+            }
+            break;
+
+        case FOTA_PROXY_CMD_SECONDARY_COMPLETE:
+            LOG_INF("Secondary device reported FOTA complete");
+            fota_proxy_state.secondary_complete = true;
+            
+            // Check if primary is waiting for secondary
+            if (fota_proxy_state.waiting_for_secondary && fota_proxy_state.primary_complete) {
+                // Both are now complete, proceed with reset
+                LOG_INF("Both devices now complete, scheduling reset");
+                fota_proxy_state.status = FOTA_PROXY_STATUS_BOTH_COMPLETE;
+                k_work_cancel_delayable(&fota_reset_work); // Cancel timeout
+                k_work_schedule(&fota_reset_work, K_SECONDS(2));
             }
             break;
 
@@ -353,6 +406,23 @@ static void fota_proxy_work_handler(struct k_work *work)
 static void fota_proxy_timeout_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
+    
+    // Check if secondary completed while we were waiting
+    if (d2d_secondary_fota_complete && fota_proxy_state.waiting_for_secondary) {
+        LOG_INF("Secondary FOTA completed during timeout period");
+        fota_proxy_state.secondary_complete = true;
+        d2d_secondary_fota_complete = false; // Reset flag
+        
+        if (fota_proxy_state.primary_complete) {
+            // Both are now complete, proceed with reset
+            LOG_INF("Both devices now complete, scheduling reset");
+            fota_proxy_state.status = FOTA_PROXY_STATUS_BOTH_COMPLETE;
+            fota_proxy_notify_status(fota_proxy_state.status);
+            k_work_schedule(&fota_reset_work, K_SECONDS(2));
+            return;
+        }
+    }
+    
     LOG_ERR("FOTA proxy timeout");
     fota_proxy_state.is_active = false;
     fota_proxy_state.status = FOTA_PROXY_STATUS_ERROR;
@@ -366,12 +436,31 @@ static void fota_proxy_timeout_handler(struct k_work *work)
     fota_proxy_notify_status(fota_proxy_state.status);
 }
 
+// Reset handler - performs the actual system reset
+static void fota_proxy_reset_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    
+    if (fota_proxy_state.waiting_for_secondary && !fota_proxy_state.secondary_complete) {
+        LOG_WRN("Timeout waiting for secondary device, resetting anyway");
+    }
+    
+    LOG_INF("Performing system reset for FOTA completion");
+    
+    // Give time for final log messages
+    k_sleep(K_MSEC(100));
+    
+    // Perform warm reset
+    sys_reboot(SYS_REBOOT_WARM);
+}
+
 // Public functions
 int fota_proxy_init(void)
 {
     // Initialize work items
     k_work_init(&fota_work, fota_proxy_work_handler);
     k_work_init_delayable(&fota_timeout_work, fota_proxy_timeout_handler);
+    k_work_init_delayable(&fota_reset_work, fota_proxy_reset_handler);
 
     LOG_INF("FOTA proxy service initialized");
     return 0;
@@ -419,4 +508,23 @@ int fota_proxy_notify_status(enum fota_proxy_status status)
     // 9: CCC
     return bt_gatt_notify(NULL, &fota_proxy_svc.attrs[7], 
                          &fota_status_value, sizeof(fota_status_value));
+}
+
+int fota_proxy_handle_secondary_complete(void)
+{
+    LOG_INF("Secondary device FOTA completion received");
+    fota_proxy_state.secondary_complete = true;
+    
+    // Check if primary is waiting for secondary
+    if (fota_proxy_state.waiting_for_secondary && fota_proxy_state.primary_complete) {
+        // Both are now complete, proceed with reset
+        LOG_INF("Both devices now complete, scheduling reset");
+        fota_proxy_state.status = FOTA_PROXY_STATUS_BOTH_COMPLETE;
+        fota_proxy_notify_status(fota_proxy_state.status);
+        
+        k_work_cancel_delayable(&fota_reset_work); // Cancel timeout
+        k_work_schedule(&fota_reset_work, K_SECONDS(2));
+    }
+    
+    return 0;
 }

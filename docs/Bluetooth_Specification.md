@@ -32,7 +32,6 @@ This document describes the Bluetooth GATT services and characteristics implemen
     - [9.1 D2D RX Service (Primary Device Only)](#91-d2d-rx-service-primary-device-only)
     - [9.2 D2D TX Service (Secondary Device Only)](#92-d2d-tx-service-secondary-device-only)
     - [9.3 D2D File Transfer Service](#93-d2d-file-transfer-service)
-  - [Exporting to CODA](#exporting-to-coda)
 
 ---
 
@@ -370,17 +369,3 @@ struct d2d_file_packet {
 - Secondary acts as GATT server, Primary acts as GATT client
 - Used by File Proxy service to retrieve files from secondary devices
 
----
-
-## Exporting to CODA
-
-To export this document to CODA:
-1. Open this Markdown file in your editor.
-2. Copy all contents (Ctrl+A, Ctrl+C).
-3. In CODA, create a new document or page.
-4. Paste the Markdown content (Ctrl+V). CODA will automatically format headings, tables, and sections.
-5. Review and adjust formatting as needed in CODA.
-
----
-
-For further questions or clarifications, refer to the firmware codebase or contact the firmware team.

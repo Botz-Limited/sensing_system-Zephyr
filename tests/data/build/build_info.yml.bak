@@ -1,4 +1,0 @@
-west:
-  command: /opt/venv/bin/west build -b native_sim -p
-  topdir: /home/ee/ncs
-  version: 1.4.0

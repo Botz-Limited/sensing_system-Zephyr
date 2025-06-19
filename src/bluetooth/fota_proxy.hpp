@@ -35,6 +35,7 @@ enum fota_proxy_cmd {
     FOTA_PROXY_CMD_ABORT = 0x04,
     FOTA_PROXY_CMD_STATUS = 0x05,
     FOTA_PROXY_CMD_RESET = 0x06,
+    FOTA_PROXY_CMD_SECONDARY_COMPLETE = 0x07,
 };
 
 // FOTA Proxy Status
@@ -44,6 +45,8 @@ enum fota_proxy_status {
     FOTA_PROXY_STATUS_SUCCESS = 0x02,
     FOTA_PROXY_STATUS_ERROR = 0x03,
     FOTA_PROXY_STATUS_NO_TARGET = 0x04,
+    FOTA_PROXY_STATUS_WAITING_SECONDARY = 0x05,
+    FOTA_PROXY_STATUS_BOTH_COMPLETE = 0x06,
 };
 
 // Target device selection

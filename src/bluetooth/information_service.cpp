@@ -283,42 +283,190 @@ void set_device_status(uint32_t new_status)
 }
 
 /**
- * @brief clears the error status
+ * @brief Sets error status bits based on err_t error codes
  *
- * @param new_device_status
- *
+ * @param error_code The error code to convert to status bit
  */
-void jis_clear_err_status_notify(err_t new_device_status)
+void jis_set_err_status_notify(err_t error_code)
 {
-    switch (new_device_status)
+    uint32_t error_bit = 0;
+    
+    // Map err_t values to status bits
+    switch (error_code)
     {
+        case err_t::NO_ERROR:
+            // No error, nothing to set
+            return;
+            
+        case err_t::BATTERY_FAULT:
+            error_bit = STATUS_BATTERY_FAULT;
+            break;
+            
+        case err_t::BLUETOOTH_ERROR:
+            error_bit = STATUS_BLUETOOTH_ERROR;
+            break;
+            
+        case err_t::HARDWARE:
+            error_bit = STATUS_HARDWARE_ERROR;
+            break;
+            
+        case err_t::DATA_ERROR:
+            error_bit = STATUS_DATA_ERROR;
+            break;
+            
+        case err_t::DFU_ERROR:
+            error_bit = STATUS_DFU_ERROR;
+            break;
+            
+        case err_t::ADC_ERROR:
+            error_bit = STATUS_ADC_ERROR;
+            break;
+            
+        case err_t::I2C_ERROR:
+            error_bit = STATUS_I2C_ERROR;
+            break;
+            
+        case err_t::BATTERY_DISCONNECTION_ERROR:
+            error_bit = STATUS_BATTERY_DISCONNECTED;
+            break;
+            
+        case err_t::MOTION_ERROR:
+            error_bit = STATUS_MOTION_ERROR;
+            break;
+            
+        case err_t::RTC_ERROR:
+            error_bit = STATUS_RTC_ERROR;
+            break;
+            
+        case err_t::FILE_SYSTEM_ERROR:
+            error_bit = STATUS_FILE_SYSTEM_ERROR;
+            break;
+            
+        case err_t::PROTO_ENCODE_ERROR:
+            error_bit = STATUS_PROTO_ENCODE_ERROR;
+            break;
+            
+        case err_t::FILE_SYSTEM_NO_FILES:
+            error_bit = STATUS_FILE_SYSTEM_NO_FILES;
+            break;
+            
+        case err_t::FILE_SYSTEM_STORAGE_FULL:
+            error_bit = STATUS_FILE_SYSTEM_FULL;
+            break;
+            
+        case err_t::FLASH_FAILURE:
+            error_bit = STATUS_FLASH_FAILURE;
+            break;
+            
         default:
-            LOG_WRN("UNKNOWN device clear status reported: %d", (int)new_device_status);
+            LOG_WRN("Unknown error code: %d, setting general error flag", (int)error_code);
+            error_bit = STATUS_ERROR;
             break;
     }
-    // Check if device_status_bitfield has changed or update it if its the first time
-    if (!init_status_bt_update || device_status_bitfield != previous_device_status_bitfield)
+    
+    // Set the error bit and the general error flag
+    uint32_t new_status = device_status_bitfield | error_bit | STATUS_ERROR;
+    
+    LOG_INF("Setting error status: error_code=%d, bit=0x%08X, new_status=0x%08X", 
+            (int)error_code, error_bit, new_status);
+    
+    set_device_status(new_status);
+}
+
+/**
+ * @brief Clears error status bits based on err_t error codes
+ *
+ * @param error_code The error code to clear from status
+ */
+void jis_clear_err_status_notify(err_t error_code)
+{
+    uint32_t error_bit = 0;
+    
+    // Map err_t values to status bits
+    switch (error_code)
     {
-        if (status_subscribed)
-        {
-            auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &STATUS_UUID.uuid);
-            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&device_status_bitfield),
-                           sizeof(device_status_bitfield));
-            LOG_INF("Clear Bit field Data: 0x%X\n", device_status_bitfield);
-            // create the critical error event and fill in the status
-        }
-
-        previous_device_status_bitfield = device_status_bitfield; // Update the previous value
-
-        // All monitored bits are cleared, allow system reset to be cleared
-        // Don't clear it at the first time, the static variable is cleared in the warm reboot.
-        if ((device_status_bitfield == 0) && (init_status_bt_update))
-        {
-            LOG_WRN("device_status_bitfield %d, previous_device_status_bitfield: %d init_status_bt_update: %d",
-                    device_status_bitfield, previous_device_status_bitfield, init_status_bt_update);
-        }
-        init_status_bt_update = true;
+        case err_t::NO_ERROR:
+            // Clear all error bits
+            error_bit = STATUS_ALL_ERRORS_MASK;
+            break;
+            
+        case err_t::BATTERY_FAULT:
+            error_bit = STATUS_BATTERY_FAULT;
+            break;
+            
+        case err_t::BLUETOOTH_ERROR:
+            error_bit = STATUS_BLUETOOTH_ERROR;
+            break;
+            
+        case err_t::HARDWARE:
+            error_bit = STATUS_HARDWARE_ERROR;
+            break;
+            
+        case err_t::DATA_ERROR:
+            error_bit = STATUS_DATA_ERROR;
+            break;
+            
+        case err_t::DFU_ERROR:
+            error_bit = STATUS_DFU_ERROR;
+            break;
+            
+        case err_t::ADC_ERROR:
+            error_bit = STATUS_ADC_ERROR;
+            break;
+            
+        case err_t::I2C_ERROR:
+            error_bit = STATUS_I2C_ERROR;
+            break;
+            
+        case err_t::BATTERY_DISCONNECTION_ERROR:
+            error_bit = STATUS_BATTERY_DISCONNECTED;
+            break;
+            
+        case err_t::MOTION_ERROR:
+            error_bit = STATUS_MOTION_ERROR;
+            break;
+            
+        case err_t::RTC_ERROR:
+            error_bit = STATUS_RTC_ERROR;
+            break;
+            
+        case err_t::FILE_SYSTEM_ERROR:
+            error_bit = STATUS_FILE_SYSTEM_ERROR;
+            break;
+            
+        case err_t::PROTO_ENCODE_ERROR:
+            error_bit = STATUS_PROTO_ENCODE_ERROR;
+            break;
+            
+        case err_t::FILE_SYSTEM_NO_FILES:
+            error_bit = STATUS_FILE_SYSTEM_NO_FILES;
+            break;
+            
+        case err_t::FILE_SYSTEM_STORAGE_FULL:
+            error_bit = STATUS_FILE_SYSTEM_FULL;
+            break;
+            
+        case err_t::FLASH_FAILURE:
+            error_bit = STATUS_FLASH_FAILURE;
+            break;
+            
+        default:
+            LOG_WRN("Unknown error code to clear: %d", (int)error_code);
+            return;
     }
+    
+    // Clear the specific error bit
+    uint32_t new_status = device_status_bitfield & ~error_bit;
+    
+    // If no error bits remain, clear the general error flag
+    if ((new_status & STATUS_ALL_ERRORS_MASK) == 0) {
+        new_status &= ~STATUS_ERROR;
+    }
+    
+    LOG_INF("Clearing error status: error_code=%d, bit=0x%08X, new_status=0x%08X", 
+            (int)error_code, error_bit, new_status);
+    
+    set_device_status(new_status);
 }
 
 void jis_foot_sensor_notify(const foot_samples_t *samples_data)

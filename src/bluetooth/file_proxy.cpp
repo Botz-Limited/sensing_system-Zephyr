@@ -104,6 +104,10 @@ static ssize_t file_proxy_command_write(struct bt_conn *conn,
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
 
+    if (len > FILE_PROXY_BUF_SIZE) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    
     const uint8_t *data = (const uint8_t *)buf;
     uint8_t cmd = data[0];
 
@@ -328,7 +332,8 @@ static int handle_primary_file_operation(uint8_t cmd, const uint8_t *data, size_
                 entry->type = FILE_TYPE_FOOT_SENSOR;
                 entry->size = 1024;
                 entry->timestamp = 1234567890;
-                snprintf(entry->name, sizeof(entry->name), "foot_1.bin");
+                strncpy(entry->name, "foot_1.bin", sizeof(entry->name) - 1);
+                entry->name[sizeof(entry->name) - 1] = '\0';
             }
             
             if (file_proxy_state.file_count < MAX_FILE_LIST_ENTRIES) {
@@ -337,7 +342,8 @@ static int handle_primary_file_operation(uint8_t cmd, const uint8_t *data, size_
                 entry->type = FILE_TYPE_BHI360;
                 entry->size = 2048;
                 entry->timestamp = 1234567900;
-                snprintf(entry->name, sizeof(entry->name), "bhi360_2.bin");
+                strncpy(entry->name, "bhi360_2.bin", sizeof(entry->name) - 1);
+                entry->name[sizeof(entry->name) - 1] = '\0';
             }
             
             // Send file list as data notification

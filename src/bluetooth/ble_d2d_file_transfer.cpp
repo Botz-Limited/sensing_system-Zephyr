@@ -168,7 +168,11 @@ static void d2d_file_status_ccc_changed(const struct bt_gatt_attr *attr, uint16_
 static void get_file_path(char *path, size_t path_size, uint8_t file_id, uint8_t file_type)
 {
     const char *prefix = (file_type == 0x01) ? "foot" : "bhi360";
-    snprintf(path, path_size, "/lfs/%s_%d.bin", prefix, file_id);
+    int ret = snprintf(path, path_size, "/lfs/%s_%d.bin", prefix, file_id);
+    if (ret < 0 || (size_t)ret >= path_size) {
+        LOG_ERR("Path buffer too small for file path");
+        path[0] = '\0';
+    }
 }
 
 // Handle list command - enumerate files in /lfs directory
@@ -188,10 +192,22 @@ static int handle_list_command(void)
     
     // Count files and build list
     uint8_t file_count = 0;
-    struct d2d_file_packet packet;
-    packet.cmd = D2D_FILE_CMD_LIST;
-    packet.status = D2D_FILE_STATUS_OK;
-    packet.sequence = 0;
+    
+    // Define file entry structure
+    struct file_entry_t {
+        uint8_t id;
+        uint8_t type;
+        uint32_t size;
+        uint32_t timestamp;
+        char name[32];
+    } __packed;
+    
+    // Allocate packet with enough space for file entry
+    uint8_t packet_buffer[sizeof(struct d2d_file_packet) + sizeof(struct file_entry_t)];
+    struct d2d_file_packet *packet = (struct d2d_file_packet *)packet_buffer;
+    packet->cmd = D2D_FILE_CMD_LIST;
+    packet->status = D2D_FILE_STATUS_OK;
+    packet->sequence = 0;
     
     // First pass - count files
     while (fs_readdir(&dir, &entry) == 0) {
@@ -201,9 +217,9 @@ static int handle_list_command(void)
     }
     
     // Send count
-    packet.length = 1;
-    packet.data[0] = file_count;
-    ble_d2d_file_send_data((uint8_t *)&packet, sizeof(packet) + 1, 0);
+    packet->length = 1;
+    packet->data[0] = file_count;
+    ble_d2d_file_send_data((uint8_t *)packet, sizeof(struct d2d_file_packet) + 1, 0);
     
     // Reset directory
     fs_closedir(&dir);
@@ -222,20 +238,20 @@ static int handle_list_command(void)
             
             if (strncmp(entry.name, "foot_", 5) == 0) {
                 file_type = 0x01;
-                sscanf(entry.name + 5, "%hhu", &file_id);
+                if (sscanf(entry.name + 5, "%3hhu", &file_id) != 1) {
+                    LOG_WRN("Failed to parse foot sensor file ID from: %s", entry.name);
+                    continue;
+                }
             } else if (strncmp(entry.name, "bhi360_", 7) == 0) {
                 file_type = 0x02;
-                sscanf(entry.name + 7, "%hhu", &file_id);
+                if (sscanf(entry.name + 7, "%3hhu", &file_id) != 1) {
+                    LOG_WRN("Failed to parse BHI360 file ID from: %s", entry.name);
+                    continue;
+                }
             }
             
             // Build file entry
-            struct {
-                uint8_t id;
-                uint8_t type;
-                uint32_t size;
-                uint32_t timestamp;
-                char name[32];
-            } __packed file_entry;
+            struct file_entry_t file_entry;
             
             file_entry.id = file_id;
             file_entry.type = file_type;
@@ -245,10 +261,10 @@ static int handle_list_command(void)
             file_entry.name[sizeof(file_entry.name) - 1] = '\0';
             
             // Send entry
-            packet.sequence = seq++;
-            packet.length = sizeof(file_entry);
-            memcpy(packet.data, &file_entry, sizeof(file_entry));
-            ble_d2d_file_send_data((uint8_t *)&packet, sizeof(packet) + sizeof(file_entry), seq);
+            packet->sequence = seq++;
+            packet->length = sizeof(file_entry);
+            memcpy(packet->data, &file_entry, sizeof(file_entry));
+            ble_d2d_file_send_data((uint8_t *)packet, sizeof(struct d2d_file_packet) + sizeof(file_entry), seq);
         }
     }
     
@@ -283,9 +299,10 @@ static int handle_read_command(uint8_t file_id, uint8_t file_type)
     d2d_file_state.sequence = 0;
     
     // Read and send file in chunks
-    struct d2d_file_packet packet;
-    packet.cmd = D2D_FILE_CMD_READ;
-    packet.status = D2D_FILE_STATUS_OK;
+    uint8_t packet_buffer[sizeof(struct d2d_file_packet) + FILE_BUFFER_SIZE];
+    struct d2d_file_packet *packet = (struct d2d_file_packet *)packet_buffer;
+    packet->cmd = D2D_FILE_CMD_READ;
+    packet->status = D2D_FILE_STATUS_OK;
     
     while (true) {
         ssize_t bytes_read = fs_read(&d2d_file_state.file, file_buffer, FILE_BUFFER_SIZE);
@@ -293,12 +310,12 @@ static int handle_read_command(uint8_t file_id, uint8_t file_type)
             break;
         }
         
-        packet.sequence = d2d_file_state.sequence++;
-        packet.length = bytes_read;
-        memcpy(packet.data, file_buffer, bytes_read);
+        packet->sequence = d2d_file_state.sequence++;
+        packet->length = bytes_read;
+        memcpy(packet->data, file_buffer, bytes_read);
         
         // Send data packet
-        ble_d2d_file_send_data((uint8_t *)&packet, sizeof(packet) + bytes_read, packet.sequence);
+        ble_d2d_file_send_data((uint8_t *)packet, sizeof(struct d2d_file_packet) + bytes_read, packet->sequence);
         
         // Small delay to avoid overwhelming the connection
         k_msleep(10);
@@ -340,7 +357,6 @@ static int handle_delete_command(uint8_t file_id, uint8_t file_type)
 static int handle_info_command(uint8_t file_id, uint8_t file_type)
 {
     char path[64];
-    struct fs_dirent entry;
     int rc;
     
     get_file_path(path, sizeof(path), file_id, file_type);

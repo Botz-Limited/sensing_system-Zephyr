@@ -1,0 +1,4 @@
+tests:
+  bluetooth.unit:
+    platform_allow: native_posix
+    tags: bluetooth unit

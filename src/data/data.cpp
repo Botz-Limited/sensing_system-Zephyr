@@ -47,6 +47,10 @@
 #include <status_codes.h>
 #include <ble_services.hpp>
 
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "../bluetooth/ble_d2d_tx.hpp"
+#endif
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_DATA_MODULE_LOG_LEVEL); // NOLINT
 
 FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(littlefs_storage);
@@ -55,12 +59,15 @@ FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(littlefs_storage);
 #define STORAGE_PARTITION_LABEL storage_ext
 #define STORAGE_PARTITION_ID FIXED_PARTITION_ID(STORAGE_PARTITION_LABEL)
 
-static struct fs_mount_t lfs_ext_storage_mnt = {
-    .type = FS_LITTLEFS,
-    .mnt_point = "/lfs1",
-    .fs_data = &littlefs_storage,
-    .storage_dev = (void *)FLASH_AREA_ID(littlefs_storage),
-};
+static struct fs_mount_t lfs_ext_storage_mnt = {0};
+
+static void init_fs_mount(void)
+{
+    lfs_ext_storage_mnt.type = FS_LITTLEFS;
+    lfs_ext_storage_mnt.mnt_point = "/lfs1";
+    lfs_ext_storage_mnt.fs_data = &littlefs_storage;
+    lfs_ext_storage_mnt.storage_dev = (void *)FLASH_AREA_ID(littlefs_storage);
+}
 
 static err_t mount_file_system(struct fs_mount_t *mount);
 static err_t littlefs_flash_erase(unsigned int id);
@@ -102,6 +109,16 @@ static uint8_t foot_sensor_write_buffer[FLASH_PAGE_SIZE];
 static size_t foot_sensor_write_buffer_pos = 0;
 static uint8_t bhi360_write_buffer[FLASH_PAGE_SIZE];
 static size_t bhi360_write_buffer_pos = 0;
+
+// --- Thread safety ---
+K_MUTEX_DEFINE(foot_sensor_file_mutex);
+K_MUTEX_DEFINE(bhi360_file_mutex);
+
+// --- Timestamp tracking for delta calculation ---
+static uint32_t foot_sensor_last_timestamp_ms = 0;
+static uint32_t bhi360_last_timestamp_ms = 0;
+static bool foot_sensor_first_packet = true;
+static bool bhi360_first_packet = true;
 
 static void flush_foot_sensor_buffer() {
     if (foot_sensor_write_buffer_pos > 0) {
@@ -209,6 +226,9 @@ static uint32_t get_next_file_sequence(const char *dir_path_param, const char *f
  */
 static err_t data_init()
 {
+    // Initialize the fs_mount_t structure
+    init_fs_mount();
+    
     struct fs_mount_t *mp = &lfs_ext_storage_mnt;
     // Mount the File System
     err_t err = mount_file_system(mp);
@@ -237,6 +257,8 @@ static err_t data_init()
     }
 }
 
+// Currently unused - kept for debugging directory contents
+__attribute__((unused))
 static int lsdir(const char *path)
 {
     int res;
@@ -374,12 +396,33 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         foot_log_msg.payload.foot_sensor.readings.funcs.encode = &encode_foot_sensor_readings_callback;
                         foot_log_msg.payload.foot_sensor.readings.arg = (void *)foot_data;
 
+                        // Calculate delta time
+                        uint32_t current_time_ms = (uint32_t)k_uptime_get();
+                        uint16_t delta_ms = 0;
+                        
+                        if (foot_sensor_first_packet) {
+                            delta_ms = 0;  // First packet after header has delta 0
+                            foot_sensor_first_packet = false;
+                        } else {
+                            uint32_t time_diff = current_time_ms - foot_sensor_last_timestamp_ms;
+                            // Cap at 65535ms (about 65 seconds) to fit in 2 bytes
+                            delta_ms = (time_diff > 65535) ? 65535 : (uint16_t)time_diff;
+                        }
+                        
+                        foot_sensor_last_timestamp_ms = current_time_ms;
+                        foot_log_msg.payload.foot_sensor.delta_ms = delta_ms;
+
                         err_t write_status = write_foot_sensor_protobuf_data(&foot_log_msg);
                         if (write_status != err_t::NO_ERROR)
                         {
                             LOG_ERR("Failed to write foot sensor data to file: %d", (int)write_status);
                         }
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                         jis_foot_sensor_notify(foot_data);
+#else
+                        // Secondary device: Send to primary via D2D
+                        ble_d2d_tx_send_foot_sensor_data(foot_data);
+#endif
                     }
                     break;
                 }
@@ -403,7 +446,22 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         bhi360_log_msg.payload.bhi360_log_record.lacc_y = record->lacc_y;
                         bhi360_log_msg.payload.bhi360_log_record.lacc_z = record->lacc_z;
                         bhi360_log_msg.payload.bhi360_log_record.step_count = record->step_count;
-                        bhi360_log_msg.payload.bhi360_log_record.timestamp = record->timestamp;
+
+                        // Calculate delta time
+                        uint32_t current_time_ms = (uint32_t)k_uptime_get();
+                        uint16_t delta_ms = 0;
+                        
+                        if (bhi360_first_packet) {
+                            delta_ms = 0;  // First packet after header has delta 0
+                            bhi360_first_packet = false;
+                        } else {
+                            uint32_t time_diff = current_time_ms - bhi360_last_timestamp_ms;
+                            // Cap at 65535ms (about 65 seconds) to fit in 2 bytes
+                            delta_ms = (time_diff > 65535) ? 65535 : (uint16_t)time_diff;
+                        }
+                        
+                        bhi360_last_timestamp_ms = current_time_ms;
+                        bhi360_log_msg.payload.bhi360_log_record.delta_ms = delta_ms;
 
                         err_t write_status = write_bhi360_protobuf_data(&bhi360_log_msg);
                         if (write_status != err_t::NO_ERROR)
@@ -877,6 +935,13 @@ static bool encode_string_callback(pb_ostream_t *stream, const pb_field_t *field
 err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_version)
 {
     err_t status = err_t::NO_ERROR;
+    
+    // Lock mutex for thread safety
+    k_mutex_lock(&foot_sensor_file_mutex, K_FOREVER);
+
+    // Reset timestamp tracking for new logging session
+    foot_sensor_last_timestamp_ms = (uint32_t)k_uptime_get();
+    foot_sensor_first_packet = true;
 
     // --- Create hardware directory if it doesn't exist ---
     int ret_mkdir = fs_mkdir(hardware_dir_path);
@@ -900,6 +965,9 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
     {
         LOG_ERR("FAIL: open foot sensor log %s: %d", foot_sensor_file_path, ret_fs_open);
         status = err_t::FILE_SYSTEM_ERROR;
+        
+        // Report error to Bluetooth module
+        send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, true);
     }
     else
     {
@@ -943,10 +1011,14 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
                 }
                 LOG_DBG("Foot sensor SensingData header written to %s (%u bytes).", foot_sensor_file_path,
                         stream.bytes_written);
+                
+                // Clear any previous file system errors since we succeeded
+                send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, false);
             }
         }
     }
 
+    k_mutex_unlock(&foot_sensor_file_mutex);
     return status;
 }
 
@@ -959,6 +1031,9 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
 err_t end_foot_sensor_logging()
 {
     err_t overall_status = err_t::NO_ERROR;
+    
+    // Lock mutex for thread safety
+    k_mutex_lock(&foot_sensor_file_mutex, K_FOREVER);
 
     // --- End Foot Sensor Log ---
     if (foot_sensor_log_file.filep != nullptr)
@@ -1030,6 +1105,7 @@ err_t end_foot_sensor_logging()
         }
     }
 
+    k_mutex_unlock(&foot_sensor_file_mutex);
     return overall_status;
 }
 
@@ -1059,6 +1135,13 @@ static bool encode_foot_sensor_readings_callback(pb_ostream_t *stream, const pb_
 err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
 {
     err_t status = err_t::NO_ERROR;
+    
+    // Lock mutex for thread safety
+    k_mutex_lock(&bhi360_file_mutex, K_FOREVER);
+
+    // Reset timestamp tracking for new logging session
+    bhi360_last_timestamp_ms = (uint32_t)k_uptime_get();
+    bhi360_first_packet = true;
 
     // --- Initialize BHI360 Log File ---
     next_bhi360_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
@@ -1121,6 +1204,7 @@ err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
         }
     }
 
+    k_mutex_unlock(&bhi360_file_mutex);
     return status;
 }
 
@@ -1133,6 +1217,9 @@ err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
 err_t end_bhi360_logging()
 {
     err_t overall_status = err_t::NO_ERROR;
+    
+    // Lock mutex for thread safety
+    k_mutex_lock(&bhi360_file_mutex, K_FOREVER);
 
     // --- End BHI360 Log ---
     if (bhi360_log_file.filep != nullptr)
@@ -1203,6 +1290,7 @@ err_t end_bhi360_logging()
         }
     }
 
+    k_mutex_unlock(&bhi360_file_mutex);
     return overall_status;
 }
 
@@ -1224,6 +1312,9 @@ static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSens
         return err_t::PROTO_ENCODE_ERROR;
     }
 
+    // Lock mutex for buffer access
+    k_mutex_lock(&foot_sensor_file_mutex, K_FOREVER);
+    
     // Batch buffering logic
     if (foot_sensor_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE) {
         flush_foot_sensor_buffer();
@@ -1237,6 +1328,8 @@ static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSens
         flush_foot_sensor_buffer();
     }
 
+    k_mutex_unlock(&foot_sensor_file_mutex);
+    
     LOG_DBG("Foot sensor data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written, (unsigned)foot_sensor_write_buffer_pos, FLASH_PAGE_SIZE);
     return err_t::NO_ERROR;
 }
@@ -1259,6 +1352,9 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
         return err_t::PROTO_ENCODE_ERROR;
     }
 
+    // Lock mutex for buffer access
+    k_mutex_lock(&bhi360_file_mutex, K_FOREVER);
+    
     // Batch buffering logic
     if (bhi360_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE) {
         flush_bhi360_buffer();
@@ -1272,6 +1368,8 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
         flush_bhi360_buffer();
     }
 
+    k_mutex_unlock(&bhi360_file_mutex);
+    
     LOG_DBG("BHI360 data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written, (unsigned)bhi360_write_buffer_pos, FLASH_PAGE_SIZE);
     return err_t::NO_ERROR;
 }
@@ -1480,7 +1578,7 @@ err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, u
             strncmp(entry.name, file_prefix, prefix_len) == 0 && strcmp(entry.name + name_len - ext_len, ".pb") == 0)
         {
             uint8_t id = 0;
-            if (sscanf(entry.name + prefix_len, "%hhu.pb", &id) == 1)
+            if (sscanf(entry.name + prefix_len, "%3hhu.pb", &id) == 1)
             {
                 LogFileEntry lfe;
                 lfe.id = id;
@@ -1582,7 +1680,7 @@ err_t delete_oldest_log_file_checked(const char *file_prefix, const char *dir_pa
             strncmp(entry.name, file_prefix, prefix_len) == 0 && strcmp(entry.name + name_len - ext_len, ".pb") == 0)
         {
             uint8_t id = 0;
-            if (sscanf(entry.name + prefix_len, "%hhu.pb", &id) == 1)
+            if (sscanf(entry.name + prefix_len, "%3hhu.pb", &id) == 1)
             {
                 if (id < oldest_id)
                 {

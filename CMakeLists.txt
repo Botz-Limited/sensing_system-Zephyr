@@ -85,6 +85,9 @@ target_sources(app PRIVATE src/main.cpp)
 target_include_directories(app PRIVATE include/)
 target_include_directories(app PRIVATE src/)
 
+# Add shell commands if enabled
+add_subdirectory_ifdef(CONFIG_SHELL src/shell_commands)
+
 
 # Moves the compile_commands.json file into root for clangd
 add_custom_command(

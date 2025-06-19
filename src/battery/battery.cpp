@@ -41,20 +41,21 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_MODULE_LOG_LEVEL); // NOLINT
 // --- PERIODIC BATTERY UPDATE ---
 static struct k_work_delayable battery_update_work;
 
+// Currently unused - kept for future battery monitoring implementation
+__attribute__((unused))
 static void battery_update_work_handler(struct k_work *work)
 {
     (void)work;         // Silence unused parameter warning
     uint8_t level = 80; // this module is in development so at the moment just hardoce a value;
     bt_bas_set_battery_level(level);
-    LOG_INF("Battery level updated: %u%%", level);
-    k_work_reschedule(&battery_update_work, K_MSEC(1000));
+    k_work_reschedule(&battery_update_work, K_MSEC(10000));
 }
 
 void battery_monitor_init(void)
 {
     LOG_INF("Battery level Init");
-  //  k_work_init_delayable(&battery_update_work, battery_update_work_handler);
-  //  k_work_schedule(&battery_update_work, K_NO_WAIT);
+    k_work_init_delayable(&battery_update_work, battery_update_work_handler);
+    k_work_schedule(&battery_update_work, K_NO_WAIT);
     module_set_state(MODULE_STATE_READY);
 }
 

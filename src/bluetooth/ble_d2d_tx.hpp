@@ -1,9 +1,38 @@
 #pragma once
 #include <zephyr/types.h>
 #include <zephyr/bluetooth/conn.h>
+#include <app.hpp>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 void ble_d2d_tx_init(void);
-int ble_d2d_tx_send_set_time(uint32_t epoch_time);
-// Add more send functions for other characteristics as needed
+void ble_d2d_tx_set_connection(struct bt_conn *conn);
+
+// Send functions for sensor data
+int ble_d2d_tx_send_foot_sensor_data(const foot_samples_t *samples);
+int ble_d2d_tx_send_foot_sensor_log_available(uint8_t log_id);
+int ble_d2d_tx_send_foot_sensor_req_id_path(const char *path);
+int ble_d2d_tx_send_bhi360_log_available(uint8_t log_id);
+int ble_d2d_tx_send_bhi360_req_id_path(const char *path);
+int ble_d2d_tx_send_bhi360_data1(const bhi360_3d_mapping_t *data);
+int ble_d2d_tx_send_bhi360_data2(const bhi360_step_count_t *data);
+int ble_d2d_tx_send_bhi360_data3(const bhi360_linear_accel_t *data);
+int ble_d2d_tx_send_status(uint32_t status);
+int ble_d2d_tx_send_charge_status(uint8_t status);
+
+// Send functions for control commands (primary -> secondary)
+int ble_d2d_tx_send_set_time_command(uint32_t epoch_time);
+int ble_d2d_tx_send_delete_foot_log_command(uint8_t log_id);
+int ble_d2d_tx_send_delete_bhi360_log_command(uint8_t log_id);
+int ble_d2d_tx_send_start_activity_command(uint8_t value);
+int ble_d2d_tx_send_stop_activity_command(uint8_t value);
+
+// Send function for FOTA completion status (secondary -> primary)
+int ble_d2d_tx_send_fota_complete(void);
+
+#ifdef __cplusplus
+}
+#endif
 

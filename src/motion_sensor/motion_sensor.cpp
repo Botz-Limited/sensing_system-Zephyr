@@ -28,6 +28,10 @@
 #include <motion_sensor.hpp>
 #include <status_codes.h>
 #include <ble_services.hpp>
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "../bluetooth/ble_d2d_tx.hpp"
+#endif
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
@@ -55,6 +59,8 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_LOG_DEFAULT_LEVEL); // NOLINT
 static const struct device *const bhi360_dev = DEVICE_DT_GET(BHI360_NODE);
 
 // SPI config
+// Currently unused - kept for future SPI configuration
+__attribute__((unused))
 static struct spi_config bhi360_spi_cfg = {
     .frequency = 8000000,
     .operation = SPI_WORD_SET(8) | SPI_TRANSFER_MSB | NRF_SPIM_MODE_0,
@@ -358,7 +364,12 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             qmsg.data.bhi360_3d_mapping.gyro_y = latest_quat_y;
             qmsg.data.bhi360_3d_mapping.gyro_z = latest_quat_z;
             // Optionally add .accel_x/y/z if you want to use them for something else
+            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
+#else
+            // Secondary device: Send to primary via D2D
+            ble_d2d_tx_send_bhi360_data1(&qmsg.data.bhi360_3d_mapping);
+#endif
 
             // Linear acceleration
             generic_message_t lmsg{};
@@ -367,7 +378,12 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             lmsg.data.bhi360_linear_accel.x = latest_lacc_x;
             lmsg.data.bhi360_linear_accel.y = latest_lacc_y;
             lmsg.data.bhi360_linear_accel.z = latest_lacc_z;
+            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &lmsg, K_NO_WAIT);
+#else
+            // Secondary device: Send to primary via D2D
+            ble_d2d_tx_send_bhi360_data3(&lmsg.data.bhi360_linear_accel);
+#endif
 
             // Step count
             generic_message_t smsg{};
@@ -375,7 +391,12 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             smsg.type = MSG_TYPE_BHI360_STEP_COUNT;
             smsg.data.bhi360_step_count.step_count = latest_step_count;
             smsg.data.bhi360_step_count.activity_duration_s = 0; // Fill if available
+            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
+#else
+            // Secondary device: Send to primary via D2D
+            ble_d2d_tx_send_bhi360_data2(&smsg.data.bhi360_step_count);
+#endif
         }
     }
 }

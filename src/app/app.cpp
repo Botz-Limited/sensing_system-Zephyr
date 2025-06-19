@@ -35,6 +35,10 @@
 #include <app.hpp>
 #include <errors.hpp>
 
+#if IS_ENABLED(CONFIG_SECONDARY_DEVICE)
+#include "../bluetooth/ble_d2d_tx.hpp"
+#endif
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_APP_MODULE_LOG_LEVEL); // NOLINT
 
 // FOTA progress tracking structure
@@ -195,6 +199,15 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     fota_progress.status = 3; // confirmed
     notify_fota_progress_to_ble();
     
+    #if IS_ENABLED(CONFIG_SECONDARY_DEVICE)
+    // Secondary device needs to notify primary that FOTA is complete
+    LOG_INF("Notifying primary device of FOTA completion");
+    int err = ble_d2d_tx_send_fota_complete();
+    if (err) {
+        LOG_ERR("Failed to notify primary of FOTA completion: %d", err);
+    }
+    #endif
+    
     return MGMT_CB_OK;
 }
 
@@ -344,6 +357,10 @@ const char *get_sender_name(sender_type_t sender)
             return "BHI360 Thread";
         case SENDER_BTH:
             return "UI Thread";
+        case SENDER_DATA:
+            return "Data Thread";
+        case SENDER_D2D_SECONDARY:
+            return "D2D Secondary";
         case SENDER_NONE:
             return "None/Unknown";
         default:

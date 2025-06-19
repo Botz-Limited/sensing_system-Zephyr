@@ -1,3 +1,4 @@
 tests:
-  data.test:
-    tags: data
+  data.unit:
+    platform_allow: native_posix
+    tags: data unit filesystem

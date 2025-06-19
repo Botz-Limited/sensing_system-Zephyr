@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "nanopb.proto";
+
 package sensor_data_messages;
 
 // --- Enums (BHI360 Specific) ---
@@ -39,7 +41,7 @@ message BHI360LogRecord {
   float lacc_y = 7;
   float lacc_z = 8;
   uint32 step_count = 9;
-  uint64 timestamp = 10;
+  uint32 delta_ms = 10 [(nanopb).int_size = IS_16]; // Delta time in milliseconds from previous packet (2 bytes, max 65535ms)
 }
 
 // BHI360 specific message for logging session metadata

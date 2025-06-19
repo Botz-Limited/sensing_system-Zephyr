@@ -1,0 +1,4 @@
+tests:
+  packetizer.unit:
+    platform_allow: native_posix
+    tags: packetizer unit
