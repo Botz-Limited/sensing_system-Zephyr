@@ -30,13 +30,13 @@ struct foot_samples_t {
     // ... any other fields ...
 };
 
-// Structures for BHI360 data (unchanged)
+// Structures for BHI360 data
 typedef struct
 {
-    float accel_x, accel_y, accel_z;
-    float gyro_x, gyro_y, gyro_z;
-
-} bhi360_3d_mapping_t; // Size: 6 * 4 bytes (floats) + 8 bytes (uint64_t) = 24 + 8 = 32 bytes
+    float accel_x, accel_y, accel_z;  // Currently used for quaternion x,y,z
+    float gyro_x, gyro_y, gyro_z;     // Gyroscope angular velocity
+    float quat_w;                     // Quaternion W component (added)
+} bhi360_3d_mapping_t; // Size: 7 * 4 bytes (floats) = 28 bytes
 
 typedef struct
 {
@@ -53,6 +53,7 @@ typedef struct
 {
     float quat_x, quat_y, quat_z, quat_w, quat_accuracy;
     float lacc_x, lacc_y, lacc_z;
+    float gyro_x, gyro_y, gyro_z;  // Added gyroscope data
     uint32_t step_count;
     uint64_t timestamp;
 } bhi360_log_record_t;

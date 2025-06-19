@@ -29,6 +29,7 @@
 #include <cstring>
 
 #include <app.hpp>
+#include <app_fixed_point.hpp>
 #include <ble_services.hpp>
 #include <util.hpp>
 #include <status_codes.h>
@@ -55,10 +56,11 @@ static uint8_t ct[10];
 static uint8_t ct_update = 0;
 
 // --- BHI360 Data Set Characteristics ---
-// 1: 3D Mapping, 2: Step Count, 3: (placeholder, update as needed)
-static bhi360_3d_mapping_t bhi360_data1_value = {0};
-static bhi360_step_count_t bhi360_data2_value = {0};
-static bhi360_linear_accel_t bhi360_data3_value = {}; // Now holds linear acceleration struct
+// 1: 3D Mapping, 2: Step Count, 3: Linear Acceleration
+// Using fixed-point versions for BLE transmission
+static bhi360_3d_mapping_fixed_t bhi360_data1_value_fixed = {0};
+static bhi360_step_count_fixed_t bhi360_data2_value_fixed = {0};
+static bhi360_linear_accel_fixed_t bhi360_data3_value_fixed = {0};
 static bool bhi360_data1_subscribed = false;
 static bool bhi360_data2_subscribed = false;
 static bool bhi360_data3_subscribed = false;
@@ -235,21 +237,21 @@ BT_GATT_SERVICE_DEFINE(
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
         BT_GATT_PERM_READ_ENCRYPT,
         jis_bhi360_data1_read, nullptr,
-        static_cast<void *>(&bhi360_data1_value)),
+        static_cast<void *>(&bhi360_data1_value_fixed)),
     BT_GATT_CCC(jis_bhi360_data1_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     BT_GATT_CHARACTERISTIC(&bhi360_data2_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
         BT_GATT_PERM_READ_ENCRYPT,
         jis_bhi360_data2_read, nullptr,
-        static_cast<void *>(&bhi360_data2_value)),
+        static_cast<void *>(&bhi360_data2_value_fixed)),
     BT_GATT_CCC(jis_bhi360_data2_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     BT_GATT_CHARACTERISTIC(&bhi360_data3_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
         BT_GATT_PERM_READ_ENCRYPT,
         jis_bhi360_data3_read, nullptr,
-        static_cast<void *>(&bhi360_data3_value)),
+        static_cast<void *>(&bhi360_data3_value_fixed)),
     BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // FOTA Progress Characteristic
@@ -861,14 +863,16 @@ static void jis_bhi360_data1_ccc_cfg_changed(const struct bt_gatt_attr *attr, ui
 }
 static ssize_t jis_bhi360_data1_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_data1_value));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_3d_mapping_fixed_t));
 }
 void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
 {
-    memcpy(&bhi360_data1_value, data, sizeof(bhi360_data1_value));
+    // Convert float data to fixed-point for BLE transmission
+    convert_3d_mapping_to_fixed(*data, bhi360_data1_value_fixed);
+    
     if (bhi360_data1_subscribed) {
         auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data1_uuid.uuid);
-        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data1_value), sizeof(bhi360_data1_value));
+        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data1_value_fixed), sizeof(bhi360_data1_value_fixed));
     }
 }
 // --- BHI360 Data Set 2 ---
@@ -879,14 +883,17 @@ static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr *attr, ui
 }
 static ssize_t jis_bhi360_data2_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_data2_value));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_step_count_fixed_t));
 }
 void jis_bhi360_data2_notify(const bhi360_step_count_t *data)
 {
-    memcpy(&bhi360_data2_value, data, sizeof(bhi360_data2_value));
+    // Step count data is already integers, just copy
+    bhi360_data2_value_fixed.step_count = data->step_count;
+    bhi360_data2_value_fixed.activity_duration_s = data->activity_duration_s;
+    
     if (bhi360_data2_subscribed) {
         auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data2_uuid.uuid);
-        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data2_value), sizeof(bhi360_data2_value));
+        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data2_value_fixed), sizeof(bhi360_data2_value_fixed));
     }
 }
 // --- BHI360 Data Set 3 ---
@@ -897,14 +904,16 @@ static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr *attr, ui
 }
 static ssize_t jis_bhi360_data3_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_linear_accel_t));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_linear_accel_fixed_t));
 }
 void jis_bhi360_data3_notify(const bhi360_linear_accel_t *data)
 {
-    memcpy(&bhi360_data3_value, data, sizeof(bhi360_linear_accel_t));
+    // Convert float data to fixed-point for BLE transmission
+    convert_linear_accel_to_fixed(*data, bhi360_data3_value_fixed);
+    
     if (bhi360_data3_subscribed) {
         auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data3_uuid.uuid);
-        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data3_value), sizeof(bhi360_linear_accel_t));
+        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data3_value_fixed), sizeof(bhi360_data3_value_fixed));
     }
 }
 

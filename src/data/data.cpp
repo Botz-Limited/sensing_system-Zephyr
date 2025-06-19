@@ -38,6 +38,7 @@
 #include <util.hpp>
 
 #include <app.hpp>
+#include <app_fixed_point.hpp>
 #include <bhi360_sensor_messages.pb.h>
 #include <ble_services.hpp>
 #include <data.hpp>
@@ -436,15 +437,23 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             sensor_data_messages_BHI360LogMessage_init_default;
                         bhi360_log_msg.which_payload = sensor_data_messages_BHI360LogMessage_bhi360_log_record_tag;
 
-                        // Populate BHI360LogRecord fields
-                        bhi360_log_msg.payload.bhi360_log_record.quat_x = record->quat_x;
-                        bhi360_log_msg.payload.bhi360_log_record.quat_y = record->quat_y;
-                        bhi360_log_msg.payload.bhi360_log_record.quat_z = record->quat_z;
-                        bhi360_log_msg.payload.bhi360_log_record.quat_w = record->quat_w;
-                        bhi360_log_msg.payload.bhi360_log_record.quat_accuracy = record->quat_accuracy;
-                        bhi360_log_msg.payload.bhi360_log_record.lacc_x = record->lacc_x;
-                        bhi360_log_msg.payload.bhi360_log_record.lacc_y = record->lacc_y;
-                        bhi360_log_msg.payload.bhi360_log_record.lacc_z = record->lacc_z;
+                        // Populate BHI360LogRecord fields with fixed-point conversion
+                        // Quaternion components scaled by 10000
+                        bhi360_log_msg.payload.bhi360_log_record.quat_x = float_to_fixed16(record->quat_x, FixedPoint::QUAT_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.quat_y = float_to_fixed16(record->quat_y, FixedPoint::QUAT_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.quat_z = float_to_fixed16(record->quat_z, FixedPoint::QUAT_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.quat_w = float_to_fixed16(record->quat_w, FixedPoint::QUAT_SCALE);
+                        // Quaternion accuracy scaled by 100
+                        bhi360_log_msg.payload.bhi360_log_record.quat_accuracy = static_cast<uint8_t>(record->quat_accuracy * FixedPoint::ACCURACY_SCALE);
+                        // Linear acceleration scaled by 1000 (mm/s²)
+                        bhi360_log_msg.payload.bhi360_log_record.lacc_x = float_to_fixed16(record->lacc_x, FixedPoint::ACCEL_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.lacc_y = float_to_fixed16(record->lacc_y, FixedPoint::ACCEL_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.lacc_z = float_to_fixed16(record->lacc_z, FixedPoint::ACCEL_SCALE);
+                        // Gyroscope scaled by 10000 (0.0001 rad/s)
+                        bhi360_log_msg.payload.bhi360_log_record.gyro_x = float_to_fixed16(record->gyro_x, FixedPoint::GYRO_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.gyro_y = float_to_fixed16(record->gyro_y, FixedPoint::GYRO_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.gyro_z = float_to_fixed16(record->gyro_z, FixedPoint::GYRO_SCALE);
+                        // Step count remains as is
                         bhi360_log_msg.payload.bhi360_log_record.step_count = record->step_count;
 
                         // Calculate delta time

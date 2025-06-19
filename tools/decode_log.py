@@ -207,6 +207,9 @@ class LogDecoder:
                             print(f"  Quaternion: [{rec.quat_x:.3f}, {rec.quat_y:.3f}, {rec.quat_z:.3f}, {rec.quat_w:.3f}]")
                             print(f"  Accuracy: {rec.quat_accuracy}")
                             print(f"  Linear Accel: [{rec.lacc_x:.3f}, {rec.lacc_y:.3f}, {rec.lacc_z:.3f}] m/s²")
+                            # Check if gyroscope fields exist (for newer log files)
+                            if hasattr(rec, 'gyro_x'):
+                                print(f"  Gyroscope: [{rec.gyro_x:.3f}, {rec.gyro_y:.3f}, {rec.gyro_z:.3f}] rad/s")
                             print(f"  Step Count: {rec.step_count}")
                         
                         if self.packet_count == 0:

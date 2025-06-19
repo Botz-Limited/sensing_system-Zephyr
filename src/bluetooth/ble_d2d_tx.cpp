@@ -3,6 +3,7 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/logging/log.h>
+#include <app_fixed_point.hpp>
 
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_tx_service.hpp"

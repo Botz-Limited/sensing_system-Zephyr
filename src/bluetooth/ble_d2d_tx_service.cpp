@@ -14,6 +14,7 @@
 
 #include "ble_d2d_tx_service.hpp"
 #include <app.hpp>
+#include <app_fixed_point.hpp>
 
 LOG_MODULE_REGISTER(d2d_tx_svc, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -59,11 +60,11 @@ static bool charge_status_notify_enabled = false;
 static bool foot_log_notify_enabled = false;
 static bool bhi360_log_notify_enabled = false;
 
-// Data buffers
+// Data buffers - using fixed-point versions for BLE transmission
 static foot_samples_t foot_sensor_data;
-static bhi360_3d_mapping_t bhi360_data1;
-static bhi360_step_count_t bhi360_data2;
-static bhi360_linear_accel_t bhi360_data3;
+static bhi360_3d_mapping_fixed_t bhi360_data1_fixed;
+static bhi360_step_count_fixed_t bhi360_data2_fixed;
+static bhi360_linear_accel_fixed_t bhi360_data3_fixed;
 static uint32_t device_status = 0;
 static uint8_t charge_status = 0;
 static uint8_t foot_log_available = 0;
@@ -218,14 +219,15 @@ int d2d_tx_notify_bhi360_data1(const bhi360_3d_mapping_t *data)
         return -ENOTCONN;
     }
     
-    memcpy(&bhi360_data1, data, sizeof(bhi360_3d_mapping_t));
+    // Convert float data to fixed-point for BLE transmission
+    convert_3d_mapping_to_fixed(*data, bhi360_data1_fixed);
     
     // BHI360 data1 characteristic is at index 4
-    int err = bt_gatt_notify(primary_conn, &d2d_tx_svc.attrs[4], data, sizeof(bhi360_3d_mapping_t));
+    int err = bt_gatt_notify(primary_conn, &d2d_tx_svc.attrs[4], &bhi360_data1_fixed, sizeof(bhi360_data1_fixed));
     if (err) {
         LOG_ERR("Failed to send BHI360 data1 notification: %d", err);
     } else {
-        LOG_DBG("Sent BHI360 3D mapping notification");
+        LOG_DBG("Sent BHI360 3D mapping notification (fixed-point)");
     }
     
     return err;
@@ -237,10 +239,12 @@ int d2d_tx_notify_bhi360_data2(const bhi360_step_count_t *data)
         return -ENOTCONN;
     }
     
-    memcpy(&bhi360_data2, data, sizeof(bhi360_step_count_t));
+    // Step count data is already integers, just copy
+    bhi360_data2_fixed.step_count = data->step_count;
+    bhi360_data2_fixed.activity_duration_s = data->activity_duration_s;
     
     // BHI360 data2 characteristic is at index 7
-    int err = bt_gatt_notify(primary_conn, &d2d_tx_svc.attrs[7], data, sizeof(bhi360_step_count_t));
+    int err = bt_gatt_notify(primary_conn, &d2d_tx_svc.attrs[7], &bhi360_data2_fixed, sizeof(bhi360_data2_fixed));
     if (err) {
         LOG_ERR("Failed to send BHI360 data2 notification: %d", err);
     } else {
@@ -256,14 +260,15 @@ int d2d_tx_notify_bhi360_data3(const bhi360_linear_accel_t *data)
         return -ENOTCONN;
     }
     
-    memcpy(&bhi360_data3, data, sizeof(bhi360_linear_accel_t));
+    // Convert float data to fixed-point for BLE transmission
+    convert_linear_accel_to_fixed(*data, bhi360_data3_fixed);
     
     // BHI360 data3 characteristic is at index 10
-    int err = bt_gatt_notify(primary_conn, &d2d_tx_svc.attrs[10], data, sizeof(bhi360_linear_accel_t));
+    int err = bt_gatt_notify(primary_conn, &d2d_tx_svc.attrs[10], &bhi360_data3_fixed, sizeof(bhi360_data3_fixed));
     if (err) {
         LOG_ERR("Failed to send BHI360 data3 notification: %d", err);
     } else {
-        LOG_DBG("Sent BHI360 linear accel notification");
+        LOG_DBG("Sent BHI360 linear accel notification (fixed-point)");
     }
     
     return err;

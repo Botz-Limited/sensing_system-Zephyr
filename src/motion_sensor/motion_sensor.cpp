@@ -69,7 +69,7 @@ static struct spi_config bhi360_spi_cfg = {
 };
 
 static bool logging_active = false; // Tracks current logging state
-static float configured_sample_rate = 20.0f; // Tracks the configured sample rate (Hz)
+static float configured_sample_rate = 50.0f; // Tracks the configured sample rate (Hz) for motion sensors
 
 // INT and RESET GPIOs from device tree
 #if DT_NODE_HAS_PROP(BHI360_NODE, int_gpios)
@@ -79,9 +79,15 @@ static const struct gpio_dt_spec bhi360_int = GPIO_DT_SPEC_GET(BHI360_NODE, int_
 static const struct gpio_dt_spec bhi360_reset = GPIO_DT_SPEC_GET(BHI360_NODE, reset_gpios);
 #endif
 
-static constexpr uint8_t QUAT_SENSOR_ID = BHY2_SENSOR_ID_RV;          // Use Rotation Vector sensor ID
-static constexpr uint8_t LACC_SENSOR_ID = BHY2_SENSOR_ID_ACC;         // Use Linear Acceleration sensor ID
-static constexpr uint8_t STEP_COUNTER_SENSOR_ID = BHY2_SENSOR_ID_STC; // Use Step Counter sensor ID
+// Sensor IDs for BHI360 virtual sensors
+static constexpr uint8_t QUAT_SENSOR_ID = BHY2_SENSOR_ID_RV;          // Rotation Vector (quaternion) - ID 34
+static constexpr uint8_t LACC_SENSOR_ID = BHY2_SENSOR_ID_LACC;        // Linear Acceleration (gravity removed) - ID 31
+static constexpr uint8_t GYRO_SENSOR_ID = BHY2_SENSOR_ID_GYRO;        // Gyroscope (angular velocity) - ID 13
+static constexpr uint8_t STEP_COUNTER_SENSOR_ID = BHY2_SENSOR_ID_STC; // Step Counter - ID 52
+
+// Note: The key improvement here is using LACC (ID 31) instead of ACC (ID 4).
+// LACC provides linear acceleration with gravity already removed by the BHI360's
+// sensor fusion algorithms, which is better for motion tracking applications.
 
 static struct bhy2_dev bhy2;
 
@@ -221,25 +227,41 @@ static void motion_sensor_init()
         print_api_error(rslt, &bhy2);
         // 8. Register callbacks
         LOG_INF("BHI360: Registering callbacks");
-        float sample_rate = 20.0; // Example: 20 Hz for all sensors
-        configured_sample_rate = sample_rate; // Store the configured sample rate
+        
+        // Configure different rates for motion sensors vs step counter
+        float motion_sensor_rate = 50.0f;  // 50 Hz for motion sensors (20ms interval)
+        float step_counter_rate = 5.0f;    // 5 Hz for step counter (200ms interval)
+        configured_sample_rate = motion_sensor_rate; // Store the motion sensor rate for logging
         uint32_t report_latency_ms = 0;
+        
+        // Configure high-rate motion sensors
+        LOG_INF("BHI360: Configuring motion sensors at %.1f Hz", motion_sensor_rate);
+        
         // Configure quaternion sensor
-        LOG_INF("BHI360: Configuring quaternion sensor...");
-        rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, sample_rate, report_latency_ms, &bhy2);
+        LOG_INF("BHI360: Configuring quaternion sensor (ID %d)...", QUAT_SENSOR_ID);
+        rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, motion_sensor_rate, report_latency_ms, &bhy2);
         print_api_error(rslt, &bhy2);
-        // Configure linear acceleration sensor
-        LOG_INF("BHI360: Configuring linear acceleration sensor...");
-        rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, sample_rate, report_latency_ms, &bhy2);
+        
+        // Configure linear acceleration sensor (gravity removed)
+        LOG_INF("BHI360: Configuring linear acceleration sensor (ID %d)...", LACC_SENSOR_ID);
+        rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, motion_sensor_rate, report_latency_ms, &bhy2);
         print_api_error(rslt, &bhy2);
-        // Configure step counter sensor
-        LOG_INF("BHI360: Configuring step counter sensor...");
-        rslt = bhy2_set_virt_sensor_cfg(STEP_COUNTER_SENSOR_ID, sample_rate, report_latency_ms, &bhy2);
+        
+        // Configure gyroscope sensor
+        LOG_INF("BHI360: Configuring gyroscope sensor (ID %d)...", GYRO_SENSOR_ID);
+        rslt = bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, motion_sensor_rate, report_latency_ms, &bhy2);
+        print_api_error(rslt, &bhy2);
+        
+        // Configure step counter sensor at lower rate
+        LOG_INF("BHI360: Configuring step counter sensor (ID %d) at %.1f Hz...", STEP_COUNTER_SENSOR_ID, step_counter_rate);
+        rslt = bhy2_set_virt_sensor_cfg(STEP_COUNTER_SENSOR_ID, step_counter_rate, report_latency_ms, &bhy2);
         print_api_error(rslt, &bhy2);
         // Register a single callback for all sensors
         rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, &bhy2);
         print_api_error(rslt, &bhy2);
         rslt = bhy2_register_fifo_parse_callback(LACC_SENSOR_ID, parse_all_sensors, NULL, &bhy2);
+        print_api_error(rslt, &bhy2);
+        rslt = bhy2_register_fifo_parse_callback(GYRO_SENSOR_ID, parse_all_sensors, NULL, &bhy2);
         print_api_error(rslt, &bhy2);
         rslt = bhy2_register_fifo_parse_callback(STEP_COUNTER_SENSOR_ID, parse_all_sensors, NULL, &bhy2);
         print_api_error(rslt, &bhy2);
@@ -283,10 +305,18 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
     // Static variables to hold the latest values
     static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0, latest_quat_w = 0, latest_quat_accuracy = 0;
     static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;
+    static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
     static uint32_t latest_step_count = 0;
     static uint64_t latest_timestamp = 0;
 
-    bool updated = false;
+    // Synchronization tracking
+    static uint8_t motion_update_mask = 0;
+    static const uint8_t QUAT_UPDATED = 0x01;
+    static const uint8_t LACC_UPDATED = 0x02;
+    static const uint8_t GYRO_UPDATED = 0x04;
+    static const uint8_t ALL_MOTION_SENSORS = (QUAT_UPDATED | LACC_UPDATED | GYRO_UPDATED);
+    
+    bool send_data = false;
 
     switch (callback_info->sensor_id)
     {
@@ -298,22 +328,34 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
                 return;
             }
             bhy2_parse_quaternion(callback_info->data_ptr, &data);
+            // Quaternion components are normalized to [-1, 1] range
             latest_quat_x = (float)data.x / 16384.0f;
             latest_quat_y = (float)data.y / 16384.0f;
             latest_quat_z = (float)data.z / 16384.0f;
             latest_quat_w = (float)data.w / 16384.0f;
             latest_quat_accuracy = (float)data.accuracy;
-            latest_timestamp = *callback_info->time_stamp * 15625;
-            updated = true;
+            latest_timestamp = *callback_info->time_stamp * 15625; // Convert to nanoseconds
+            motion_update_mask |= QUAT_UPDATED;
             break;
         }
         case LACC_SENSOR_ID: {
             struct bhy2_data_xyz data;
             bhy2_parse_xyz(callback_info->data_ptr, &data);
-            latest_lacc_x = (float)data.x;
-            latest_lacc_y = (float)data.y;
-            latest_lacc_z = (float)data.z;
-            updated = true;
+            // Linear acceleration is in m/s^2, scaled by 100
+            latest_lacc_x = (float)data.x / 100.0f;
+            latest_lacc_y = (float)data.y / 100.0f;
+            latest_lacc_z = (float)data.z / 100.0f;
+            motion_update_mask |= LACC_UPDATED;
+            break;
+        }
+        case GYRO_SENSOR_ID: {
+            struct bhy2_data_xyz data;
+            bhy2_parse_xyz(callback_info->data_ptr, &data);
+            // Gyroscope data is in rad/s, scaled by 2^14
+            latest_gyro_x = (float)data.x / 16384.0f;
+            latest_gyro_y = (float)data.y / 16384.0f;
+            latest_gyro_z = (float)data.z / 16384.0f;
+            motion_update_mask |= GYRO_UPDATED;
             break;
         }
         case STEP_COUNTER_SENSOR_ID: {
@@ -324,7 +366,8 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             }
             latest_step_count = (callback_info->data_ptr[0]) | (callback_info->data_ptr[1] << 8) |
                                 (callback_info->data_ptr[2] << 16) | (callback_info->data_ptr[3] << 24);
-            updated = true;
+            // Step counter updates independently, don't wait for it
+            // It will be included with whatever value it has when motion sensors sync
             break;
         }
         default:
@@ -332,8 +375,15 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             break;
     }
 
-    // After any update, pack and send the combined record
-    if (updated)
+    // Check if all motion sensors have been updated
+    if ((motion_update_mask & ALL_MOTION_SENSORS) == ALL_MOTION_SENSORS)
+    {
+        send_data = true;
+        motion_update_mask = 0;  // Reset for next cycle
+    }
+    
+    // Send data when we have a complete set or step counter update
+    if (send_data)
     {
         // Send combined log record to data module
         bhi360_log_record_t record{};
@@ -345,6 +395,9 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
         record.lacc_x = latest_lacc_x;
         record.lacc_y = latest_lacc_y;
         record.lacc_z = latest_lacc_z;
+        record.gyro_x = latest_gyro_x;
+        record.gyro_y = latest_gyro_y;
+        record.gyro_z = latest_gyro_z;
         record.step_count = latest_step_count;
         record.timestamp = latest_timestamp;
         if (logging_active == true)
@@ -356,14 +409,18 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
 
             // Send individual values to Bluetooth module
-            // Quaternion (3D mapping)
+            // 3D mapping with actual gyro data and quaternion
             generic_message_t qmsg{};
             qmsg.sender = SENDER_BHI360_THREAD;
             qmsg.type = MSG_TYPE_BHI360_3D_MAPPING;
-            qmsg.data.bhi360_3d_mapping.gyro_x = latest_quat_x;
-            qmsg.data.bhi360_3d_mapping.gyro_y = latest_quat_y;
-            qmsg.data.bhi360_3d_mapping.gyro_z = latest_quat_z;
-            // Optionally add .accel_x/y/z if you want to use them for something else
+            qmsg.data.bhi360_3d_mapping.gyro_x = latest_gyro_x;
+            qmsg.data.bhi360_3d_mapping.gyro_y = latest_gyro_y;
+            qmsg.data.bhi360_3d_mapping.gyro_z = latest_gyro_z;
+            // Using accel fields for quaternion x,y,z components
+            qmsg.data.bhi360_3d_mapping.accel_x = latest_quat_x;
+            qmsg.data.bhi360_3d_mapping.accel_y = latest_quat_y;
+            qmsg.data.bhi360_3d_mapping.accel_z = latest_quat_z;
+            qmsg.data.bhi360_3d_mapping.quat_w = latest_quat_w;  // Now including W component
             #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
 #else

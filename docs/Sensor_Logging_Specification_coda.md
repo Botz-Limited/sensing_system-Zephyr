@@ -1,0 +1,692 @@
+<!-- CODA OPTIMIZED VERSION -->
+<!-- Images are set to fit within Coda's column width -->
+<!-- Click any image to view full size in new tab -->
+
+# Sensor Logging Specification
+
+**Version:** 1.0  
+**Date:** December 2024  
+**Scope:** Complete specification for sensor data logging, file formats, retrieval methods, and analysis tools  
+**Purpose:** Comprehensive reference for developers implementing logging features, parsing log files, and analyzing sensor data
+
+---
+
+## Table of Contents
+
+1. [Introduction](#1-introduction)
+2. [System Architecture](#2-system-architecture)
+3. [File Formats](#3-file-formats)
+4. [Timing Mechanism](#4-timing-mechanism)
+5. [Foot Sensor Logs](#5-foot-sensor-logs)
+6. [BHI360 Motion Sensor Logs](#6-bhi360-motion-sensor-logs)
+7. [BLE Interface](#7-ble-interface)
+8. [File Retrieval Methods](#8-file-retrieval-methods)
+9. [Log Decoder Tools](#9-log-decoder-tools)
+10. [Secondary Device Access](#10-secondary-device-access)
+11. [Protobuf Definitions](#11-protobuf-definitions)
+12. [Integration Examples](#12-integration-examples)
+13. [Troubleshooting](#13-troubleshooting)
+
+---
+
+## 1. Introduction
+
+The sensing firmware implements a comprehensive logging system for capturing and storing sensor data from both foot pressure sensors and BHI360 motion sensors. The system is designed for efficiency, accuracy, and ease of integration.
+
+### Key Features
+
+- **Efficient Storage**: Protocol Buffers binary format with fixed-point encoding
+- **Accurate Timing**: Delta timestamp mechanism with microsecond precision
+- **Dual Device Support**: Access logs from both primary and secondary devices
+- **Multiple Access Methods**: BLE characteristics, SMP file transfer, shell commands
+- **Analysis Tools**: On-device and host-side decoders with timing validation
+
+### Storage Efficiency
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_1.png" alt="Diagram 1" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 1 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_1.mmd -->
+
+---
+
+## 2. System Architecture
+
+### Logging Flow
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_2.png" alt="Diagram 2" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 2 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_2.mmd -->
+
+### File Naming Convention
+
+```
+/lfs1/hardware/foot_XXX.pb    # Foot sensor logs (XXX = 001-999)
+/lfs1/hardware/bhi360_XXX.pb  # BHI360 logs (XXX = 001-999)
+```
+
+---
+
+## 3. File Formats
+
+### General Structure
+
+All log files follow the same basic structure using Protocol Buffers:
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_3.png" alt="Diagram 3" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 3 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_3.mmd -->
+
+### Binary Layout
+
+```
++------------------+------------------+------------------+------------------+
+| Header           | Packet 1         | Packet 2         | ... | SessionEnd |
+| Protobuf message | Protobuf message | Protobuf message |     | Protobuf   |
++------------------+------------------+------------------+------------------+
+| - fw_version     | - sensor_data    | - sensor_data    |     | - uptime   |
+| - frequency      | - delta_ms = 0   | - delta_ms = Δt  |     |            |
+| - message_type   |                  |                  |     |            |
++------------------+------------------+------------------+------------------+
+```
+
+---
+
+## 4. Timing Mechanism
+
+### Delta Timestamp System
+
+To minimize storage overhead while maintaining timing accuracy:
+
+- **No absolute timestamps** in data packets (saves 8 bytes/packet)
+- **Delta timestamp** (uint16_t, 2 bytes) stores milliseconds since previous packet
+- **First packet** always has delta_ms = 0
+- **Maximum delta**: 65,535 ms (~65 seconds)
+
+### Timestamp Reconstruction
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_4.png" alt="Diagram 4" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 4 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_4.mmd -->
+
+### Implementation Example
+
+```python
+def reconstruct_timestamps(packets, sampling_freq):
+    absolute_time_ms = 0
+    expected_delta = 1000 / sampling_freq
+    
+    for i, packet in enumerate(packets):
+        if i == 0:
+            absolute_time_ms = 0  # First packet
+        else:
+            absolute_time_ms += packet.delta_ms
+        
+        # Analyze timing
+        if i > 0:
+            deviation = abs(packet.delta_ms - expected_delta)
+            if deviation > expected_delta * 0.1:  # >10% deviation
+                print(f"Timing anomaly at {absolute_time_ms}ms")
+        
+        yield absolute_time_ms, packet.data
+```
+
+---
+
+## 5. Foot Sensor Logs
+
+### Specifications
+
+| Parameter | Value |
+|-----------|-------|
+| Sampling Rate | 20 Hz |
+| Channels | 8 (pressure/force sensors) |
+| Data Type | uint32_t per channel |
+| Packet Size | ~25 bytes |
+| Storage Rate | ~500 bytes/second |
+
+### Data Structure
+
+```c
+// Header (first message in file)
+message FootSensorSensingData {
+    string firmware_version = 1;     // e.g., "1.0.0"
+    uint32 sampling_frequency = 2;   // 20 Hz
+    enum message_type = 3;           // FOOT_SENSOR_DATA
+}
+
+// Data packet (repeated)
+message FootSensorData {
+    repeated uint32 readings = 1;    // 8 channel values
+    uint16 delta_ms = 2;            // Time since previous packet
+}
+
+// Session end (last message)
+message FootSensorSessionEnd {
+    uint64 uptime_ms = 1;           // Total system uptime
+}
+```
+
+### Example Data Flow
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_5.png" alt="Diagram 5" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 5 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_5.mmd -->
+
+---
+
+## 6. BHI360 Motion Sensor Logs
+
+### Specifications
+
+| Parameter | Value |
+|-----------|-------|
+| Motion Sensors | 50 Hz (quaternion, accel, gyro) |
+| Step Counter | 5 Hz (independent) |
+| Data Format | Fixed-point integers |
+| Packet Size | ~32 bytes |
+| Storage Rate | ~1600 bytes/second |
+
+### Fixed-Point Encoding
+
+| Sensor | Scale Factor | Precision | Range |
+|--------|--------------|-----------|-------|
+| Quaternion | ×10,000 | 0.0001 | ±1.0 |
+| Linear Acceleration | ×1,000 | 0.001 m/s² | ±20 m/s² |
+| Gyroscope | ×10,000 | 0.0001 rad/s | ±2.0 rad/s |
+| Accuracy | ×100 | 0.01 | 0-3.0 |
+
+### Data Structure
+
+```c
+// Data packet with fixed-point encoding
+message BHI360LogRecord {
+    // Quaternion (×10,000)
+    sint16 quat_x = 1;
+    sint16 quat_y = 2;
+    sint16 quat_z = 3;
+    sint16 quat_w = 4;
+    
+    // Accuracy (×100)
+    uint8 quat_accuracy = 5;
+    
+    // Linear acceleration (×1,000)
+    sint16 lacc_x = 6;
+    sint16 lacc_y = 7;
+    sint16 lacc_z = 8;
+    
+    // Gyroscope (×10,000)
+    sint16 gyro_x = 9;
+    sint16 gyro_y = 10;
+    sint16 gyro_z = 11;
+    
+    // Step counter (no scaling)
+    uint32 step_count = 12;
+    
+    // Timing
+    uint16 delta_ms = 13;
+}
+```
+
+### Sensor Synchronization
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_6.png" alt="Diagram 6" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 6 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_6.mmd -->
+
+---
+
+## 7. BLE Interface
+
+### Information Service Characteristics
+
+**Service UUID:** `0c372eaa-27eb-437e-bef4-775aefaf3c97`
+
+| Characteristic | UUID Suffix | Type | Description |
+|----------------|-------------|------|-------------|
+| Foot Log Available | `...eac` | uint8_t | Latest closed log ID |
+| Foot Log Path | `...eae` | string | File path (e.g., "/lfs1/hardware/foot_005.pb") |
+| BHI360 Log Available | `...eb0` | uint8_t | Latest closed log ID |
+| BHI360 Log Path | `...eb1` | string | File path |
+
+### Control Service Commands
+
+**Service UUID:** `4fd5b67f-9d89-4061-92aa-319ca786baae`
+
+| Command | UUID Suffix | Type | Description |
+|---------|-------------|------|-------------|
+| Delete Foot Log | `...b682` | uint8_t | Delete by log ID |
+| Delete BHI360 Log | `...b683` | uint8_t | Delete by log ID |
+| Start Activity | `...b684` | uint8_t | Start logging (write 1) |
+| Stop Activity | `...b685` | uint8_t | Stop logging (write 1) |
+
+### Workflow
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_7.png" alt="Diagram 7" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 7 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_7.mmd -->
+
+---
+
+## 8. File Retrieval Methods
+
+### Method 1: SMP (Simple Management Protocol)
+
+**Service UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
+**Characteristic:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_8.png" alt="Diagram 8" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 8 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_8.mmd -->
+
+### Method 2: File Proxy (Secondary Device)
+
+**Service UUID:** `7e500001-b5a3-f393-e0a9-e50e24dcca9e`
+
+Used to access logs on secondary devices through the primary device.
+
+### Method 3: Debug Interface
+
+For development/debugging:
+- J-Link RTT
+- USB CDC ACM
+- UART console
+
+---
+
+## 9. Log Decoder Tools
+
+### On-Device Shell Commands
+
+```bash
+# Enable in prj.conf:
+CONFIG_SHELL=y
+CONFIG_LOG_DECODER_SHELL_CMD=y
+```
+
+#### Available Commands
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_9.png" alt="Diagram 9" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 9 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_9.mmd -->
+
+#### Example Session
+
+```bash
+uart:~$ log list
+=== LOG FILE INVENTORY ===
+Directory: /lfs1/hardware
+
+FILENAME                  SIZE       TYPE
+-------------------------  ---------- ----
+foot_001.pb               2048       Foot Sensor
+foot_002.pb               4096       Foot Sensor
+bhi360_001.pb             8192       BHI360
+bhi360_002.pb             16384      BHI360
+
+SUMMARY:
+  Foot Sensor Logs: 2
+  BHI360 Logs: 2
+  Total Files: 4
+  Total Size: 30720 bytes (30.00 KB)
+
+uart:~$ log decode foot
+=== FOOT SENSOR LOG (ID: 2) ===
+File: /lfs1/hardware/foot_002.pb
+Firmware: 1.0.0
+Frequency: 20 Hz
+Packets: 80
+Duration: 4.00 seconds
+
+TIMING ANALYSIS:
+  Expected delta: 50 ms
+  Average delta: 50.1 ms
+  Max jitter: 3 ms
+  Packet loss: 0.0%
+  
+First 5 packets:
+  [0] t=0ms: [1023, 512, 768, 256, 384, 640, 896, 128]
+  [1] t=50ms: [1024, 513, 769, 257, 385, 641, 897, 129]
+  [2] t=100ms: [1025, 514, 770, 258, 386, 642, 898, 130]
+  [3] t=150ms: [1026, 515, 771, 259, 387, 643, 899, 131]
+  [4] t=200ms: [1027, 516, 772, 260, 388, 644, 900, 132]
+```
+
+### Python Decoder Script
+
+```python
+# Usage
+python tools/decode_log.py [options] <log_file>
+
+# Options:
+#   --list          List all logs in directory
+#   --format json   Output in JSON format
+#   --timing        Show detailed timing analysis
+#   --export csv    Export data to CSV file
+
+# Examples:
+python tools/decode_log.py foot_001.pb
+python tools/decode_log.py --timing bhi360_001.pb
+python tools/decode_log.py --export data.csv foot_001.pb
+```
+
+### Timing Analysis Output
+
+```
+TIMING STATISTICS:
+┌─────────────────┬──────────┬──────────┬──────────┐
+│ Metric          │ Expected │ Actual   │ Status   │
+├─────────────────┼──────────┼──────────┼────────���─┤
+│ Sample Rate     │ 50 Hz    │ 49.9 Hz  │ ✓ GOOD   │
+│ Average Delta   │ 20.0 ms  │ 20.1 ms  │ ✓ GOOD   │
+│ Min Delta       │ -        │ 19 ms    │ ✓ GOOD   │
+│ Max Delta       │ -        │ 22 ms    │ ✓ GOOD   │
+│ Jitter          │ < 5 ms   │ 3 ms     │ ✓ GOOD   │
+│ Deviation       │ < 5%     │ 0.5%     │ ✓ GOOD   │
+│ Packet Loss     │ < 1%     │ 0.0%     │ ✓ GOOD   │
+└─────────────────┴──────────┴──────────┴──────────┘
+```
+
+---
+
+## 10. Secondary Device Access
+
+### Architecture
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_10.png" alt="Diagram 10" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 10 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_10.mmd -->
+
+### File Proxy Commands
+
+| Command | Value | Parameters | Description |
+|---------|-------|------------|-------------|
+| List Files | 0x01 | File type | Get file list |
+| Read File | 0x02 | File ID | Download file |
+| Delete File | 0x03 | File ID | Remove file |
+| Get Info | 0x04 | File ID | Get metadata |
+
+### Usage Example
+
+```swift
+// iOS Swift
+func downloadSecondaryLog(fileId: UInt8) async throws -> Data {
+    // Set target to secondary
+    try await writeCharacteristic(targetUUID, data: Data([0x01]))
+    
+    // Send read command
+    let command = Data([0x02, fileId, 0x01]) // Read, ID, Type=Foot
+    try await writeCharacteristic(commandUUID, data: command)
+    
+    // Collect data chunks
+    var fileData = Data()
+    for await chunk in notificationStream(dataUUID) {
+        fileData.append(chunk)
+        if isComplete(chunk) { break }
+    }
+    
+    return fileData
+}
+```
+
+---
+
+## 11. Protobuf Definitions
+
+### Common Enums
+
+```protobuf
+enum MessageType {
+    UNKNOWN = 0;
+    FOOT_SENSOR_DATA = 1;
+    BHI360_3D_DATA = 2;
+}
+
+enum LogFileType {
+    TYPE_UNKNOWN = 0;
+    TYPE_FOOT = 1;
+    TYPE_BHI360 = 2;
+}
+```
+
+### Foot Sensor Messages
+
+```protobuf
+syntax = "proto3";
+import "nanopb.proto";
+
+message FootSensorLogMessage {
+    oneof payload {
+        FootSensorData data = 1;
+        FootSensorSensingData header = 2;
+        FootSensorSessionEnd end = 3;
+    }
+}
+
+message FootSensorData {
+    repeated uint32 readings = 1 [(nanopb).max_count = 8];
+    uint32 delta_ms = 2 [(nanopb).int_size = IS_16];
+}
+```
+
+### BHI360 Messages (Fixed-Point)
+
+```protobuf
+message BHI360LogRecord {
+    // Quaternion ×10,000
+    sint32 quat_x = 1 [(nanopb).int_size = IS_16];
+    sint32 quat_y = 2 [(nanopb).int_size = IS_16];
+    sint32 quat_z = 3 [(nanopb).int_size = IS_16];
+    sint32 quat_w = 4 [(nanopb).int_size = IS_16];
+    
+    // Accuracy ×100
+    uint32 quat_accuracy = 5 [(nanopb).int_size = IS_8];
+    
+    // Linear acceleration ×1,000
+    sint32 lacc_x = 6 [(nanopb).int_size = IS_16];
+    sint32 lacc_y = 7 [(nanopb).int_size = IS_16];
+    sint32 lacc_z = 8 [(nanopb).int_size = IS_16];
+    
+    // Gyroscope ×10,000
+    sint32 gyro_x = 9 [(nanopb).int_size = IS_16];
+    sint32 gyro_y = 10 [(nanopb).int_size = IS_16];
+    sint32 gyro_z = 11 [(nanopb).int_size = IS_16];
+    
+    uint32 step_count = 12;
+    uint32 delta_ms = 13 [(nanopb).int_size = IS_16];
+}
+```
+
+---
+
+## 12. Integration Examples
+
+### Mobile App - Complete Log Download
+
+```kotlin
+// Android Kotlin
+class LogDownloader(private val bleManager: BleManager) {
+    
+    suspend fun downloadLatestFootLog(): FootSensorLog? {
+        // 1. Check available logs
+        val logId = bleManager.readCharacteristic(FOOT_LOG_AVAILABLE_UUID)
+        if (logId == 0) return null
+        
+        // 2. Get file path
+        val path = bleManager.readCharacteristic(FOOT_LOG_PATH_UUID)
+        
+        // 3. Download via SMP
+        val fileData = smpClient.downloadFile(path)
+        
+        // 4. Parse protobuf
+        return FootSensorLogParser.parse(fileData)
+    }
+    
+    suspend fun deleteLog(logId: UInt8) {
+        bleManager.writeCharacteristic(DELETE_FOOT_LOG_UUID, byteArrayOf(logId))
+    }
+}
+```
+
+### Firmware - Custom Log Analysis
+
+```c
+#include "log_decoder_app.h"
+
+void analyze_foot_timing(void) {
+    struct log_stats stats = {0};
+    
+    int ret = analyze_latest_foot_log(&stats);
+    if (ret == 0) {
+        LOG_INF("Foot log analysis:");
+        LOG_INF("  Duration: %d.%03d seconds", 
+                stats.duration_ms / 1000,
+                stats.duration_ms % 1000);
+        LOG_INF("  Packets: %d", stats.packet_count);
+        LOG_INF("  Avg delta: %d ms", stats.avg_delta_ms);
+        LOG_INF("  Max jitter: %d ms", stats.max_jitter_ms);
+        
+        if (stats.max_jitter_ms > 10) {
+            LOG_WRN("High timing jitter detected!");
+        }
+    }
+}
+```
+
+### Python - Batch Processing
+
+```python
+import glob
+from decode_log import LogDecoder
+
+def process_all_logs(directory):
+    """Process all log files and generate report"""
+    
+    results = {
+        'foot': [],
+        'bhi360': []
+    }
+    
+    # Process foot sensor logs
+    for file in glob.glob(f"{directory}/foot_*.pb"):
+        decoder = LogDecoder(file)
+        stats = decoder.analyze()
+        results['foot'].append({
+            'file': file,
+            'duration': stats['duration_s'],
+            'packets': stats['packet_count'],
+            'timing_quality': stats['timing_quality']
+        })
+    
+    # Generate report
+    print(f"Processed {len(results['foot'])} foot logs")
+    print(f"Total duration: {sum(r['duration'] for r in results['foot']):.1f}s")
+    print(f"Average quality: {np.mean([r['timing_quality'] for r in results['foot']]):.1%}")
+```
+
+---
+
+## 13. Troubleshooting
+
+### Common Issues and Solutions
+
+<div style="max-width: 100%; overflow: hidden;">
+<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_11.png" alt="Diagram 11" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
+</div>
+<p style="text-align: center; font-size: 0.9em; color: #666;">
+Diagram 11 (Click to view full size)
+</p>
+<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_11.mmd -->
+
+### Debug Checklist
+
+1. **File System Health**
+   ```bash
+   fs mount
+   fs statvfs /lfs1
+   ```
+
+2. **Log File Integrity**
+   ```bash
+   # Check file exists and size
+   fs ls /lfs1/hardware
+   
+   # Verify can read
+   fs read /lfs1/hardware/foot_001.pb 0 32
+   ```
+
+3. **Timing Validation**
+   ```bash
+   # On-device analysis
+   log decode foot
+   
+   # Look for:
+   # - Consistent deltas
+   # - Low jitter
+   # - No large gaps
+   ```
+
+4. **BLE Communication**
+   - Ensure bonding/pairing complete
+   - Verify characteristic permissions
+   - Check notification subscriptions
+
+### Performance Optimization
+
+1. **Reduce Logging Overhead**
+   - Use appropriate sampling rates
+   - Enable only needed sensors
+   - Implement circular buffers
+
+2. **Improve Timing Accuracy**
+   - Minimize ISR processing
+   - Use DMA for sensor reads
+   - Priority-based task scheduling
+
+3. **Optimize Storage**
+   - Regular log cleanup
+   - Compression for long-term storage
+   - Efficient file rotation
+
+---
+
+**End of Specification**
