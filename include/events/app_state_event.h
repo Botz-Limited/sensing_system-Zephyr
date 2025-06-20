@@ -55,6 +55,8 @@ typedef enum
     MSG_TYPE_DELETE_BHI360_LOG, // Specific message type for deleting BHI360 logs
     MSG_TYPE_FOTA_PROGRESS, // FOTA progress updates
     MSG_TYPE_ERROR_STATUS, // Error status updates from modules
+    MSG_TYPE_SAVE_BHI360_CALIBRATION, // Save BHI360 calibration data
+    MSG_TYPE_LOAD_BHI360_CALIBRATION, // Load BHI360 calibration data
 } msg_type_t;
 
 // Define sender types

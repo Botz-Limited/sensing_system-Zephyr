@@ -100,6 +100,9 @@ err_t end_foot_sensor_logging();
 err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version);
 err_t end_bhi360_logging();
 
+err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data);
+err_t load_bhi360_calibration_data(uint8_t sensor_type);
+
 // --- Foot Sensor Log File Handle ---
 static struct fs_file_t foot_sensor_log_file;
 static struct fs_file_t bhi360_log_file;
@@ -148,6 +151,9 @@ static atomic_t logging_bhi360_active = ATOMIC_INIT(0);
 // Mutex for protecting sequence number generation
 K_MUTEX_DEFINE(sequence_number_mutex);
 
+// Mutex for protecting calibration file access
+K_MUTEX_DEFINE(calibration_file_mutex);
+
 // Thread
 static struct k_thread data_thread_data;
 constexpr int data_stack_size = CONFIG_DATA_MODULE_STACK_SIZE;
@@ -160,6 +166,14 @@ k_tid_t data_tid;
 // This dir_path is likely for a general-purpose directory listing, not for specific log files.
 // Specific log file paths are defined above and declared in data.hpp.
 constexpr char dir_path[] = CONFIG_FILE_SYSTEM_MOUNT;
+
+// Calibration file paths
+constexpr char calibration_dir_path[] = "/lfs1/calibration";
+constexpr char bhi360_calib_file_prefix[] = "bhi360_calib_";
+
+// Define the file path variables declared as extern in data.hpp
+char foot_sensor_file_path[util::max_path_length];
+char bhi360_file_path[util::max_path_length];
 
 /**
  * @brief Helper to find the next available sequence number for a log file.
@@ -619,6 +633,36 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     else
                     {
                         LOG_INF("Successfully deleted BHI360 log file with ID %u", msg.data.delete_cmd.id);
+                    }
+                    break;
+                }
+
+                case MSG_TYPE_SAVE_BHI360_CALIBRATION: {
+                    LOG_INF("Received SAVE BHI360 CALIBRATION command for sensor type: %u", 
+                            msg.data.bhi360_calibration.sensor_type);
+                    err_t save_status = save_bhi360_calibration_data(&msg.data.bhi360_calibration);
+                    if (save_status != err_t::NO_ERROR)
+                    {
+                        LOG_ERR("Failed to save BHI360 calibration data: %d", (int)save_status);
+                    }
+                    else
+                    {
+                        LOG_INF("Successfully saved BHI360 calibration data");
+                    }
+                    break;
+                }
+
+                case MSG_TYPE_LOAD_BHI360_CALIBRATION: {
+                    LOG_INF("Received LOAD BHI360 CALIBRATION command for sensor type: %u", 
+                            msg.data.bhi360_calibration.sensor_type);
+                    err_t load_status = load_bhi360_calibration_data(msg.data.bhi360_calibration.sensor_type);
+                    if (load_status != err_t::NO_ERROR)
+                    {
+                        LOG_ERR("Failed to load BHI360 calibration data: %d", (int)load_status);
+                    }
+                    else
+                    {
+                        LOG_INF("Successfully loaded BHI360 calibration data");
                     }
                     break;
                 }
@@ -1902,6 +1946,278 @@ static bool app_event_handler(const struct app_event_header *aeh)
         return false;
     }
     return false;
+}
+
+/**
+ * @brief Save BHI360 calibration data to file
+ *
+ * @param calib_data Pointer to calibration data structure
+ * @return err_t NO_ERROR on success, or an error code on failure
+ */
+err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
+{
+    if (!calib_data) {
+        return err_t::INVALID_PARAMETER;
+    }
+
+    // Lock mutex for thread safety
+    k_mutex_lock(&calibration_file_mutex, K_FOREVER);
+
+    // Create calibration directory if it doesn't exist
+    int ret = fs_mkdir(calibration_dir_path);
+    if (ret != 0 && ret != -EEXIST) {
+        LOG_ERR("Failed to create calibration directory: %d", ret);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Create filename based on sensor type
+    char filename[util::max_path_length];
+    const char *sensor_name;
+    switch (calib_data->sensor_type) {
+        case 0: sensor_name = "accel"; break;
+        case 1: sensor_name = "gyro"; break;
+        default:
+            LOG_ERR("Invalid sensor type: %u (only 0=accel, 1=gyro supported)", calib_data->sensor_type);
+            k_mutex_unlock(&calibration_file_mutex);
+            return err_t::INVALID_PARAMETER;
+    }
+    
+    snprintk(filename, sizeof(filename), "%s/%s%s.bin", 
+             calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
+
+    // Open file for writing
+    struct fs_file_t file;
+    fs_file_t_init(&file);
+    
+    ret = fs_open(&file, filename, FS_O_CREATE | FS_O_WRITE);
+    if (ret != 0) {
+        LOG_ERR("Failed to open calibration file %s: %d", filename, ret);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Write calibration data
+    // First write the profile size
+    ret = fs_write(&file, &calib_data->profile_size, sizeof(calib_data->profile_size));
+    if (ret < 0) {
+        LOG_ERR("Failed to write profile size: %d", ret);
+        fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Then write the actual profile data
+    ret = fs_write(&file, calib_data->profile_data, calib_data->profile_size);
+    if (ret < 0) {
+        LOG_ERR("Failed to write calibration data: %d", ret);
+        fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Sync and close file
+    fs_sync(&file);
+    fs_close(&file);
+
+    LOG_INF("Saved BHI360 %s calibration to %s (%u bytes)", 
+            sensor_name, filename, calib_data->profile_size);
+
+    k_mutex_unlock(&calibration_file_mutex);
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Load BHI360 calibration data from file and send to motion sensor
+ *
+ * @param sensor_type Sensor type (0=accel, 1=gyro, 2=mag)
+ * @return err_t NO_ERROR on success, or an error code on failure
+ */
+err_t load_bhi360_calibration_data(uint8_t sensor_type)
+{
+    // Create filename based on sensor type
+    char filename[util::max_path_length];
+    const char *sensor_name;
+    switch (sensor_type) {
+        case 0: sensor_name = "accel"; break;
+        case 1: sensor_name = "gyro"; break;
+        default:
+            LOG_ERR("Invalid sensor type: %u (only 0=accel, 1=gyro supported)", sensor_type);
+            k_mutex_unlock(&calibration_file_mutex);
+            return err_t::INVALID_PARAMETER;
+    }
+    
+    snprintk(filename, sizeof(filename), "%s/%s%s.bin", 
+             calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
+
+    // Check if file exists
+    struct fs_dirent entry;
+    int ret = fs_stat(filename, &entry);
+    if (ret != 0) {
+        LOG_WRN("Calibration file %s not found", filename);
+        return err_t::FILE_SYSTEM_NO_FILES;
+    }
+
+    // Open file for reading
+    struct fs_file_t file;
+    fs_file_t_init(&file);
+    
+    ret = fs_open(&file, filename, FS_O_READ);
+    if (ret != 0) {
+        LOG_ERR("Failed to open calibration file %s: %d", filename, ret);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Read profile size
+    uint16_t profile_size;
+    ret = fs_read(&file, &profile_size, sizeof(profile_size));
+    if (ret < 0) {
+        LOG_ERR("Failed to read profile size: %d", ret);
+        fs_close(&file);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Validate profile size
+    if (profile_size > 512) {
+        LOG_ERR("Invalid profile size: %u", profile_size);
+        fs_close(&file);
+        return err_t::DATA_ERROR;
+    }
+
+    // Read calibration data
+    uint8_t profile_data[512];
+    ret = fs_read(&file, profile_data, profile_size);
+    if (ret < 0) {
+        LOG_ERR("Failed to read calibration data: %d", ret);
+        fs_close(&file);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    fs_close(&file);
+
+    LOG_INF("Loaded BHI360 %s calibration from %s (%u bytes)", 
+            sensor_name, filename, profile_size);
+
+    // Instead of sending to motion sensor, we'll just log success
+    // The motion sensor module should call load_bhi360_calibration_data during initialization
+    LOG_INF("Calibration data ready for sensor type %u", sensor_type);
+
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Public API to get BHI360 calibration data from storage
+ * This function can be called by the motion sensor module during initialization
+ *
+ * @param sensor_type Sensor type (0=accel, 1=gyro, 2=mag)
+ * @param profile_data Buffer to store calibration data
+ * @param max_size Maximum size of the buffer
+ * @param actual_size Actual size of the calibration data read
+ * @return err_t NO_ERROR on success, or an error code on failure
+ */
+err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data, 
+                                  size_t max_size, size_t *actual_size)
+{
+    if (!profile_data || !actual_size) {
+        return err_t::INVALID_PARAMETER;
+    }
+
+    // Lock mutex for thread safety
+    k_mutex_lock(&calibration_file_mutex, K_FOREVER);
+
+    // Create filename based on sensor type
+    char filename[util::max_path_length];
+    const char *sensor_name;
+    switch (sensor_type) {
+        case 0: sensor_name = "accel"; break;
+        case 1: sensor_name = "gyro"; break;
+        default:
+            LOG_ERR("Invalid sensor type: %u (only 0=accel, 1=gyro supported)", sensor_type);
+            return err_t::INVALID_PARAMETER;
+    }
+    
+    snprintk(filename, sizeof(filename), "%s/%s%s.bin", 
+             calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
+
+    // Check if file exists
+    struct fs_dirent entry;
+    int ret = fs_stat(filename, &entry);
+    if (ret != 0) {
+        LOG_DBG("Calibration file %s not found", filename);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_NO_FILES;
+    }
+
+    // Open file for reading
+    struct fs_file_t file;
+    fs_file_t_init(&file);
+    
+    ret = fs_open(&file, filename, FS_O_READ);
+    if (ret != 0) {
+        LOG_ERR("Failed to open calibration file %s: %d", filename, ret);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Read profile size
+    uint16_t profile_size;
+    ret = fs_read(&file, &profile_size, sizeof(profile_size));
+    if (ret < 0) {
+        LOG_ERR("Failed to read profile size: %d", ret);
+        fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Validate profile size
+    if (profile_size > max_size) {
+        LOG_ERR("Profile size %u exceeds buffer size %u", profile_size, max_size);
+        fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::DATA_ERROR;
+    }
+
+    // Read calibration data
+    ret = fs_read(&file, profile_data, profile_size);
+    if (ret < 0) {
+        LOG_ERR("Failed to read calibration data: %d", ret);
+        fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    fs_close(&file);
+    *actual_size = profile_size;
+
+    LOG_INF("Retrieved BHI360 %s calibration (%u bytes)", sensor_name, profile_size);
+    k_mutex_unlock(&calibration_file_mutex);
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Public API to store BHI360 calibration data
+ * This function can be called by the motion sensor module after calibration
+ *
+ * @param sensor_type Sensor type (0=accel, 1=gyro, 2=mag)
+ * @param profile_data Calibration data to store
+ * @param profile_size Size of the calibration data
+ * @return err_t NO_ERROR on success, or an error code on failure
+ */
+err_t store_bhi360_calibration_data(uint8_t sensor_type, const uint8_t *profile_data, 
+                                    size_t profile_size)
+{
+    if (!profile_data || profile_size == 0 || profile_size > 512) {
+        return err_t::INVALID_PARAMETER;
+    }
+
+    // Create calibration data structure
+    bhi360_calibration_data_t calib_data;
+    calib_data.sensor_type = sensor_type;
+    calib_data.profile_size = (uint16_t)profile_size;
+    memcpy(calib_data.profile_data, profile_data, profile_size);
+
+    // Use the existing save function
+    return save_bhi360_calibration_data(&calib_data);
 }
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);

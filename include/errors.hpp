@@ -34,6 +34,8 @@ enum class err_t
     FILE_SYSTEM_NO_FILES = -26,
     FILE_SYSTEM_STORAGE_FULL = -27,
     FLASH_FAILURE = -28,
+    INVALID_PARAMETER = -29,
+    QUEUE_FULL = -30,
 };
 
 #endif // APP_INCLUDE_ERRORS_H_

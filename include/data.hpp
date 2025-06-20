@@ -39,8 +39,13 @@ constexpr char bhi360_file_prefix[] = "bhi360_";
 
 constexpr char hardware_dir_path[] = CONFIG_FILE_SYSTEM_MOUNT "/hardware";
 
-char foot_sensor_file_path[util::max_path_length];
-char bhi360_file_path[util::max_path_length];
+extern char foot_sensor_file_path[util::max_path_length];
+extern char bhi360_file_path[util::max_path_length];
 
+// BHI360 calibration API functions
+err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data, 
+                                  size_t max_size, size_t *actual_size);
+err_t store_bhi360_calibration_data(uint8_t sensor_type, const uint8_t *profile_data, 
+                                    size_t profile_size);
 
 #endif // APP_INCLUDE_DATA_HEADER_

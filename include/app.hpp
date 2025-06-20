@@ -88,6 +88,13 @@ typedef struct {
     bool is_set;       // true = set error, false = clear error
 } error_status_msg_t;
 
+// BHI360 calibration data structure
+typedef struct {
+    uint8_t sensor_type;  // 0=accel, 1=gyro, 2=mag
+    uint16_t profile_size;
+    uint8_t profile_data[512];  // Max calibration profile size
+} bhi360_calibration_data_t;
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -109,6 +116,7 @@ typedef struct
         delete_log_command_t delete_cmd;
         fota_progress_msg_t fota_progress;
         error_status_msg_t error_status;
+        bhi360_calibration_data_t bhi360_calibration;
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 
