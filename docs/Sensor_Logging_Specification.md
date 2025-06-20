@@ -1,7 +1,7 @@
 # Sensor Logging Specification
 
 **Version:** 1.0  
-**Date:** December 2024  
+**Date:** June 2025  
 **Scope:** Complete specification for sensor data logging, file formats, retrieval methods, and analysis tools  
 **Purpose:** Comprehensive reference for developers implementing logging features, parsing log files, and analyzing sensor data
 
@@ -39,8 +39,21 @@ The sensing firmware implements a comprehensive logging system for capturing and
 
 ### Storage Efficiency
 
-![Diagram 1](mermaid_images/Sensor_Logging_Specification/diagram_1.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_1.mmd -->
+```mermaid
+graph LR
+    subgraph "Float Format (Old)"
+        F1[55 bytes/record<br/>@ 50Hz]
+        F2[10 MB/hour]
+    end
+    
+    subgraph "Fixed-Point Format (New)"
+        X1[32 bytes/record<br/>@ 50Hz]
+        X2[5.8 MB/hour]
+    end
+    
+    F1 -->|"-42%"| X1
+    F2 -->|"-42%"| X2
+```
 
 ---
 
@@ -48,8 +61,46 @@ The sensing firmware implements a comprehensive logging system for capturing and
 
 ### Logging Flow
 
-![Diagram 2](mermaid_images/Sensor_Logging_Specification/diagram_2.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_2.mmd -->
+```mermaid
+graph TB
+    subgraph "Sensors"
+        FOOT[Foot Pressure<br/>8 channels @ 20Hz]
+        BHI[BHI360 IMU<br/>Motion @ 50Hz<br/>Steps @ 5Hz]
+    end
+    
+    subgraph "Processing"
+        CONV[Fixed-Point<br/>Converter]
+        TIME[Delta Timestamp<br/>Generator]
+        PROTO[Protobuf<br/>Encoder]
+    end
+    
+    subgraph "Storage"
+        FS[LittleFS<br/>/lfs1/hardware/]
+        FOOT_LOG[foot_XXX.pb]
+        BHI_LOG[bhi360_XXX.pb]
+    end
+    
+    subgraph "Access"
+        BLE[BLE Services]
+        SMP[SMP Server]
+        SHELL[Shell Commands]
+    end
+    
+    FOOT --> CONV
+    BHI --> CONV
+    CONV --> TIME
+    TIME --> PROTO
+    PROTO --> FS
+    FS --> FOOT_LOG
+    FS --> BHI_LOG
+    
+    FOOT_LOG --> BLE
+    BHI_LOG --> BLE
+    FOOT_LOG --> SMP
+    BHI_LOG --> SMP
+    FOOT_LOG --> SHELL
+    BHI_LOG --> SHELL
+```
 
 ### File Naming Convention
 
@@ -66,10 +117,18 @@ The sensing firmware implements a comprehensive logging system for capturing and
 
 All log files follow the same basic structure using Protocol Buffers:
 
-![Diagram 3](mermaid_images/Sensor_Logging_Specification/diagram_3.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_3.mmd -->
+```mermaid
+graph LR
+    A[Header<br/>~50-100 bytes] --> B[Data Packet 1<br/>delta=0]
+    B --> C[Data Packet 2<br/>delta=Δt]
+    C --> D[...]
+    D --> E[Data Packet N<br/>delta=Δt]
+    E --> F[Session End<br/>~15 bytes]
+```
 
 ### Binary Layout
+
+The binary file structure uses Protocol Buffers encoding with the following layout:
 
 ```
 +------------------+------------------+------------------+------------------+
@@ -81,6 +140,39 @@ All log files follow the same basic structure using Protocol Buffers:
 | - message_type   |                  |                  |     |            |
 +------------------+------------------+------------------+------------------+
 ```
+
+### File Structure Flow
+
+```mermaid
+graph LR
+    subgraph "File Start"
+        H[Header Message<br/>fw_version<br/>frequency<br/>message_type]
+    end
+    
+    subgraph "Data Section"
+        P1[Packet 1<br/>sensor_data<br/>delta_ms = 0]
+        P2[Packet 2<br/>sensor_data<br/>delta_ms = Δt]
+        PN[Packet N<br/>sensor_data<br/>delta_ms = Δt]
+    end
+    
+    subgraph "File End"
+        E[Session End<br/>uptime_ms]
+    end
+    
+    H --> P1
+    P1 --> P2
+    P2 -.-> PN
+    PN --> E
+    
+    style H fill:#f9f,stroke:#333,stroke-width:2px
+    style E fill:#9ff,stroke:#333,stroke-width:2px
+```
+
+**Key Points:**
+- **Header**: Contains metadata about the log file (firmware version, sampling frequency, message type)
+- **Data Packets**: Each packet contains sensor data and a delta timestamp (milliseconds since previous packet)
+- **First Packet**: Always has delta_ms = 0 as the reference point
+- **Session End**: Final message contains the total system uptime when logging stopped
 
 ---
 
@@ -97,8 +189,29 @@ To minimize storage overhead while maintaining timing accuracy:
 
 ### Timestamp Reconstruction
 
-![Diagram 4](mermaid_images/Sensor_Logging_Specification/diagram_4.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_4.mmd -->
+```mermaid
+sequenceDiagram
+    participant Decoder
+    participant File
+    
+    Decoder->>File: Read Header
+    File-->>Decoder: sampling_frequency
+    
+    Note over Decoder: absolute_time = 0
+    
+    loop For each packet
+        Decoder->>File: Read Packet
+        File-->>Decoder: delta_ms, data
+        
+        alt First packet
+            Note over Decoder: absolute_time = 0
+        else Subsequent packets
+            Note over Decoder: absolute_time += delta_ms
+        end
+        
+        Note over Decoder: Process data with absolute_time
+    end
+```
 
 ### Implementation Example
 
@@ -160,8 +273,16 @@ message FootSensorSessionEnd {
 
 ### Example Data Flow
 
-![Diagram 5](mermaid_images/Sensor_Logging_Specification/diagram_5.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_5.mmd -->
+```mermaid
+graph TD
+    A[Start Logging] --> B[Write Header<br/>fw=1.0.0, freq=20Hz]
+    B --> C[Packet 1<br/>readings=array, delta=0]
+    C --> D[Packet 2<br/>readings=array, delta=50]
+    D --> E[Packet 3<br/>readings=array, delta=49]
+    E --> F[...]
+    F --> G[Stop Logging]
+    G --> H[Write Session End<br/>uptime=3600000]
+```
 
 ---
 
@@ -220,8 +341,25 @@ message BHI360LogRecord {
 
 ### Sensor Synchronization
 
-![Diagram 6](mermaid_images/Sensor_Logging_Specification/diagram_6.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_6.mmd -->
+```mermaid
+graph TD
+    subgraph "50Hz Sensors"
+        Q[Quaternion]
+        L[Linear Accel]
+        G[Gyroscope]
+    end
+    
+    subgraph "5Hz Sensor"
+        S[Step Counter]
+    end
+    
+    Q --> SYNC{All Updated?}
+    L --> SYNC
+    G --> SYNC
+    
+    SYNC -->|Yes| LOG[Log Record]
+    S -->|Latest Value| LOG
+```
 
 ---
 
@@ -251,8 +389,26 @@ message BHI360LogRecord {
 
 ### Workflow
 
-![Diagram 7](mermaid_images/Sensor_Logging_Specification/diagram_7.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_7.mmd -->
+```mermaid
+sequenceDiagram
+    participant App
+    participant BLE
+    participant Device
+    
+    App->>BLE: Start Activity
+    BLE->>Device: Begin logging
+    Note over Device: Logging active...
+    
+    App->>BLE: Stop Activity
+    BLE->>Device: Close log file
+    Device-->>BLE: Update available logs
+    
+    App->>BLE: Read Log Available
+    BLE-->>App: Log ID = 5
+    
+    App->>BLE: Read Log Path
+    BLE-->>App: "/lfs1/hardware/foot_005.pb"
+```
 
 ---
 
@@ -263,8 +419,22 @@ message BHI360LogRecord {
 **Service UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
 **Characteristic:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`
 
-![Diagram 8](mermaid_images/Sensor_Logging_Specification/diagram_8.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_8.mmd -->
+```mermaid
+sequenceDiagram
+    participant App
+    participant SMP
+    participant FS as File System
+    
+    App->>SMP: FS Download<br/>"/lfs1/hardware/foot_005.pb"
+    
+    loop File chunks
+        SMP->>FS: Read chunk
+        FS-->>SMP: Data
+        SMP-->>App: Data packet
+    end
+    
+    SMP-->>App: Transfer complete
+```
 
 ### Method 2: File Proxy (Secondary Device)
 
@@ -293,8 +463,15 @@ CONFIG_LOG_DECODER_SHELL_CMD=y
 
 #### Available Commands
 
-![Diagram 9](mermaid_images/Sensor_Logging_Specification/diagram_9.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_9.mmd -->
+```mermaid
+graph LR
+    A[log] --> B[list<br/>Show all logs]
+    A --> C[decode]
+    C --> D[foot<br/>Latest foot log]
+    C --> E[bhi360<br/>Latest BHI log]
+    C --> F[file PATH<br/>Specific file]
+    A --> G[delete_all<br/>Remove all logs]
+```
 
 #### Example Session
 
@@ -379,8 +556,43 @@ TIMING STATISTICS:
 
 ### Architecture
 
-![Diagram 10](mermaid_images/Sensor_Logging_Specification/diagram_10.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_10.mmd -->
+The secondary device file access architecture shows how the mobile app can access log files stored on the secondary device through the primary device's proxy services:
+
+```mermaid
+graph TB
+    subgraph "Mobile App"
+        APP[BLE Client]
+    end
+    
+    subgraph "Primary Device"
+        PROXY[File Proxy Service]
+        D2D_C[D2D Client]
+    end
+    
+    subgraph "Secondary Device"
+        D2D_S[D2D Server]
+        LOGS[Log Files]
+    end
+    
+    APP -->|"1. Request"| PROXY
+    PROXY -->|"2. Forward"| D2D_C
+    D2D_C -->|"3. D2D Transfer"| D2D_S
+    D2D_S -->|"4. Read"| LOGS
+    LOGS -->|"5. Data"| D2D_S
+    D2D_S -->|"6. Response"| D2D_C
+    D2D_C -->|"7. Forward"| PROXY
+    PROXY -->|"8. Send"| APP
+```
+
+**Data Flow Steps:**
+1. **Request**: Mobile app sends file request to Primary's File Proxy Service
+2. **Forward**: File Proxy forwards request to D2D Client module
+3. **D2D Transfer**: D2D Client sends request over BLE to Secondary's D2D Server
+4. **Read**: D2D Server reads requested log file from file system
+5. **Data**: File data is read and prepared for transmission
+6. **Response**: D2D Server sends data back to Primary's D2D Client
+7. **Forward**: D2D Client forwards data to File Proxy Service
+8. **Send**: File Proxy sends data to Mobile App via BLE notification
 
 ### File Proxy Commands
 
@@ -575,8 +787,30 @@ def process_all_logs(directory):
 
 ### Common Issues and Solutions
 
-![Diagram 11](mermaid_images/Sensor_Logging_Specification/diagram_11.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_11.mmd -->
+```mermaid
+graph TD
+    A[Issue] --> B{Type?}
+    
+    B -->|No Logs| C[Check Storage]
+    C --> C1[Verify FS mounted]
+    C --> C2[Check free space]
+    C --> C3[Ensure activity started/stopped]
+    
+    B -->|Corrupt File| D[Check File]
+    D --> D1[Verify complete download]
+    D --> D2[Check session end marker]
+    D --> D3[Validate protobuf format]
+    
+    B -->|Timing Issues| E[Analyze Timing]
+    E --> E1[Check system load]
+    E --> E2[Verify sensor config]
+    E --> E3[Monitor packet loss]
+    
+    B -->|Decode Error| F[Debug Decoder]
+    F --> F1[Update protobuf files]
+    F --> F2[Check file version]
+    F --> F3[Verify data format]
+```
 
 ### Debug Checklist
 

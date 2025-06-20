@@ -1,8 +1,11 @@
-<!-- CODA OPTIMIZED VERSION -->
-<!-- Images are set to fit within Coda's column width -->
-<!-- Click any image to view full size in new tab -->
-
 # D2D (Device-to-Device) Communication Complete Guide
+
+**Version:** 1.0  
+**Date:** June 2025  
+**Scope:** Complete specification for device-to-device communication between primary and secondary sensing devices  
+**Purpose:** Comprehensive reference for implementing D2D communication, command forwarding, data aggregation, and file transfer
+
+---
 
 ## Table of Contents
 1. [System Overview](#system-overview)
@@ -23,25 +26,61 @@ The sensing firmware supports a dual-device configuration where two devices work
 - **Primary Device** (Right Foot - "SensingGR"): Connects to mobile phone and secondary device
 - **Secondary Device** (Left Foot - "SensingGL"): Connects only to primary device
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/D2D_Communication_Complete_Guide/diagram_1.png" alt="Diagram 1" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 1 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_1.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[Mobile App] -->|BLE Control & Info Services| B[Right Foot SensingGR]",
+    "B -->|D2D BLE| C[Left Foot SensingGL]",
+    "B --> B1[Advertises]",
+    "B --> B2[Phone facing]",
+    "C --> C1[Scans]",
+    "C --> C2[No phone conn]"
+  ),
+  "TB",
+  "default"
+)
 
 ## Architecture
 
+### Detailed D2D Architecture
+
+The D2D architecture implements bidirectional communication with distinct data and command flows:
+
+DrawFlowchart(
+  Syntax(
+    // Data Flow
+    "SEC[Secondary Sensors] -->|Notify| SECTX[D2D TX Service]",
+    "SECTX -->|BLE| PRIMRX[Primary D2D Client]",
+    "PRIMRX -->|Internal| PRIMINFO[Information Service]",
+    "PRIMINFO -->|Notify| PHONE[Mobile App]",
+    // Command Flow
+    "PHONE2[Mobile App] -->|Write| PRIMCTRL[Control Service]",
+    "PRIMCTRL -->|Internal| PRIMD2D[D2D TX Client]",
+    "PRIMD2D -->|BLE Write| SECRX[D2D RX Service]",
+    "SECRX -->|Execute| SECDEV[Secondary Device]"
+  ),
+  "TB",
+  "default"
+)
+
+This architecture clearly shows:
+- **Data Flow**: How sensor data flows from Secondary → Primary → App
+- **Command Flow**: How commands flow from App → Primary → Secondary
+- **Service Isolation**: Specific services involved in each direction
+
 ### Service Distribution
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/D2D_Communication_Complete_Guide/diagram_2.png" alt="Diagram 2" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 2 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_2.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[Control Service] --> B[D2D TX Module]",
+    "D[Information Service] --> C[D2D RX Module]",
+    "B --> E[D2D RX Module]",
+    "C --> F[D2D TX Module]",
+    "E --> F",
+    "F --> E"
+  ),
+  "LR",
+  "default"
+)
 
 ### Key Design Principles
 
@@ -58,7 +97,7 @@ Diagram 2 (Click to view full size)
 All control commands from the mobile app are forwarded to the secondary device:
 
 | Command | Purpose | Data Format |
-|---------|---------|-------------|
+|---:|---:|---:|
 | Set Time | Synchronize RTC time | `uint32_t` epoch time |
 | Delete Foot Log | Remove foot sensor logs | `uint8_t` log ID |
 | Delete BHI360 Log | Remove motion sensor logs | `uint8_t` log ID |
@@ -67,13 +106,18 @@ All control commands from the mobile app are forwarded to the secondary device:
 
 ### Command Flow Sequence
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/D2D_Communication_Complete_Guide/diagram_3.png" alt="Diagram 3" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 3 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_3.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant Phone",
+    "participant Primary",
+    "participant Secondary",
+    "Phone->>Primary: Control Command",
+    "Primary->>Primary: Process locally",
+    "Primary->>Secondary: Forward via D2D TX",
+    "Secondary->>Secondary: Process command"
+  ),
+  "default"
+)
 
 ### Implementation Details
 
@@ -109,18 +153,23 @@ Diagram 3 (Click to view full size)
 
 ### Sensor Data from Secondary to Primary
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/D2D_Communication_Complete_Guide/diagram_4.png" alt="Diagram 4" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 4 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_4.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant Secondary",
+    "participant Primary",
+    "participant Phone",
+    "Secondary->>Secondary: Collect sensor data",
+    "Secondary->>Primary: Send via D2D TX",
+    "Primary->>Primary: Aggregate data",
+    "Primary->>Phone: Notify combined data"
+  ),
+  "default"
+)
 
 ### Data Types Transferred
 
 | Data Type | Size | Format | Description |
-|-----------|------|--------|-------------|
+|---:|---:|---:|---:|
 | Foot Sensor Samples | 16 bytes | `uint16_t[8]` | 8 pressure channels |
 | BHI360 3D Mapping | 15 bytes | Fixed-point | Quaternion + Gyro |
 | BHI360 Linear Accel | 6 bytes | Fixed-point | 3-axis acceleration |
@@ -149,35 +198,51 @@ namespace FixedPoint {
 
 ### Data Conversion Flow
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/D2D_Communication_Complete_Guide/diagram_5.png" alt="Diagram 5" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 5 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_5.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[Float Data quat: 0.7071] -->|Convert| B[Fixed-Point quat: 7071]",
+    "B -->|15 bytes| C[D2D RX]",
+    "C --> D[BLE Notify]",
+    "D -->|15 bytes| E[Receive]",
+    "E --> F[Convert Back quat: 0.7071]"
+  ),
+  "LR",
+  "default"
+)
 
 ## Connection Management
 
 ### Primary Device State Machine
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/D2D_Communication_Complete_Guide/diagram_6.png" alt="Diagram 6" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 6 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_6.mmd -->
+DrawStateDiagram(
+  Syntax(
+    "[*] --> IDLE",
+    "IDLE --> IDLE: Advertising SensingGR",
+    "IDLE --> PHONE_CONNECTED: Phone connects",
+    "IDLE --> D2D_CONNECTED: Secondary connects",
+    "PHONE_CONNECTED --> FULLY_CONNECTED: Secondary connects",
+    "D2D_CONNECTED --> FULLY_CONNECTED: Phone connects",
+    "FULLY_CONNECTED --> PHONE_CONNECTED: Secondary disconnects",
+    "FULLY_CONNECTED --> D2D_CONNECTED: Phone disconnects",
+    "PHONE_CONNECTED --> IDLE: Phone disconnects",
+    "D2D_CONNECTED --> IDLE: Secondary disconnects"
+  ),
+  "default"
+)
 
 ### Secondary Device State Machine
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/D2D_Communication_Complete_Guide/diagram_7.png" alt="Diagram 7" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 7 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_7.mmd -->
+DrawStateDiagram(
+  Syntax(
+    "[*] --> IDLE",
+    "IDLE --> SCANNING: Start scanning",
+    "SCANNING --> D2D_CONNECTED: Found SensingGR",
+    "D2D_CONNECTED --> READY: Services discovered",
+    "READY --> SCANNING: Connection lost",
+    "SCANNING --> IDLE: Timeout"
+  ),
+  "default"
+)
 
 ### Connection Events
 
@@ -196,13 +261,17 @@ The D2D file transfer service enables the primary device to access log files on 
 
 ### Operations Supported
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/D2D_Communication_Complete_Guide/diagram_8.png" alt="Diagram 8" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 8 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_8.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[File Transfer Client] -->|List Files| B[File Transfer Service]",
+    "A -->|Read File| B",
+    "A -->|Delete File| B",
+    "A -->|Get File Info| B",
+    "B --> C[Log Files]"
+  ),
+  "LR",
+  "default"
+)
 
 ### File Transfer Protocol
 
@@ -281,11 +350,15 @@ set(CONFIG_BT_DEVICE_NAME "SensingGL")
 ```cpp
 // D2D RX Service
 static struct bt_uuid_128 d2d_rx_service_uuid = 
-    BT_UUID_INIT_128(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef0);
+    BT_UUID_INIT_128(0xe060ca1f, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b);
+
+// D2D TX Service
+static struct bt_uuid_128 d2d_tx_service_uuid = 
+    BT_UUID_INIT_128(0x75ad68d6, 0x200c, 0x437d, 0x98b5, 0x061862076c5f);
 
 // D2D File Transfer Service  
 static struct bt_uuid_128 d2d_file_transfer_service_uuid = 
-    BT_UUID_INIT_128(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef1);
+    BT_UUID_INIT_128(0x8e600001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e);
 ```
 
 ### MTU Configuration

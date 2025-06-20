@@ -32,6 +32,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 
 // Specific NRF HAL/nrfx/nrfy headers should be inside extern "C" if they are C libraries
 extern "C"
@@ -88,7 +89,8 @@ static void calibrate_saadc_channels(void);
 void init_dppi(void);
 void TIMER0_IRQHandler(void);
 
-static bool logging_active = false; // Tracks current logging state
+// Use atomic for thread-safe access to logging state
+static atomic_t logging_active = ATOMIC_INIT(0);
 
 // ADJUSTMENT: Added __aligned(4) for DMA-safe memory alignment
 static int16_t saadc_buffer[BUFFER_COUNT][SAADC_BUFFER_SIZE] __aligned(4);
@@ -237,7 +239,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
             }
             else // Normal operation after calibration
             {
-                if (logging_active)
+                if (atomic_get(&logging_active) == 1)
                 {
                     generic_message_t msg;
 
@@ -480,7 +482,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     if (is_foot_sensor_start_activity_event(aeh))
     {
         // Trigger the same logic as auto-start logging
-        if (!logging_active)
+        if (atomic_get(&logging_active) == 0)
         {
             generic_message_t cmd_msg = {};
             cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
@@ -495,7 +497,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
             if (cmd_ret == 0)
             {
                 LOG_INF("Sent START_LOGGING_FOOT_SENSOR command (via event)");
-                logging_active = true;
+                atomic_set(&logging_active, 1);
             }
             else
             {
@@ -507,7 +509,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     if (is_foot_sensor_stop_activity_event(aeh))
     {
         LOG_INF("Received foot_sensor_stop_activity_event");
-        if (logging_active)
+        if (atomic_get(&logging_active) == 1)
         {
             generic_message_t cmd_msg = {};
             cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
@@ -518,7 +520,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
             if (cmd_ret == 0)
             {
                 LOG_INF("Sent STOP_LOGGING_FOOT_SENSOR command (via event)");
-                logging_active = false;
+                atomic_set(&logging_active, 0);
             }
             else
             {

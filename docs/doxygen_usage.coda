@@ -9,14 +9,14 @@
 
 ## Table of Contents
 
-- [Introduction](#introduction)
-- [Installation](#installation)
-- [Configuring Doxygen](#configuring-doxygen)
-- [Doxygen Style for Code Comments](#doxygen-style-for-code-comments)
-- [Generating Documentation](#generating-documentation)
-- [Additional Doxygen Features](#additional-doxygen-features)
-- [Example](#example)
-- [Conclusion](#conclusion)
+1. [Introduction](#introduction)
+2. [Installation](#installation)
+3. [Configuring Doxygen](#configuring-doxygen)
+4. [Doxygen Style for Code Comments](#doxygen-style-for-code-comments)
+5. [Generating Documentation](#generating-documentation)
+6. [Additional Doxygen Features](#additional-doxygen-features)
+7. [Example](#example)
+8. [Conclusion](#conclusion)
 
 ---
 

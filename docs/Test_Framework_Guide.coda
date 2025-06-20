@@ -16,7 +16,9 @@
 6. [Troubleshooting](#troubleshooting)
 7. [Best Practices](#best-practices)
 
-## Overview
+---
+
+## 1. Overview
 
 The Sensing FW project uses Zephyr's testing framework (ztest) for unit testing. The test suite covers all major modules and provides comprehensive validation of the firmware functionality.
 
@@ -33,7 +35,7 @@ The project includes tests for the following modules:
 - **motion_sensor**: Motion sensor (BHI360) data handling
 - **packetizer**: Data packet creation and parsing
 
-## Test Architecture
+## 2. Test Architecture
 
 ### Directory Structure
 ```
@@ -65,7 +67,7 @@ The tests use Zephyr's built-in testing framework which provides:
 - Fixture support
 - Native POSIX execution
 
-## Running Tests
+## 3. Running Tests
 
 ### Quick Start
 
@@ -116,7 +118,7 @@ west twister -T tests \
 # Coverage report will be in: twister-out/coverage/index.html
 ```
 
-## Writing Tests
+## 4. Writing Tests
 
 ### Basic Test Structure
 
@@ -213,7 +215,7 @@ target_sources(app PRIVATE
 target_compile_options(app PRIVATE -std=c++20)
 ```
 
-## Coverage Analysis
+## 5. Coverage Analysis
 
 ### Prerequisites
 
@@ -249,7 +251,7 @@ The system must have matching GCC and gcov versions. The project uses:
 - Focus on testing error paths and edge cases
 - Exclude test code itself from coverage metrics
 
-## Troubleshooting
+## 6. Troubleshooting
 
 ### Common Issues
 
@@ -281,7 +283,7 @@ cat twister-out/native_posix_native/host/module.unit/build.log
 cat twister-out/native_posix_native/host/module.unit/handler.log
 ```
 
-## Best Practices
+## 7. Best Practices
 
 ### Test Design
 

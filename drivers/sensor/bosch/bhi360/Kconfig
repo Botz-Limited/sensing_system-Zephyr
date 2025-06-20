@@ -15,6 +15,25 @@ module = BHI360_MODULE
 module-str = app module
 source "subsys/logging/Kconfig.template.log_config"
 
+config BHI360_AUTO_CALIBRATION
+    bool "Automatic calibration on startup"
+    default y
+    help
+      Enable automatic calibration check and calibration during initialization.
+      When enabled, the driver will check calibration status and perform
+      Fast Offset Compensation (FOC) for gyroscope and accelerometer if needed.
 
+config BHI360_CALIBRATION_THRESHOLD
+    int "Calibration accuracy threshold (0-4)"
+    default 3
+    range 0 4
+    help
+      Minimum calibration accuracy required. If current calibration is below
+      this threshold, automatic calibration will be performed.
+      0 = Not calibrated
+      1 = Calibration in progress
+      2 = Low accuracy
+      3 = Medium accuracy
+      4 = High accuracy
 
 endif # BHI360

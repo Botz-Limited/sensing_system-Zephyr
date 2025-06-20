@@ -27,6 +27,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/storage/flash_map.h>
+#include <zephyr/sys/atomic.h>
 
 #include <app_event_manager.h>
 #include <ble_services.hpp>
@@ -140,8 +141,12 @@ static void flush_bhi360_buffer() {
 static uint8_t next_foot_sensor_file_sequence = 0;
 static uint8_t next_bhi360_file_sequence = 0;
 
-static bool logging_foot_active = false; // Tracks foot sensor logging state
-static bool logging_bhi360_active = false; // Tracks BHI360 logging state
+// Use atomic operations for thread-safe access to logging flags
+static atomic_t logging_foot_active = ATOMIC_INIT(0);
+static atomic_t logging_bhi360_active = ATOMIC_INIT(0);
+
+// Mutex for protecting sequence number generation
+K_MUTEX_DEFINE(sequence_number_mutex);
 
 // Thread
 static struct k_thread data_thread_data;
@@ -386,7 +391,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
             {
                 case MSG_TYPE_FOOT_SAMPLES: {
                     const foot_samples_t *foot_data = &msg.data.foot_samples;
-                    if (logging_foot_active == true)
+                    if (atomic_get(&logging_foot_active) == 1)
                     {
                         // Create FootSensorLogMessage
                         sensor_data_messages_FootSensorLogMessage foot_log_msg =
@@ -430,7 +435,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_BHI360_LOG_RECORD: {
                     const bhi360_log_record_t *record = &msg.data.bhi360_log_record;
-                    if (logging_bhi360_active == true)
+                    if (atomic_get(&logging_bhi360_active) == 1)
                     {
                          LOG_INF("bhi360 sample data");
                         sensor_data_messages_BHI360LogMessage bhi360_log_msg =
@@ -484,7 +489,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_BHI360_STEP_COUNT: {
                     const bhi360_step_count_t *step_count_data = &msg.data.bhi360_step_count;
-                    if (logging_bhi360_active == true)
+                    if (atomic_get(&logging_bhi360_active) == 1)
                     {
                         sensor_data_messages_BHI360LogMessage bhi360_log_msg =
                             sensor_data_messages_BHI360LogMessage_init_default;
@@ -507,65 +512,68 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_COMMAND: {
                     LOG_INF("Received generic command: %s", msg.data.command_str);
-                    if ((strcmp(msg.data.command_str, "START_LOGGING_FOOT_SENSOR") == 0) && !logging_foot_active)
+                    if ((strcmp(msg.data.command_str, "START_LOGGING_FOOT_SENSOR") == 0) && (atomic_get(&logging_foot_active) == 0))
                     {
                         LOG_INF("Command: Starting foot sensor logging.");
                         err_t foot_status = start_foot_sensor_logging(msg.sampling_frequency, msg.fw_version);
                         if (foot_status == err_t::NO_ERROR)
                         {
-                            logging_foot_active = true;
+                            atomic_set(&logging_foot_active, 1);
                         }
                         else
                         {
                             LOG_ERR("Failed to start foot sensor logging from command: %d", (int)foot_status);
-                            logging_foot_active = false;
+                            atomic_set(&logging_foot_active, 0);
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_FOOT_SENSOR") == 0) && logging_foot_active)
+                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_FOOT_SENSOR") == 0) && (atomic_get(&logging_foot_active) == 1))
                     {
                         LOG_INF("Command: Stopping foot sensor logging.");
+                        atomic_set(&logging_foot_active, 0);
                         err_t foot_status = end_foot_sensor_logging();
-                        logging_foot_active = false;
                         if (foot_status != err_t::NO_ERROR)
                         {
                             LOG_ERR("Failed to stop foot sensor logging from command: %d", (int)foot_status);
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "START_LOGGING_BHI360") == 0) && !logging_bhi360_active)
+                    else if ((strcmp(msg.data.command_str, "START_LOGGING_BHI360") == 0) && (atomic_get(&logging_bhi360_active) == 0))
                     {
                         LOG_INF("Command: Starting BHI360 logging.");
                         err_t bhi360_status = start_bhi360_logging(msg.sampling_frequency, msg.fw_version);
                         if (bhi360_status == err_t::NO_ERROR)
                         {
-                            logging_bhi360_active = true;
+                            atomic_set(&logging_bhi360_active, 1);
                         }
                         else
                         {
                             LOG_ERR("Failed to start BHI360 logging from command: %d", (int)bhi360_status);
-                            logging_bhi360_active = false;
+                            atomic_set(&logging_bhi360_active, 0);
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_BHI360") == 0) && logging_bhi360_active)
+                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_BHI360") == 0) && (atomic_get(&logging_bhi360_active) == 1))
                     {
                         LOG_INF("Command: Stopping BHI360 logging.");
+                        atomic_set(&logging_bhi360_active, 0);
                         err_t bhi360_status = end_bhi360_logging();
-                        logging_bhi360_active = false;
                         if (bhi360_status != err_t::NO_ERROR)
                         {
                             LOG_ERR("Failed to stop BHI360 logging from command: %d", (int)bhi360_status);
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING") == 0) && (logging_foot_active || logging_bhi360_active))
+                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING") == 0) && 
+                             ((atomic_get(&logging_foot_active) == 1) || (atomic_get(&logging_bhi360_active) == 1)))
                     {
                         LOG_INF("Command: Stopping all logging.");
                         err_t foot_status = err_t::NO_ERROR;
                         err_t bhi360_status = err_t::NO_ERROR;
-                        if (logging_foot_active)
+                        if (atomic_get(&logging_foot_active) == 1) {
+                            atomic_set(&logging_foot_active, 0);
                             foot_status = end_foot_sensor_logging();
-                        if (logging_bhi360_active)
+                        }
+                        if (atomic_get(&logging_bhi360_active) == 1) {
+                            atomic_set(&logging_bhi360_active, 0);
                             bhi360_status = end_bhi360_logging();
-                        logging_foot_active = false;
-                        logging_bhi360_active = false;
+                        }
                         if (foot_status != err_t::NO_ERROR)
                         {
                             LOG_ERR("Failed to stop foot sensor logging from command: %d", (int)foot_status);
@@ -957,14 +965,18 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
     if (ret_mkdir != 0 && ret_mkdir != -EEXIST)
     {
         LOG_INF("FAIL: fs_mkdir %s: %d", hardware_dir_path, ret_mkdir);
+        k_mutex_unlock(&foot_sensor_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
     }
 
     // --- Initialize Foot Sensor Log File ---
+    // Protect sequence number generation with mutex
+    k_mutex_lock(&sequence_number_mutex, K_FOREVER);
     next_foot_sensor_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
     if (next_foot_sensor_file_sequence == 0) {
         next_foot_sensor_file_sequence = 1;
     }
+    k_mutex_unlock(&sequence_number_mutex);
     snprintk(foot_sensor_file_path, sizeof(foot_sensor_file_path), "%s/%s%03u.pb", hardware_dir_path,
              foot_sensor_file_prefix, next_foot_sensor_file_sequence);
     fs_file_t_init(&foot_sensor_log_file);
@@ -1153,10 +1165,13 @@ err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
     bhi360_first_packet = true;
 
     // --- Initialize BHI360 Log File ---
+    // Protect sequence number generation with mutex
+    k_mutex_lock(&sequence_number_mutex, K_FOREVER);
     next_bhi360_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
     if (next_bhi360_file_sequence == 0) {
         next_bhi360_file_sequence = 1;
     }
+    k_mutex_unlock(&sequence_number_mutex);
     snprintk(bhi360_file_path, sizeof(bhi360_file_path), "%s/%s%03u.pb", hardware_dir_path, bhi360_file_prefix,
              next_bhi360_file_sequence);
     fs_file_t_init(&bhi360_log_file);

@@ -4,9 +4,9 @@ zephyr_library()
 file(GLOB BHY2_SOURCES 
     "${CMAKE_CURRENT_SOURCE_DIR}/BHY2-Sensor-API/*.c"
 )
-zephyr_library_sources(bhi360_zephyr.c)
 zephyr_library_sources(
-    common.c
+    bhi360_zephyr.c
+    bhi360_calibration.c
     ${BHY2_SOURCES}
 )
 

@@ -1,5 +1,12 @@
 # FOTA (Firmware Over-The-Air) Complete Guide
 
+**Version:** 1.0  
+**Date:** June 2025  
+**Scope:** Complete specification for firmware updates on primary and secondary devices via BLE  
+**Purpose:** Comprehensive reference for implementing FOTA updates, proxy services, synchronization, and file access
+
+---
+
 ## Table of Contents
 1. [Overview](#overview)
 2. [System Architecture](#system-architecture)
@@ -30,8 +37,33 @@ The sensing firmware supports FOTA updates for both primary (right foot) and sec
 
 ## System Architecture
 
-![Diagram 1](mermaid_images/FOTA_Complete_Guide/diagram_1.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_1.mmd -->
+```mermaid
+graph TB
+    subgraph "Mobile Phone"
+        A[Mobile App]
+    end
+    
+    subgraph "Primary Device"
+        B[Right Foot<br/>SensingGR]
+        B1[SMP Server]
+        B2[FOTA Proxy]
+        B3[File Proxy]
+        B4[Info Service]
+    end
+    
+    subgraph "Secondary Device"
+        C[Left Foot<br/>SensingGL]
+        C1[SMP Server]
+        C2[D2D TX Service]
+        C3[D2D File Transfer]
+    end
+    
+    A <-->|"BLE<br/>Direct FOTA"| B1
+    A <-->|"BLE<br/>Proxy Services"| B2
+    A <-->|"BLE<br/>File Access"| B3
+    B2 <-->|"D2D<br/>SMP Client"| C1
+    B3 <-->|"D2D<br/>File Protocol"| C3
+```
 
 ### Build Configuration
 
@@ -70,8 +102,23 @@ The primary device uses the industry-standard MCUmgr protocol for firmware updat
 
 #### Update Process
 
-![Diagram 2](mermaid_images/FOTA_Complete_Guide/diagram_2.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_2.mmd -->
+```mermaid
+sequenceDiagram
+    participant Phone
+    participant Primary
+    
+    Phone->>Primary: Connect BLE
+    Phone->>Primary: Subscribe to Progress
+    Phone->>Primary: Upload firmware
+    loop Progress Updates
+        Primary-->>Phone: Progress: X%
+    end
+    Primary-->>Phone: Status: Pending
+    Primary->>Primary: Auto-reset
+    Phone->>Primary: Reconnect
+    Phone->>Primary: Confirm image
+    Primary-->>Phone: Status: Confirmed
+```
 
 ### Progress Tracking
 
@@ -156,8 +203,24 @@ Secondary devices are updated through the FOTA Proxy service on the primary devi
 
 #### Update Process
 
-![Diagram 3](mermaid_images/FOTA_Complete_Guide/diagram_3.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_3.mmd -->
+```mermaid
+sequenceDiagram
+    participant Phone
+    participant Primary
+    participant Secondary
+    
+    Phone->>Primary: Set target = SECONDARY
+    Phone->>Primary: Start FOTA (size)
+    loop Send Firmware
+        Phone->>Primary: Data chunks
+        Primary->>Secondary: Forward via SMP
+    end
+    Phone->>Primary: End FOTA
+    Primary->>Secondary: Finalize
+    Phone->>Primary: Reset command
+    Primary->>Secondary: Reset
+    Secondary->>Secondary: Boot new firmware
+```
 
 ### Mobile Implementation (iOS)
 
@@ -239,8 +302,20 @@ When updating both devices, the primary must wait for the secondary to complete 
 
 ### Implementation
 
-![Diagram 4](mermaid_images/FOTA_Complete_Guide/diagram_4.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_4.mmd -->
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Updating: Start FOTA
+    Updating --> PrimaryComplete: Primary done
+    Updating --> SecondaryComplete: Secondary done
+    PrimaryComplete --> WaitingForSecondary: Reset command
+    SecondaryComplete --> BothComplete: Primary was waiting
+    WaitingForSecondary --> BothComplete: Secondary reports done
+    BothComplete --> Reset: Schedule reset
+    Reset --> [*]
+    
+    WaitingForSecondary --> Reset: 30s timeout
+```
 
 ### Synchronization Flow
 
@@ -275,8 +350,18 @@ When updating both devices, the primary must wait for the secondary to complete 
 
 Direct access via Information and Control services:
 
-![Diagram 5](mermaid_images/FOTA_Complete_Guide/diagram_5.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_5.mmd -->
+```mermaid
+sequenceDiagram
+    participant Phone
+    participant Primary
+    
+    Phone->>Primary: Read Log Available
+    Primary-->>Phone: Log ID
+    Phone->>Primary: Read File Path
+    Primary-->>Phone: "/lfs/foot_5.bin"
+    Phone->>Primary: SMP Download
+    Primary-->>Phone: File data
+```
 
 ### Secondary Device Files
 
@@ -301,8 +386,25 @@ Access through File Proxy service on primary:
 
 #### File Access Flow
 
-![Diagram 6](mermaid_images/FOTA_Complete_Guide/diagram_6.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_6.mmd -->
+```mermaid
+sequenceDiagram
+    participant Phone
+    participant Primary
+    participant Secondary
+    
+    Phone->>Primary: Set Target = SECONDARY
+    Phone->>Primary: List files
+    Primary->>Secondary: D2D: List
+    Secondary-->>Primary: File list
+    Primary-->>Phone: Notify: Files
+    
+    Phone->>Primary: Read file ID 5
+    Primary->>Secondary: D2D: Read
+    loop File chunks
+        Secondary-->>Primary: Data
+        Primary-->>Phone: Notify: Data
+    end
+```
 
 ## Mobile App Integration
 

@@ -1,7 +1,7 @@
 # Bluetooth GATT Specification
 
 **Version:** 2.0  
-**Date:** December 2024  
+**Date:** June 2025  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
 
@@ -38,8 +38,29 @@ This device implements a comprehensive set of Bluetooth Low Energy (BLE) GATT se
 - **Dual-device architecture** with primary/secondary roles
 - **40% bandwidth reduction** compared to floating-point format
 
-![Diagram 1](mermaid_images/Bluetooth_GATT_Specification/diagram_1.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Bluetooth_GATT_Specification/diagram_1.mmd -->
+```mermaid
+graph TB
+    subgraph "Mobile App"
+        APP[BLE Client]
+    end
+    
+    subgraph "Primary Device"
+        PRIM[GATT Services]
+        CONV[Fixed-Point Converter]
+        D2DC[D2D Central]
+    end
+    
+    subgraph "Secondary Device"
+        D2DP[D2D Peripheral]
+        SENS[Sensor Data]
+    end
+    
+    APP <-->|"BLE"| PRIM
+    PRIM <--> CONV
+    CONV <--> D2DC
+    D2DC <-->|"BLE D2D"| D2DP
+    D2DP <--> SENS
+```
 
 ---
 
@@ -47,8 +68,23 @@ This device implements a comprehensive set of Bluetooth Low Energy (BLE) GATT se
 
 ### Device Roles
 
-![Diagram 2](mermaid_images/Bluetooth_GATT_Specification/diagram_2.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Bluetooth_GATT_Specification/diagram_2.mmd -->
+```mermaid
+graph LR
+    subgraph "Primary Device (Right)"
+        P1[Phone Services]
+        P2[D2D Central]
+        P3[Proxy Services]
+    end
+    
+    subgraph "Secondary Device (Left)"
+        S1[D2D Peripheral]
+        S2[Sensor Services]
+    end
+    
+    PHONE[Mobile App] <-->|"Direct BLE"| P1
+    P2 <-->|"D2D BLE"| S1
+    P3 -->|"Relay"| P2
+```
 
 | Feature | Primary Device | Secondary Device |
 |---------|----------------|------------------|
@@ -75,8 +111,24 @@ All sensor data uses fixed-point integers to optimize bandwidth and ensure porta
 
 ### Bandwidth Comparison
 
-![Diagram 3](mermaid_images/Bluetooth_GATT_Specification/diagram_3.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Bluetooth_GATT_Specification/diagram_3.mmd -->
+```mermaid
+graph LR
+    subgraph "Float Format"
+        F1[28 bytes<br/>3D Mapping]
+        F2[12 bytes<br/>Linear Accel]
+        F3[40 bytes/update<br/>@ 50Hz = 2000 B/s]
+    end
+    
+    subgraph "Fixed-Point Format"
+        X1[15 bytes<br/>3D Mapping]
+        X2[6 bytes<br/>Linear Accel]
+        X3[21 bytes/update<br/>@ 50Hz = 1050 B/s]
+    end
+    
+    F1 -->|"-46%"| X1
+    F2 -->|"-50%"| X2
+    F3 -->|"-48%"| X3
+```
 
 ### Conversion Functions
 
@@ -187,8 +239,19 @@ float decode_acceleration(int16_t fixed) {
 
 ### Command Flow
 
-![Diagram 4](mermaid_images/Bluetooth_GATT_Specification/diagram_4.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Bluetooth_GATT_Specification/diagram_4.mmd -->
+```mermaid
+sequenceDiagram
+    participant App
+    participant Primary
+    participant Secondary
+    
+    App->>Primary: Write Command
+    Primary->>Primary: Process locally
+    Primary->>Secondary: Forward via D2D
+    Secondary->>Secondary: Execute command
+    Secondary-->>Primary: Acknowledge
+    Primary-->>App: Notify status
+```
 
 ---
 
@@ -220,8 +283,28 @@ float decode_acceleration(int16_t fixed) {
 
 #### FOTA Flow
 
-![Diagram 5](mermaid_images/Bluetooth_GATT_Specification/diagram_5.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Bluetooth_GATT_Specification/diagram_5.mmd -->
+```mermaid
+sequenceDiagram
+    participant App
+    participant Primary
+    participant Secondary
+    
+    App->>Primary: Set Target = Secondary
+    App->>Primary: Start + Size
+    Primary->>Secondary: Init FOTA
+    
+    loop Firmware Chunks
+        App->>Primary: Data Chunk
+        Primary->>Secondary: Forward Data
+        Secondary-->>Primary: ACK
+        Primary-->>App: Progress Update
+    end
+    
+    App->>Primary: End Command
+    Primary->>Secondary: Finalize
+    Secondary->>Secondary: Reboot
+    Primary-->>App: Complete
+```
 
 ### 7.2 File Proxy Service
 
@@ -303,8 +386,22 @@ typedef struct {
 
 ### D2D Architecture
 
-![Diagram 6](mermaid_images/Bluetooth_GATT_Specification/diagram_6.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Bluetooth_GATT_Specification/diagram_6.mmd -->
+```mermaid
+graph TB
+    subgraph "Data Flow"
+        SEC[Secondary Sensors] -->|"Notify"| SECTX[D2D TX Service]
+        SECTX -->|"BLE"| PRIMRX[Primary D2D Client]
+        PRIMRX -->|"Internal"| PRIMINFO[Information Service]
+        PRIMINFO -->|"Notify"| PHONE[Mobile App]
+    end
+    
+    subgraph "Command Flow"
+        PHONE2[Mobile App] -->|"Write"| PRIMCTRL[Control Service]
+        PRIMCTRL -->|"Internal"| PRIMD2D[D2D TX Client]
+        PRIMD2D -->|"BLE Write"| SECRX[D2D RX Service]
+        SECRX -->|"Execute"| SECDEV[Secondary Device]
+    end
+```
 
 ---
 
@@ -498,8 +595,23 @@ asyncio.run(update_secondary_device("XX:XX:XX:XX:XX:XX", firmware_data))
 
 ### Troubleshooting Guide
 
-![Diagram 7](mermaid_images/Bluetooth_GATT_Specification/diagram_7.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/Bluetooth_GATT_Specification/diagram_7.mmd -->
+```mermaid
+graph TD
+    A[Connection Issues?] -->|Yes| B[Check Bonding]
+    A -->|No| C[Data Issues?]
+    
+    B --> D[Clear bonds and re-pair]
+    
+    C -->|Yes| E[Check Format]
+    C -->|No| F[Performance Issues?]
+    
+    E --> G[Verify fixed-point scaling]
+    
+    F -->|Yes| H[Optimize Parameters]
+    F -->|No| I[Check Logs]
+    
+    H --> J[Reduce notification rate<br/>Increase connection interval]
+```
 
 ### Security Considerations
 

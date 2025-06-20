@@ -1,5 +1,12 @@
 # D2D (Device-to-Device) Communication Complete Guide
 
+**Version:** 1.0  
+**Date:** June 2025  
+**Scope:** Complete specification for device-to-device communication between primary and secondary sensing devices  
+**Purpose:** Comprehensive reference for implementing D2D communication, command forwarding, data aggregation, and file transfer
+
+---
+
 ## Table of Contents
 1. [System Overview](#system-overview)
 2. [Architecture](#architecture)
@@ -19,15 +26,84 @@ The sensing firmware supports a dual-device configuration where two devices work
 - **Primary Device** (Right Foot - "SensingGR"): Connects to mobile phone and secondary device
 - **Secondary Device** (Left Foot - "SensingGL"): Connects only to primary device
 
-![Diagram 1](mermaid_images/D2D_Communication_Complete_Guide/diagram_1.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_1.mmd -->
+```mermaid
+graph TB
+    subgraph "Mobile Phone"
+        A[Mobile App]
+    end
+    
+    subgraph "Primary Device"
+        B[Right Foot<br/>SensingGR]
+        B1[Advertises]
+        B2[Phone facing]
+    end
+    
+    subgraph "Secondary Device"
+        C[Left Foot<br/>SensingGL]
+        C1[Scans]
+        C2[No phone conn]
+    end
+    
+    A <-->|"BLE<br/>(Control & Info Services)"| B
+    B <-->|"D2D BLE"| C
+    
+    B --- B1
+    B --- B2
+    C --- C1
+    C --- C2
+```
 
 ## Architecture
 
+### Detailed D2D Architecture
+
+The D2D architecture implements bidirectional communication with distinct data and command flows:
+
+```mermaid
+graph TB
+    subgraph "Data Flow"
+        SEC[Secondary Sensors] -->|"Notify"| SECTX[D2D TX Service]
+        SECTX -->|"BLE"| PRIMRX[Primary D2D Client]
+        PRIMRX -->|"Internal"| PRIMINFO[Information Service]
+        PRIMINFO -->|"Notify"| PHONE[Mobile App]
+    end
+    
+    subgraph "Command Flow"
+        PHONE2[Mobile App] -->|"Write"| PRIMCTRL[Control Service]
+        PRIMCTRL -->|"Internal"| PRIMD2D[D2D TX Client]
+        PRIMD2D -->|"BLE Write"| SECRX[D2D RX Service]
+        SECRX -->|"Execute"| SECDEV[Secondary Device]
+    end
+```
+
+This architecture clearly shows:
+- **Data Flow**: How sensor data flows from Secondary → Primary → App
+- **Command Flow**: How commands flow from App → Primary → Secondary
+- **Service Isolation**: Specific services involved in each direction
+
 ### Service Distribution
 
-![Diagram 2](mermaid_images/D2D_Communication_Complete_Guide/diagram_2.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_2.mmd -->
+```mermaid
+graph LR
+    subgraph "PRIMARY DEVICE"
+        subgraph "Phone-Facing Services"
+            A[Control Service]
+            D[Information Service]
+        end
+        
+        subgraph "D2D Modules"
+            B[D2D TX Module]
+            C[D2D RX Module]
+        end
+    end
+    
+    subgraph "SECONDARY DEVICE"
+        subgraph "D2D Services Only"
+            E[D2D RX Module]
+            F[D2D TX Module]
+        end
+    end
+```
 
 ### Key Design Principles
 
@@ -53,8 +129,17 @@ All control commands from the mobile app are forwarded to the secondary device:
 
 ### Command Flow Sequence
 
-![Diagram 3](mermaid_images/D2D_Communication_Complete_Guide/diagram_3.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_3.mmd -->
+```mermaid
+sequenceDiagram
+    participant Phone
+    participant Primary
+    participant Secondary
+    
+    Phone->>Primary: Control Command
+    Primary->>Primary: Process locally
+    Primary->>Secondary: Forward via D2D TX
+    Secondary->>Secondary: Process command
+```
 
 ### Implementation Details
 
@@ -90,8 +175,17 @@ All control commands from the mobile app are forwarded to the secondary device:
 
 ### Sensor Data from Secondary to Primary
 
-![Diagram 4](mermaid_images/D2D_Communication_Complete_Guide/diagram_4.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_4.mmd -->
+```mermaid
+sequenceDiagram
+    participant Secondary
+    participant Primary
+    participant Phone
+    
+    Secondary->>Secondary: Collect sensor data
+    Secondary->>Primary: Send via D2D TX
+    Primary->>Primary: Aggregate data
+    Primary->>Phone: Notify combined data
+```
 
 ### Data Types Transferred
 
@@ -125,20 +219,59 @@ namespace FixedPoint {
 
 ### Data Conversion Flow
 
-![Diagram 5](mermaid_images/D2D_Communication_Complete_Guide/diagram_5.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_5.mmd -->
+```mermaid
+graph LR
+    subgraph "Secondary Device"
+        A[Float Data<br/>quat: 0.7071]
+        B[Fixed-Point<br/>quat: 7071]
+    end
+    
+    subgraph "Primary Device"
+        C[D2D RX]
+        D[BLE Notify]
+    end
+    
+    subgraph "Mobile App"
+        E[Receive]
+        F[Convert Back<br/>quat: 0.7071]
+    end
+    
+    A -->|Convert| B
+    B -->|15 bytes| C
+    C --> D
+    D -->|15 bytes| E
+    E --> F
+```
 
 ## Connection Management
 
 ### Primary Device State Machine
 
-![Diagram 6](mermaid_images/D2D_Communication_Complete_Guide/diagram_6.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_6.mmd -->
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> IDLE: Advertising "SensingGR"
+    IDLE --> PHONE_CONNECTED: Phone connects
+    IDLE --> D2D_CONNECTED: Secondary connects
+    PHONE_CONNECTED --> FULLY_CONNECTED: Secondary connects
+    D2D_CONNECTED --> FULLY_CONNECTED: Phone connects
+    FULLY_CONNECTED --> PHONE_CONNECTED: Secondary disconnects
+    FULLY_CONNECTED --> D2D_CONNECTED: Phone disconnects
+    PHONE_CONNECTED --> IDLE: Phone disconnects
+    D2D_CONNECTED --> IDLE: Secondary disconnects
+```
 
 ### Secondary Device State Machine
 
-![Diagram 7](mermaid_images/D2D_Communication_Complete_Guide/diagram_7.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_7.mmd -->
+```mermaid
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> SCANNING: Start scanning
+    SCANNING --> D2D_CONNECTED: Found "SensingGR"
+    D2D_CONNECTED --> READY: Services discovered
+    READY --> SCANNING: Connection lost
+    SCANNING --> IDLE: Timeout
+```
 
 ### Connection Events
 
@@ -157,8 +290,23 @@ The D2D file transfer service enables the primary device to access log files on 
 
 ### Operations Supported
 
-![Diagram 8](mermaid_images/D2D_Communication_Complete_Guide/diagram_8.png)
-<!-- Original diagram was Mermaid format - see mermaid_images/D2D_Communication_Complete_Guide/diagram_8.mmd -->
+```mermaid
+graph LR
+    subgraph "Primary Device"
+        A[File Transfer Client]
+    end
+    
+    subgraph "Secondary Device"
+        B[File Transfer Service]
+        C[Log Files]
+    end
+    
+    A -->|List Files| B
+    A -->|Read File| B
+    A -->|Delete File| B
+    A -->|Get File Info| B
+    B --> C
+```
 
 ### File Transfer Protocol
 

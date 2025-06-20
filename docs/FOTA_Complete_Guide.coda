@@ -1,8 +1,11 @@
-<!-- CODA OPTIMIZED VERSION -->
-<!-- Images are set to fit within Coda's column width -->
-<!-- Click any image to view full size in new tab -->
-
 # FOTA (Firmware Over-The-Air) Complete Guide
+
+**Version:** 1.0  
+**Date:** June 2025  
+**Scope:** Complete specification for firmware updates on primary and secondary devices via BLE  
+**Purpose:** Comprehensive reference for implementing FOTA updates, proxy services, synchronization, and file access
+
+---
 
 ## Table of Contents
 1. [Overview](#overview)
@@ -34,13 +37,24 @@ The sensing firmware supports FOTA updates for both primary (right foot) and sec
 
 ## System Architecture
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/FOTA_Complete_Guide/diagram_1.png" alt="Diagram 1" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 1 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_1.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[Mobile App] -->|BLE Direct FOTA| B1[SMP Server]",
+    "A -->|BLE Proxy Services| B2[FOTA Proxy]",
+    "A -->|BLE File Access| B3[File Proxy]",
+    "B[Right Foot SensingGR] --> B1",
+    "B --> B2",
+    "B --> B3",
+    "B --> B4[Info Service]",
+    "C[Left Foot SensingGL] --> C1[SMP Server]",
+    "C --> C2[D2D TX Service]",
+    "C --> C3[D2D File Transfer]",
+    "B2 -->|D2D SMP Client| C1",
+    "B3 -->|D2D File Protocol| C3"
+  ),
+  "TB",
+  "default"
+)
 
 ### Build Configuration
 
@@ -59,7 +73,7 @@ west build --build-dir build_secondary --board nrf5340dk/nrf5340/cpuapp --sysbui
 ### Firmware Differences
 
 | Feature | Primary Device | Secondary Device |
-|---------|----------------|------------------|
+|---:|:---:|:---:|
 | Device Name | "SensingGR" | "SensingGL" |
 | BLE Role | Peripheral + Central | Peripheral only |
 | Phone Services | Full set | None |
@@ -79,13 +93,24 @@ The primary device uses the industry-standard MCUmgr protocol for firmware updat
 
 #### Update Process
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/FOTA_Complete_Guide/diagram_2.png" alt="Diagram 2" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 2 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_2.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant Phone",
+    "participant Primary",
+    "Phone->>Primary: Connect BLE",
+    "Phone->>Primary: Subscribe to Progress",
+    "Phone->>Primary: Upload firmware",
+    "loop Progress Updates",
+    "Primary-->>Phone: Progress: X%",
+    "end",
+    "Primary-->>Phone: Status: Pending",
+    "Primary->>Primary: Auto-reset",
+    "Phone->>Primary: Reconnect",
+    "Phone->>Primary: Confirm image",
+    "Primary-->>Phone: Status: Confirmed"
+  ),
+  "default"
+)
 
 ### Progress Tracking
 
@@ -153,7 +178,7 @@ Secondary devices are updated through the FOTA Proxy service on the primary devi
 - **Service UUID**: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
 
 | Characteristic | UUID | Properties | Description |
-|----------------|------|------------|-------------|
+|---:|---:|---:|---:|
 | Target Select | `6e400002-...` | Write | Select update target |
 | Command | `6e400003-...` | Write/Write NR | Send commands |
 | Data | `6e400004-...` | Write/Write NR | Bulk data transfer |
@@ -170,13 +195,25 @@ Secondary devices are updated through the FOTA Proxy service on the primary devi
 
 #### Update Process
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/FOTA_Complete_Guide/diagram_3.png" alt="Diagram 3" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 3 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_3.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant Phone",
+    "participant Primary",
+    "participant Secondary",
+    "Phone->>Primary: Set target = SECONDARY",
+    "Phone->>Primary: Start FOTA (size)",
+    "loop Send Firmware",
+    "Phone->>Primary: Data chunks",
+    "Primary->>Secondary: Forward via SMP",
+    "end",
+    "Phone->>Primary: End FOTA",
+    "Primary->>Secondary: Finalize",
+    "Phone->>Primary: Reset command",
+    "Primary->>Secondary: Reset",
+    "Secondary->>Secondary: Boot new firmware"
+  ),
+  "default"
+)
 
 ### Mobile Implementation (iOS)
 
@@ -258,13 +295,21 @@ When updating both devices, the primary must wait for the secondary to complete 
 
 ### Implementation
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/FOTA_Complete_Guide/diagram_4.png" alt="Diagram 4" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 4 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_4.mmd -->
+DrawStateDiagram(
+  Syntax(
+    "[*] --> Idle",
+    "Idle --> Updating: Start FOTA",
+    "Updating --> PrimaryComplete: Primary done",
+    "Updating --> SecondaryComplete: Secondary done",
+    "PrimaryComplete --> WaitingForSecondary: Reset command",
+    "SecondaryComplete --> BothComplete: Primary was waiting",
+    "WaitingForSecondary --> BothComplete: Secondary reports done",
+    "BothComplete --> Reset: Schedule reset",
+    "Reset --> [*]",
+    "WaitingForSecondary --> Reset: 30s timeout"
+  ),
+  "default"
+)
 
 ### Synchronization Flow
 
@@ -299,13 +344,19 @@ Diagram 4 (Click to view full size)
 
 Direct access via Information and Control services:
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/FOTA_Complete_Guide/diagram_5.png" alt="Diagram 5" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 5 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_5.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant Phone",
+    "participant Primary",
+    "Phone->>Primary: Read Log Available",
+    "Primary-->>Phone: Log ID",
+    "Phone->>Primary: Read File Path",
+    "Primary-->>Phone: /lfs/foot_5.bin",
+    "Phone->>Primary: SMP Download",
+    "Primary-->>Phone: File data"
+  ),
+  "default"
+)
 
 ### Secondary Device Files
 
@@ -315,7 +366,7 @@ Access through File Proxy service on primary:
 - **Service UUID**: `7e500001-b5a3-f393-e0a9-e50e24dcca9e`
 
 | Characteristic | UUID | Properties | Description |
-|----------------|------|------------|-------------|
+|---:|---:|---:|---:|
 | Target Device | `7e500002-...` | Write | Select device |
 | File Command | `7e500003-...` | Write | Send commands |
 | File Data | `7e500004-...` | Notify | Receive data |
@@ -330,13 +381,25 @@ Access through File Proxy service on primary:
 
 #### File Access Flow
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/FOTA_Complete_Guide/diagram_6.png" alt="Diagram 6" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 6 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/FOTA_Complete_Guide/diagram_6.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant Phone",
+    "participant Primary",
+    "participant Secondary",
+    "Phone->>Primary: Set Target = SECONDARY",
+    "Phone->>Primary: List files",
+    "Primary->>Secondary: D2D: List",
+    "Secondary-->>Primary: File list",
+    "Primary-->>Phone: Notify: Files",
+    "Phone->>Primary: Read file ID 5",
+    "Primary->>Secondary: D2D: Read",
+    "loop File chunks",
+    "Secondary-->>Primary: Data",
+    "Primary-->>Phone: Notify: Data",
+    "end"
+  ),
+  "default"
+)
 
 ## Mobile App Integration
 
@@ -450,7 +513,7 @@ python tools/test_file_proxy.py delete 5 1
 ### Common Issues
 
 | Issue | Cause | Solution |
-|-------|-------|----------|
+|---:|---:|---:|
 | Wrong firmware | Primary/Secondary swapped | Check CONFIG_PRIMARY_DEVICE |
 | Secondary not updating | No D2D connection | Verify connection status |
 | Timeout during update | Large file, slow connection | Increase chunk delays |

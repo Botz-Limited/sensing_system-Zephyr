@@ -1,11 +1,7 @@
-<!-- CODA OPTIMIZED VERSION -->
-<!-- Images are set to fit within Coda's column width -->
-<!-- Click any image to view full size in new tab -->
-
 # Sensor Logging Specification
 
 **Version:** 1.0  
-**Date:** December 2024  
+**Date:** June 2025  
 **Scope:** Complete specification for sensor data logging, file formats, retrieval methods, and analysis tools  
 **Purpose:** Comprehensive reference for developers implementing logging features, parsing log files, and analyzing sensor data
 
@@ -43,13 +39,14 @@ The sensing firmware implements a comprehensive logging system for capturing and
 
 ### Storage Efficiency
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_1.png" alt="Diagram 1" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 1 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_1.mmd -->
+DrawFlowchart(
+  Syntax(
+    "F1[55 bytes/record @ 50Hz] -->|-42%| X1[32 bytes/record @ 50Hz]",
+    "F2[10 MB/hour] -->|-42%| X2[5.8 MB/hour]"
+  ),
+  "LR",
+  "default"
+)
 
 ---
 
@@ -57,13 +54,25 @@ Diagram 1 (Click to view full size)
 
 ### Logging Flow
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_2.png" alt="Diagram 2" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 2 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_2.mmd -->
+DrawFlowchart(
+  Syntax(
+    "FOOT[Foot Pressure 8 channels @ 20Hz] --> CONV[Fixed-Point Converter]",
+    "BHI[BHI360 IMU Motion @ 50Hz Steps @ 5Hz] --> CONV",
+    "CONV --> TIME[Delta Timestamp Generator]",
+    "TIME --> PROTO[Protobuf Encoder]",
+    "PROTO --> FS[LittleFS /lfs1/hardware/]",
+    "FS --> FOOT_LOG[foot_XXX.pb]",
+    "FS --> BHI_LOG[bhi360_XXX.pb]",
+    "FOOT_LOG --> BLE[BLE Services]",
+    "BHI_LOG --> BLE",
+    "FOOT_LOG --> SMP[SMP Server]",
+    "BHI_LOG --> SMP",
+    "FOOT_LOG --> SHELL[Shell Commands]",
+    "BHI_LOG --> SHELL"
+  ),
+  "TB",
+  "default"
+)
 
 ### File Naming Convention
 
@@ -80,15 +89,21 @@ Diagram 2 (Click to view full size)
 
 All log files follow the same basic structure using Protocol Buffers:
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_3.png" alt="Diagram 3" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 3 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_3.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[Header ~50-100 bytes] --> B[Data Packet 1 delta=0]",
+    "B --> C[Data Packet 2 delta=Δt]",
+    "C --> D[...]",
+    "D --> E[Data Packet N delta=Δt]",
+    "E --> F[Session End ~15 bytes]"
+  ),
+  "LR",
+  "default"
+)
 
 ### Binary Layout
+
+The binary file structure uses Protocol Buffers encoding with the following layout:
 
 ```
 +------------------+------------------+------------------+------------------+
@@ -100,6 +115,43 @@ Diagram 3 (Click to view full size)
 | - message_type   |                  |                  |     |            |
 +------------------+------------------+------------------+------------------+
 ```
+
+### File Structure Flow
+
+DrawFlowchart(
+  Syntax(
+    // File Start
+    "subgraph File Start",
+    "H[Header Message<br/>fw_version<br/>frequency<br/>message_type]",
+    "end",
+    
+    // Data Section
+    "subgraph Data Section",
+    "P1[Packet 1<br/>sensor_data<br/>delta_ms = 0]",
+    "P2[Packet 2<br/>sensor_data<br/>delta_ms = Δt]",
+    "PN[Packet N<br/>sensor_data<br/>delta_ms = Δt]",
+    "end",
+    
+    // File End
+    "subgraph File End",
+    "E[Session End<br/>uptime_ms]",
+    "end",
+    
+    // Connections
+    "H --> P1",
+    "P1 --> P2",
+    "P2 -.-> PN",
+    "PN --> E"
+  ),
+  "LR",
+  "default"
+)
+
+**Key Points:**
+- **Header**: Contains metadata about the log file (firmware version, sampling frequency, message type)
+- **Data Packets**: Each packet contains sensor data and a delta timestamp (milliseconds since previous packet)
+- **First Packet**: Always has delta_ms = 0 as the reference point
+- **Session End**: Final message contains the total system uptime when logging stopped
 
 ---
 
@@ -116,13 +168,26 @@ To minimize storage overhead while maintaining timing accuracy:
 
 ### Timestamp Reconstruction
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_4.png" alt="Diagram 4" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 4 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_4.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant Decoder",
+    "participant File",
+    "Decoder->>File: Read Header",
+    "File-->>Decoder: sampling_frequency",
+    "Note over Decoder: absolute_time = 0",
+    "loop For each packet",
+    "Decoder->>File: Read Packet",
+    "File-->>Decoder: delta_ms, data",
+    "alt First packet",
+    "Note over Decoder: absolute_time = 0",
+    "else Subsequent packets",
+    "Note over Decoder: absolute_time += delta_ms",
+    "end",
+    "Note over Decoder: Process data with absolute_time",
+    "end"
+  ),
+  "default"
+)
 
 ### Implementation Example
 
@@ -153,7 +218,7 @@ def reconstruct_timestamps(packets, sampling_freq):
 ### Specifications
 
 | Parameter | Value |
-|-----------|-------|
+|---|---|
 | Sampling Rate | 20 Hz |
 | Channels | 8 (pressure/force sensors) |
 | Data Type | uint32_t per channel |
@@ -184,13 +249,19 @@ message FootSensorSessionEnd {
 
 ### Example Data Flow
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_5.png" alt="Diagram 5" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 5 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_5.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[Start Logging] --> B[Write Header fw=1.0.0, freq=20Hz]",
+    "B --> C[Packet 1 readings=array, delta=0]",
+    "C --> D[Packet 2 readings=array, delta=50]",
+    "D --> E[Packet 3 readings=array, delta=49]",
+    "E --> F[...]",
+    "F --> G[Stop Logging]",
+    "G --> H[Write Session End uptime=3600000]"
+  ),
+  "TD",
+  "default"
+)
 
 ---
 
@@ -199,7 +270,7 @@ Diagram 5 (Click to view full size)
 ### Specifications
 
 | Parameter | Value |
-|-----------|-------|
+|---|---|
 | Motion Sensors | 50 Hz (quaternion, accel, gyro) |
 | Step Counter | 5 Hz (independent) |
 | Data Format | Fixed-point integers |
@@ -209,7 +280,7 @@ Diagram 5 (Click to view full size)
 ### Fixed-Point Encoding
 
 | Sensor | Scale Factor | Precision | Range |
-|--------|--------------|-----------|-------|
+|---|---|---|---|
 | Quaternion | ×10,000 | 0.0001 | ±1.0 |
 | Linear Acceleration | ×1,000 | 0.001 m/s² | ±20 m/s² |
 | Gyroscope | ×10,000 | 0.0001 rad/s | ±2.0 rad/s |
@@ -249,13 +320,17 @@ message BHI360LogRecord {
 
 ### Sensor Synchronization
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_6.png" alt="Diagram 6" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 6 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_6.mmd -->
+DrawFlowchart(
+  Syntax(
+    "Q[Quaternion] --> SYNC{All Updated?}",
+    "L[Linear Accel] --> SYNC",
+    "G[Gyroscope] --> SYNC",
+    "SYNC -->|Yes| LOG[Log Record]",
+    "S[Step Counter] -->|Latest Value| LOG"
+  ),
+  "TD",
+  "default"
+)
 
 ---
 
@@ -266,7 +341,7 @@ Diagram 6 (Click to view full size)
 **Service UUID:** `0c372eaa-27eb-437e-bef4-775aefaf3c97`
 
 | Characteristic | UUID Suffix | Type | Description |
-|----------------|-------------|------|-------------|
+|---|---|---|---|
 | Foot Log Available | `...eac` | uint8_t | Latest closed log ID |
 | Foot Log Path | `...eae` | string | File path (e.g., "/lfs1/hardware/foot_005.pb") |
 | BHI360 Log Available | `...eb0` | uint8_t | Latest closed log ID |
@@ -277,7 +352,7 @@ Diagram 6 (Click to view full size)
 **Service UUID:** `4fd5b67f-9d89-4061-92aa-319ca786baae`
 
 | Command | UUID Suffix | Type | Description |
-|---------|-------------|------|-------------|
+|---|---|---|---|
 | Delete Foot Log | `...b682` | uint8_t | Delete by log ID |
 | Delete BHI360 Log | `...b683` | uint8_t | Delete by log ID |
 | Start Activity | `...b684` | uint8_t | Start logging (write 1) |
@@ -285,13 +360,24 @@ Diagram 6 (Click to view full size)
 
 ### Workflow
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_7.png" alt="Diagram 7" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 7 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_7.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant BLE",
+    "participant Device",
+    "App->>BLE: Start Activity",
+    "BLE->>Device: Begin logging",
+    "Note over Device: Logging active...",
+    "App->>BLE: Stop Activity",
+    "BLE->>Device: Close log file",
+    "Device-->>BLE: Update available logs",
+    "App->>BLE: Read Log Available",
+    "BLE-->>App: Log ID = 5",
+    "App->>BLE: Read Log Path",
+    "BLE-->>App: /lfs1/hardware/foot_005.pb"
+  ),
+  "default"
+)
 
 ---
 
@@ -302,13 +388,21 @@ Diagram 7 (Click to view full size)
 **Service UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
 **Characteristic:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_8.png" alt="Diagram 8" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 8 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_8.mmd -->
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant SMP",
+    "participant FS as File System",
+    "App->>SMP: FS Download /lfs1/hardware/foot_005.pb",
+    "loop File chunks",
+    "SMP->>FS: Read chunk",
+    "FS-->>SMP: Data",
+    "SMP-->>App: Data packet",
+    "end",
+    "SMP-->>App: Transfer complete"
+  ),
+  "default"
+)
 
 ### Method 2: File Proxy (Secondary Device)
 
@@ -337,13 +431,18 @@ CONFIG_LOG_DECODER_SHELL_CMD=y
 
 #### Available Commands
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_9.png" alt="Diagram 9" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 9 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_9.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[log] --> B[list Show all logs]",
+    "A --> C[decode]",
+    "C --> D[foot Latest foot log]",
+    "C --> E[bhi360 Latest BHI log]",
+    "C --> F[file PATH Specific file]",
+    "A --> G[delete_all Remove all logs]"
+  ),
+  "LR",
+  "default"
+)
 
 #### Example Session
 
@@ -411,7 +510,7 @@ python tools/decode_log.py --export data.csv foot_001.pb
 TIMING STATISTICS:
 ┌─────────────────┬──────────┬──────────┬──────────┐
 │ Metric          │ Expected │ Actual   │ Status   │
-├─────────────────┼──────────┼──────────┼────────���─┤
+├─────────────────┼──────────┼──────────┼──────────┤
 │ Sample Rate     │ 50 Hz    │ 49.9 Hz  │ ✓ GOOD   │
 │ Average Delta   │ 20.0 ms  │ 20.1 ms  │ ✓ GOOD   │
 │ Min Delta       │ -        │ 19 ms    │ ✓ GOOD   │
@@ -428,18 +527,55 @@ TIMING STATISTICS:
 
 ### Architecture
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_10.png" alt="Diagram 10" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 10 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_10.mmd -->
+The secondary device file access architecture shows how the mobile app can access log files stored on the secondary device through the primary device's proxy services:
+
+DrawFlowchart(
+  Syntax(
+    // Define the flow with numbered steps and clear labels
+    "subgraph Mobile App",
+    "APP[BLE Client]",
+    "end",
+    
+    "subgraph Primary Device",
+    "PROXY[File Proxy Service]",
+    "D2D_C[D2D Client]",
+    "end",
+    
+    "subgraph Secondary Device", 
+    "D2D_S[D2D Server]",
+    "LOGS[Log Files]",
+    "end",
+    
+    // Request flow (steps 1-4)
+    "APP -->|1. Request| PROXY",
+    "PROXY -->|2. Forward| D2D_C",
+    "D2D_C -->|3. D2D Transfer| D2D_S",
+    "D2D_S -->|4. Read| LOGS",
+    
+    // Response flow (steps 5-8)
+    "LOGS -->|5. Data| D2D_S",
+    "D2D_S -->|6. Response| D2D_C",
+    "D2D_C -->|7. Forward| PROXY",
+    "PROXY -->|8. Send| APP"
+  ),
+  "TB",
+  "default"
+)
+
+**Data Flow Steps:**
+1. **Request**: Mobile app sends file request to Primary's File Proxy Service
+2. **Forward**: File Proxy forwards request to D2D Client module
+3. **D2D Transfer**: D2D Client sends request over BLE to Secondary's D2D Server
+4. **Read**: D2D Server reads requested log file from file system
+5. **Data**: File data is read and prepared for transmission
+6. **Response**: D2D Server sends data back to Primary's D2D Client
+7. **Forward**: D2D Client forwards data to File Proxy Service
+8. **Send**: File Proxy sends data to Mobile App via BLE notification
 
 ### File Proxy Commands
 
 | Command | Value | Parameters | Description |
-|---------|-------|------------|-------------|
+|---|---|---|---|
 | List Files | 0x01 | File type | Get file list |
 | Read File | 0x02 | File ID | Download file |
 | Delete File | 0x03 | File ID | Remove file |
@@ -629,13 +765,29 @@ def process_all_logs(directory):
 
 ### Common Issues and Solutions
 
-<div style="max-width: 100%; overflow: hidden;">
-<img src="https://raw.githubusercontent.com/Botz-Limited/sensing_system-Zephyr/Nrf5340-framework/docs/mermaid_images/Sensor_Logging_Specification/diagram_11.png" alt="Diagram 11" style="max-width: 100%; height: auto; cursor: pointer;" onclick="window.open(this.src, '_blank')">
-</div>
-<p style="text-align: center; font-size: 0.9em; color: #666;">
-Diagram 11 (Click to view full size)
-</p>
-<!-- Original diagram was Mermaid format - see mermaid_images/Sensor_Logging_Specification/diagram_11.mmd -->
+DrawFlowchart(
+  Syntax(
+    "A[Issue] --> B{Type?}",
+    "B -->|No Logs| C[Check Storage]",
+    "C --> C1[Verify FS mounted]",
+    "C --> C2[Check free space]",
+    "C --> C3[Ensure activity started/stopped]",
+    "B -->|Corrupt File| D[Check File]",
+    "D --> D1[Verify complete download]",
+    "D --> D2[Check session end marker]",
+    "D --> D3[Validate protobuf format]",
+    "B -->|Timing Issues| E[Analyze Timing]",
+    "E --> E1[Check system load]",
+    "E --> E2[Verify sensor config]",
+    "E --> E3[Monitor packet loss]",
+    "B -->|Decode Error| F[Debug Decoder]",
+    "F --> F1[Update protobuf files]",
+    "F --> F2[Check file version]",
+    "F --> F3[Verify data format]"
+  ),
+  "TD",
+  "default"
+)
 
 ### Debug Checklist
 
