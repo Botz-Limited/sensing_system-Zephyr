@@ -57,6 +57,7 @@ void initializing_entry();
 
 K_MSGQ_DEFINE(bluetooth_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(motion_sensor_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 
 // Add other slab definitions here as needed
 
@@ -361,6 +362,8 @@ const char *get_sender_name(sender_type_t sender)
             return "Data Thread";
         case SENDER_D2D_SECONDARY:
             return "D2D Secondary";
+        case SENDER_MOTION_SENSOR:
+            return "Motion Sensor";
         case SENDER_NONE:
             return "None/Unknown";
         default:

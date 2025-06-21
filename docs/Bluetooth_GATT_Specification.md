@@ -236,6 +236,7 @@ float decode_acceleration(int16_t fixed) {
 | Delete BHI360 Log | `...b683` | Write, Notify | uint8_t | Log ID to delete |
 | Start Activity | `...b684` | Write, Notify | uint8_t | Write 1 to start |
 | Stop Activity | `...b685` | Write, Notify | uint8_t | Write 1 to stop |
+| **Trigger BHI360 Calibration** | `...b686` | Write, Notify | uint8_t | Write 1 to trigger calibration |
 
 ### Command Flow
 
@@ -353,6 +354,7 @@ typedef struct {
 | D2D Delete BHI360 Log | `...ca83` | Write | uint8_t | Delete command |
 | D2D Start Activity | `...ca84` | Write | uint8_t | Start command |
 | D2D Stop Activity | `...ca85` | Write | uint8_t | Stop command |
+| **D2D Trigger BHI360 Calibration** | `...ca86` | Write | uint8_t | Calibration trigger |
 
 ### 8.2 D2D TX Service (Secondary Device)
 

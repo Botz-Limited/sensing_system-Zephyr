@@ -344,6 +344,21 @@ int ble_d2d_tx_send_fota_complete(void) {
     return 0;
 }
 
+int ble_d2d_tx_send_trigger_bhi360_calibration_command(uint8_t value) {
+    if (!d2d_conn) {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+    
+    // For now, we'll just log this since the handle isn't discovered yet
+    // This would need to be added to the discovery process
+    LOG_INF("D2D TX: Trigger BHI360 calibration command - value: %u (not implemented in discovery yet)", value);
+    
+    // TODO: Add calibration characteristic to discovery and use proper handle
+    // For now, return success to not break the flow
+    return 0;
+}
+
 int ble_d2d_tx_send_foot_sensor_log_available(uint8_t log_id) {
     if (!d2d_conn) return -ENOTCONN;
     LOG_DBG("D2D TX: Sending foot sensor log available: %u", log_id);

@@ -44,7 +44,6 @@
 #include "BHY2-Sensor-API/firmware/bhi360/BHI360_Aux_BMM150.fw.h"
 
 #include <errors.hpp>
-#include <data.hpp>  // For calibration storage API
 
 static constexpr uint16_t BHY2_RD_WR_LEN = 256;
 static constexpr uint16_t WORK_BUFFER_SIZE = 2048;
@@ -78,10 +77,11 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
 static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
 static void print_api_error(int8_t rslt, struct bhy2_dev *dev);
 static int8_t upload_firmware(struct bhy2_dev *dev);
-static void load_saved_calibrations(const struct device *bhi360_dev);
 static void save_calibration_profile(const struct device *bhi360_dev, 
                                    enum bhi360_sensor_type sensor, const char *sensor_name);
 static void check_and_save_calibration_updates(const struct device *bhi360_dev);
+static void perform_bhi360_calibration(void);
+static void apply_calibration_data(const bhi360_calibration_data_t *calib_data);
 
 /********************************** Motion Sensor THREAD ********************************/
 static constexpr int motion_sensor_stack_size = CONFIG_MOTION_SENSOR_MODULE_STACK_SIZE;
@@ -195,86 +195,15 @@ static void motion_sensor_init()
         
         LOG_INF("BHI360: Initialization complete");
         
-        // DRIVER_INTEGRATION: Load saved calibrations and perform calibration if needed
-#if IS_ENABLED(CONFIG_BHI360_AUTO_CALIBRATION)
-        LOG_INF("BHI360: Checking calibration status...");
+        // Request calibration data from data module
+        LOG_INF("BHI360: Requesting calibration data from data module");
+        generic_message_t request_msg = {};
+        request_msg.sender = SENDER_MOTION_SENSOR;
+        request_msg.type = MSG_TYPE_REQUEST_BHI360_CALIBRATION;
         
-        // First, try to load saved calibrations from storage
-        load_saved_calibrations(bhi360_dev);
-        
-        // Then check current calibration status
-        struct bhi360_calibration_status calib_status;
-        int ret = bhi360_get_calibration_status(bhi360_dev, &calib_status);
-        if (ret == 0) {
-            LOG_INF("BHI360: Calibration status - Accel: %d, Gyro: %d",
-                    calib_status.accel_calib_status,
-                    calib_status.gyro_calib_status);
-            
-            // Perform gyroscope calibration if needed
-            if (calib_status.gyro_calib_status < CONFIG_BHI360_CALIBRATION_THRESHOLD) {
-                LOG_INF("BHI360: Gyroscope needs calibration, performing FOC...");
-                LOG_INF("BHI360: Please keep the device stationary");
-                
-                // Give user time to ensure device is stationary
-                k_sleep(K_SECONDS(2));
-                
-                struct bhi360_foc_result foc_result;
-                ret = bhi360_perform_gyro_foc(bhi360_dev, &foc_result);
-                if (ret == 0 && foc_result.success) {
-                    LOG_INF("BHI360: Gyro calibration successful! Offsets: X=%d, Y=%d, Z=%d",
-                            foc_result.x_offset, foc_result.y_offset, foc_result.z_offset);
-                    
-                    // Save the new calibration to storage
-                    save_calibration_profile(bhi360_dev, BHI360_SENSOR_GYRO, "gyro");
-                } else {
-                    LOG_WRN("BHI360: Gyro calibration failed, continuing anyway");
-                }
-            } else {
-                LOG_INF("BHI360: Gyroscope already calibrated");
-            }
-            
-            // Perform accelerometer calibration if needed
-            if (calib_status.accel_calib_status < CONFIG_BHI360_CALIBRATION_THRESHOLD) {
-                LOG_INF("BHI360: Accelerometer needs calibration, performing FOC...");
-                LOG_INF("BHI360: Please place device on flat surface with Z-axis up");
-                
-                // Give user time to position device
-                k_sleep(K_SECONDS(3));
-                
-                struct bhi360_foc_result foc_result;
-                ret = bhi360_perform_accel_foc(bhi360_dev, &foc_result);
-                if (ret == 0 && foc_result.success) {
-                    LOG_INF("BHI360: Accel calibration successful! Offsets: X=%d, Y=%d, Z=%d",
-                            foc_result.x_offset, foc_result.y_offset, foc_result.z_offset);
-                    
-                    // Save the new calibration to storage
-                    save_calibration_profile(bhi360_dev, BHI360_SENSOR_ACCEL, "accel");
-                } else {
-                    LOG_WRN("BHI360: Accel calibration failed, continuing anyway");
-                }
-            } else {
-                LOG_INF("BHI360: Accelerometer already calibrated");
-            }
-            
-            // Note: BHI360 does not have a magnetometer
-            
-            // Check final calibration status
-            ret = bhi360_get_calibration_status(bhi360_dev, &calib_status);
-            if (ret == 0) {
-                LOG_INF("BHI360: Final calibration status - Accel: %d, Gyro: %d",
-                        calib_status.accel_calib_status,
-                        calib_status.gyro_calib_status);
-            }
-        } else {
-            LOG_WRN("BHI360: Could not check calibration status: %d", ret);
+        if (k_msgq_put(&data_msgq, &request_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to request calibration data from data module");
         }
-#else
-        LOG_INF("BHI360: Automatic calibration disabled");
-        // Still try to load saved calibrations even if auto-calibration is disabled
-        load_saved_calibrations(bhi360_dev);
-#endif /* CONFIG_BHI360_AUTO_CALIBRATION */
-        
-        LOG_INF("BHI360: Initialization and calibration complete");
     } else {
         LOG_ERR("BHI360: Host interface not ready");
         return;
@@ -294,16 +223,38 @@ void motion_sensor_process(void *, void *, void *)
     uint8_t work_buffer[WORK_BUFFER_SIZE];
     uint32_t calibration_check_counter = 0;
     const uint32_t CALIBRATION_CHECK_INTERVAL = 1000; // Check every 1000 iterations
+    generic_message_t msg;
     
     while (true) {
-        // Periodically check and save calibration improvements (especially for magnetometer)
+        // Check for messages with a short timeout
+        int msg_ret = k_msgq_get(&motion_sensor_msgq, &msg, K_MSEC(10));
+        if (msg_ret == 0) {
+            // Handle messages
+            switch (msg.type) {
+                case MSG_TYPE_TRIGGER_BHI360_CALIBRATION:
+                    LOG_INF("Received calibration trigger from %s", get_sender_name(msg.sender));
+                    perform_bhi360_calibration();
+                    break;
+                    
+                case MSG_TYPE_BHI360_CALIBRATION_DATA:
+                    LOG_INF("Received calibration data from %s", get_sender_name(msg.sender));
+                    apply_calibration_data(&msg.data.bhi360_calibration);
+                    break;
+                    
+                default:
+                    LOG_WRN("Unknown message type %d from %s", msg.type, get_sender_name(msg.sender));
+                    break;
+            }
+        }
+        
+        // Periodically check and save calibration improvements
         if (++calibration_check_counter >= CALIBRATION_CHECK_INTERVAL) {
             calibration_check_counter = 0;
             check_and_save_calibration_updates(bhi360_dev);
         }
         
         // DRIVER_INTEGRATION: Use driver's wait function instead of manual semaphore
-        int ret = bhi360_wait_for_data(bhi360_dev, K_FOREVER);
+        int ret = bhi360_wait_for_data(bhi360_dev, K_MSEC(10));
         if (ret == 0) {
             // Process FIFO using BHY2 API directly
             int8_t rslt = bhy2_get_and_process_fifo(work_buffer, sizeof(work_buffer), bhy2_ptr);
@@ -311,8 +262,8 @@ void motion_sensor_process(void *, void *, void *)
                 LOG_WRN("BHI360: FIFO processing error: %d", rslt);
             }
         } else if (ret == -EAGAIN) {
-            LOG_WRN("BHI360: Wait for data timeout");
-        } else {
+            // Timeout is expected with short wait time
+        } else if (ret != -EAGAIN) {
             LOG_ERR("BHI360: Wait for data error: %d", ret);
         }
     }
@@ -410,7 +361,7 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             .quat_y = latest_quat_y,
             .quat_z = latest_quat_z,
             .quat_w = latest_quat_w,
-            .quat_accuracy = latest_quat_accuracy,
+            .quat_accuracy = (uint8_t)latest_quat_accuracy,
             .lacc_x = latest_lacc_x,
             .lacc_y = latest_lacc_y,
             .lacc_z = latest_lacc_z,
@@ -617,50 +568,111 @@ static int8_t upload_firmware(struct bhy2_dev *dev)
 // DRIVER_INTEGRATION: Remove bhi360_int_handler - driver handles interrupts
 
 /**
- * @brief Load saved calibrations from storage
+ * @brief Apply calibration data received from data module
  */
-static void load_saved_calibrations(const struct device *bhi360_dev)
+static void apply_calibration_data(const bhi360_calibration_data_t *calib_data)
 {
-    struct {
-        enum bhi360_sensor_type sensor;
-        uint8_t type_id;
-        const char *name;
-    } sensors[] = {
-        {BHI360_SENSOR_ACCEL, 0, "accel"},
-        {BHI360_SENSOR_GYRO, 1, "gyro"}
-    };
-
-    LOG_INF("Attempting to load saved calibrations...");
-
-    for (int i = 0; i < ARRAY_SIZE(sensors); i++) {
-        uint8_t profile_data[512];
-        size_t actual_size;
-        
-        err_t err = get_bhi360_calibration_data(sensors[i].type_id, 
-                                               profile_data, 
-                                               sizeof(profile_data), 
-                                               &actual_size);
-        if (err == err_t::NO_ERROR) {
-            // Successfully loaded calibration from storage
-            int ret = bhi360_set_calibration_profile(bhi360_dev, 
-                                                    sensors[i].sensor,
-                                                    profile_data, 
-                                                    actual_size);
-            if (ret == 0) {
-                LOG_INF("Loaded %s calibration from storage (%u bytes)", 
-                        sensors[i].name, actual_size);
-            } else {
-                LOG_WRN("Failed to apply %s calibration: %d", 
-                        sensors[i].name, ret);
-            }
-        } else if (err == err_t::FILE_SYSTEM_NO_FILES) {
-            LOG_INF("No saved %s calibration found (first time)", 
-                    sensors[i].name);
-        } else {
-            LOG_WRN("Error loading %s calibration: %d", 
-                    sensors[i].name, (int)err);
-        }
+    if (!calib_data) {
+        LOG_ERR("Invalid calibration data");
+        return;
     }
+    
+    enum bhi360_sensor_type sensor_type;
+    const char *sensor_name;
+    
+    switch (calib_data->sensor_type) {
+        case 0:
+            sensor_type = BHI360_SENSOR_ACCEL;
+            sensor_name = "accel";
+            break;
+        case 1:
+            sensor_type = BHI360_SENSOR_GYRO;
+            sensor_name = "gyro";
+            break;
+        default:
+            LOG_ERR("Unknown sensor type: %u", calib_data->sensor_type);
+            return;
+    }
+    
+    if (calib_data->profile_size > 0) {
+        int ret = bhi360_set_calibration_profile(bhi360_dev, 
+                                                sensor_type,
+                                                calib_data->profile_data, 
+                                                calib_data->profile_size);
+        if (ret == 0) {
+            LOG_INF("Applied %s calibration (%u bytes)", 
+                    sensor_name, calib_data->profile_size);
+        } else {
+            LOG_ERR("Failed to apply %s calibration: %d", 
+                    sensor_name, ret);
+        }
+    } else {
+        LOG_INF("No %s calibration data available", sensor_name);
+    }
+}
+
+/**
+ * @brief Perform BHI360 calibration when triggered
+ */
+static void perform_bhi360_calibration(void)
+{
+    LOG_INF("Starting BHI360 calibration sequence...");
+    
+    // Check current calibration status
+    struct bhi360_calibration_status calib_status;
+    int ret = bhi360_get_calibration_status(bhi360_dev, &calib_status);
+    if (ret == 0) {
+        LOG_INF("Current calibration status - Accel: %d, Gyro: %d",
+                calib_status.accel_calib_status,
+                calib_status.gyro_calib_status);
+    }
+    
+    // Perform gyroscope calibration
+    LOG_INF("Performing gyroscope calibration...");
+    LOG_INF("Please keep the device stationary");
+    
+    // Give user time to ensure device is stationary
+    k_sleep(K_SECONDS(2));
+    
+    struct bhi360_foc_result foc_result;
+    ret = bhi360_perform_gyro_foc(bhi360_dev, &foc_result);
+    if (ret == 0 && foc_result.success) {
+        LOG_INF("Gyro calibration successful! Offsets: X=%d, Y=%d, Z=%d",
+                foc_result.x_offset, foc_result.y_offset, foc_result.z_offset);
+        
+        // Save the new calibration
+        save_calibration_profile(bhi360_dev, BHI360_SENSOR_GYRO, "gyro");
+    } else {
+        LOG_ERR("Gyro calibration failed");
+    }
+    
+    // Perform accelerometer calibration
+    LOG_INF("Performing accelerometer calibration...");
+    LOG_INF("Please place device on flat surface with Z-axis up");
+    
+    // Give user time to position device
+    k_sleep(K_SECONDS(3));
+    
+    ret = bhi360_perform_accel_foc(bhi360_dev, &foc_result);
+    if (ret == 0 && foc_result.success) {
+        LOG_INF("Accel calibration successful! Offsets: X=%d, Y=%d, Z=%d",
+                foc_result.x_offset, foc_result.y_offset, foc_result.z_offset);
+        
+        // Save the new calibration
+        save_calibration_profile(bhi360_dev, BHI360_SENSOR_ACCEL, "accel");
+    } else {
+        LOG_ERR("Accel calibration failed");
+    }
+    
+    // Check final calibration status
+    ret = bhi360_get_calibration_status(bhi360_dev, &calib_status);
+    if (ret == 0) {
+        LOG_INF("Final calibration status - Accel: %d, Gyro: %d",
+                calib_status.accel_calib_status,
+                calib_status.gyro_calib_status);
+    }
+    
+    LOG_INF("BHI360 calibration sequence complete");
 }
 
 /**
@@ -670,8 +682,6 @@ static void save_calibration_profile(const struct device *bhi360_dev,
                                    enum bhi360_sensor_type sensor,
                                    const char *sensor_name)
 {
-    uint8_t profile_data[512];
-    size_t actual_size;
     uint8_t type_id;
     
     // Map sensor type to storage ID
@@ -682,21 +692,24 @@ static void save_calibration_profile(const struct device *bhi360_dev,
     }
     
     // Get current calibration profile from BHI360
+    generic_message_t save_msg = {};
+    save_msg.sender = SENDER_MOTION_SENSOR;
+    save_msg.type = MSG_TYPE_SAVE_BHI360_CALIBRATION;
+    save_msg.data.bhi360_calibration.sensor_type = type_id;
+    
+    size_t actual_size;
     int ret = bhi360_get_calibration_profile(bhi360_dev, sensor, 
-                                            profile_data, 
-                                            sizeof(profile_data), 
+                                            save_msg.data.bhi360_calibration.profile_data, 
+                                            sizeof(save_msg.data.bhi360_calibration.profile_data), 
                                             &actual_size);
+    save_msg.data.bhi360_calibration.profile_size = (uint16_t)actual_size;
     if (ret == 0) {
-        // Save to storage
-        err_t err = store_bhi360_calibration_data(type_id, 
-                                                 profile_data, 
-                                                 actual_size);
-        if (err == err_t::NO_ERROR) {
-            LOG_INF("Saved %s calibration (%u bytes)", 
-                    sensor_name, actual_size);
+        // Send to data module for storage
+        if (k_msgq_put(&data_msgq, &save_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send %s calibration to data module", sensor_name);
         } else {
-            LOG_ERR("Failed to save %s calibration: %d", 
-                    sensor_name, (int)err);
+            LOG_INF("Sent %s calibration to data module (%u bytes)", 
+                    sensor_name, save_msg.data.bhi360_calibration.profile_size);
         }
     } else {
         LOG_ERR("Failed to get %s calibration profile: %d", 

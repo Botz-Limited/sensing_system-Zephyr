@@ -103,11 +103,17 @@ static struct bt_uuid_128 start_activity_command_uuid =
 static struct bt_uuid_128 stop_activity_command_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b685, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
+// --- New: UUID for the trigger BHI360 calibration characteristic. ---
+static struct bt_uuid_128 trigger_bhi360_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b686, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
 // Forward declarations for start/stop activity handlers
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static void cs_stop_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+static ssize_t write_trigger_bhi360_calibration_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_trigger_bhi360_calibration_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -164,7 +170,13 @@ BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | B
     BT_GATT_CHARACTERISTIC(&stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_WRITE_ENCRYPT,
                            nullptr, write_stop_activity_command_vnd, nullptr),
-    BT_GATT_CCC(cs_stop_activity_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+    BT_GATT_CCC(cs_stop_activity_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // New: Trigger BHI360 Calibration Characteristic
+    BT_GATT_CHARACTERISTIC(&trigger_bhi360_calibration_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
+                           BT_GATT_PERM_WRITE_ENCRYPT,
+                           nullptr, write_trigger_bhi360_calibration_vnd, nullptr),
+    BT_GATT_CCC(cs_trigger_bhi360_calibration_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
 );
 
 /**
@@ -347,6 +359,53 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
     }
 
     return len;
+}
+
+// --- Trigger BHI360 Calibration Characteristic Handlers ---
+static bool trigger_bhi360_calibration_subscribed = false;
+
+static ssize_t write_trigger_bhi360_calibration_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t value = *((const uint8_t *)buf);
+
+    if (value == 1) {
+        // Send message to motion sensor to trigger calibration
+        generic_message_t calib_msg = {};
+        calib_msg.sender = SENDER_BTH;
+        calib_msg.type = MSG_TYPE_TRIGGER_BHI360_CALIBRATION;
+        
+        if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send calibration trigger to motion sensor");
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        }
+
+        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device
+        ble_d2d_tx_send_trigger_bhi360_calibration_command(value);
+        #endif
+
+        LOG_INF("Triggered BHI360 calibration (input=1).");
+    } else {
+        LOG_WRN("Trigger BHI360 calibration characteristic write ignored (input=%u).", value);
+    }
+
+    return len;
+}
+
+static void cs_trigger_bhi360_calibration_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    ARG_UNUSED(attr);
+    trigger_bhi360_calibration_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Trigger BHI360 Calibration CCC changed: %u", value);
 }
 
 static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)

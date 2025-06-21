@@ -667,6 +667,19 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     break;
                 }
 
+                case MSG_TYPE_REQUEST_BHI360_CALIBRATION: {
+                    LOG_INF("Received REQUEST BHI360 CALIBRATION from %s", get_sender_name(msg.sender));
+                    // Load and send calibration data for both accel and gyro
+                    for (uint8_t sensor_type = 0; sensor_type <= 1; sensor_type++) {
+                        err_t load_status = load_bhi360_calibration_data(sensor_type);
+                        if (load_status != err_t::NO_ERROR && load_status != err_t::FILE_SYSTEM_NO_FILES) {
+                            LOG_ERR("Failed to load BHI360 calibration data for sensor %u: %d", 
+                                    sensor_type, (int)load_status);
+                        }
+                    }
+                    break;
+                }
+
                 default:
                     LOG_WRN("Unknown message type received: %d", msg.type);
                     break;
@@ -2097,12 +2110,23 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
     fs_close(&file);
 
     LOG_INF("Loaded BHI360 %s calibration from %s (%u bytes)", 
-            sensor_name, filename, profile_size);
-
-    // Instead of sending to motion sensor, we'll just log success
-    // The motion sensor module should call load_bhi360_calibration_data during initialization
-    LOG_INF("Calibration data ready for sensor type %u", sensor_type);
-
+    sensor_name, filename, profile_size);
+    
+    // Send calibration data to motion sensor via message queue
+    generic_message_t calib_msg = {};
+    calib_msg.sender = SENDER_DATA;
+    calib_msg.type = MSG_TYPE_BHI360_CALIBRATION_DATA;
+    calib_msg.data.bhi360_calibration.sensor_type = sensor_type;
+    calib_msg.data.bhi360_calibration.profile_size = profile_size;
+    memcpy(calib_msg.data.bhi360_calibration.profile_data, profile_data, profile_size);
+    
+    if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0) {
+    LOG_ERR("Failed to send calibration data to motion sensor");
+    return err_t::QUEUE_FULL;
+    }
+    
+    LOG_INF("Sent calibration data to motion sensor for sensor type %u", sensor_type);
+    
     return err_t::NO_ERROR;
 }
 

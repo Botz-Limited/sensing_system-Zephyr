@@ -103,6 +103,7 @@ All control commands from the mobile app are forwarded to the secondary device:
 | Delete BHI360 Log | Remove motion sensor logs | `uint8_t` log ID |
 | Start Activity | Begin recording | `uint8_t` activity type |
 | Stop Activity | End recording | `uint8_t` activity type |
+| **Trigger BHI360 Calibration** | Initiate sensor calibration | `uint8_t` trigger (1) |
 
 ### Command Flow Sequence
 
@@ -131,6 +132,7 @@ DrawSequenceDiagram(
        DISCOVER_DELETE_BHI360_LOG_CHAR,
        DISCOVER_START_ACTIVITY_CHAR,
        DISCOVER_STOP_ACTIVITY_CHAR,
+       DISCOVER_TRIGGER_CALIBRATION_CHAR,
        DISCOVER_COMPLETE
    };
    ```

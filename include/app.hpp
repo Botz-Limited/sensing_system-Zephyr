@@ -128,6 +128,7 @@ static constexpr uint8_t MSG_QUEUE_DEPTH = 10; // Adjust if necessary
 // --- MESSAGE QUEUE DECLARATION (unchanged) ---
 extern struct k_msgq bluetooth_msgq;
 extern struct k_msgq data_msgq;
+extern struct k_msgq motion_sensor_msgq;
 
 const char *get_sender_name(sender_type_t sender);
 

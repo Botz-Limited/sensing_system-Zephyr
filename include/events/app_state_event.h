@@ -57,6 +57,9 @@ typedef enum
     MSG_TYPE_ERROR_STATUS, // Error status updates from modules
     MSG_TYPE_SAVE_BHI360_CALIBRATION, // Save BHI360 calibration data
     MSG_TYPE_LOAD_BHI360_CALIBRATION, // Load BHI360 calibration data
+    MSG_TYPE_TRIGGER_BHI360_CALIBRATION, // Trigger BHI360 calibration
+    MSG_TYPE_REQUEST_BHI360_CALIBRATION, // Request calibration data from data module
+    MSG_TYPE_BHI360_CALIBRATION_DATA, // Calibration data response from data module
 } msg_type_t;
 
 // Define sender types
@@ -68,6 +71,7 @@ typedef enum
     SENDER_BTH, // Bluetooth
     SENDER_DATA,
     SENDER_D2D_SECONDARY, // D2D data from secondary device
+    SENDER_MOTION_SENSOR, // Motion sensor module
 } sender_type_t;
 #ifdef __cplusplus
 }

@@ -58,7 +58,8 @@ west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 - Delete BHI360 Log: `e160ca83-3115-4ad6-9709-8c5ff3bf558b`
 - Start Activity: `e160ca84-3115-4ad6-9709-8c5ff3bf558b`
 - Stop Activity: `e160ca85-3115-4ad6-9709-8c5ff3bf558b`
-- FOTA Status: `e160ca86-3115-4ad6-9709-8c5ff3bf558b`
+- **Trigger BHI360 Calibration**: `e160ca86-3115-4ad6-9709-8c5ff3bf558b`
+- FOTA Status: `e160ca87-3115-4ad6-9709-8c5ff3bf558b`
 
 ### FOTA Proxy Service (Primary Only)
 - Service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
