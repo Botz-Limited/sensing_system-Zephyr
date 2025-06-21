@@ -294,6 +294,92 @@ CONFIG_BHI360_CALIBRATION_THRESHOLD=3
 - Susceptible to interference
 - Poor indoor navigation
 
+## Calibration Message Flow
+
+### Message Types
+
+The calibration system uses the following message types for inter-module communication:
+
+| Message Type | Description | Sender | Receiver |
+|--------------|-------------|---------|----------|
+| `MSG_TYPE_TRIGGER_BHI360_CALIBRATION` | Trigger calibration process | Bluetooth/Control Service | Motion Sensor |
+| `MSG_TYPE_REQUEST_BHI360_CALIBRATION` | Request stored calibration data | Motion Sensor | Data Module |
+| `MSG_TYPE_BHI360_CALIBRATION_DATA` | Calibration data response | Data Module | Motion Sensor |
+| `MSG_TYPE_SAVE_BHI360_CALIBRATION` | Save calibration to storage | Motion Sensor | Data Module |
+
+### Startup Calibration Loading
+
+When the motion sensor module initializes, it automatically loads any previously saved calibration:
+
+```mermaid
+sequenceDiagram
+    participant MS as Motion Sensor
+    participant DM as Data Module
+    participant FS as File System
+    
+    Note over MS: motion_sensor_init()
+    MS->>DM: MSG_TYPE_REQUEST_BHI360_CALIBRATION
+    
+    loop For each sensor (accel, gyro)
+        DM->>FS: Read calibration file
+        alt File exists
+            FS-->>DM: Calibration data
+            DM->>MS: MSG_TYPE_BHI360_CALIBRATION_DATA
+            Note over MS: apply_calibration_data()
+        else File not found
+            Note over DM: No calibration available
+        end
+    end
+```
+
+### Manual Calibration Trigger
+
+Users can trigger calibration via BLE characteristic or shell command:
+
+```mermaid
+sequenceDiagram
+    participant App as Mobile App
+    participant BLE as BLE Service
+    participant MS as Motion Sensor
+    participant DM as Data Module
+    
+    App->>BLE: Write to Calibration Characteristic
+    BLE->>MS: MSG_TYPE_TRIGGER_BHI360_CALIBRATION
+    
+    Note over MS: perform_bhi360_calibration()
+    
+    alt Calibration successful
+        MS->>DM: MSG_TYPE_SAVE_BHI360_CALIBRATION
+        DM->>DM: Save to file system
+    end
+```
+
+### Periodic Calibration Updates
+
+The motion sensor periodically checks for calibration improvements:
+
+```c
+// In motion_sensor_process() thread
+if (++calibration_check_counter >= CALIBRATION_CHECK_INTERVAL) {
+    calibration_check_counter = 0;
+    check_and_save_calibration_updates(bhi360_dev);
+}
+```
+
+### Calibration Data Storage
+
+Calibration profiles are stored in the file system:
+
+```
+/lfs1/calibration/
+├── bhi360_calib_accel.bin   # Accelerometer calibration
+└── bhi360_calib_gyro.bin    # Gyroscope calibration
+```
+
+File format:
+- 2 bytes: profile_size (uint16_t)
+- N bytes: profile_data (calibration data from BHI360)
+
 ## Implementation Guide
 
 ### Basic Implementation

@@ -13,12 +13,13 @@
 2. [Key Files](#key-files)
 3. [Important UUIDs](#important-uuids)
 4. [Command Values](#command-values)
-5. [Debug Commands](#debug-commands)
-6. [Common Issues](#common-issues)
-7. [Testing Checklist](#testing-checklist)
-8. [Code Patterns](#code-patterns)
-9. [Performance Tips](#performance-tips)
-10. [Security Notes](#security-notes)
+5. [Message Types](#message-types)
+6. [Debug Commands](#debug-commands)
+7. [Common Issues](#common-issues)
+8. [Testing Checklist](#testing-checklist)
+9. [Code Patterns](#code-patterns)
+10. [Performance Tips](#performance-tips)
+11. [Security Notes](#security-notes)
 
 ---
 
@@ -99,7 +100,35 @@ west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 0xFF - ALL
 ```
 
-## 5. Debug Commands
+## 5. Message Types
+
+### Calibration Messages
+```c
+MSG_TYPE_TRIGGER_BHI360_CALIBRATION  // Trigger calibration
+MSG_TYPE_REQUEST_BHI360_CALIBRATION  // Request stored calibration
+MSG_TYPE_BHI360_CALIBRATION_DATA     // Calibration data response
+MSG_TYPE_SAVE_BHI360_CALIBRATION     // Save calibration to storage
+```
+
+### Data Flow Messages
+```c
+MSG_TYPE_FOOT_SAMPLES         // Foot sensor data
+MSG_TYPE_BHI360_3D_MAPPING    // BHI360 quaternion + gyro
+MSG_TYPE_BHI360_LINEAR_ACCEL  // Linear acceleration
+MSG_TYPE_BHI360_STEP_COUNT    // Step counter data
+MSG_TYPE_BHI360_LOG_RECORD    // Complete BHI360 record for logging
+```
+
+### Control Messages
+```c
+MSG_TYPE_COMMAND              // Generic command string
+MSG_TYPE_DELETE_FOOT_LOG      // Delete foot sensor log
+MSG_TYPE_DELETE_BHI360_LOG    // Delete BHI360 log
+MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE  // New log file notification
+MSG_TYPE_NEW_BHI360_LOG_FILE       // New log file notification
+```
+
+## 6. Debug Commands
 
 ### Check Device Role
 ```bash
@@ -127,7 +156,7 @@ west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 "Both devices now complete, scheduling reset"
 ```
 
-## 6. Common Issues
+## 7. Common Issues
 
 ### 1. Commands Not Reaching Secondary
 - Check D2D connection established
@@ -144,7 +173,7 @@ west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 - Verify all includes present
 - Clean build directory
 
-## 7. Testing Checklist
+## 8. Testing Checklist
 
 ### Basic Connectivity
 - [ ] Primary advertises as "SensingGR"
@@ -163,7 +192,7 @@ west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 - [ ] Timeout works if secondary fails
 - [ ] Status notifications correct
 
-## 8. Code Patterns
+## 9. Code Patterns
 
 ### Adding New Command (Primary → Secondary)
 
@@ -196,14 +225,14 @@ static ssize_t d2d_new_command_write(...) {
 3. Add send function in D2D TX
 4. Call from secondary code
 
-## 9. Performance Tips
+## 10. Performance Tips
 
 1. Use write-without-response for speed
 2. Batch multiple commands when possible
 3. Monitor connection parameters
 4. Keep payloads small (<20 bytes)
 
-## 10. Security Notes
+## 11. Security Notes
 
 1. All characteristics use encryption
 2. Bonding required for phone connection
