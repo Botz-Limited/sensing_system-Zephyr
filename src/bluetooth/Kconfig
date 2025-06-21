@@ -114,4 +114,37 @@ config BLUETOOTH_MODULE_PRIORITY
 	int "BTH module thread priority"
 	default 4
 
+config FOTA_PROXY_TIMEOUT_SEC
+	int "FOTA proxy operation timeout in seconds"
+	default 300
+	help
+	  Timeout for FOTA proxy operations. If a FOTA operation
+	  doesn't complete within this time, it will be aborted.
+
+config FOTA_SYNC_TIMEOUT_SEC
+	int "FOTA synchronization timeout in seconds"
+	default 30
+	help
+	  Timeout for waiting for secondary device to complete FOTA
+	  when updating both devices. After this timeout, primary
+	  will reset anyway.
+
+config FILE_PROXY_TIMEOUT_SEC
+	int "File proxy operation timeout in seconds"
+	default 60
+	help
+	  Timeout for file proxy operations like file transfer.
+
+config D2D_DISCOVERY_RETRY_COUNT
+	int "D2D service discovery retry count"
+	default 3
+	help
+	  Number of times to retry D2D service discovery if it fails.
+
+config D2D_DISCOVERY_RETRY_DELAY_MS
+	int "D2D service discovery retry delay in milliseconds"
+	default 1000
+	help
+	  Delay between D2D service discovery retry attempts.
+
 endif # BLUETOOTH_MODULE

@@ -100,23 +100,28 @@ void motion_sensor_initializing_entry()
 
 static void motion_sensor_init()
 {
+    bool init_failed = false;
     motion_sensor_initializing_entry();
     LOG_INF("Starting BHI360 initialization using driver");
     
     // DRIVER_INTEGRATION: Check if driver is ready
     if (!device_is_ready(bhi360_dev)) {
         LOG_ERR("BHI360 device driver not ready");
-        return;
+        init_failed = true;
     }
     
     // DRIVER_INTEGRATION: Get BHY2 device handle from driver
-    bhy2_ptr = bhi360_get_bhy2_dev(bhi360_dev);
-    if (!bhy2_ptr) {
-        LOG_ERR("Failed to get BHY2 device handle from driver");
-        return;
+    if (!init_failed) {
+        bhy2_ptr = bhi360_get_bhy2_dev(bhi360_dev);
+        if (!bhy2_ptr) {
+            LOG_ERR("Failed to get BHY2 device handle from driver");
+            init_failed = true;
+        }
     }
     
-    LOG_INF("BHI360 driver ready, BHY2 handle obtained");
+    if (!init_failed) {
+        LOG_INF("BHI360 driver ready, BHY2 handle obtained");
+    }
     
     // DRIVER_INTEGRATION: Driver already performed:
     // - Hardware reset
@@ -128,38 +133,71 @@ static void motion_sensor_init()
     uint16_t version = 0;
     uint8_t hintr_ctrl, hif_ctrl, boot_status;
     
-    // Configure FIFO and interrupts (enable INT output)
-    hintr_ctrl = 0; // Enable all INT outputs
-    rslt = bhy2_set_host_interrupt_ctrl(hintr_ctrl, bhy2_ptr);
-    hif_ctrl = 0;
-    rslt = bhy2_set_host_intf_ctrl(hif_ctrl, bhy2_ptr);
+    if (!init_failed) {
+        // Configure FIFO and interrupts (enable INT output)
+        hintr_ctrl = 0; // Enable all INT outputs
+        rslt = bhy2_set_host_interrupt_ctrl(hintr_ctrl, bhy2_ptr);
+        if (rslt != BHY2_OK) {
+            LOG_ERR("Failed to set host interrupt control: %d", rslt);
+            init_failed = true;
+        }
+        
+        hif_ctrl = 0;
+        rslt = bhy2_set_host_intf_ctrl(hif_ctrl, bhy2_ptr);
+        if (rslt != BHY2_OK) {
+            LOG_ERR("Failed to set host interface control: %d", rslt);
+            init_failed = true;
+        }
+    }
     
     // Check boot status and upload firmware
-    rslt = bhy2_get_boot_status(&boot_status, bhy2_ptr);
-    if (boot_status & BHY2_BST_HOST_INTERFACE_READY) {
+    if (!init_failed) {
+        rslt = bhy2_get_boot_status(&boot_status, bhy2_ptr);
+        if (rslt != BHY2_OK) {
+            LOG_ERR("Failed to get boot status: %d", rslt);
+            init_failed = true;
+        } else if (!(boot_status & BHY2_BST_HOST_INTERFACE_READY)) {
+            LOG_ERR("BHI360: Host interface not ready");
+            init_failed = true;
+        }
+    }
+    
+    if (!init_failed) {
         LOG_INF("BHI360: Uploading firmware");
         rslt = upload_firmware(bhy2_ptr);
         if (rslt != BHY2_OK) {
             LOG_ERR("BHI360: Firmware upload failed");
-            return;
+            init_failed = true;
         }
         
         // Boot from RAM and verify
-        rslt = bhy2_boot_from_ram(bhy2_ptr);
-        rslt = bhy2_get_kernel_version(&version, bhy2_ptr);
-        if (rslt != BHY2_OK || version == 0) {
-            LOG_ERR("BHI360: Boot failed");
-            return;
+        if (!init_failed) {
+            rslt = bhy2_boot_from_ram(bhy2_ptr);
+            if (rslt != BHY2_OK) {
+                LOG_ERR("BHI360: Boot from RAM failed: %d", rslt);
+                init_failed = true;
+            }
         }
-        LOG_INF("BHI360: Boot successful, kernel version %u", version);
+        
+        if (!init_failed) {
+            rslt = bhy2_get_kernel_version(&version, bhy2_ptr);
+            if (rslt != BHY2_OK || version == 0) {
+                LOG_ERR("BHI360: Boot verification failed");
+                init_failed = true;
+            } else {
+                LOG_INF("BHI360: Boot successful, kernel version %u", version);
+            }
+        }
         
         // Update virtual sensor list
-        LOG_INF("BHI360: Updating virtual sensor list");
-        rslt = bhy2_update_virtual_sensor_list(bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        
-        // Register callbacks
-        LOG_INF("BHI360: Registering callbacks");
+        if (!init_failed) {
+            LOG_INF("BHI360: Updating virtual sensor list");
+            rslt = bhy2_update_virtual_sensor_list(bhy2_ptr);
+            if (rslt != BHY2_OK) {
+                LOG_ERR("Failed to update virtual sensor list: %d", rslt);
+                init_failed = true;
+            }
+        }
         
         // Configure sensor rates
         float motion_sensor_rate = 50.0f;
@@ -168,52 +206,85 @@ static void motion_sensor_init()
         uint32_t report_latency_ms = 0;
         
         // Configure sensors
-        LOG_INF("BHI360: Configuring sensors");
-        rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        
-        rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        
-        rslt = bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        
-        rslt = bhy2_set_virt_sensor_cfg(STEP_COUNTER_SENSOR_ID, step_counter_rate, report_latency_ms, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
+        if (!init_failed) {
+            LOG_INF("BHI360: Configuring sensors");
+            rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
+            if (rslt != BHY2_OK) {
+                LOG_ERR("Failed to configure quaternion sensor: %d", rslt);
+                init_failed = true;
+            }
+            
+            rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
+            if (rslt != BHY2_OK) {
+                LOG_ERR("Failed to configure linear acceleration sensor: %d", rslt);
+                init_failed = true;
+            }
+            
+            rslt = bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
+            if (rslt != BHY2_OK) {
+                LOG_ERR("Failed to configure gyroscope sensor: %d", rslt);
+                init_failed = true;
+            }
+            
+            rslt = bhy2_set_virt_sensor_cfg(STEP_COUNTER_SENSOR_ID, step_counter_rate, report_latency_ms, bhy2_ptr);
+            if (rslt != BHY2_OK) {
+                LOG_ERR("Failed to configure step counter sensor: %d", rslt);
+                init_failed = true;
+            }
+        }
         
         // Register callbacks
-        rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        rslt = bhy2_register_fifo_parse_callback(LACC_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        rslt = bhy2_register_fifo_parse_callback(GYRO_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        rslt = bhy2_register_fifo_parse_callback(STEP_COUNTER_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        rslt = bhy2_register_fifo_parse_callback(BHY2_SYS_ID_META_EVENT, parse_meta_event, NULL, bhy2_ptr);
-        print_api_error(rslt, bhy2_ptr);
-        
-        LOG_INF("BHI360: Initialization complete");
-        
-        // Request calibration data from data module
-        LOG_INF("BHI360: Requesting calibration data from data module");
-        generic_message_t request_msg = {};
-        request_msg.sender = SENDER_MOTION_SENSOR;
-        request_msg.type = MSG_TYPE_REQUEST_BHI360_CALIBRATION;
-        
-        if (k_msgq_put(&data_msgq, &request_msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to request calibration data from data module");
+        if (!init_failed) {
+            LOG_INF("BHI360: Registering callbacks");
+            rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+            rslt |= bhy2_register_fifo_parse_callback(LACC_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+            rslt |= bhy2_register_fifo_parse_callback(GYRO_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+            rslt |= bhy2_register_fifo_parse_callback(STEP_COUNTER_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+            rslt |= bhy2_register_fifo_parse_callback(BHY2_SYS_ID_META_EVENT, parse_meta_event, NULL, bhy2_ptr);
+            
+            if (rslt != BHY2_OK) {
+                LOG_ERR("Failed to register callbacks: %d", rslt);
+                init_failed = true;
+            }
         }
-    } else {
-        LOG_ERR("BHI360: Host interface not ready");
-        return;
+        
+        if (!init_failed) {
+            LOG_INF("BHI360: Initialization complete");
+            
+            // Request calibration data from data module
+            LOG_INF("BHI360: Requesting calibration data from data module");
+            generic_message_t request_msg = {};
+            request_msg.sender = SENDER_MOTION_SENSOR;
+            request_msg.type = MSG_TYPE_REQUEST_BHI360_CALIBRATION;
+            
+            if (k_msgq_put(&data_msgq, &request_msg, K_NO_WAIT) != 0) {
+                LOG_ERR("Failed to request calibration data from data module");
+            }
+        }
     }
     
-    // Start the motion sensor thread
-    motion_sensor_tid = k_thread_create(&motion_sensor_thread_data, motion_sensor_stack_area,
-                                        K_THREAD_STACK_SIZEOF(motion_sensor_stack_area), motion_sensor_process, nullptr,
-                                        nullptr, nullptr, motion_sensor_priority, 0, K_NO_WAIT);
-    LOG_INF("Motion Sensor Module Initialised");
+    // Handle initialization failure
+    if (init_failed) {
+        // Report error to Bluetooth module
+        send_error_to_bluetooth(SENDER_MOTION_SENSOR, err_t::MOTION_ERROR, true);
+        
+        #if IS_ENABLED(CONFIG_MOTION_SENSOR_OPTIONAL)
+        LOG_WRN("Motion sensor initialization failed but continuing (non-critical)");
+        module_set_state(MODULE_STATE_READY);
+        #else
+        LOG_ERR("Motion sensor initialization failed (critical)");
+        module_set_state(MODULE_STATE_ERROR);
+        return;
+        #endif
+    }
+    
+    // Start the motion sensor thread only if initialization succeeded
+    if (!init_failed) {
+        motion_sensor_tid = k_thread_create(&motion_sensor_thread_data, motion_sensor_stack_area,
+                                            K_THREAD_STACK_SIZEOF(motion_sensor_stack_area), motion_sensor_process, nullptr,
+                                            nullptr, nullptr, motion_sensor_priority, 0, K_NO_WAIT);
+        LOG_INF("Motion Sensor Module Initialised");
+    }
 }
 
 void motion_sensor_process(void *, void *, void *)
@@ -224,6 +295,12 @@ void motion_sensor_process(void *, void *, void *)
     uint32_t calibration_check_counter = 0;
     const uint32_t CALIBRATION_CHECK_INTERVAL = 1000; // Check every 1000 iterations
     generic_message_t msg;
+    
+    // Check if BHY2 pointer is valid (in case we're in degraded mode)
+    if (!bhy2_ptr) {
+        LOG_ERR("BHY2 pointer is null, cannot process sensor data");
+        return;
+    }
     
     while (true) {
         // Check for messages with a short timeout

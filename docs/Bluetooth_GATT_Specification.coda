@@ -19,7 +19,8 @@
 8. [Device-to-Device (D2D) Services](#8-device-to-device-d2d-services)
 9. [Data Structures](#9-data-structures)
 10. [Integration Examples](#10-integration-examples)
-11. [Error Codes and Troubleshooting](#11-error-codes-and-troubleshooting)
+11. [Error Handling and Status Communication](#11-error-handling-and-status-communication)
+12. [Common BLE Error Codes](#12-common-ble-error-codes)
 
 ---
 
@@ -566,9 +567,159 @@ asyncio.run(update_secondary_device("XX:XX:XX:XX:XX:XX", firmware_data))
 
 ---
 
-## 11. Error Codes and Troubleshooting
+## 11. Error Handling and Status Communication
 
-### Common BLE Error Codes
+### Status Characteristic Details
+
+The Status characteristic in the Information Service provides real-time device health monitoring through a 32-bit bitmask.
+
+#### Status Bit Definitions
+
+```c
+#define STATUS_OK                     0x00000000  // No errors
+#define STATUS_BATTERY_FAULT          (1 << 0)   // Battery fault detected
+#define STATUS_BLUETOOTH_ERROR        (1 << 4)   // Bluetooth communication error
+#define STATUS_HARDWARE_ERROR         (1 << 14)  // General hardware error
+#define STATUS_DATA_ERROR             (1 << 15)  // Data module error
+#define STATUS_DFU_ERROR              (1 << 16)  // DFU/firmware update error
+#define STATUS_ADC_ERROR              (1 << 18)  // ADC/foot sensor error
+#define STATUS_I2C_ERROR              (1 << 19)  // I2C communication error
+#define STATUS_BATTERY_DISCONNECTED   (1 << 20)  // Battery disconnected
+#define STATUS_MOTION_ERROR           (1 << 21)  // Motion sensor error
+#define STATUS_RTC_ERROR              (1 << 22)  // Real-time clock error
+#define STATUS_FILE_SYSTEM_ERROR      (1 << 23)  // File system error
+#define STATUS_PROTO_ENCODE_ERROR     (1 << 24)  // Protocol buffer encoding error
+#define STATUS_FILE_SYSTEM_NO_FILES   (1 << 25)  // No files in file system
+#define STATUS_FILE_SYSTEM_FULL       (1 << 26)  // File system storage full
+#define STATUS_FLASH_FAILURE          (1 << 27)  // Flash memory failure
+#define STATUS_INVALID_PARAMETER      (1 << 28)  // Invalid parameter error
+#define STATUS_QUEUE_FULL             (1 << 29)  // Message queue full
+```
+
+#### Status Examples
+
+```
+0x00000000 - System operating normally
+0x00040000 - ADC error (foot sensor failure)
+0x00200000 - Motion sensor error
+0x00240000 - Both ADC and motion sensor errors
+0x00800000 - File system error
+0x04000000 - File system full
+```
+
+### Sensor Criticality Configuration
+
+The firmware supports configurable sensor criticality, determining whether the system continues operating when a sensor fails.
+
+#### Build-Time Configuration
+
+```kconfig
+choice PRIMARY_SENSING_FUNCTION
+    prompt "Primary sensing function"
+    default PRIMARY_FUNCTION_BOTH
+    
+    config PRIMARY_FUNCTION_FOOT
+        bool "Foot pressure sensing is primary"
+        help
+          Motion sensor failures will be reported but system continues.
+        
+    config PRIMARY_FUNCTION_MOTION
+        bool "Motion/IMU sensing is primary"
+        help
+          Foot sensor failures will be reported but system continues.
+        
+    config PRIMARY_FUNCTION_BOTH
+        bool "Both sensors are required"
+        help
+          Either sensor failure will prevent system startup.
+endchoice
+```
+
+#### Behavior by Configuration
+
+| Configuration | Foot Sensor Fails | Motion Sensor Fails | Both Fail |
+|---:|---:|---:|---:|
+| **BOTH** (default) | System halts | System halts | System halts |
+| **FOOT** primary | System continues* | System halts | System halts |
+| **MOTION** primary | System halts | System continues* | System halts |
+
+*Error is reported via BLE status characteristic but system operates in degraded mode
+
+### Mobile App Status Handling
+
+#### iOS Swift Example
+
+```swift
+func parseDeviceStatus(_ statusValue: UInt32) -> [String] {
+    var errors: [String] = []
+    
+    if statusValue == 0 {
+        return ["System OK"]
+    }
+    
+    if statusValue & (1 << 18) != 0 {
+        errors.append("Foot sensor error")
+    }
+    if statusValue & (1 << 21) != 0 {
+        errors.append("Motion sensor error")
+    }
+    if statusValue & (1 << 23) != 0 {
+        errors.append("File system error")
+    }
+    if statusValue & (1 << 26) != 0 {
+        errors.append("Storage full")
+    }
+    
+    return errors
+}
+```
+
+#### Android Kotlin Example
+
+```kotlin
+fun parseDeviceStatus(statusValue: Int): List<String> {
+    val errors = mutableListOf<String>()
+    
+    if (statusValue == 0) {
+        return listOf("System OK")
+    }
+    
+    if (statusValue and (1 shl 18) != 0) {
+        errors.add("Foot sensor error")
+    }
+    if (statusValue and (1 shl 21) != 0) {
+        errors.add("Motion sensor error")
+    }
+    if (statusValue and (1 shl 23) != 0) {
+        errors.add("File system error")
+    }
+    if (statusValue and (1 shl 26) != 0) {
+        errors.add("Storage full")
+    }
+    
+    return errors
+}
+```
+
+### Error Priority Guidelines
+
+1. **Critical** (System cannot function):
+   - Bluetooth errors
+   - All sensors failed (if both required)
+
+2. **High** (Degraded operation):
+   - Single sensor failure
+   - Storage full
+
+3. **Medium** (Feature unavailable):
+   - RTC error
+   - Battery monitoring failure
+
+4. **Low** (Informational):
+   - Temporary file system errors
+   - Queue full (usually transient)
+
+## 12. Common BLE Error Codes
 
 | Error | Code | Description | Solution |
 |---:|---:|---:|---:|

@@ -14,6 +14,7 @@
 #define APP_INCLUDE_APP_FIXED_POINT_HEADER_
 
 #include <cstdint>
+#include "app.hpp"  // For bhi360_3d_mapping_t, bhi360_linear_accel_t, etc.
 
 // Scaling factors for fixed-point conversion
 namespace FixedPoint {

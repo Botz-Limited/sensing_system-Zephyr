@@ -10,6 +10,7 @@ target_include_directories(app PRIVATE
 # Add test sources only
 target_sources(app PRIVATE
     test_bluetooth_main.cpp
+    test_d2d_data_handler.cpp
 )
 
 # Set compile options

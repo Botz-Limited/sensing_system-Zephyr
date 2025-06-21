@@ -66,6 +66,8 @@ static struct bt_uuid_128 d2d_rx_stop_activity_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca85, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 static struct bt_uuid_128 d2d_rx_fota_status_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca86, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_trigger_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca87, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
 // Discovered characteristic handles
 struct d2d_discovered_handles {
@@ -75,6 +77,7 @@ struct d2d_discovered_handles {
     uint16_t start_activity_handle;
     uint16_t stop_activity_handle;
     uint16_t fota_status_handle;
+    uint16_t trigger_calibration_handle;
     bool discovery_complete;
 };
 
@@ -85,6 +88,7 @@ static struct d2d_discovered_handles d2d_handles = {
     .start_activity_handle = 0,
     .stop_activity_handle = 0,
     .fota_status_handle = 0,
+    .trigger_calibration_handle = 0,
     .discovery_complete = false
 };
 
@@ -107,6 +111,7 @@ enum discover_state {
     DISCOVER_START_ACTIVITY_CHAR,
     DISCOVER_STOP_ACTIVITY_CHAR,
     DISCOVER_FOTA_STATUS_CHAR,
+    DISCOVER_TRIGGER_CALIBRATION_CHAR,
     DISCOVER_COMPLETE
 };
 
@@ -182,6 +187,14 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
         if (bt_uuid_cmp(params->uuid, &d2d_rx_fota_status_uuid.uuid) == 0) {
             d2d_handles.fota_status_handle = bt_gatt_attr_value_handle(attr);
             LOG_INF("Found FOTA status characteristic, handle: %u", d2d_handles.fota_status_handle);
+            discovery_state = DISCOVER_TRIGGER_CALIBRATION_CHAR;
+        }
+        break;
+
+    case DISCOVER_TRIGGER_CALIBRATION_CHAR:
+        if (bt_uuid_cmp(params->uuid, &d2d_rx_trigger_calibration_uuid.uuid) == 0) {
+            d2d_handles.trigger_calibration_handle = bt_gatt_attr_value_handle(attr);
+            LOG_INF("Found trigger calibration characteristic, handle: %u", d2d_handles.trigger_calibration_handle);
             discovery_state = DISCOVER_COMPLETE;
             d2d_handles.discovery_complete = true;
             LOG_INF("D2D service discovery complete!");
@@ -251,6 +264,9 @@ static void continue_discovery(void)
         break;
     case DISCOVER_FOTA_STATUS_CHAR:
         discover_params.uuid = &d2d_rx_fota_status_uuid.uuid;
+        break;
+    case DISCOVER_TRIGGER_CALIBRATION_CHAR:
+        discover_params.uuid = &d2d_rx_trigger_calibration_uuid.uuid;
         break;
     default:
         LOG_INF("Discovery sequence complete");
@@ -350,12 +366,24 @@ int ble_d2d_tx_send_trigger_bhi360_calibration_command(uint8_t value) {
         return -ENOTCONN;
     }
     
-    // For now, we'll just log this since the handle isn't discovered yet
-    // This would need to be added to the discovery process
-    LOG_INF("D2D TX: Trigger BHI360 calibration command - value: %u (not implemented in discovery yet)", value);
+    if (!d2d_handles.discovery_complete || d2d_handles.trigger_calibration_handle == 0) {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
     
-    // TODO: Add calibration characteristic to discovery and use proper handle
-    // For now, return success to not break the flow
+    LOG_INF("D2D TX: Forwarding trigger BHI360 calibration command - value: %u to handle: %u", 
+            value, d2d_handles.trigger_calibration_handle);
+    
+    int err = bt_gatt_write_without_response(d2d_conn, 
+                                            d2d_handles.trigger_calibration_handle,
+                                            &value, 
+                                            sizeof(value), 
+                                            false);
+    if (err) {
+        LOG_ERR("D2D TX: Failed to send trigger calibration command (err %d)", err);
+        return err;
+    }
+    
     return 0;
 }
 

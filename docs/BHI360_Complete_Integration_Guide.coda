@@ -29,31 +29,12 @@ The BHI360 is a smart sensor hub from Bosch that combines multiple MEMS sensors 
 
 ### System Components
 
-```
-┌─────────────────────┐
-│   Application       │
-│ (motion_sensor.cpp) │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│   BHI360 Driver     │
-│ (bhi360_zephyr.c)   │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│ Calibration Module  │
-│(bhi360_calibration) │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│   BHY2 API         │
-│ (Bosch Library)     │
-└──────────┬──────────┘
-           │
-┌──────────▼──────────┐
-│  Hardware (SPI)     │
-│   BHI360 Chip       │
-└─────────────────────┘
+```mermaid
+graph TD
+    A[Application<br/>motion_sensor.cpp] --> B[BHI360 Driver<br/>bhi360_zephyr.c]
+    B --> C[Calibration Module<br/>bhi360_calibration]
+    C --> D[BHY2 API<br/>Bosch Library]
+    D --> E[Hardware SPI<br/>BHI360 Chip]
 ```
 
 ### Data Flow
@@ -162,26 +143,15 @@ The BHI360 reports calibration status on a 0-4 scale:
 
 ### Calibration Process Flow
 
-```
-Start
-  │
-  ▼
-Check Status ──────► Status ≥ Threshold? ──Yes──► Skip Calibration
-  │                          │
-  │                          No
-  │                          ▼
-  │                    Gyro Calibration
-  │                    (Device Stationary)
-  │                          │
-  │                          ▼
-  │                    Accel Calibration
-  │                    (Device Flat, Z-up)
-  │                          │
-  │                          ▼
-  │                    Update Status
-  │                          │
-  ▼                          ▼
-Continue ◄──────���───────────┘
+```mermaid
+graph TD
+    A[Start] --> B{Check Status}
+    B -->|Status >= Threshold| C[Skip Calibration]
+    B -->|Status < Threshold| D[Gyro Calibration<br/>Device Stationary]
+    D --> E[Accel Calibration<br/>Device Flat, Z-up]
+    E --> F[Update Status]
+    F --> G[Continue]
+    C --> G
 ```
 
 ## Configuration Options
@@ -606,7 +576,7 @@ Calibration files are stored in:
 ```
 /lfs1/calibration/
 ├── bhi360_calib_accel.bin   # Accelerometer calibration
-��── bhi360_calib_gyro.bin    # Gyroscope calibration
+└── bhi360_calib_gyro.bin    # Gyroscope calibration
 ```
 
 ### Storage API

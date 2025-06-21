@@ -132,7 +132,7 @@ static ssize_t file_proxy_command_write(struct bt_conn *conn,
                     file_proxy_state.current_target == FILE_TARGET_PRIMARY ? "primary" : "secondary");
             
             // Start timeout timer
-            k_work_schedule(&file_timeout_work, K_SECONDS(10));
+            k_work_schedule(&file_timeout_work, K_SECONDS(CONFIG_FILE_PROXY_TIMEOUT_SEC / 6)); // Shorter for list operation
             
             // Submit work to handle the operation
             k_work_submit(&file_work);
@@ -156,7 +156,7 @@ static ssize_t file_proxy_command_write(struct bt_conn *conn,
                     file_proxy_state.current_target == FILE_TARGET_PRIMARY ? "primary" : "secondary");
             
             // Start timeout timer
-            k_work_schedule(&file_timeout_work, K_SECONDS(60));
+            k_work_schedule(&file_timeout_work, K_SECONDS(CONFIG_FILE_PROXY_TIMEOUT_SEC));
             
             // Submit work to handle the operation
             k_work_submit(&file_work);

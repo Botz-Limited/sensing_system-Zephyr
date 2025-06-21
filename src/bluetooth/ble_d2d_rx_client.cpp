@@ -13,6 +13,7 @@
 #include <zephyr/kernel.h>
 
 #include "ble_d2d_rx_client.hpp"
+#include "d2d_data_handler.hpp"
 #include <app.hpp>
 
 LOG_MODULE_REGISTER(d2d_rx_client, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
@@ -103,6 +104,9 @@ static uint8_t foot_sensor_notify_handler(struct bt_conn *conn,
     LOG_INF("  Channel 6: %u", samples->values[6]);
     LOG_INF("  Channel 7: %u", samples->values[7]);
 
+    // Process the data through the handler
+    d2d_data_handler_process_foot_samples(samples);
+
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -130,6 +134,9 @@ static uint8_t bhi360_data1_notify_handler(struct bt_conn *conn,
     LOG_INF("  Accel: X=%.2f, Y=%.2f, Z=%.2f",
             (double)mapping->accel_x, (double)mapping->accel_y, (double)mapping->accel_z);
 
+    // Process the data through the handler
+    d2d_data_handler_process_bhi360_3d_mapping(mapping);
+
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -154,6 +161,9 @@ static uint8_t bhi360_data2_notify_handler(struct bt_conn *conn,
     LOG_INF("=== RECEIVED BHI360 STEP COUNT FROM SECONDARY ===");
     LOG_INF("  Steps: %u", steps->step_count);
     LOG_INF("  Activity Duration: %u seconds", steps->activity_duration_s);
+
+    // Process the data through the handler
+    d2d_data_handler_process_bhi360_step_count(steps);
 
     return BT_GATT_ITER_CONTINUE;
 }
@@ -180,6 +190,9 @@ static uint8_t bhi360_data3_notify_handler(struct bt_conn *conn,
     LOG_INF("  Linear Accel: X=%.2f, Y=%.2f, Z=%.2f",
             (double)accel->x, (double)accel->y, (double)accel->z);
 
+    // Process the data through the handler
+    d2d_data_handler_process_bhi360_linear_accel(accel);
+
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -201,6 +214,9 @@ static uint8_t status_notify_handler(struct bt_conn *conn,
 
     uint32_t status = *(const uint32_t *)data;
     LOG_INF("=== RECEIVED STATUS FROM SECONDARY: 0x%08x ===", status);
+
+    // Process the data through the handler
+    d2d_data_handler_process_status(status);
 
     return BT_GATT_ITER_CONTINUE;
 }
@@ -224,6 +240,9 @@ static uint8_t charge_status_notify_handler(struct bt_conn *conn,
     uint8_t charge_status = *(const uint8_t *)data;
     LOG_INF("=== RECEIVED CHARGE STATUS FROM SECONDARY: %u ===", charge_status);
 
+    // Process the data through the handler
+    d2d_data_handler_process_charge_status(charge_status);
+
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -246,6 +265,9 @@ static uint8_t foot_log_notify_handler(struct bt_conn *conn,
     uint8_t log_id = *(const uint8_t *)data;
     LOG_INF("=== RECEIVED FOOT LOG AVAILABLE FROM SECONDARY: ID=%u ===", log_id);
 
+    // Process the data through the handler
+    d2d_data_handler_process_log_available(log_id, 0); // 0 = foot sensor log type
+
     return BT_GATT_ITER_CONTINUE;
 }
 
@@ -267,6 +289,9 @@ static uint8_t bhi360_log_notify_handler(struct bt_conn *conn,
 
     uint8_t log_id = *(const uint8_t *)data;
     LOG_INF("=== RECEIVED BHI360 LOG AVAILABLE FROM SECONDARY: ID=%u ===", log_id);
+
+    // Process the data through the handler
+    d2d_data_handler_process_log_available(log_id, 1); // 1 = BHI360 log type
 
     return BT_GATT_ITER_CONTINUE;
 }

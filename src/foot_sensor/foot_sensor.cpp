@@ -83,7 +83,7 @@ static constexpr uint8_t TIMER_INSTANCE_ID = 0;
 // Forward declarations
 static void saadc_event_handler(nrfx_saadc_evt_t const *p_event);
 static void timer_handler(nrf_timer_event_t event_type, void *p_context);
-static void init_saadc(void);
+static err_t init_saadc(void);
 static void init_timer(void);
 static void calibrate_saadc_channels(void);
 void init_dppi(void);
@@ -135,12 +135,35 @@ void foot_sensor_initializing_entry()
 
 static void foot_sensor_init()
 {
+    bool init_failed = false;
+    err_t result = err_t::NO_ERROR;
+    
     foot_sensor_initializing_entry(); // This function is currently empty
 
     // All hardware initialization (SAADC, Timer, DPPI) should be done here
     init_dppi();
     init_timer();
-    init_saadc(); // This will internally call init_timer() and init_dppi()
+    
+    // Initialize SAADC and check result
+    result = init_saadc();
+    if (result != err_t::NO_ERROR) {
+        LOG_ERR("SAADC initialization failed");
+        init_failed = true;
+    }
+
+    if (init_failed) {
+        // Report error to Bluetooth module
+        send_error_to_bluetooth(SENDER_FOOT_SENSOR_THREAD, err_t::ADC_ERROR, true);
+        
+        #if IS_ENABLED(CONFIG_FOOT_SENSOR_OPTIONAL)
+        LOG_WRN("Foot sensor initialization failed but continuing (non-critical)");
+        module_set_state(MODULE_STATE_READY);
+        #else
+        LOG_ERR("Foot sensor initialization failed (critical)");
+        module_set_state(MODULE_STATE_ERROR);
+        #endif
+        return;
+    }
 
     // Initiate the software calibration process.
     // The actual calibration samples will be collected by the SAADC_DONE handler
@@ -369,7 +392,7 @@ void init_dppi(void)
 }
 
 // --- Initialize SAADC and channels ---
-static void init_saadc(void)
+static err_t init_saadc(void)
 {
     nrfx_err_t err;
 
@@ -378,7 +401,7 @@ static void init_saadc(void)
     if (err != NRFX_SUCCESS)
     {
         LOG_ERR("SAADC driver init failed: %d", err);
-        return;
+        return err_t::ADC_ERROR;
     }
 
     // 2. Configure global SAADC settings using NRFY HAL functions.
@@ -407,7 +430,7 @@ static void init_saadc(void)
     if (err != NRFX_SUCCESS)
     {
         LOG_ERR("Failed to configure all SAADC channels: %d", err);
-        return;
+        return err_t::ADC_ERROR;
     }
 
     // Set up advanced mode for external triggering and continuous sampling.
@@ -421,7 +444,7 @@ static void init_saadc(void)
     if (err != NRFX_SUCCESS)
     {
         LOG_ERR("SAADC advanced mode set failed: %d", err);
-        return;
+        return err_t::ADC_ERROR;
     }
 
     // Enable the SAADC peripheral after all configuration.
@@ -431,19 +454,21 @@ static void init_saadc(void)
     if (err != NRFX_SUCCESS)
     {
         LOG_ERR("SAADC buffer 0 set failed: %d", err);
-        return;
+        return err_t::ADC_ERROR;
     }
     err = nrfx_saadc_buffer_set(saadc_buffer[1], SAADC_BUFFER_SIZE);
     if (err != NRFX_SUCCESS)
     {
         LOG_ERR("SAADC buffer 1 set failed: %d", err);
-        return;
+        return err_t::ADC_ERROR;
     }
 
     // This starts the first conversion cycle. After this, the DPPI chain
     // (Timer -> SAADC SAMPLE, and SAADC END -> SAADC START) will keep it going.
     // nrf_saadc_task_trigger(NRF_SAADC, NRF_SAADC_TASK_START); // <-- UN-COMMENT THIS LINE!
     nrfx_saadc_offset_calibrate(saadc_event_handler); // This is for calibration, not continuous sampling initiation.
+    
+    return err_t::NO_ERROR;
 }
 
 // --- IRQ handler for SAADC (call nrfx handler) ---

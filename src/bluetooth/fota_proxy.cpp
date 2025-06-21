@@ -123,7 +123,7 @@ static ssize_t fota_proxy_command_write(struct bt_conn *conn,
                 LOG_INF("Starting FOTA update, total size: %u bytes", fota_proxy_state.total_size);
                 
                 // Start timeout timer
-                k_work_schedule(&fota_timeout_work, K_SECONDS(300)); // 5 minute timeout
+                k_work_schedule(&fota_timeout_work, K_SECONDS(CONFIG_FOTA_PROXY_TIMEOUT_SEC));
                 
                 // Forward to secondary if needed
                 if (fota_proxy_state.current_target == FOTA_TARGET_SECONDARY ||
@@ -209,7 +209,7 @@ static ssize_t fota_proxy_command_write(struct bt_conn *conn,
                     LOG_INF("Waiting for secondary device to complete FOTA...");
                     
                     // Set a timeout in case secondary fails
-                    k_work_schedule(&fota_reset_work, K_SECONDS(30));
+                    k_work_schedule(&fota_reset_work, K_SECONDS(CONFIG_FOTA_SYNC_TIMEOUT_SEC));
                 }
             } else if (fota_proxy_state.current_target == FOTA_TARGET_PRIMARY) {
                 // Primary only, reset after delay
