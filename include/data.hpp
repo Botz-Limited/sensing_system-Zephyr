@@ -35,12 +35,14 @@ uint8_t find_oldest_log_file(const char *file_prefix, record_type_t record_type,
 // File prefixes for each sensor type
 constexpr char foot_sensor_file_prefix[] = "foot_";
 constexpr char bhi360_file_prefix[] = "bhi360_";
+constexpr char activity_file_prefix[] = "activity_";
 
 
 constexpr char hardware_dir_path[] = CONFIG_FILE_SYSTEM_MOUNT "/hardware";
 
 extern char foot_sensor_file_path[util::max_path_length];
 extern char bhi360_file_path[util::max_path_length];
+extern char activity_file_path[util::max_path_length];
 
 // BHI360 calibration API functions
 err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data, 

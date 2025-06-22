@@ -29,6 +29,9 @@
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "../bluetooth/ble_d2d_tx.hpp"
 #endif
+
+// Include 3D orientation service for high-rate updates
+#include "../bluetooth/orientation_3d_service.hpp"
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
@@ -383,6 +386,34 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             latest_quat_accuracy = (float)data.accuracy;
             latest_timestamp = *callback_info->time_stamp * 15625; // Convert to nanoseconds
             motion_update_mask |= QUAT_UPDATED;
+            
+            // Send high-rate update for 3D visualization only when NOT logging
+            // When logging is active, quaternion data is sent via the regular logging path
+            if (atomic_get(&logging_active) == 0) {
+                #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                // Primary device: update local orientation service
+                orientation_3d_update_primary(latest_quat_w, latest_quat_x, latest_quat_y, latest_quat_z);
+                #else
+                // Secondary device: send to primary via D2D at high rate
+                // Create a simple quaternion-only message for high-rate transmission
+                static uint32_t quat_counter = 0;
+                if (++quat_counter >= 1) { // Send every quaternion update (50Hz)
+                    quat_counter = 0;
+                    // Use existing D2D infrastructure but with quaternion-focused data
+                    bhi360_3d_mapping_t quat_msg = {
+                        .accel_x = latest_quat_x,
+                        .accel_y = latest_quat_y,
+                        .accel_z = latest_quat_z,
+                        .gyro_x = 0.0f,
+                        .gyro_y = 0.0f,
+                        .gyro_z = 0.0f,
+                        .quat_w = latest_quat_w
+                    };
+                    ble_d2d_tx_send_bhi360_data1(&quat_msg);
+                }
+                #endif
+            }
+            
             break;
         }
         case LACC_SENSOR_ID: {
@@ -519,10 +550,27 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             // Secondary device: Send to primary via D2D
             ble_d2d_tx_send_bhi360_data2(&smsg.data.bhi360_step_count);
 #endif
+
+            // Also send activity step count to data module for activity file
+            generic_message_t activity_msg{};
+            activity_msg.sender = SENDER_MOTION_SENSOR;
+            activity_msg.type = MSG_TYPE_ACTIVITY_STEP_COUNT;
+            // For now, we'll put all steps on the left foot (primary device)
+            // In the future, this could be split based on device role
+            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            activity_msg.data.activity_step_count.left_step_count = latest_step_count;
+            activity_msg.data.activity_step_count.right_step_count = 0;
+            #else
+            activity_msg.data.activity_step_count.left_step_count = 0;
+            activity_msg.data.activity_step_count.right_step_count = latest_step_count;
+            #endif
+            k_msgq_put(&data_msgq, &activity_msg, K_NO_WAIT);
         }
     }
 }
 
+// Currently unused - kept for future debugging
+#if 0
 static void print_api_error(int8_t rslt, struct bhy2_dev *dev)
 {
     // [Implementation remains unchanged]
@@ -534,6 +582,7 @@ static void print_api_error(int8_t rslt, struct bhy2_dev *dev)
         }
     }
 }
+#endif
 
 static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref)
 {
@@ -854,7 +903,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
             strncpy(cmd_msg.fw_version, CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION, sizeof(cmd_msg.fw_version) - 1);
             cmd_msg.fw_version[sizeof(cmd_msg.fw_version) - 1] = '\0';
 
-            LOG_INF("Motion sensor sending stop command: '%s', type: %d", cmd_msg.data.command_str, cmd_msg.type);
+            LOG_INF("Motion sensor sending start command: '%s', type: %d", cmd_msg.data.command_str, cmd_msg.type);
             int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
             if (cmd_ret == 0)
             {
@@ -864,6 +913,26 @@ static bool app_event_handler(const struct app_event_header *aeh)
             else
             {
                 LOG_ERR("Failed to send START_LOGGING_BHI360 command: %d", cmd_ret);
+            }
+            
+            // Also start activity logging
+            generic_message_t activity_cmd_msg = {};
+            activity_cmd_msg.sender = SENDER_MOTION_SENSOR;
+            activity_cmd_msg.type = MSG_TYPE_COMMAND;
+            activity_cmd_msg.sampling_frequency = configured_sample_rate;
+            strncpy(activity_cmd_msg.fw_version, CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION, sizeof(activity_cmd_msg.fw_version) - 1);
+            activity_cmd_msg.fw_version[sizeof(activity_cmd_msg.fw_version) - 1] = '\0';
+            strncpy(activity_cmd_msg.data.command_str, "START_LOGGING_ACTIVITY", sizeof(activity_cmd_msg.data.command_str) - 1);
+            activity_cmd_msg.data.command_str[sizeof(activity_cmd_msg.data.command_str) - 1] = '\0';
+            LOG_INF("Motion sensor sending start activity command: '%s'", activity_cmd_msg.data.command_str);
+            cmd_ret = k_msgq_put(&data_msgq, &activity_cmd_msg, K_NO_WAIT);
+            if (cmd_ret == 0)
+            {
+                LOG_INF("Sent START_LOGGING_ACTIVITY command");
+            }
+            else
+            {
+                LOG_ERR("Failed to send START_LOGGING_ACTIVITY command: %d", cmd_ret);
             }
         }
         return false;
@@ -887,6 +956,23 @@ static bool app_event_handler(const struct app_event_header *aeh)
             else
             {
                 LOG_ERR("Failed to send STOP_LOGGING_BHI360 command: %d", cmd_ret);
+            }
+            
+            // Also stop activity logging
+            generic_message_t activity_cmd_msg = {};
+            activity_cmd_msg.sender = SENDER_MOTION_SENSOR;
+            activity_cmd_msg.type = MSG_TYPE_COMMAND;
+            strncpy(activity_cmd_msg.data.command_str, "STOP_LOGGING_ACTIVITY", sizeof(activity_cmd_msg.data.command_str) - 1);
+            activity_cmd_msg.data.command_str[sizeof(activity_cmd_msg.data.command_str) - 1] = '\0';
+            LOG_INF("Motion sensor sending stop activity command: '%s'", activity_cmd_msg.data.command_str);
+            cmd_ret = k_msgq_put(&data_msgq, &activity_cmd_msg, K_NO_WAIT);
+            if (cmd_ret == 0)
+            {
+                LOG_INF("Sent STOP_LOGGING_ACTIVITY command");
+            }
+            else
+            {
+                LOG_ERR("Failed to send STOP_LOGGING_ACTIVITY command: %d", cmd_ret);
             }
         }
         return false;

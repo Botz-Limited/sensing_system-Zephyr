@@ -1,7 +1,7 @@
 # Sensor Logging Specification
 
-**Version:** 1.0  
-**Date:** June 2025  
+**Version:** 1.2  
+**Date:** December 2024  
 **Scope:** Complete specification for sensor data logging, file formats, retrieval methods, and analysis tools  
 **Purpose:** Comprehensive reference for developers implementing logging features, parsing log files, and analyzing sensor data
 
@@ -12,10 +12,10 @@
 1. [Introduction](#1-introduction)
 2. [System Architecture](#2-system-architecture)
 3. [File Formats](#3-file-formats)
-4. [Timing Mechanism](#4-timing-mechanism)
-5. [Foot Sensor Logs](#5-foot-sensor-logs)
-6. [BHI360 Motion Sensor Logs](#6-bhi360-motion-sensor-logs)
-7. [Activity Logs](#7-activity-logs)
+4. [Activity Logs](#4-activity-logs)
+5. [Timing Mechanism](#5-timing-mechanism)
+6. [Foot Sensor Logs](#6-foot-sensor-logs)
+7. [BHI360 Motion Sensor Logs](#7-bhi360-motion-sensor-logs)
 8. [BLE Interface](#8-ble-interface)
 9. [File Retrieval Methods](#9-file-retrieval-methods)
 10. [Log Decoder Tools](#10-log-decoder-tools)
@@ -28,7 +28,7 @@
 
 ## 1. Introduction
 
-The sensing firmware implements a comprehensive logging system for capturing and storing sensor data from foot pressure sensors, BHI360 motion sensors, and activity tracking. The system is designed for efficiency, accuracy, and ease of integration.
+The sensing firmware implements a comprehensive logging system for capturing and storing sensor data from foot pressure sensors, BHI360 motion sensors, and activity metrics. The system is designed for efficiency, accuracy, and ease of integration.
 
 ### Key Features
 
@@ -37,25 +37,17 @@ The sensing firmware implements a comprehensive logging system for capturing and
 - **Dual Device Support**: Access logs from both primary and secondary devices
 - **Multiple Access Methods**: BLE characteristics, SMP file transfer, shell commands
 - **Analysis Tools**: On-device and host-side decoders with timing validation
-- **Activity Tracking**: Integrated step counting and activity metrics
 
 ### Storage Efficiency
 
-```mermaid
-graph LR
-    subgraph "Float Format (Old)"
-        F1[55 bytes/record<br/>@ 50Hz]
-        F2[10 MB/hour]
-    end
-    
-    subgraph "Fixed-Point Format (New)"
-        X1[32 bytes/record<br/>@ 50Hz]
-        X2[5.8 MB/hour]
-    end
-    
-    F1 -->|"-42%"| X1
-    F2 -->|"-42%"| X2
-```
+DrawFlowchart(
+  Syntax(
+    "F1[55 bytes/record<br/>@ 50Hz] -->|-42%| X1[32 bytes/record<br/>@ 50Hz]",
+    "F2[10 MB/hour] -->|-42%| X2[5.8 MB/hour]"
+  ),
+  "LR",
+  "default"
+)
 
 ---
 
@@ -63,61 +55,36 @@ graph LR
 
 ### Logging Flow
 
-```mermaid
-graph TB
-    subgraph "Sensors"
-        FOOT[Foot Pressure<br/>8 channels @ 20Hz]
-        BHI[BHI360 IMU<br/>Motion @ 50Hz<br/>Steps @ 5Hz]
-    end
-    
-    subgraph "Processing"
-        CONV[Fixed-Point<br/>Converter]
-        TIME[Delta Timestamp<br/>Generator]
-        PROTO[Protobuf<br/>Encoder]
-        ACT[Activity<br/>Processor]
-    end
-    
-    subgraph "Storage"
-        FS[LittleFS<br/>/lfs1/hardware/]
-        FOOT_LOG[foot_XXX.pb]
-        BHI_LOG[bhi360_XXX.pb]
-        ACT_LOG[activity_XXX.pb]
-    end
-    
-    subgraph "Access"
-        BLE[BLE Services]
-        SMP[SMP Server]
-        SHELL[Shell Commands]
-    end
-    
-    FOOT --> CONV
-    BHI --> CONV
-    FOOT --> ACT
-    BHI --> ACT
-    CONV --> TIME
-    ACT --> TIME
-    TIME --> PROTO
-    PROTO --> FS
-    FS --> FOOT_LOG
-    FS --> BHI_LOG
-    FS --> ACT_LOG
-    
-    FOOT_LOG --> BLE
-    BHI_LOG --> BLE
-    ACT_LOG --> BLE
-    FOOT_LOG --> SMP
-    BHI_LOG --> SMP
-    ACT_LOG --> SMP
-    FOOT_LOG --> SHELL
-    BHI_LOG --> SHELL
-    ACT_LOG --> SHELL
-```
+DrawFlowchart(
+  Syntax(
+    "FOOT[Foot Pressure<br/>8 channels @ 20Hz] --> CONV[Fixed-Point<br/>Converter]",
+    "BHI[BHI360 IMU<br/>Motion @ 50Hz<br/>Steps @ 5Hz] --> CONV",
+    "ACT[Activity Metrics<br/>Step Count] --> CONV",
+    "CONV --> TIME[Delta Timestamp<br/>Generator]",
+    "TIME --> PROTO[Protobuf<br/>Encoder]",
+    "PROTO --> FS[LittleFS<br/>/lfs1/hardware/]",
+    "FS --> FOOT_LOG[foot_XXX.pb]",
+    "FS --> BHI_LOG[bhi360_XXX.pb]",
+    "FS --> ACT_LOG[activity_XXX.bin]",
+    "FOOT_LOG --> BLE[BLE Services]",
+    "BHI_LOG --> BLE",
+    "ACT_LOG --> BLE",
+    "FOOT_LOG --> SMP[SMP Server]",
+    "BHI_LOG --> SMP",
+    "ACT_LOG --> SMP",
+    "FOOT_LOG --> SHELL[Shell Commands]",
+    "BHI_LOG --> SHELL",
+    "ACT_LOG --> SHELL"
+  ),
+  "TB",
+  "default"
+)
 
 ### File Naming Convention
 
 ```
-/lfs1/hardware/foot_XXX.pb      # Foot sensor logs (XXX = 001-999)
-/lfs1/hardware/bhi360_XXX.pb    # BHI360 logs (XXX = 001-999)
+/lfs1/hardware/foot_XXX.pb    # Foot sensor logs (XXX = 001-999)
+/lfs1/hardware/bhi360_XXX.pb  # BHI360 logs (XXX = 001-999)
 /lfs1/hardware/activity_XXX.pb  # Activity logs (XXX = 001-999)
 ```
 
@@ -129,14 +96,17 @@ graph TB
 
 All log files follow the same basic structure using Protocol Buffers:
 
-```mermaid
-graph LR
-    A[Header<br/>~50-100 bytes] --> B[Data Packet 1<br/>delta=0]
-    B --> C[Data Packet 2<br/>delta=Δt]
-    C --> D[...]
-    D --> E[Data Packet N<br/>delta=Δt]
-    E --> F[Session End<br/>~15 bytes]
-```
+DrawFlowchart(
+  Syntax(
+    "A[Header ~50-100 bytes] --> B[Data Packet 1 delta=0]",
+    "B --> C[Data Packet 2 delta=Δt]",
+    "C --> D[...]",
+    "D --> E[Data Packet N delta=Δt]",
+    "E --> F[Session End ~15 bytes]"
+  ),
+  "LR",
+  "default"
+)
 
 ### Binary Layout
 
@@ -155,30 +125,34 @@ The binary file structure uses Protocol Buffers encoding with the following layo
 
 ### File Structure Flow
 
-```mermaid
-graph LR
-    subgraph "File Start"
-        H[Header Message<br/>fw_version<br/>frequency<br/>message_type]
-    end
+DrawFlowchart(
+  Syntax(
+    // File Start
+    "subgraph File Start",
+    "H[Header Message<br/>fw_version<br/>frequency<br/>message_type]",
+    "end",
     
-    subgraph "Data Section"
-        P1[Packet 1<br/>sensor_data<br/>delta_ms = 0]
-        P2[Packet 2<br/>sensor_data<br/>delta_ms = Δt]
-        PN[Packet N<br/>sensor_data<br/>delta_ms = Δt]
-    end
+    // Data Section
+    "subgraph Data Section",
+    "P1[Packet 1<br/>sensor_data<br/>delta_ms = 0]",
+    "P2[Packet 2<br/>sensor_data<br/>delta_ms = Δt]",
+    "PN[Packet N<br/>sensor_data<br/>delta_ms = Δt]",
+    "end",
     
-    subgraph "File End"
-        E[Session End<br/>uptime_ms]
-    end
+    // File End
+    "subgraph File End",
+    "E[Session End<br/>uptime_ms]",
+    "end",
     
-    H --> P1
-    P1 --> P2
-    P2 -.-> PN
-    PN --> E
-    
-    style H fill:#f9f,stroke:#333,stroke-width:2px
-    style E fill:#9ff,stroke:#333,stroke-width:2px
-```
+    // Connections
+    "H --> P1",
+    "P1 --> P2",
+    "P2 -.-> PN",
+    "PN --> E"
+  ),
+  "LR",
+  "default"
+)
 
 **Key Points:**
 - **Header**: Contains metadata about the log file (firmware version, sampling frequency, message type)
@@ -188,7 +162,70 @@ graph LR
 
 ---
 
-## 4. Timing Mechanism
+## 4. Activity Logs
+
+### Overview
+
+Activity logs capture session-based metrics including step count data from the BHI360 sensor. These logs are created when an activity session is started and stopped.
+
+### Specifications
+
+| Parameter | Value |
+|---:|---:|
+| File Format | Binary (protobuf) |
+| File Naming | `activity_XXX.pb` (XXX = 001-999) |
+| Data Type | Activity step count |
+| Storage Location | `/lfs1/hardware/` |
+
+### Data Structure
+
+```c
+// Activity log message
+message ActivityLogMessage {
+    oneof payload {
+        ActivityStepCount step_count = 1;
+        ActivitySessionEnd session_end = 2;
+    }
+}
+
+// Step count data
+message ActivityStepCount {
+    uint32 step_count = 1;
+    uint32 activity_duration_s = 2;
+}
+
+// Session end marker
+message ActivitySessionEnd {
+    uint64 uptime_ms = 1;
+}
+```
+
+### File Structure
+
+DrawFlowchart(
+  Syntax(
+    "A[Start Activity] --> B[Create activity_XXX.pb]",
+    "B --> C[Write Step Count step_count, duration]",
+    "C --> D[Update periodically]",
+    "D --> E[Stop Activity]",
+    "E --> F[Write Session End uptime_ms]",
+    "F --> G[Close File]"
+  ),
+  "TD",
+  "default"
+)
+
+### BLE Characteristics
+
+| Characteristic | UUID Suffix | Type | Description |
+|---:|---:|---:|---:|
+| Activity Log Available | `...eb6` | uint8_t | Latest closed log ID |
+| Activity Log Path | `...eb7` | string | File path |
+| Delete Activity Log | `...b687` | uint8_t | Delete by log ID |
+
+---
+
+## 5. Timing Mechanism
 
 ### Delta Timestamp System
 
@@ -201,29 +238,26 @@ To minimize storage overhead while maintaining timing accuracy:
 
 ### Timestamp Reconstruction
 
-```mermaid
-sequenceDiagram
-    participant Decoder
-    participant File
-    
-    Decoder->>File: Read Header
-    File-->>Decoder: sampling_frequency
-    
-    Note over Decoder: absolute_time = 0
-    
-    loop For each packet
-        Decoder->>File: Read Packet
-        File-->>Decoder: delta_ms, data
-        
-        alt First packet
-            Note over Decoder: absolute_time = 0
-        else Subsequent packets
-            Note over Decoder: absolute_time += delta_ms
-        end
-        
-        Note over Decoder: Process data with absolute_time
-    end
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant Decoder",
+    "participant File",
+    "Decoder->>File: Read Header",
+    "File-->>Decoder: sampling_frequency",
+    "Note over Decoder: absolute_time = 0",
+    "loop For each packet",
+    "Decoder->>File: Read Packet",
+    "File-->>Decoder: delta_ms, data",
+    "alt First packet",
+    "Note over Decoder: absolute_time = 0",
+    "else Subsequent packets",
+    "Note over Decoder: absolute_time += delta_ms",
+    "end",
+    "Note over Decoder: Process data with absolute_time",
+    "end"
+  ),
+  "default"
+)
 
 ### Implementation Example
 
@@ -249,12 +283,12 @@ def reconstruct_timestamps(packets, sampling_freq):
 
 ---
 
-## 5. Foot Sensor Logs
+## 6. Foot Sensor Logs
 
 ### Specifications
 
 | Parameter | Value |
-|-----------|-------|
+|---:|---:|
 | Sampling Rate | 20 Hz |
 | Channels | 8 (pressure/force sensors) |
 | Data Type | uint32_t per channel |
@@ -285,25 +319,28 @@ message FootSensorSessionEnd {
 
 ### Example Data Flow
 
-```mermaid
-graph TD
-    A[Start Logging] --> B[Write Header<br/>fw=1.0.0, freq=20Hz]
-    B --> C[Packet 1<br/>readings=array, delta=0]
-    C --> D[Packet 2<br/>readings=array, delta=50]
-    D --> E[Packet 3<br/>readings=array, delta=49]
-    E --> F[...]
-    F --> G[Stop Logging]
-    G --> H[Write Session End<br/>uptime=3600000]
-```
+DrawFlowchart(
+  Syntax(
+    "A[Start Logging] --> B[Write Header fw=1.0.0, freq=20Hz]",
+    "B --> C[Packet 1 readings=array, delta=0]",
+    "C --> D[Packet 2 readings=array, delta=50]",
+    "D --> E[Packet 3 readings=array, delta=49]",
+    "E --> F[...]",
+    "F --> G[Stop Logging]",
+    "G --> H[Write Session End uptime=3600000]"
+  ),
+  "TD",
+  "default"
+)
 
 ---
 
-## 6. BHI360 Motion Sensor Logs
+## 7. BHI360 Motion Sensor Logs
 
 ### Specifications
 
 | Parameter | Value |
-|-----------|-------|
+|---:|---:|
 | Motion Sensors | 50 Hz (quaternion, accel, gyro) |
 | Step Counter | 5 Hz (independent) |
 | Data Format | Fixed-point integers |
@@ -313,7 +350,7 @@ graph TD
 ### Fixed-Point Encoding
 
 | Sensor | Scale Factor | Precision | Range |
-|--------|--------------|-----------|-------|
+|---:|---:|---:|---:|
 | Quaternion | ×10,000 | 0.0001 | ±1.0 |
 | Linear Acceleration | ×1,000 | 0.001 m/s² | ±20 m/s² |
 | Gyroscope | ×10,000 | 0.0001 rad/s | ±2.0 rad/s |
@@ -353,85 +390,17 @@ message BHI360LogRecord {
 
 ### Sensor Synchronization
 
-```mermaid
-graph TD
-    subgraph "50Hz Sensors"
-        Q[Quaternion]
-        L[Linear Accel]
-        G[Gyroscope]
-    end
-    
-    subgraph "5Hz Sensor"
-        S[Step Counter]
-    end
-    
-    Q --> SYNC{All Updated?}
-    L --> SYNC
-    G --> SYNC
-    
-    SYNC -->|Yes| LOG[Log Record]
-    S -->|Latest Value| LOG
-```
-
----
-
-## 7. Activity Logs
-
-### Specifications
-
-| Parameter | Value |
-|-----------|-------|
-| Update Rate | Variable (step-based) |
-| Data Type | Step counts per foot |
-| Packet Size | ~10 bytes |
-| Storage Rate | ~50-100 bytes/second |
-
-### Data Structure
-
-```c
-// Header (first message in file)
-message ActivitySensingData {
-    string firmware_version = 1;     // e.g., "1.0.0"
-    uint32 sampling_frequency = 2;   // Variable
-    enum message_type = 3;           // ACTIVITY_DATA
-}
-
-// Data packet (repeated)
-message ActivityData {
-    uint32 step_count = 1;          // Combined left + right steps
-    uint16 delta_ms = 2;            // Time since previous packet
-}
-
-// Session end (last message)
-message ActivitySessionEnd {
-    uint64 uptime_ms = 1;           // Total system uptime
-}
-```
-
-### Activity Tracking Features
-
-The activity logging system tracks:
-- **Step Count**: Combined left and right foot steps
-- **Step Rate**: Calculated from delta timestamps
-- **Activity Duration**: Total time of activity session
-
-### Integration with Motion Sensors
-
-```mermaid
-graph TD
-    A[Foot Sensors] --> D[Step Detection]
-    B[BHI360 IMU] --> D
-    D --> E[Activity Logger]
-    E --> F[activity_XXX.pb]
-    
-    D --> G[Real-time BLE]
-    G --> H[Mobile App]
-```
-
-The activity logger combines data from:
-- **Foot pressure sensors**: Ground contact detection
-- **BHI360 motion data**: Movement validation
-- **Algorithm fusion**: Accurate step counting
+DrawFlowchart(
+  Syntax(
+    "Q[Quaternion] --> SYNC{All Updated?}",
+    "L[Linear Accel] --> SYNC",
+    "G[Gyroscope] --> SYNC",
+    "SYNC -->|Yes| LOG[Log Record]",
+    "S[Step Counter] -->|Latest Value| LOG"
+  ),
+  "TD",
+  "default"
+)
 
 ---
 
@@ -442,74 +411,71 @@ The activity logger combines data from:
 **Service UUID:** `0c372eaa-27eb-437e-bef4-775aefaf3c97`
 
 | Characteristic | UUID Suffix | Type | Description |
-|----------------|-------------|------|-------------|
+|---:|---:|---:|---:|
 | Foot Log Available | `...eac` | uint8_t | Latest closed log ID |
 | Foot Log Path | `...eae` | string | File path (e.g., "/lfs1/hardware/foot_005.pb") |
 | BHI360 Log Available | `...eb0` | uint8_t | Latest closed log ID |
 | BHI360 Log Path | `...eb1` | string | File path |
-| Activity Log Available | `...eb2` | uint8_t | Latest closed log ID |
-| Activity Log Path | `...eb3` | string | File path |
+| Activity Log Available | `...eb6` | uint8_t | Latest closed log ID |
+| Activity Log Path | `...eb7` | string | File path |
 
 ### Control Service Commands
 
 **Service UUID:** `4fd5b67f-9d89-4061-92aa-319ca786baae`
 
 | Command | UUID Suffix | Type | Description |
-|---------|-------------|------|-------------|
+|---:|---:|---:|---:|
 | Delete Foot Log | `...b682` | uint8_t | Delete by log ID |
 | Delete BHI360 Log | `...b683` | uint8_t | Delete by log ID |
-| Delete Activity Log | `...b686` | uint8_t | Delete by log ID |
+| Delete Activity Log | `...b687` | uint8_t | Delete by log ID |
 | Start Activity | `...b684` | uint8_t | Start logging (write 1) |
 | Stop Activity | `...b685` | uint8_t | Stop logging (write 1) |
 
 ### Workflow
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant BLE
-    participant Device
-    
-    App->>BLE: Start Activity
-    BLE->>Device: Begin logging
-    Note over Device: Logging active...
-    
-    App->>BLE: Stop Activity
-    BLE->>Device: Close log file
-    Device-->>BLE: Update available logs
-    
-    App->>BLE: Read Log Available
-    BLE-->>App: Log ID = 5
-    
-    App->>BLE: Read Log Path
-    BLE-->>App: "/lfs1/hardware/foot_005.pb"
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant BLE",
+    "participant Device",
+    "App->>BLE: Start Activity",
+    "BLE->>Device: Begin logging",
+    "Note over Device: Logging active...",
+    "App->>BLE: Stop Activity",
+    "BLE->>Device: Close log file",
+    "Device-->>BLE: Update available logs",
+    "App->>BLE: Read Log Available",
+    "BLE-->>App: Log ID = 5",
+    "App->>BLE: Read Log Path",
+    "BLE-->>App: /lfs1/hardware/foot_005.pb"
+  ),
+  "default"
+)
 
 ---
 
-## 8. File Retrieval Methods
+## 9. File Retrieval Methods
 
 ### Method 1: SMP (Simple Management Protocol)
 
 **Service UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
 **Characteristic:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant SMP
-    participant FS as File System
-    
-    App->>SMP: FS Download<br/>"/lfs1/hardware/foot_005.pb"
-    
-    loop File chunks
-        SMP->>FS: Read chunk
-        FS-->>SMP: Data
-        SMP-->>App: Data packet
-    end
-    
-    SMP-->>App: Transfer complete
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant SMP",
+    "participant FS as File System",
+    "App->>SMP: FS Download /lfs1/hardware/foot_005.pb",
+    "loop File chunks",
+    "SMP->>FS: Read chunk",
+    "FS-->>SMP: Data",
+    "SMP-->>App: Data packet",
+    "end",
+    "SMP-->>App: Transfer complete"
+  ),
+  "default"
+)
 
 ### Method 2: File Proxy (Secondary Device)
 
@@ -526,7 +492,7 @@ For development/debugging:
 
 ---
 
-## 9. Log Decoder Tools
+## 10. Log Decoder Tools
 
 ### On-Device Shell Commands
 
@@ -538,16 +504,19 @@ CONFIG_LOG_DECODER_SHELL_CMD=y
 
 #### Available Commands
 
-```mermaid
-graph LR
-    A[log] --> B[list<br/>Show all logs]
-    A --> C[decode]
-    C --> D[foot<br/>Latest foot log]
-    C --> E[bhi360<br/>Latest BHI log]
-    C --> F[activity<br/>Latest activity log]
-    C --> G[file PATH<br/>Specific file]
-    A --> H[delete_all<br/>Remove all logs]
-```
+DrawFlowchart(
+  Syntax(
+    "A[log] --> B[list Show all logs]",
+    "A --> C[decode]",
+    "C --> D[foot Latest foot log]",
+    "C --> E[bhi360 Latest BHI log]",
+    "C --> F[activity Latest activity log]",
+    "C --> G[file PATH Specific file]",
+    "A --> H[delete_all Remove all logs]"
+  ),
+  "LR",
+  "default"
+)
 
 #### Example Session
 
@@ -562,15 +531,14 @@ foot_001.pb               2048       Foot Sensor
 foot_002.pb               4096       Foot Sensor
 bhi360_001.pb             8192       BHI360
 bhi360_002.pb             16384      BHI360
-activity_001.pb           1024       Activity
-activity_002.pb           2048       Activity
+activity_001.pb           512        Activity
 
 SUMMARY:
   Foot Sensor Logs: 2
   BHI360 Logs: 2
-  Activity Logs: 2
-  Total Files: 6
-  Total Size: 33792 bytes (33.00 KB)
+  Activity Logs: 1
+  Total Files: 5
+  Total Size: 31232 bytes (30.50 KB)
 
 uart:~$ log decode foot
 === FOOT SENSOR LOG (ID: 2) ===
@@ -618,7 +586,7 @@ python tools/decode_log.py --export data.csv foot_001.pb
 TIMING STATISTICS:
 ┌─────────────────┬──────────┬──────────┬──────────┐
 │ Metric          │ Expected │ Actual   │ Status   │
-├─────────────────┼──────────┼──────────┼────────���─┤
+├─────────────────┼──────────┼──────────┼──────────┤
 │ Sample Rate     │ 50 Hz    │ 49.9 Hz  │ ✓ GOOD   │
 │ Average Delta   │ 20.0 ms  │ 20.1 ms  │ ✓ GOOD   │
 │ Min Delta       │ -        │ 19 ms    │ ✓ GOOD   │
@@ -631,37 +599,31 @@ TIMING STATISTICS:
 
 ---
 
-## 10. Secondary Device Access
+## 11. Secondary Device Access
 
 ### Architecture
 
 The secondary device file access architecture shows how the mobile app can access log files stored on the secondary device through the primary device's proxy services:
 
-```mermaid
-graph TB
-    subgraph "Mobile App"
-        APP[BLE Client]
-    end
+DrawSequenceDiagram(
+  Syntax(
+    "participant Mobile App",
+    "participant File Proxy Service",
+    "participant D2D Client",
+    "participant D2D Server",
+    "participant Log Files",
     
-    subgraph "Primary Device"
-        PROXY[File Proxy Service]
-        D2D_C[D2D Client]
-    end
-    
-    subgraph "Secondary Device"
-        D2D_S[D2D Server]
-        LOGS[Log Files]
-    end
-    
-    APP -->|"1. Request"| PROXY
-    PROXY -->|"2. Forward"| D2D_C
-    D2D_C -->|"3. D2D Transfer"| D2D_S
-    D2D_S -->|"4. Read"| LOGS
-    LOGS -->|"5. Data"| D2D_S
-    D2D_S -->|"6. Response"| D2D_C
-    D2D_C -->|"7. Forward"| PROXY
-    PROXY -->|"8. Send"| APP
-```
+    "Mobile App->>File Proxy Service: 1. Request file",
+    "File Proxy Service->>D2D Client: 2. Forward request",
+    "D2D Client->>D2D Server: 3. D2D Transfer",
+    "D2D Server->>Log Files: 4. Read file",
+    "Log Files-->>D2D Server: 5. File data",
+    "D2D Server-->>D2D Client: 6. Response with data",
+    "D2D Client-->>File Proxy Service: 7. Forward response",
+    "File Proxy Service-->>Mobile App: 8. Send file data"
+  ),
+  "default"
+)
 
 **Data Flow Steps:**
 1. **Request**: Mobile app sends file request to Primary's File Proxy Service
@@ -676,7 +638,7 @@ graph TB
 ### File Proxy Commands
 
 | Command | Value | Parameters | Description |
-|---------|-------|------------|-------------|
+|---:|---:|---:|---:|
 | List Files | 0x01 | File type | Get file list |
 | Read File | 0x02 | File ID | Download file |
 | Delete File | 0x03 | File ID | Remove file |
@@ -707,7 +669,7 @@ func downloadSecondaryLog(fileId: UInt8) async throws -> Data {
 
 ---
 
-## 11. Protobuf Definitions
+## 12. Protobuf Definitions
 
 ### Common Enums
 
@@ -778,26 +740,16 @@ message BHI360LogRecord {
 ### Activity Messages
 
 ```protobuf
-syntax = "proto3";
-import "nanopb.proto";
-
 message ActivityLogMessage {
     oneof payload {
-        ActivityData data = 1;
-        ActivitySensingData header = 2;
-        ActivitySessionEnd end = 3;
+        ActivityStepCount step_count = 1;
+        ActivitySessionEnd session_end = 2;
     }
 }
 
-message ActivityData {
-    uint32 step_count = 1;              // Combined left + right steps
-    uint32 delta_ms = 2 [(nanopb).int_size = IS_16];
-}
-
-message ActivitySensingData {
-    string firmware_version = 1 [(nanopb).max_size = 16];
-    uint32 sampling_frequency = 2;
-    MessageType message_type = 3;
+message ActivityStepCount {
+    uint32 step_count = 1;
+    uint32 activity_duration_s = 2;
 }
 
 message ActivitySessionEnd {
@@ -898,30 +850,29 @@ def process_all_logs(directory):
 
 ### Common Issues and Solutions
 
-```mermaid
-graph TD
-    A[Issue] --> B{Type?}
-    
-    B -->|No Logs| C[Check Storage]
-    C --> C1[Verify FS mounted]
-    C --> C2[Check free space]
-    C --> C3[Ensure activity started/stopped]
-    
-    B -->|Corrupt File| D[Check File]
-    D --> D1[Verify complete download]
-    D --> D2[Check session end marker]
-    D --> D3[Validate protobuf format]
-    
-    B -->|Timing Issues| E[Analyze Timing]
-    E --> E1[Check system load]
-    E --> E2[Verify sensor config]
-    E --> E3[Monitor packet loss]
-    
-    B -->|Decode Error| F[Debug Decoder]
-    F --> F1[Update protobuf files]
-    F --> F2[Check file version]
-    F --> F3[Verify data format]
-```
+DrawFlowchart(
+  Syntax(
+    "A[Issue] --> B{Type?}",
+    "B -->|No Logs| C[Check Storage]",
+    "C --> C1[Verify FS mounted]",
+    "C --> C2[Check free space]",
+    "C --> C3[Ensure activity started/stopped]",
+    "B -->|Corrupt File| D[Check File]",
+    "D --> D1[Verify complete download]",
+    "D --> D2[Check session end marker]",
+    "D --> D3[Validate protobuf format]",
+    "B -->|Timing Issues| E[Analyze Timing]",
+    "E --> E1[Check system load]",
+    "E --> E2[Verify sensor config]",
+    "E --> E3[Monitor packet loss]",
+    "B -->|Decode Error| F[Debug Decoder]",
+    "F --> F1[Update protobuf files]",
+    "F --> F2[Check file version]",
+    "F --> F3[Verify data format]"
+  ),
+  "TD",
+  "default"
+)
 
 ### Debug Checklist
 

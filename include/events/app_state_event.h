@@ -34,6 +34,7 @@ typedef enum {
     RECORD_METADATA = 1,
     RECORD_HARDWARE_FOOT_SENSOR = 2,
     RECORD_HARDWARE_BHI360 = 3,
+    RECORD_HARDWARE_ACTIVITY = 4,
     // Add other record types as needed
 } record_type_t;
 
@@ -48,11 +49,15 @@ typedef enum
     MSG_TYPE_BHI360_LINEAR_ACCEL,
     MSG_TYPE_BHI360_STEP_COUNT,
     MSG_TYPE_BHI360_LOG_RECORD,
+    MSG_TYPE_QUATERNION_3D,  // High-rate quaternion for 3D visualization
     MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE,
     MSG_TYPE_NEW_BHI360_LOG_FILE,
+    MSG_TYPE_NEW_ACTIVITY_LOG_FILE,
+    MSG_TYPE_ACTIVITY_STEP_COUNT, // Step count data for activity file
     MSG_TYPE_COMMAND, // Generic command string
     MSG_TYPE_DELETE_FOOT_LOG, // Specific message type for deleting foot sensor logs
     MSG_TYPE_DELETE_BHI360_LOG, // Specific message type for deleting BHI360 logs
+    MSG_TYPE_DELETE_ACTIVITY_LOG, // Specific message type for deleting activity logs
     MSG_TYPE_FOTA_PROGRESS, // FOTA progress updates
     MSG_TYPE_ERROR_STATUS, // Error status updates from modules
     MSG_TYPE_SAVE_BHI360_CALIBRATION, // Save BHI360 calibration data

@@ -38,6 +38,13 @@ typedef struct
     float quat_w;                     // Quaternion W component (added)
 } bhi360_3d_mapping_t; // Size: 7 * 4 bytes (floats) = 28 bytes
 
+// High-rate quaternion data for 3D visualization
+typedef struct
+{
+    float quat_w, quat_x, quat_y, quat_z;
+    uint32_t timestamp_ms;
+} quaternion_3d_t; // Size: 20 bytes
+
 typedef struct
 {
     float x, y, z;
@@ -95,6 +102,12 @@ typedef struct {
     uint8_t profile_data[512];  // Max calibration profile size
 } bhi360_calibration_data_t;
 
+// Activity step count data for activity file
+typedef struct {
+    uint16_t left_step_count;   // Left foot step count
+    uint16_t right_step_count;  // Right foot step count
+} activity_step_count_t;
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -111,12 +124,14 @@ typedef struct
         bhi360_linear_accel_t bhi360_linear_accel;
         bhi360_step_count_t bhi360_step_count;
         bhi360_log_record_t bhi360_log_record;
+        quaternion_3d_t quaternion_3d;
         new_log_info_msg_t new_hardware_log_file;
         command_data_t command_str; // For command messages
         delete_log_command_t delete_cmd;
         fota_progress_msg_t fota_progress;
         error_status_msg_t error_status;
         bhi360_calibration_data_t bhi360_calibration;
+        activity_step_count_t activity_step_count;
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

@@ -1,6 +1,6 @@
 # Developer Quick Reference
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** June 2025  
 **Scope:** Quick reference guide for developers working with the sensing firmware  
 **Purpose:** Essential commands, UUIDs, debug tips, and common patterns for rapid development
@@ -57,11 +57,11 @@ west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 - Set Time: `e160ca1f-3115-4ad6-9709-8c5ff3bf558b`
 - Delete Foot Log: `e160ca82-3115-4ad6-9709-8c5ff3bf558b`
 - Delete BHI360 Log: `e160ca83-3115-4ad6-9709-8c5ff3bf558b`
-- Delete Activity Log: `e160ca86-3115-4ad6-9709-8c5ff3bf558b`
+- Delete Activity Log: `e160ca87-3115-4ad6-9709-8c5ff3bf558b`
 - Start Activity: `e160ca84-3115-4ad6-9709-8c5ff3bf558b`
 - Stop Activity: `e160ca85-3115-4ad6-9709-8c5ff3bf558b`
-- **Trigger BHI360 Calibration**: `e160ca87-3115-4ad6-9709-8c5ff3bf558b`
-- FOTA Status: `e160ca88-3115-4ad6-9709-8c5ff3bf558b`
+- **Trigger BHI360 Calibration**: `e160ca86-3115-4ad6-9709-8c5ff3bf558b`
+- FOTA Status: `e160ca87-3115-4ad6-9709-8c5ff3bf558b`
 
 ### FOTA Proxy Service (Primary Only)
 - Service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
@@ -118,7 +118,6 @@ MSG_TYPE_BHI360_3D_MAPPING    // BHI360 quaternion + gyro
 MSG_TYPE_BHI360_LINEAR_ACCEL  // Linear acceleration
 MSG_TYPE_BHI360_STEP_COUNT    // Step counter data
 MSG_TYPE_BHI360_LOG_RECORD    // Complete BHI360 record for logging
-MSG_TYPE_ACTIVITY_STEP_COUNT  // Activity step count data
 ```
 
 ### Control Messages
@@ -129,7 +128,7 @@ MSG_TYPE_DELETE_BHI360_LOG    // Delete BHI360 log
 MSG_TYPE_DELETE_ACTIVITY_LOG  // Delete activity log
 MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE  // New log file notification
 MSG_TYPE_NEW_BHI360_LOG_FILE       // New log file notification
-MSG_TYPE_NEW_ACTIVITY_LOG_FILE      // New log file notification
+MSG_TYPE_NEW_ACTIVITY_LOG_FILE      // New activity log file notification
 ```
 
 ## 6. Debug Commands

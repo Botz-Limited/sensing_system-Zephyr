@@ -1,6 +1,6 @@
 # D2D (Device-to-Device) Communication Complete Guide
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** June 2025  
 **Scope:** Complete specification for device-to-device communication between primary and secondary sensing devices  
 **Purpose:** Comprehensive reference for implementing D2D communication, command forwarding, data aggregation, and file transfer
@@ -26,32 +26,18 @@ The sensing firmware supports a dual-device configuration where two devices work
 - **Primary Device** (Right Foot - "SensingGR"): Connects to mobile phone and secondary device
 - **Secondary Device** (Left Foot - "SensingGL"): Connects only to primary device
 
-```mermaid
-graph TB
-    subgraph "Mobile Phone"
-        A[Mobile App]
-    end
-    
-    subgraph "Primary Device"
-        B[Right Foot<br/>SensingGR]
-        B1[Advertises]
-        B2[Phone facing]
-    end
-    
-    subgraph "Secondary Device"
-        C[Left Foot<br/>SensingGL]
-        C1[Scans]
-        C2[No phone conn]
-    end
-    
-    A <-->|"BLE<br/>(Control & Info Services)"| B
-    B <-->|"D2D BLE"| C
-    
-    B --- B1
-    B --- B2
-    C --- C1
-    C --- C2
-```
+DrawFlowchart(
+  Syntax(
+    "A[Mobile App] -->|BLE Control & Info Services| B[Right Foot SensingGR]",
+    "B -->|D2D BLE| C[Left Foot SensingGL]",
+    "B --> B1[Advertises]",
+    "B --> B2[Phone facing]",
+    "C --> C1[Scans]",
+    "C --> C2[No phone conn]"
+  ),
+  "TB",
+  "default"
+)
 
 ## Architecture
 
@@ -59,22 +45,22 @@ graph TB
 
 The D2D architecture implements bidirectional communication with distinct data and command flows:
 
-```mermaid
-graph TB
-    subgraph "Data Flow"
-        SEC[Secondary Sensors] -->|"Notify"| SECTX[D2D TX Service]
-        SECTX -->|"BLE"| PRIMRX[Primary D2D Client]
-        PRIMRX -->|"Internal"| PRIMINFO[Information Service]
-        PRIMINFO -->|"Notify"| PHONE[Mobile App]
-    end
-    
-    subgraph "Command Flow"
-        PHONE2[Mobile App] -->|"Write"| PRIMCTRL[Control Service]
-        PRIMCTRL -->|"Internal"| PRIMD2D[D2D TX Client]
-        PRIMD2D -->|"BLE Write"| SECRX[D2D RX Service]
-        SECRX -->|"Execute"| SECDEV[Secondary Device]
-    end
-```
+DrawFlowchart(
+  Syntax(
+    // Data Flow
+    "SEC[Secondary Sensors] -->|Notify| SECTX[D2D TX Service]",
+    "SECTX -->|BLE| PRIMRX[Primary D2D Client]",
+    "PRIMRX -->|Internal| PRIMINFO[Information Service]",
+    "PRIMINFO -->|Notify| PHONE[Mobile App]",
+    // Command Flow
+    "PHONE2[Mobile App] -->|Write| PRIMCTRL[Control Service]",
+    "PRIMCTRL -->|Internal| PRIMD2D[D2D TX Client]",
+    "PRIMD2D -->|BLE Write| SECRX[D2D RX Service]",
+    "SECRX -->|Execute| SECDEV[Secondary Device]"
+  ),
+  "TB",
+  "default"
+)
 
 This architecture clearly shows:
 - **Data Flow**: How sensor data flows from Secondary → Primary → App
@@ -83,27 +69,18 @@ This architecture clearly shows:
 
 ### Service Distribution
 
-```mermaid
-graph LR
-    subgraph "PRIMARY DEVICE"
-        subgraph "Phone-Facing Services"
-            A[Control Service]
-            D[Information Service]
-        end
-        
-        subgraph "D2D Modules"
-            B[D2D TX Module]
-            C[D2D RX Module]
-        end
-    end
-    
-    subgraph "SECONDARY DEVICE"
-        subgraph "D2D Services Only"
-            E[D2D RX Module]
-            F[D2D TX Module]
-        end
-    end
-```
+DrawFlowchart(
+  Syntax(
+    "A[Control Service] --> B[D2D TX Module]",
+    "D[Information Service] --> C[D2D RX Module]",
+    "B --> E[D2D RX Module]",
+    "C --> F[D2D TX Module]",
+    "E --> F",
+    "F --> E"
+  ),
+  "LR",
+  "default"
+)
 
 ### Key Design Principles
 
@@ -120,7 +97,7 @@ graph LR
 All control commands from the mobile app are forwarded to the secondary device:
 
 | Command | Purpose | Data Format |
-|---------|---------|-------------|
+|---:|---:|---:|
 | Set Time | Synchronize RTC time | `uint32_t` epoch time |
 | Delete Foot Log | Remove foot sensor logs | `uint8_t` log ID |
 | Delete BHI360 Log | Remove motion sensor logs | `uint8_t` log ID |
@@ -131,17 +108,18 @@ All control commands from the mobile app are forwarded to the secondary device:
 
 ### Command Flow Sequence
 
-```mermaid
-sequenceDiagram
-    participant Phone
-    participant Primary
-    participant Secondary
-    
-    Phone->>Primary: Control Command
-    Primary->>Primary: Process locally
-    Primary->>Secondary: Forward via D2D TX
-    Secondary->>Secondary: Process command
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant Phone",
+    "participant Primary",
+    "participant Secondary",
+    "Phone->>Primary: Control Command",
+    "Primary->>Primary: Process locally",
+    "Primary->>Secondary: Forward via D2D TX",
+    "Secondary->>Secondary: Process command"
+  ),
+  "default"
+)
 
 ### Implementation Details
 
@@ -179,22 +157,23 @@ sequenceDiagram
 
 ### Sensor Data from Secondary to Primary
 
-```mermaid
-sequenceDiagram
-    participant Secondary
-    participant Primary
-    participant Phone
-    
-    Secondary->>Secondary: Collect sensor data
-    Secondary->>Primary: Send via D2D TX
-    Primary->>Primary: Aggregate data
-    Primary->>Phone: Notify combined data
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant Secondary",
+    "participant Primary",
+    "participant Phone",
+    "Secondary->>Secondary: Collect sensor data",
+    "Secondary->>Primary: Send via D2D TX",
+    "Primary->>Primary: Aggregate data",
+    "Primary->>Phone: Notify combined data"
+  ),
+  "default"
+)
 
 ### Data Types Transferred
 
 | Data Type | Size | Format | Description |
-|-----------|------|--------|-------------|
+|---:|---:|---:|---:|
 | Foot Sensor Samples | 16 bytes | `uint16_t[8]` | 8 pressure channels |
 | BHI360 3D Mapping | 15 bytes | Fixed-point | Quaternion + Gyro |
 | BHI360 Linear Accel | 6 bytes | Fixed-point | 3-axis acceleration |
@@ -223,59 +202,51 @@ namespace FixedPoint {
 
 ### Data Conversion Flow
 
-```mermaid
-graph LR
-    subgraph "Secondary Device"
-        A[Float Data<br/>quat: 0.7071]
-        B[Fixed-Point<br/>quat: 7071]
-    end
-    
-    subgraph "Primary Device"
-        C[D2D RX]
-        D[BLE Notify]
-    end
-    
-    subgraph "Mobile App"
-        E[Receive]
-        F[Convert Back<br/>quat: 0.7071]
-    end
-    
-    A -->|Convert| B
-    B -->|15 bytes| C
-    C --> D
-    D -->|15 bytes| E
-    E --> F
-```
+DrawFlowchart(
+  Syntax(
+    "A[Float Data quat: 0.7071] -->|Convert| B[Fixed-Point quat: 7071]",
+    "B -->|15 bytes| C[D2D RX]",
+    "C --> D[BLE Notify]",
+    "D -->|15 bytes| E[Receive]",
+    "E --> F[Convert Back quat: 0.7071]"
+  ),
+  "LR",
+  "default"
+)
 
 ## Connection Management
 
 ### Primary Device State Machine
 
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> IDLE: Advertising "SensingGR"
-    IDLE --> PHONE_CONNECTED: Phone connects
-    IDLE --> D2D_CONNECTED: Secondary connects
-    PHONE_CONNECTED --> FULLY_CONNECTED: Secondary connects
-    D2D_CONNECTED --> FULLY_CONNECTED: Phone connects
-    FULLY_CONNECTED --> PHONE_CONNECTED: Secondary disconnects
-    FULLY_CONNECTED --> D2D_CONNECTED: Phone disconnects
-    PHONE_CONNECTED --> IDLE: Phone disconnects
-    D2D_CONNECTED --> IDLE: Secondary disconnects
-```
+DrawStateDiagram(
+  Syntax(
+    "[*] --> IDLE",
+    "IDLE --> IDLE: Advertising SensingGR",
+    "IDLE --> PHONE_CONNECTED: Phone connects",
+    "IDLE --> D2D_CONNECTED: Secondary connects",
+    "PHONE_CONNECTED --> FULLY_CONNECTED: Secondary connects",
+    "D2D_CONNECTED --> FULLY_CONNECTED: Phone connects",
+    "FULLY_CONNECTED --> PHONE_CONNECTED: Secondary disconnects",
+    "FULLY_CONNECTED --> D2D_CONNECTED: Phone disconnects",
+    "PHONE_CONNECTED --> IDLE: Phone disconnects",
+    "D2D_CONNECTED --> IDLE: Secondary disconnects"
+  ),
+  "default"
+)
 
 ### Secondary Device State Machine
 
-```mermaid
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> SCANNING: Start scanning
-    SCANNING --> D2D_CONNECTED: Found "SensingGR"
-    D2D_CONNECTED --> READY: Services discovered
-    READY --> SCANNING: Connection lost
-    SCANNING --> IDLE: Timeout
-```
+DrawStateDiagram(
+  Syntax(
+    "[*] --> IDLE",
+    "IDLE --> SCANNING: Start scanning",
+    "SCANNING --> D2D_CONNECTED: Found SensingGR",
+    "D2D_CONNECTED --> READY: Services discovered",
+    "READY --> SCANNING: Connection lost",
+    "SCANNING --> IDLE: Timeout"
+  ),
+  "default"
+)
 
 ### Connection Events
 
@@ -294,23 +265,17 @@ The D2D file transfer service enables the primary device to access log files on 
 
 ### Operations Supported
 
-```mermaid
-graph LR
-    subgraph "Primary Device"
-        A[File Transfer Client]
-    end
-    
-    subgraph "Secondary Device"
-        B[File Transfer Service]
-        C[Log Files]
-    end
-    
-    A -->|List Files| B
-    A -->|Read File| B
-    A -->|Delete File| B
-    A -->|Get File Info| B
-    B --> C
-```
+DrawFlowchart(
+  Syntax(
+    "A[File Transfer Client] -->|List Files| B[File Transfer Service]",
+    "A -->|Read File| B",
+    "A -->|Delete File| B",
+    "A -->|Get File Info| B",
+    "B --> C[Log Files]"
+  ),
+  "LR",
+  "default"
+)
 
 ### File Transfer Protocol
 
@@ -389,11 +354,15 @@ set(CONFIG_BT_DEVICE_NAME "SensingGL")
 ```cpp
 // D2D RX Service
 static struct bt_uuid_128 d2d_rx_service_uuid = 
-    BT_UUID_INIT_128(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef0);
+    BT_UUID_INIT_128(0xe060ca1f, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b);
+
+// D2D TX Service
+static struct bt_uuid_128 d2d_tx_service_uuid = 
+    BT_UUID_INIT_128(0x75ad68d6, 0x200c, 0x437d, 0x98b5, 0x061862076c5f);
 
 // D2D File Transfer Service  
 static struct bt_uuid_128 d2d_file_transfer_service_uuid = 
-    BT_UUID_INIT_128(0x12345678, 0x1234, 0x5678, 0x1234, 0x56789abcdef1);
+    BT_UUID_INIT_128(0x8e600001, 0xb5a3, 0xf393, 0xe0a9, 0xe50e24dcca9e);
 ```
 
 ### MTU Configuration

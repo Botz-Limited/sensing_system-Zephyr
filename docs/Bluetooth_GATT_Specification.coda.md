@@ -1,6 +1,6 @@
 # Bluetooth GATT Specification
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** June 2025  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
@@ -39,29 +39,29 @@ This device implements a comprehensive set of Bluetooth Low Energy (BLE) GATT se
 - **Dual-device architecture** with primary/secondary roles
 - **40% bandwidth reduction** compared to floating-point format
 
-```mermaid
-graph TB
-    subgraph "Mobile App"
-        APP[BLE Client]
-    end
-    
-    subgraph "Primary Device"
-        PRIM[GATT Services]
-        CONV[Fixed-Point Converter]
-        D2DC[D2D Central]
-    end
-    
-    subgraph "Secondary Device"
-        D2DP[D2D Peripheral]
-        SENS[Sensor Data]
-    end
-    
-    APP <-->|"BLE"| PRIM
-    PRIM <--> CONV
-    CONV <--> D2DC
-    D2DC <-->|"BLE D2D"| D2DP
-    D2DP <--> SENS
-```
+DrawFlowchart(
+  Syntax(
+    "subgraph Mobile Phone",
+    "APP[BLE Client]",
+    "end",
+    "subgraph Primary Device",
+    "PRIM[GATT Services]",
+    "CONV[Fixed-Point Converter]",
+    "D2DC[D2D Central]",
+    "end",
+    "subgraph Secondary Device",
+    "D2DP[D2D Peripheral]",
+    "SENS[Sensor Data]",
+    "end",
+    "APP -->|BLE| PRIM",
+    "PRIM --> CONV",
+    "CONV --> D2DC",
+    "D2DC -->|BLE D2D| D2DP",
+    "D2DP --> SENS"
+  ),
+  "TB",
+  "default"
+)
 
 ---
 
@@ -69,26 +69,27 @@ graph TB
 
 ### Device Roles
 
-```mermaid
-graph LR
-    subgraph "Primary Device (Right)"
-        P1[Phone Services]
-        P2[D2D Central]
-        P3[Proxy Services]
-    end
-    
-    subgraph "Secondary Device (Left)"
-        S1[D2D Peripheral]
-        S2[Sensor Services]
-    end
-    
-    PHONE[Mobile App] <-->|"Direct BLE"| P1
-    P2 <-->|"D2D BLE"| S1
-    P3 -->|"Relay"| P2
-```
+DrawFlowchart(
+  Syntax(
+    "subgraph Primary Device (Right)",
+    "P1[Phone Services]",
+    "P2[D2D Central]",
+    "P3[Proxy Services]",
+    "end",
+    "subgraph Secondary Device (Left)",
+    "S1[D2D Peripheral]",
+    "S2[Sensor Services]",
+    "end",
+    "PHONE[Mobile App] -->|Direct BLE| P1",
+    "P2 -->|D2D BLE| S1",
+    "P3 -->|Relay| P2"
+  ),
+  "LR",
+  "default"
+)
 
 | Feature | Primary Device | Secondary Device |
-|---------|----------------|------------------|
+|---:|:---:|:---:|
 | Device Name | "SensingGR" | "SensingGL" |
 | BLE Role | Peripheral + Central | Peripheral only |
 | Phone Connection | Yes | No |
@@ -104,7 +105,7 @@ All sensor data uses fixed-point integers to optimize bandwidth and ensure porta
 ### Scaling Factors
 
 | Data Type | Scale Factor | Precision | Range | Example |
-|-----------|--------------|-----------|-------|---------|
+|---:|---:|---:|---:|---:|
 | Quaternion | 10,000 | 0.0001 | ±1.0 | 0.7071 → 7071 |
 | Linear Acceleration | 1,000 | 0.001 m/s² | ±20 m/s² | 9.81 → 9810 |
 | Gyroscope | 10,000 | 0.0001 rad/s | ±2.0 rad/s | 1.5708 → 15708 |
@@ -112,24 +113,25 @@ All sensor data uses fixed-point integers to optimize bandwidth and ensure porta
 
 ### Bandwidth Comparison
 
-```mermaid
-graph LR
-    subgraph "Float Format"
-        F1[28 bytes<br/>3D Mapping]
-        F2[12 bytes<br/>Linear Accel]
-        F3[40 bytes/update<br/>@ 50Hz = 2000 B/s]
-    end
-    
-    subgraph "Fixed-Point Format"
-        X1[15 bytes<br/>3D Mapping]
-        X2[6 bytes<br/>Linear Accel]
-        X3[21 bytes/update<br/>@ 50Hz = 1050 B/s]
-    end
-    
-    F1 -->|"-46%"| X1
-    F2 -->|"-50%"| X2
-    F3 -->|"-48%"| X3
-```
+DrawFlowchart(
+  Syntax(
+    "subgraph Float Format",
+    "F1[28 bytes<br/>3D Mapping]",
+    "F2[12 bytes<br/>Linear Accel]",
+    "F3[40 bytes/update<br/>@ 50Hz = 2000 B/s]",
+    "end",
+    "subgraph Fixed-Point Format",
+    "X1[15 bytes<br/>3D Mapping]",
+    "X2[6 bytes<br/>Linear Accel]",
+    "X3[21 bytes/update<br/>@ 50Hz = 1050 B/s]",
+    "end",
+    "F1 -->|-46%| X1",
+    "F2 -->|-50%| X2",
+    "F3 -->|-48%| X3"
+  ),
+  "LR",
+  "default"
+)
 
 ### Conversion Functions
 
@@ -161,7 +163,7 @@ float decode_acceleration(int16_t fixed) {
 **UUID:** `0000180A-0000-1000-8000-00805F9B34FB`
 
 | Characteristic | UUID | Properties | Data Type |
-|----------------|------|------------|-----------|
+|---:|---:|---:|---:|
 | Manufacturer Name | 0x2A29 | Read | String |
 | Model Number | 0x2A24 | Read | String |
 | Serial Number | 0x2A25 | Read | String |
@@ -172,14 +174,14 @@ float decode_acceleration(int16_t fixed) {
 **UUID:** `0000180F-0000-1000-8000-00805F9B34FB`
 
 | Characteristic | UUID | Properties | Data Type | Description |
-|----------------|------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Battery Level | 0x2A19 | Read, Notify | uint8_t | 0-100% |
 
 ### Current Time Service (CTS)
 **UUID:** `00001805-0000-1000-8000-00805F9B34FB`
 
 | Characteristic | UUID | Properties | Data Type |
-|----------------|------|------------|-----------|
+|---:|---:|---:|---:|
 | Current Time | 0x2A2B | Read, Write, Notify | CTS struct |
 
 ---
@@ -192,7 +194,7 @@ float decode_acceleration(int16_t fixed) {
 ### Characteristics
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Current Time | 0x2A2B | Read, Notify | CTS format | Device time |
 | Status | `...eab` | Read, Notify | uint32_t | Status bitfield |
 | Foot Sensor Samples | `...eaf` | Read, Notify | foot_samples_t | 16 ADC channels |
@@ -233,7 +235,7 @@ float decode_acceleration(int16_t fixed) {
 ### Characteristics
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Set Time | `...b681` | Write | uint32_t | Epoch time (big-endian) |
 | Delete Foot Log | `...b682` | Write, Notify | uint8_t | Log ID to delete |
 | Delete BHI360 Log | `...b683` | Write, Notify | uint8_t | Log ID to delete |
@@ -244,19 +246,20 @@ float decode_acceleration(int16_t fixed) {
 
 ### Command Flow
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    App->>Primary: Write Command
-    Primary->>Primary: Process locally
-    Primary->>Secondary: Forward via D2D
-    Secondary->>Secondary: Execute command
-    Secondary-->>Primary: Acknowledge
-    Primary-->>App: Notify status
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "participant Secondary",
+    "App->>Primary: Write Command",
+    "Primary->>Primary: Process locally",
+    "Primary->>Secondary: Forward via D2D",
+    "Secondary->>Secondary: Execute command",
+    "Secondary-->>Primary: Acknowledge",
+    "Primary-->>App: Notify status"
+  ),
+  "dark"
+)
 
 ---
 
@@ -269,7 +272,7 @@ sequenceDiagram
 **Purpose:** Firmware updates for secondary device via primary
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Target Selection | `...0002` | Write | uint8_t | 0x00=Primary, 0x01=Secondary, 0xFF=All |
 | Command | `...0003` | Write | uint8_t + data | See command table |
 | Data | `...0004` | Write | byte[] | Firmware chunks |
@@ -278,7 +281,7 @@ sequenceDiagram
 #### FOTA Commands
 
 | Command | Value | Data | Description |
-|---------|-------|------|-------------|
+|---:|---:|---:|---:|
 | Start | 0x01 | 4 bytes size | Begin update |
 | Data | 0x02 | Firmware bytes | Send chunk |
 | End | 0x03 | None | Complete update |
@@ -288,28 +291,27 @@ sequenceDiagram
 
 #### FOTA Flow
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    App->>Primary: Set Target = Secondary
-    App->>Primary: Start + Size
-    Primary->>Secondary: Init FOTA
-    
-    loop Firmware Chunks
-        App->>Primary: Data Chunk
-        Primary->>Secondary: Forward Data
-        Secondary-->>Primary: ACK
-        Primary-->>App: Progress Update
-    end
-    
-    App->>Primary: End Command
-    Primary->>Secondary: Finalize
-    Secondary->>Secondary: Reboot
-    Primary-->>App: Complete
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "participant Secondary",
+    "App->>Primary: Set Target = Secondary",
+    "App->>Primary: Start + Size",
+    "Primary->>Secondary: Init FOTA",
+    "loop Firmware Chunks",
+    "App->>Primary: Data Chunk",
+    "Primary->>Secondary: Forward Data",
+    "Secondary-->>Primary: ACK",
+    "Primary-->>App: Progress Update",
+    "end",
+    "App->>Primary: End Command",
+    "Primary->>Secondary: Finalize",
+    "Secondary->>Secondary: Reboot",
+    "Primary-->>App: Complete"
+  ),
+  "dark"
+)
 
 ### 7.2 3D Orientation Service
 
@@ -318,7 +320,7 @@ sequenceDiagram
 **Purpose:** High-rate 3D orientation data for real-time visualization
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | 3D Orientation | `...2ec1` | Read, Notify | orientation_3d_packet_t | Combined quaternions |
 
 #### 3D Orientation Packet Structure
@@ -384,7 +386,7 @@ func handle3DOrientation(_ data: Data) {
 **Purpose:** Access log files on secondary device
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Target Device | `...0002` | Write | uint8_t | 0x00=Primary, 0x01=Secondary |
 | File Command | `...0003` | Write | Command struct | See below |
 | File Data | `...0004` | Notify | byte[] | File chunks |
@@ -401,7 +403,7 @@ typedef struct {
 ```
 
 | Command | Value | Description |
-|---------|-------|-------------|
+|---:|---:|---:|
 | List Files | 0x01 | Get file list |
 | Read File | 0x02 | Read by ID |
 | Delete File | 0x03 | Delete by ID |
@@ -418,7 +420,7 @@ typedef struct {
 **Purpose:** Receive commands from phone to relay to secondary
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | D2D Set Time | `...ca1f` | Write | uint32_t | Time relay |
 | D2D Delete Foot Log | `...ca82` | Write | uint8_t | Delete command |
 | D2D Delete BHI360 Log | `...ca83` | Write | uint8_t | Delete command |
@@ -433,7 +435,7 @@ typedef struct {
 **Purpose:** Transmit sensor data from secondary to primary
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | D2D Status | `...68d6` | Notify | uint32_t | Status bitfield |
 | D2D Foot Log Available | `...68d7` | Notify | uint8_t | Log ID |
 | D2D Charge Status | `...68d8` | Notify | uint8_t | Battery % |
@@ -454,29 +456,29 @@ typedef struct {
 **Purpose:** File transfer between devices
 
 | Characteristic | UUID Suffix | Properties | Data Type |
-|----------------|-------------|------------|-----------|
+|---:|---:|---:|---:|
 | Command | `...0002` | Write | Command packet |
 | Data | `...0003` | Notify | Data packet |
 | Status | `...0004` | Notify | Status byte |
 
 ### D2D Architecture
 
-```mermaid
-graph TB
-    subgraph "Data Flow"
-        SEC[Secondary Sensors] -->|"Notify"| SECTX[D2D TX Service]
-        SECTX -->|"BLE"| PRIMRX[Primary D2D Client]
-        PRIMRX -->|"Internal"| PRIMINFO[Information Service]
-        PRIMINFO -->|"Notify"| PHONE[Mobile App]
-    end
-    
-    subgraph "Command Flow"
-        PHONE2[Mobile App] -->|"Write"| PRIMCTRL[Control Service]
-        PRIMCTRL -->|"Internal"| PRIMD2D[D2D TX Client]
-        PRIMD2D -->|"BLE Write"| SECRX[D2D RX Service]
-        SECRX -->|"Execute"| SECDEV[Secondary Device]
-    end
-```
+DrawFlowchart(
+  Syntax(
+    // Data Flow
+    "SEC[Secondary Sensors] --> SECTX[D2D TX Service]",
+    "SECTX --> PRIMRX[Primary D2D Client]",
+    "PRIMRX --> PRIMINFO[Information Service]",
+    "PRIMINFO --> PHONE[Mobile App]",
+    // Command Flow
+    "PHONE2[Mobile App] --> PRIMCTRL[Control Service]",
+    "PRIMCTRL --> PRIMD2D[D2D TX Client]",
+    "PRIMD2D --> SECRX[D2D RX Service]",
+    "SECRX --> SECDEV[Secondary Device]"
+  ),
+  "TB",
+  "default"
+)
 
 ---
 
@@ -727,7 +729,7 @@ endchoice
 #### Behavior by Configuration
 
 | Configuration | Foot Sensor Fails | Motion Sensor Fails | Both Fail |
-|--------------|-------------------|---------------------|-----------|
+|---:|---:|---:|---:|
 | **BOTH** (default) | System halts | System halts | System halts |
 | **FOOT** primary | System continues* | System halts | System halts |
 | **MOTION** primary | System halts | System continues* | System halts |
@@ -811,7 +813,7 @@ fun parseDeviceStatus(statusValue: Int): List<String> {
 ## 12. Common BLE Error Codes
 
 | Error | Code | Description | Solution |
-|-------|------|-------------|----------|
+|---:|---:|---:|---:|
 | ENOTCONN | -128 | Not connected | Ensure connection established |
 | ENOMEM | -12 | Out of memory | Reduce notification rate |
 | EINVAL | -22 | Invalid parameter | Check data format |
@@ -820,23 +822,21 @@ fun parseDeviceStatus(statusValue: Int): List<String> {
 
 ### Troubleshooting Guide
 
-```mermaid
-graph TD
-    A[Connection Issues?] -->|Yes| B[Check Bonding]
-    A -->|No| C[Data Issues?]
-    
-    B --> D[Clear bonds and re-pair]
-    
-    C -->|Yes| E[Check Format]
-    C -->|No| F[Performance Issues?]
-    
-    E --> G[Verify fixed-point scaling]
-    
-    F -->|Yes| H[Optimize Parameters]
-    F -->|No| I[Check Logs]
-    
-    H --> J[Reduce notification rate<br/>Increase connection interval]
-```
+DrawFlowchart(
+  Syntax(
+    "A[Connection Issues?] -->|Yes| B[Check Bonding]",
+    "A -->|No| C[Data Issues?]",
+    "B --> D[Clear bonds and re-pair]",
+    "C -->|Yes| E[Check Format]",
+    "C -->|No| F[Performance Issues?]",
+    "E --> G[Verify fixed-point scaling]",
+    "F -->|Yes| H[Optimize Parameters]",
+    "F -->|No| I[Check Logs]",
+    "H --> J[Reduce notification rate<br/>Increase connection interval]"
+  ),
+  "TD",
+  "default"
+)
 
 ### Security Considerations
 
@@ -897,7 +897,7 @@ For Primary Device:
     
 For Secondary Device:
     - D2D Transmission (Rate limited to 20-50Hz)
-    ↓
+    ���
 BLE Transmission (Rate limited: 20-50Hz)
     ↓
 Mobile App (Receives at BLE rate)
@@ -913,10 +913,10 @@ Mobile App (Receives at BLE rate)
 ### Optimization Options
 
 | Configuration | BHI360 Rate | BLE Rate | Power Impact |
-|--------------|-------------|----------|--------------|
-| Standard     | 50Hz        | 20Hz     | Baseline     |
-| High Rate    | 100Hz       | 50Hz     | +15-20%      |
-| Maximum      | 200Hz       | 50Hz     | +30-40%      |
+|---:|---:|---:|---:|
+| Standard | 50Hz | 20Hz | Baseline |
+| High Rate | 100Hz | 50Hz | +15-20% |
+| Maximum | 200Hz | 50Hz | +30-40% |
 
 ### Recommendations for 3D Orientation Service
 

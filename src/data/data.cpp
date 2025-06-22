@@ -44,6 +44,7 @@
 #include <ble_services.hpp>
 #include <data.hpp>
 #include <foot_sensor_messages.pb.h>
+#include <activity_messages.pb.h>
 #include <pb_decode.h>
 #include <pb_encode.h>
 #include <status_codes.h>
@@ -80,6 +81,7 @@ static void strremove(char *str, const char *sub);
 // --- Protobuf-specific write function for foot sensor ---
 static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSensorLogMessage *sensor_msg);
 static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMessage *sensor_msg);
+static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLogMessage *sensor_msg);
 
 static bool encode_foot_sensor_readings_callback(pb_ostream_t *stream, const pb_field_t *field, void *const *arg);
 static bool encode_string_callback(pb_ostream_t *stream, const pb_field_t *field, void *const *arg);
@@ -103,12 +105,16 @@ err_t end_foot_sensor_logging();
 err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version);
 err_t end_bhi360_logging();
 
+err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version);
+err_t end_activity_logging();
+
 err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data);
 err_t load_bhi360_calibration_data(uint8_t sensor_type);
 
 // --- Foot Sensor Log File Handle ---
 static struct fs_file_t foot_sensor_log_file;
 static struct fs_file_t bhi360_log_file;
+static struct fs_file_t activity_log_file;
 
 // --- Batch Write Buffers ---
 constexpr size_t FLASH_PAGE_SIZE = 256;
@@ -117,16 +123,21 @@ static uint8_t foot_sensor_write_buffer[FLASH_PAGE_SIZE];
 static size_t foot_sensor_write_buffer_pos = 0;
 static uint8_t bhi360_write_buffer[FLASH_PAGE_SIZE];
 static size_t bhi360_write_buffer_pos = 0;
+static uint8_t activity_write_buffer[FLASH_PAGE_SIZE];
+static size_t activity_write_buffer_pos = 0;
 
 // --- Thread safety ---
 K_MUTEX_DEFINE(foot_sensor_file_mutex);
 K_MUTEX_DEFINE(bhi360_file_mutex);
+K_MUTEX_DEFINE(activity_file_mutex);
 
 // --- Timestamp tracking for delta calculation ---
 static uint32_t foot_sensor_last_timestamp_ms = 0;
 static uint32_t bhi360_last_timestamp_ms = 0;
+static uint32_t activity_last_timestamp_ms = 0;
 static bool foot_sensor_first_packet = true;
 static bool bhi360_first_packet = true;
+static bool activity_first_packet = true;
 
 static void flush_foot_sensor_buffer() {
     if (foot_sensor_write_buffer_pos > 0) {
@@ -142,14 +153,23 @@ static void flush_bhi360_buffer() {
         bhi360_write_buffer_pos = 0;
     }
 }
+static void flush_activity_buffer() {
+    if (activity_write_buffer_pos > 0) {
+        fs_write(&activity_log_file, activity_write_buffer, activity_write_buffer_pos);
+        fs_sync(&activity_log_file);
+        activity_write_buffer_pos = 0;
+    }
+}
 
 // --- Sequence number counter for foot sensor log ---
 static uint8_t next_foot_sensor_file_sequence = 0;
 static uint8_t next_bhi360_file_sequence = 0;
+static uint8_t next_activity_file_sequence = 0;
 
 // Use atomic operations for thread-safe access to logging flags
 static atomic_t logging_foot_active = ATOMIC_INIT(0);
 static atomic_t logging_bhi360_active = ATOMIC_INIT(0);
+static atomic_t logging_activity_active = ATOMIC_INIT(0);
 
 // Mutex for protecting sequence number generation
 K_MUTEX_DEFINE(sequence_number_mutex);
@@ -186,7 +206,7 @@ constexpr uint8_t FILESYSTEM_USAGE_THRESHOLD_PERCENT = 80;  // Start cleanup at 
 constexpr uint8_t FILESYSTEM_USAGE_TARGET_PERCENT = 70;     // Clean up until 70% usage
 
 // Counter for periodic filesystem space checks during logging
-static uint32_t filesystem_space_check_counter = 0;
+// static uint32_t filesystem_space_check_counter = 0;  // Currently unused
 constexpr uint32_t FILESYSTEM_SPACE_CHECK_INTERVAL = 1000;  // Check every 1000 writes
 
 // Time-based filesystem space checking
@@ -199,6 +219,7 @@ constexpr bool ENABLE_RUNTIME_SPACE_CHECKING = true;  // Set to false to disable
 // Define the file path variables declared as extern in data.hpp
 char foot_sensor_file_path[util::max_path_length];
 char bhi360_file_path[util::max_path_length];
+char activity_file_path[util::max_path_length];
 
 /**
  * @brief Helper to find the next available sequence number for a log file.
@@ -296,9 +317,10 @@ static err_t data_init()
         // Set flag to indicate filesystem is available
         filesystem_available = true;
 
-        // Cap and reindex log files for both foot sensor and BHI360 at startup
+        // Cap and reindex log files for foot sensor, BHI360, and activity at startup
         cap_and_reindex_log_files(foot_sensor_file_prefix, hardware_dir_path, 200, 1);
         cap_and_reindex_log_files(bhi360_file_prefix, hardware_dir_path, 200, 1);
+        cap_and_reindex_log_files(activity_file_prefix, hardware_dir_path, 200, 1);
         
         // Check filesystem space at startup
         uint8_t usage = get_filesystem_usage_percent();
@@ -436,6 +458,33 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         {
             LOG_DBG("Initial BHI360 log notification sent (ID: %u).", latest_bhi360_log_id_to_report);
         }
+
+        // Notify about latest Activity log file
+        uint8_t current_activity_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
+        uint8_t latest_activity_log_id_to_report = (current_activity_seq > 0) ? (current_activity_seq - 1) : 0;
+
+        log_info_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
+        log_info_msg.data.new_hardware_log_file.file_sequence_id = latest_activity_log_id_to_report;
+        if (latest_activity_log_id_to_report > 0)
+        {
+            type_and_id_to_path(RECORD_HARDWARE_ACTIVITY, latest_activity_log_id_to_report,
+                                log_info_msg.data.new_hardware_log_file.file_path);
+        }
+        else
+        {
+            strncpy(log_info_msg.data.new_hardware_log_file.file_path, "",
+                    sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1);
+            log_info_msg.data.new_hardware_log_file
+                .file_path[sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+        }
+        if (k_msgq_put(&bluetooth_msgq, &log_info_msg, K_NO_WAIT) != 0)
+        {
+            LOG_ERR("Failed to put initial activity log notification message.");
+        }
+        else
+        {
+            LOG_DBG("Initial activity log notification sent (ID: %u).", latest_activity_log_id_to_report);
+        }
     } else {
         // Filesystem not available - send empty notifications
         LOG_WRN("Filesystem not available - sending empty log notifications");
@@ -451,6 +500,15 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         
         // Send empty BHI360 log notification
         log_info_msg.type = MSG_TYPE_NEW_BHI360_LOG_FILE;
+        log_info_msg.data.new_hardware_log_file.file_sequence_id = 0;
+        strncpy(log_info_msg.data.new_hardware_log_file.file_path, "",
+                sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1);
+        log_info_msg.data.new_hardware_log_file
+            .file_path[sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+        k_msgq_put(&bluetooth_msgq, &log_info_msg, K_NO_WAIT);
+        
+        // Send empty activity log notification
+        log_info_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
         log_info_msg.data.new_hardware_log_file.file_sequence_id = 0;
         strncpy(log_info_msg.data.new_hardware_log_file.file_path, "",
                 sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1);
@@ -486,6 +544,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // Perform initial setup
                     cap_and_reindex_log_files(foot_sensor_file_prefix, hardware_dir_path, 200, 1);
                     cap_and_reindex_log_files(bhi360_file_prefix, hardware_dir_path, 200, 1);
+                    cap_and_reindex_log_files(activity_file_prefix, hardware_dir_path, 200, 1);
                 }
             }
         }
@@ -637,6 +696,50 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     break;
                 }
 
+                case MSG_TYPE_ACTIVITY_STEP_COUNT: {
+                    const activity_step_count_t *activity_data = &msg.data.activity_step_count;
+                    
+                    // Only attempt logging if filesystem is available and logging is active
+                    if (filesystem_available && atomic_get(&logging_activity_active) == 1)
+                    {
+                        sensor_data_messages_ActivityLogMessage activity_log_msg =
+                            sensor_data_messages_ActivityLogMessage_init_default;
+                        activity_log_msg.which_payload = sensor_data_messages_ActivityLogMessage_activity_data_tag;
+
+                        // Populate Activity data fields
+                        // Combine left and right step counts into total step count
+                        activity_log_msg.payload.activity_data.step_count = 
+                            activity_data->left_step_count + activity_data->right_step_count;
+
+                        // Calculate delta time
+                        uint32_t current_time_ms = (uint32_t)k_uptime_get();
+                        uint16_t delta_ms = 0;
+                        
+                        if (activity_first_packet) {
+                            delta_ms = 0;  // First packet after header has delta 0
+                            activity_first_packet = false;
+                        } else {
+                            uint32_t time_diff = current_time_ms - activity_last_timestamp_ms;
+                            // Cap at 65535ms (about 65 seconds) to fit in 2 bytes
+                            delta_ms = (time_diff > 65535) ? 65535 : (uint16_t)time_diff;
+                        }
+                        
+                        activity_last_timestamp_ms = current_time_ms;
+                        activity_log_msg.payload.activity_data.delta_ms = delta_ms;
+
+                        err_t write_status = write_activity_protobuf_data(&activity_log_msg);
+                        if (write_status != err_t::NO_ERROR)
+                        {
+                            LOG_ERR("Failed to write activity data to file: %d", (int)write_status);
+                        }
+                    }
+                    else if (!filesystem_available && atomic_get(&logging_activity_active) == 1)
+                    {
+                        LOG_DBG("Activity logging requested but filesystem not available");
+                    }
+                    break;
+                }
+
                 case MSG_TYPE_COMMAND: {
                     LOG_INF("Received generic command: %s", msg.data.command_str);
                     if ((strcmp(msg.data.command_str, "START_LOGGING_FOOT_SENSOR") == 0) && (atomic_get(&logging_foot_active) == 0))
@@ -703,12 +806,45 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             }
                         }
                     }
+                    else if ((strcmp(msg.data.command_str, "START_LOGGING_ACTIVITY") == 0) && (atomic_get(&logging_activity_active) == 0))
+                    {
+                        if (!filesystem_available) {
+                            LOG_WRN("Command: Cannot start activity logging - filesystem not available");
+                            // Still set the flag so we know logging was requested
+                            atomic_set(&logging_activity_active, 1);
+                        } else {
+                            LOG_INF("Command: Starting activity logging.");
+                            err_t activity_status = start_activity_logging(msg.sampling_frequency, msg.fw_version);
+                            if (activity_status == err_t::NO_ERROR)
+                            {
+                                atomic_set(&logging_activity_active, 1);
+                            }
+                            else
+                            {
+                                LOG_ERR("Failed to start activity logging from command: %d", (int)activity_status);
+                                atomic_set(&logging_activity_active, 0);
+                            }
+                        }
+                    }
+                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_ACTIVITY") == 0) && (atomic_get(&logging_activity_active) == 1))
+                    {
+                        LOG_INF("Command: Stopping activity logging.");
+                        atomic_set(&logging_activity_active, 0);
+                        if (filesystem_available) {
+                            err_t activity_status = end_activity_logging();
+                            if (activity_status != err_t::NO_ERROR)
+                            {
+                                LOG_ERR("Failed to stop activity logging from command: %d", (int)activity_status);
+                            }
+                        }
+                    }
                     else if ((strcmp(msg.data.command_str, "STOP_LOGGING") == 0) && 
-                             ((atomic_get(&logging_foot_active) == 1) || (atomic_get(&logging_bhi360_active) == 1)))
+                             ((atomic_get(&logging_foot_active) == 1) || (atomic_get(&logging_bhi360_active) == 1) || (atomic_get(&logging_activity_active) == 1)))
                     {
                         LOG_INF("Command: Stopping all logging.");
                         err_t foot_status = err_t::NO_ERROR;
                         err_t bhi360_status = err_t::NO_ERROR;
+                        err_t activity_status = err_t::NO_ERROR;
                         
                         if (atomic_get(&logging_foot_active) == 1) {
                             atomic_set(&logging_foot_active, 0);
@@ -722,6 +858,12 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                                 bhi360_status = end_bhi360_logging();
                             }
                         }
+                        if (atomic_get(&logging_activity_active) == 1) {
+                            atomic_set(&logging_activity_active, 0);
+                            if (filesystem_available) {
+                                activity_status = end_activity_logging();
+                            }
+                        }
                         
                         if (filesystem_available) {
                             if (foot_status != err_t::NO_ERROR)
@@ -731,6 +873,10 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             if (bhi360_status != err_t::NO_ERROR)
                             {
                                 LOG_ERR("Failed to stop BHI360 logging from command: %d", (int)bhi360_status);
+                            }
+                            if (activity_status != err_t::NO_ERROR)
+                            {
+                                LOG_ERR("Failed to stop activity logging from command: %d", (int)activity_status);
                             }
                         }
                     }
@@ -777,6 +923,26 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         else
                         {
                             LOG_INF("Successfully deleted BHI360 log file with ID %u", msg.data.delete_cmd.id);
+                        }
+                    }
+                    break;
+                }
+
+                case MSG_TYPE_DELETE_ACTIVITY_LOG: {
+                    LOG_INF("Received DELETE ACTIVITY LOG command for ID: %u", msg.data.delete_cmd.id);
+                    if (!filesystem_available) {
+                        LOG_WRN("Cannot delete activity log - filesystem not available");
+                    } else {
+                        err_t delete_status =
+                            delete_by_type_and_id(RECORD_HARDWARE_ACTIVITY, (uint8_t)msg.data.delete_cmd.id);
+                        if (delete_status != err_t::NO_ERROR)
+                        {
+                            LOG_ERR("Failed to delete activity log file with ID %u: %d", msg.data.delete_cmd.id,
+                                    (int)delete_status);
+                        }
+                        else
+                        {
+                            LOG_INF("Successfully deleted activity log file with ID %u", msg.data.delete_cmd.id);
                         }
                     }
                     break;
@@ -1045,7 +1211,7 @@ int find_latest_log_file(const char *file_prefix, record_type_t record_type, cha
     static fs_dirent entry{};
 
     char dir_path_buf[util::max_path_length]{};
-    if (record_type == RECORD_HARDWARE_FOOT_SENSOR || record_type == RECORD_HARDWARE_BHI360)
+    if (record_type == RECORD_HARDWARE_FOOT_SENSOR || record_type == RECORD_HARDWARE_BHI360 || record_type == RECORD_HARDWARE_ACTIVITY)
     {
         std::strcpy(dir_path_buf, hardware_dir_path);
     }
@@ -1213,6 +1379,13 @@ static bool check_filesystem_space_and_cleanup(void)
         
         // Try to delete oldest BHI360 file
         err = delete_oldest_log_file_checked(bhi360_file_prefix, hardware_dir_path);
+        if (err == err_t::NO_ERROR) {
+            files_deleted_this_iteration++;
+            total_files_deleted++;
+        }
+        
+        // Try to delete oldest activity file
+        err = delete_oldest_log_file_checked(activity_file_prefix, hardware_dir_path);
         if (err == err_t::NO_ERROR) {
             files_deleted_this_iteration++;
             total_files_deleted++;
@@ -1758,6 +1931,254 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
     return err_t::NO_ERROR;
 }
 
+/**
+ * @brief Starts the data logging process for the activity file.
+ * Opens a new log file with a sequence number and writes the SensingData header.
+ *
+ * @return err_t NO_ERROR on success, or an error code on failure.
+ */
+err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version)
+{
+    err_t status = err_t::NO_ERROR;
+    
+    // Lock mutex for thread safety
+    k_mutex_lock(&activity_file_mutex, K_FOREVER);
+
+    // Reset timestamp tracking for new logging session
+    activity_last_timestamp_ms = (uint32_t)k_uptime_get();
+    activity_first_packet = true;
+
+    // --- Create hardware directory if it doesn't exist ---
+    int ret_mkdir = fs_mkdir(hardware_dir_path);
+    if (ret_mkdir != 0 && ret_mkdir != -EEXIST)
+    {
+        LOG_INF("FAIL: fs_mkdir %s: %d", hardware_dir_path, ret_mkdir);
+        k_mutex_unlock(&activity_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // --- Check filesystem space and cleanup if needed ---
+    if (!check_filesystem_space_and_cleanup()) {
+        LOG_ERR("Insufficient filesystem space for new activity log");
+        k_mutex_unlock(&activity_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // --- Initialize Activity Log File ---
+    // Protect sequence number generation with mutex
+    k_mutex_lock(&sequence_number_mutex, K_FOREVER);
+    next_activity_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
+    if (next_activity_file_sequence == 0) {
+        next_activity_file_sequence = 1;
+    }
+    k_mutex_unlock(&sequence_number_mutex);
+    snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.pb", hardware_dir_path,
+             activity_file_prefix, next_activity_file_sequence);
+    fs_file_t_init(&activity_log_file);
+
+    int ret_fs_open = fs_open(&activity_log_file, activity_file_path, FS_O_CREATE | FS_O_RDWR | FS_O_APPEND);
+    if (ret_fs_open != 0)
+    {
+        LOG_ERR("FAIL: open activity log %s: %d", activity_file_path, ret_fs_open);
+        status = err_t::FILE_SYSTEM_ERROR;
+        
+        // Report error to Bluetooth module
+        send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, true);
+    }
+    else
+    {
+        LOG_INF("Opened new activity log file: %s", activity_file_path);
+
+        uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE]; // Sufficient for SensingData message
+        sensor_data_messages_ActivityLogMessage header_msg = sensor_data_messages_ActivityLogMessage_init_default;
+        header_msg.which_payload = sensor_data_messages_ActivityLogMessage_sensing_data_tag;
+
+        string_callback_arg_t fw_version_arg = {.str = fw_version};
+        header_msg.payload.sensing_data.firmware_version.funcs.encode = &encode_string_callback;
+        header_msg.payload.sensing_data.firmware_version.arg = &fw_version_arg;
+        header_msg.payload.sensing_data.sampling_frequency = sampling_frequency;
+        header_msg.payload.sensing_data.message_type = sensor_data_messages_ActivityMessageType_ACTIVITY_STEP_DATA;
+
+        pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+        bool encode_status = pb_encode(&stream, sensor_data_messages_ActivityLogMessage_fields, &header_msg);
+        if (!encode_status)
+        {
+            LOG_ERR("Activity header encode error: %s", stream.errmsg);
+            fs_close(&activity_log_file);
+            status = err_t::PROTO_ENCODE_ERROR;
+        }
+        else
+        {
+            int write_ret = fs_write(&activity_log_file, buffer, stream.bytes_written);
+            if (write_ret < 0)
+            {
+                LOG_ERR("fs_write error during activity header write: %d", write_ret);
+                fs_close(&activity_log_file);
+                status = err_t::FILE_SYSTEM_ERROR;
+            }
+            else
+            {
+                int sync_ret = fs_sync(&activity_log_file);
+                if (sync_ret != 0)
+                {
+                    LOG_ERR("FAIL: sync activity header %s: [rd:%d]", activity_file_path, sync_ret);
+                    fs_close(&activity_log_file);
+                    status = err_t::FILE_SYSTEM_ERROR;
+                }
+                LOG_DBG("Activity SensingData header written to %s (%u bytes).", activity_file_path,
+                        stream.bytes_written);
+                
+                // Clear any previous file system errors since we succeeded
+                send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, false);
+            }
+        }
+    }
+
+    k_mutex_unlock(&activity_file_mutex);
+    return status;
+}
+
+/**
+ * @brief Ends the data logging process for the activity file.
+ * Appends a SessionEnd message, closes the file, and notifies Bluetooth.
+ *
+ * @return err_t NO_ERROR on success, or an error code on failure.
+ */
+err_t end_activity_logging()
+{
+    err_t overall_status = err_t::NO_ERROR;
+    
+    // Lock mutex for thread safety
+    k_mutex_lock(&activity_file_mutex, K_FOREVER);
+
+    // --- End Activity Log ---
+    if (activity_log_file.filep != nullptr)
+    {
+        sensor_data_messages_ActivityLogMessage end_activity_session_msg =
+            sensor_data_messages_ActivityLogMessage_init_default;
+        end_activity_session_msg.which_payload = sensor_data_messages_ActivityLogMessage_session_end_tag;
+        end_activity_session_msg.payload.session_end.uptime_ms = k_uptime_get();
+
+        err_t err_activity_write = write_activity_protobuf_data(&end_activity_session_msg);
+        if (err_activity_write != err_t::NO_ERROR)
+        {
+            LOG_ERR("Failed to append activity SessionEnd to file: %d", (int)err_activity_write);
+            overall_status = err_activity_write;
+        }
+
+        // Flush any remaining buffered data
+        flush_activity_buffer();
+
+        int ret_activity_close = fs_close(&activity_log_file);
+        if (ret_activity_close != 0)
+        {
+            LOG_ERR("FAIL: close activity log %s: %d", activity_file_path, ret_activity_close);
+            if (overall_status == err_t::NO_ERROR)
+                overall_status = err_t::FILE_SYSTEM_ERROR;
+        }
+        else
+        {
+            LOG_INF("Closing Activity Log file '%s'", activity_file_path);
+        }
+        // Always send notification after closing, regardless of close result
+        generic_message_t activity_msg;
+        activity_msg.sender = SENDER_DATA;
+        activity_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
+        activity_msg.data.new_hardware_log_file.file_sequence_id = next_activity_file_sequence;
+        strncpy(activity_msg.data.new_hardware_log_file.file_path, activity_file_path,
+                sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1);
+        activity_msg.data.new_hardware_log_file.file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+        if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
+        {
+            LOG_ERR("Failed to put activity log notification message.");
+        }
+        else
+        {
+            LOG_DBG("Activity log notification message sent.");
+        }
+    }
+    else
+    {
+        LOG_WRN("Activity log file was not open, skipping close/end session.");
+        // Still send notification with current sequence and path (may be empty)
+        generic_message_t activity_msg;
+        activity_msg.sender = SENDER_DATA;
+        activity_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
+        activity_msg.data.new_hardware_log_file.file_sequence_id = next_activity_file_sequence;
+        strncpy(activity_msg.data.new_hardware_log_file.file_path, activity_file_path,
+                sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1);
+        activity_msg.data.new_hardware_log_file.file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+        if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
+        {
+            LOG_ERR("Failed to put activity log notification message (file not open).");
+        }
+        else
+        {
+            LOG_DBG("Activity log notification message sent (file not open).");
+        }
+    }
+
+    k_mutex_unlock(&activity_file_mutex);
+    return overall_status;
+}
+
+/**
+ * @brief Writes an ActivityLogMessage to the activity log file.
+ *
+ * @param sensor_msg Pointer to the ActivityLogMessage to write.
+ * @return err_t NO_ERROR on success, or an error code on failure.
+ */
+static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLogMessage *sensor_msg)
+{
+    if (!filesystem_available) {
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+    
+    // Periodically check filesystem space (if enabled)
+    if (ENABLE_RUNTIME_SPACE_CHECKING) {
+        uint32_t current_time_ms = k_uptime_get_32();
+        if ((current_time_ms - last_filesystem_check_time_ms) >= FILESYSTEM_CHECK_TIME_INTERVAL_MS) {
+            last_filesystem_check_time_ms = current_time_ms;
+            if (!check_filesystem_space_and_cleanup()) {
+                LOG_ERR("Filesystem full during activity logging");
+                return err_t::FILE_SYSTEM_ERROR;
+            }
+        }
+    }
+    
+    uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
+    pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
+
+    bool status = pb_encode(&stream, sensor_data_messages_ActivityLogMessage_fields, sensor_msg);
+    if (!status)
+    {
+        LOG_ERR("Activity Protobuf encode error: %s", stream.errmsg);
+        return err_t::PROTO_ENCODE_ERROR;
+    }
+
+    // Lock mutex for buffer access
+    k_mutex_lock(&activity_file_mutex, K_FOREVER);
+    
+    // Batch buffering logic
+    if (activity_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE) {
+        flush_activity_buffer();
+    }
+    memcpy(&activity_write_buffer[activity_write_buffer_pos], buffer, stream.bytes_written);
+    activity_write_buffer_pos += stream.bytes_written;
+
+    // Optionally, flush immediately for header or session end messages
+    if (sensor_msg->which_payload == sensor_data_messages_ActivityLogMessage_sensing_data_tag ||
+        sensor_msg->which_payload == sensor_data_messages_ActivityLogMessage_session_end_tag) {
+        flush_activity_buffer();
+    }
+
+    k_mutex_unlock(&activity_file_mutex);
+    
+    LOG_DBG("Activity data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written, (unsigned)activity_write_buffer_pos, FLASH_PAGE_SIZE);
+    return err_t::NO_ERROR;
+}
+
 err_t type_and_id_to_path(record_type_t type, uint8_t id, char path[])
 {
     switch (type)
@@ -1767,6 +2188,9 @@ err_t type_and_id_to_path(record_type_t type, uint8_t id, char path[])
             break;
         case RECORD_HARDWARE_BHI360: // New: Case for BHI360 files
             snprintk(path, util::max_path_length, "%s/%s%03u.pb", hardware_dir_path, bhi360_file_prefix, id);
+            break;
+        case RECORD_HARDWARE_ACTIVITY: // Case for Activity files
+            snprintk(path, util::max_path_length, "%s/%s%03u.pb", hardware_dir_path, activity_file_prefix, id);
             break;
         default:
             LOG_ERR("File path generation not implemented for type: %d", (int)type);
@@ -1915,6 +2339,60 @@ err_t delete_by_type_and_id(record_type_t type, uint8_t id)
             }
         }
     }
+    else if (type == RECORD_HARDWARE_ACTIVITY)
+    {
+        char open_file_path[util::max_path_length] = "";
+        if (activity_log_file.filep != nullptr)
+        {
+            strncpy(open_file_path, activity_file_path, sizeof(open_file_path) - 1);
+            open_file_path[sizeof(open_file_path) - 1] = '\0';
+        }
+        temp_latest_file_seq = (uint8_t)find_latest_log_file(activity_file_prefix, RECORD_HARDWARE_ACTIVITY, latest_file_path, open_file_path);
+        if (temp_latest_file_seq == (uint32_t)err_t::DATA_ERROR)
+        {
+            LOG_INF("Activity directory empty or error finding latest file after deletion. No file to report.");
+            latest_file_seq_for_notify = 0;
+            generic_message_t activity_log_info_msg;
+            activity_log_info_msg.sender = SENDER_DATA;
+            activity_log_info_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
+            activity_log_info_msg.data.new_hardware_log_file.file_sequence_id = latest_file_seq_for_notify;
+            strncpy(activity_log_info_msg.data.new_hardware_log_file.file_path, "",
+                    sizeof(activity_log_info_msg.data.new_hardware_log_file.file_path) - 1);
+            activity_log_info_msg.data.new_hardware_log_file
+                .file_path[sizeof(activity_log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+            if (k_msgq_put(&bluetooth_msgq, &activity_log_info_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to put empty activity log notification message.");
+            }
+            else
+            {
+                LOG_DBG("Sent empty activity log notification.");
+            }
+        }
+        else
+        {
+            latest_file_seq_for_notify = (uint8_t)temp_latest_file_seq;
+            LOG_INF("New latest activity log file: %s (Seq: %u)", latest_file_path, latest_file_seq_for_notify);
+            generic_message_t activity_log_info_msg;
+            activity_log_info_msg.sender = SENDER_DATA;
+            activity_log_info_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
+            activity_log_info_msg.data.new_hardware_log_file.file_sequence_id = latest_file_seq_for_notify;
+            strncpy(activity_log_info_msg.data.new_hardware_log_file.file_path, latest_file_path,
+                    sizeof(activity_log_info_msg.data.new_hardware_log_file.file_path) - 1);
+            activity_log_info_msg.data.new_hardware_log_file
+                .file_path[sizeof(activity_log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+            if (k_msgq_put(&bluetooth_msgq, &activity_log_info_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to put new latest activity log notification message.");
+            }
+            else
+            {
+                LOG_DBG("Sent new latest activity log notification (ID: %u).", latest_file_seq_for_notify);
+            }
+        }
+    }
     return err_t::NO_ERROR;
 }
 
@@ -1924,6 +2402,7 @@ struct LogFileEntry
     uint8_t id;
     char name[util::max_path_length];
 };
+
 
 // Cap and reindex log files for a given prefix and directory
 err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, uint8_t max_files, uint8_t delete_count)

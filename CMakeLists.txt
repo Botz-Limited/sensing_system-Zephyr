@@ -39,6 +39,7 @@ set(NANOPB_GENERATE_CPP_STANDALONE FALSE)
 nanopb_generate_cpp(proto_sources proto_headers
     $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/foot_sensor_messages.proto
     $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/bhi360_sensor_messages.proto
+    $ENV{APPLICATION_ROOT_PATH}/sensing-protobuf/activity_messages.proto
 )
 
 # Create a custom target for the protobuf generation step
