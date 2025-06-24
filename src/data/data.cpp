@@ -30,7 +30,6 @@
 #include <zephyr/sys/atomic.h>
 
 #include <app_event_manager.h>
-#include <ble_services.hpp>
 #include <caf/events/module_state_event.h>
 #include <errors.hpp>
 #include <events/app_state_event.h>
@@ -48,11 +47,6 @@
 #include <pb_decode.h>
 #include <pb_encode.h>
 #include <status_codes.h>
-#include <ble_services.hpp>
-
-#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-#include "../bluetooth/ble_d2d_tx.hpp"
-#endif
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_DATA_MODULE_LOG_LEVEL); // NOLINT
 
@@ -558,15 +552,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_FOOT_SAMPLES: {
                 const foot_samples_t *foot_data = &msg.data.foot_samples;
                 
-                // Always send data to Bluetooth for real-time transmission
-                #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                LOG_DBG("Data thread: Sending foot sensor data to phone");
-                jis_foot_sensor_notify(foot_data);
-                #else
-                // Secondary device: Send to primary via D2D
-                LOG_INF("Data thread: Sending foot sensor data to primary via D2D");
-                ble_d2d_tx_send_foot_sensor_data(foot_data);
-                #endif
+                // Data module only handles logging, not real-time transmission
+                // The foot sensor module should send data to the bluetooth module directly
                     
                     // Only attempt logging if filesystem is available and logging is active
                     if (filesystem_available && atomic_get(&logging_foot_active) == 1)
@@ -774,6 +761,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             {
                                 LOG_ERR("Failed to stop foot sensor logging from command: %d", (int)foot_status);
                             }
+                            // Add small delay to allow bluetooth queue to process
+                            k_msleep(10);
                         }
                     }
                     else if ((strcmp(msg.data.command_str, "START_LOGGING_BHI360") == 0) && (atomic_get(&logging_bhi360_active) == 0))
@@ -806,6 +795,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             {
                                 LOG_ERR("Failed to stop BHI360 logging from command: %d", (int)bhi360_status);
                             }
+                            // Add small delay to allow bluetooth queue to process
+                            k_msleep(10);
                         }
                     }
                     else if ((strcmp(msg.data.command_str, "START_LOGGING_ACTIVITY") == 0) && (atomic_get(&logging_activity_active) == 0))
@@ -838,6 +829,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             {
                                 LOG_ERR("Failed to stop activity logging from command: %d", (int)activity_status);
                             }
+                            // Add small delay to allow bluetooth queue to process
+                            k_msleep(10);
                         }
                     }
                     else if ((strcmp(msg.data.command_str, "STOP_LOGGING") == 0) && 
@@ -1592,7 +1585,15 @@ err_t end_foot_sensor_logging()
 
             if (k_msgq_put(&bluetooth_msgq, &foot_msg, K_NO_WAIT) != 0)
             {
-                LOG_ERR("Failed to put foot sensor log notification message.");
+                // First attempt failed, try with a small timeout
+                if (k_msgq_put(&bluetooth_msgq, &foot_msg, K_MSEC(100)) != 0)
+                {
+                    LOG_ERR("end_foot_sensor_logging: Failed to put foot sensor log notification message.");
+                }
+                else
+                {
+                    LOG_DBG("Foot sensor log notification message sent after retry.");
+                }
             }
             else
             {
@@ -1614,7 +1615,15 @@ err_t end_foot_sensor_logging()
         foot_msg.data.new_hardware_log_file.file_path[sizeof(foot_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
         if (k_msgq_put(&bluetooth_msgq, &foot_msg, K_NO_WAIT) != 0)
         {
-            LOG_ERR("Failed to put foot sensor log notification message (file not open).");
+            // First attempt failed, try with a small timeout
+            if (k_msgq_put(&bluetooth_msgq, &foot_msg, K_MSEC(100)) != 0)
+            {
+                LOG_ERR("end_foot_sensor_logging: Failed to put foot sensor log notification message (file not open).");
+            }
+            else
+            {
+                LOG_DBG("Foot Sensor log notification message sent after retry (file not open).");
+            }
         }
         else
         {
@@ -1788,7 +1797,15 @@ err_t end_bhi360_logging()
 
         if (k_msgq_put(&bluetooth_msgq, &bhi360_msg, K_NO_WAIT) != 0)
         {
-            LOG_ERR("Failed to put BHI360 log notification message.");
+            // First attempt failed, try with a small timeout
+            if (k_msgq_put(&bluetooth_msgq, &bhi360_msg, K_MSEC(100)) != 0)
+            {
+                LOG_ERR("end_bhi360_logging: Failed to put BHI360 log notification message.");
+            }
+            else
+            {
+                LOG_DBG("BHI360 log notification message sent after retry.");
+            }
         }
         else
         {
@@ -1809,7 +1826,15 @@ err_t end_bhi360_logging()
         bhi360_msg.data.new_hardware_log_file.file_path[sizeof(bhi360_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
         if (k_msgq_put(&bluetooth_msgq, &bhi360_msg, K_NO_WAIT) != 0)
         {
-            LOG_ERR("Failed to put BHI360 log notification message (file not open).");
+            // First attempt failed, try with a small timeout
+            if (k_msgq_put(&bluetooth_msgq, &bhi360_msg, K_MSEC(100)) != 0)
+            {
+                LOG_ERR("end_bhi360_logging: Failed to put BHI360 log notification message (file not open).");
+            }
+            else
+            {
+                LOG_DBG("BHI360 log notification message sent after retry (file not open).");
+            }
         }
         else
         {
@@ -2093,7 +2118,15 @@ err_t end_activity_logging()
 
         if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
         {
-            LOG_ERR("Failed to put activity log notification message.");
+            // First attempt failed, try with a small timeout
+            if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_MSEC(100)) != 0)
+            {
+                LOG_ERR("end_activity_logging: Failed to put activity log notification message.");
+            }
+            else
+            {
+                LOG_DBG("Activity log notification message sent after retry.");
+            }
         }
         else
         {

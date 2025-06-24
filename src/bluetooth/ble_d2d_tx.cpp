@@ -319,7 +319,7 @@ void ble_d2d_tx_set_connection(struct bt_conn *conn) {
 int ble_d2d_tx_send_foot_sensor_data(const foot_samples_t *samples) {
     if (!d2d_conn) return -ENOTCONN;
     
-    LOG_DBG("D2D TX: Sending foot sensor data");
+    LOG_INF("D2D TX: Sending foot sensor data");
     
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary device: Send via GATT notification
@@ -613,4 +613,19 @@ int ble_d2d_tx_send_stop_activity_command(uint8_t value) {
     }
     
     return 0;
+}
+
+int ble_d2d_tx_send_device_info(const device_info_msg_t *info) {
+    if (!d2d_conn) return -ENOTCONN;
+    
+    LOG_INF("D2D TX: Sending device info");
+    
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Secondary device: Send via GATT notification
+    return d2d_tx_notify_device_info(info);
+#else
+    // Primary device shouldn't call this
+    LOG_WRN("Primary device shouldn't send device info via D2D");
+    return -EINVAL;
+#endif
 }

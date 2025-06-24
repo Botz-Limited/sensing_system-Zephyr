@@ -348,20 +348,26 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
     uint8_t value = *((const uint8_t *)buf);
 
     if (value == 1) {
-        struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
-        APP_EVENT_SUBMIT(foot_evt);
-
-        struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
-        APP_EVENT_SUBMIT(motion_evt);
-
-        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        // Forward the command to secondary device
-        ble_d2d_tx_send_start_activity_command(value);
-        #endif
-
-        LOG_INF("Submitted start activity events for foot sensor and motion sensor (input=1).");
+    struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(foot_evt);
+    
+    struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(motion_evt);
+    
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device
+    LOG_INF("Forwarding start activity command to secondary device");
+    int err = ble_d2d_tx_send_start_activity_command(value);
+    if (err) {
+    LOG_ERR("Failed to forward start activity command to secondary: %d", err);
     } else {
-        LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
+    LOG_INF("Successfully forwarded start activity command to secondary");
+    }
+    #endif
+    
+    LOG_INF("Submitted start activity events for foot sensor and motion sensor (input=1).");
+    } else {
+    LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
     }
 
     return len;

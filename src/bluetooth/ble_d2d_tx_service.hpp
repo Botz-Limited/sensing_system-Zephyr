@@ -75,6 +75,13 @@ int d2d_tx_notify_foot_log_available(uint8_t log_id);
  */
 int d2d_tx_notify_bhi360_log_available(uint8_t log_id);
 
+/**
+ * @brief Send device info notification to primary device
+ * @param info Device information structure
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_device_info(const device_info_msg_t *info);
+
 #ifdef __cplusplus
 }
 #endif

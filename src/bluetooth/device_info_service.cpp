@@ -107,3 +107,29 @@ static ssize_t read_str(struct bt_conn *conn, const struct bt_gatt_attr *attr, v
     auto value_len = strlen(static_cast<const char *>(attr->user_data));
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, value_len);
 }
+
+// Getter functions for device information
+const char* dis_get_manufacturer(void)
+{
+    return (const char*)dis_manuf;
+}
+
+const char* dis_get_model(void)
+{
+    return (const char*)dis_model;
+}
+
+const char* dis_get_serial(void)
+{
+    return (const char*)dis_serial;
+}
+
+const char* dis_get_hw_revision(void)
+{
+    return (const char*)dis_hw_rev;
+}
+
+const char* dis_get_fw_revision(void)
+{
+    return (const char*)dis_fw_rev;
+}

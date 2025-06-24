@@ -45,6 +45,13 @@ size_t get_current_time_char_value_size(void);
 int init_rtc_time(void);
 uint32_t get_current_epoch_time(void);
 
+// Device Information Service functions
+const char* dis_get_manufacturer(void);
+const char* dis_get_model(void);
+const char* dis_get_serial(void);
+const char* dis_get_hw_revision(void);
+const char* dis_get_fw_revision(void);
+
 #ifdef __cplusplus
 }
 #endif

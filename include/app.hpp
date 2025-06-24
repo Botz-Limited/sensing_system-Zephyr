@@ -148,7 +148,7 @@ typedef struct
 // Define the message queue parameters based on the new generic_message_t size
 // Ensure CONFIG_MSG_Q_MAX_SIZE_BYTES in Kconfig is at least sizeof(generic_message_t)
 #define MSG_QUEUE_MESSAGE_SIZE sizeof(generic_message_t)
-static constexpr uint8_t MSG_QUEUE_DEPTH = 10; // Adjust if necessary
+static constexpr uint8_t MSG_QUEUE_DEPTH = 40; // Adjust if necessary
 
 // --- MESSAGE QUEUE DECLARATION (unchanged) ---
 extern struct k_msgq bluetooth_msgq;

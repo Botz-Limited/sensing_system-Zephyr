@@ -8,7 +8,7 @@
  * @copyright Botz Innovation 2025
  *
  */
- 
+
 #define MODULE foot_sensor
 
 #include <cstddef>
@@ -55,17 +55,18 @@ extern "C"
 }
 
 #include <app.hpp>
+#include <ble_services.hpp>
 #include <errors.hpp>
 #include <foot_sensor.hpp>
 #include <status_codes.h>
-#include <ble_services.hpp>
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL); // NOLINT
 
 static constexpr uint32_t US_PER_SECOND = 1000000UL;
 static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
-static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_NORMAL = 1;        // normal sampling rate (10 Hz)
-static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_CALIBRATION = 100; // Higher rate for quick calibration (1000 Hz = 1 ms period)
+static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_NORMAL = 1; // normal sampling rate (10 Hz)
+static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_CALIBRATION =
+    100; // Higher rate for quick calibration (1000 Hz = 1 ms period)
 
 static constexpr uint32_t TIME_TO_WAIT_US_NORMAL = US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_NORMAL;
 // New definition for calibration
@@ -74,8 +75,8 @@ static constexpr uint32_t TIME_TO_WAIT_US_CALIBRATION = US_PER_SECOND / SAADC_SA
 // SAADC_BUFFER_SIZE is set to SAADC_CHANNEL_COUNT.
 // This means the SAADC_EVENT_DONE will trigger after one complete set of 8 channel readings.
 static constexpr uint8_t SAADC_BUFFER_SIZE = SAADC_CHANNEL_COUNT;
-static constexpr uint8_t SAADC_IRQ_PRIORITY = 1;           // Lower number means higher priority
-static constexpr uint8_t BUFFER_COUNT = 2;               // For double buffering
+static constexpr uint8_t SAADC_IRQ_PRIORITY = 1;            // Lower number means higher priority
+static constexpr uint8_t BUFFER_COUNT = 2;                  // For double buffering
 static constexpr uint16_t SAMPLING_ITERATIONS = UINT16_MAX; // Continue sampling, never stop
 
 static constexpr uint8_t TIMER_INSTANCE_ID = 0;
@@ -137,31 +138,33 @@ static void foot_sensor_init()
 {
     bool init_failed = false;
     err_t result = err_t::NO_ERROR;
-    
+
     foot_sensor_initializing_entry(); // This function is currently empty
 
     // All hardware initialization (SAADC, Timer, DPPI) should be done here
     init_dppi();
     init_timer();
-    
+
     // Initialize SAADC and check result
     result = init_saadc();
-    if (result != err_t::NO_ERROR) {
+    if (result != err_t::NO_ERROR)
+    {
         LOG_ERR("SAADC initialization failed");
         init_failed = true;
     }
 
-    if (init_failed) {
+    if (init_failed)
+    {
         // Report error to Bluetooth module
         send_error_to_bluetooth(SENDER_FOOT_SENSOR_THREAD, err_t::ADC_ERROR, true);
-        
-        #if IS_ENABLED(CONFIG_FOOT_SENSOR_OPTIONAL)
+
+#if IS_ENABLED(CONFIG_FOOT_SENSOR_OPTIONAL)
         LOG_WRN("Foot sensor initialization failed but continuing (non-critical)");
         module_set_state(MODULE_STATE_READY);
-        #else
+#else
         LOG_ERR("Foot sensor initialization failed (critical)");
         module_set_state(MODULE_STATE_ERROR);
-        #endif
+#endif
         return;
     }
 
@@ -181,7 +184,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
     nrfx_err_t status;
     (void)status; // Suppress unused variable warning
 
-    static uint16_t buffer_index = 1;
+    static uint16_t buffer_index = 0;
     // MODIFICATION: Removed 'static uint16_t buf_req_evt_counter = 0;'
     // as it's no longer used for limiting continuous sampling.
 
@@ -207,18 +210,27 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
             break;
 
         case NRFX_SAADC_EVT_BUF_REQ:
+            LOG_DBG("SAADC BUF_REQ: Setting buffer[%d]", buffer_index);
             status = nrfx_saadc_buffer_set(saadc_buffer[buffer_index], SAADC_BUFFER_SIZE);
-            NRFX_ASSERT(status == NRFX_SUCCESS);
-            buffer_index = (buffer_index + 1) % BUFFER_COUNT;
+            if (status != NRFX_SUCCESS)
+            {
+                LOG_ERR("Failed to set SAADC buffer[%d]: %d", buffer_index, status);
+                // Don't assert - just skip this buffer
+            }
+            else
+            {
+                buffer_index = (buffer_index + 1) % BUFFER_COUNT;
+            }
             break;
 
         case NRFX_SAADC_EVT_DONE:
             samples_number = p_event->data.done.size;
             // Assign the buffer to our new uint16_t pointer
             raw_adc_data = (int16_t *)p_event->data.done.p_buffer;
-            
+
             // Validate pointer before use
-            if (!raw_adc_data) {
+            if (!raw_adc_data)
+            {
                 LOG_ERR("SAADC buffer pointer is NULL");
                 break;
             }
@@ -241,43 +253,57 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                     }
                     calibration_sample_counter++;
 
-                    // All calibration samples collected, calculate offsets
-                    for (uint16_t i = 0; i < samples_number; i++)
+                    // Check if we've collected all calibration samples
+                    if (calibration_sample_counter >= CALIBRATION_SAMPLES_TO_AVG)
                     {
-                        // Offset itself can be negative if calibration point is high, so int16_t is fine.
-                        saadc_offset[i] = (int16_t)(calibration_sum[i] / CALIBRATION_SAMPLES_TO_AVG);
+                        // All calibration samples collected, calculate offsets
+                        for (uint16_t i = 0; i < samples_number; i++)
+                        {
+                            // Offset itself can be negative if calibration point is high, so int16_t is fine.
+                            saadc_offset[i] = (int16_t)(calibration_sum[i] / CALIBRATION_SAMPLES_TO_AVG);
+                        }
+                        // Set flag to true: calibration is complete
+                        calibration_done = true;
+                        LOG_INF("SAADC calibration complete. Readings will now be offset.");
+                        // Adjust timer to normal sampling rate after calibration
+                        nrfx_timer_disable(&timer_inst);
+                        uint32_t ticks = nrfx_timer_us_to_ticks(&timer_inst, TIME_TO_WAIT_US_NORMAL);
+                        nrfx_timer_extended_compare(&timer_inst, NRF_TIMER_CC_CHANNEL0, ticks,
+                                                    NRF_TIMER_SHORT_COMPARE0_CLEAR_MASK, false);
+                        nrfx_timer_clear(&timer_inst); // Keep this clear to restart timer from 0 with new compare value
+                        nrfx_timer_enable(&timer_inst);
+                        LOG_INF("Switched SAADC sampling rate to %u Hz (normal operation).",
+                                SAADC_SAMPLE_RATE_HZ_NORMAL);
                     }
-                    // Set flag to true: calibration is complete
-                    calibration_done = true;
-                    LOG_INF("SAADC calibration complete. Readings will now be offset.");
-                    // Adjust timer to normal sampling rate after calibration
-                    nrfx_timer_disable(&timer_inst);
-                    uint32_t ticks = nrfx_timer_us_to_ticks(&timer_inst, TIME_TO_WAIT_US_NORMAL);
-                    nrfx_timer_extended_compare(&timer_inst, NRF_TIMER_CC_CHANNEL0, ticks,
-                                                NRF_TIMER_SHORT_COMPARE0_CLEAR_MASK, false);
-                    nrfx_timer_clear(&timer_inst); // Keep this clear to restart timer from 0 with new compare value
-                    nrfx_timer_enable(&timer_inst);
-                    LOG_INF("Switched SAADC sampling rate to %u Hz (normal operation).", SAADC_SAMPLE_RATE_HZ_NORMAL);
                 }
             }
             else // Normal operation after calibration
             {
+
                 if (atomic_get(&logging_active) == 1)
                 {
+
                     generic_message_t msg;
 
                     msg.sender = SENDER_FOOT_SENSOR_THREAD;
                     msg.type = MSG_TYPE_FOOT_SAMPLES;
 
                     // Populate the foot sensor data directly into the message's union member.
-                    for (uint16_t i = 0; i < samples_number; i++)
+                    for (uint8_t i = 0; i < samples_number; i++)
                     {
                         int16_t calibrated_value = raw_adc_data[i] - saadc_offset[i];
                         msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
                     }
 
-                    LOG_DBG("Foot sensor: Sending data to data thread (logging_active=1)");
-                    k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
+                    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
+                    {
+                        LOG_WRN("Failed to send foot sensor data to bluetooth module");
+                    }
+
+                    if (k_msgq_put(&data_msgq, &msg, K_NO_WAIT) != 0)
+                    {
+                        LOG_WRN("Failed to send foot sensor data to data module");
+                    }
                 }
             }
             break;
@@ -323,8 +349,7 @@ static void calibrate_saadc_channels(void)
 
 // --- Timer handler (empty as per your use case, now marked with ARG_UNUSED) ---
 // Currently unused - DPPI handles the direct trigger
-__attribute__((unused))
-static void timer_handler(nrf_timer_event_t event_type, void *p_context)
+__attribute__((unused)) static void timer_handler(nrf_timer_event_t event_type, void *p_context)
 {
     ARG_UNUSED(event_type);
     ARG_UNUSED(p_context);
@@ -468,7 +493,7 @@ static err_t init_saadc(void)
     // (Timer -> SAADC SAMPLE, and SAADC END -> SAADC START) will keep it going.
     // nrf_saadc_task_trigger(NRF_SAADC, NRF_SAADC_TASK_START); // <-- UN-COMMENT THIS LINE!
     nrfx_saadc_offset_calibrate(saadc_event_handler); // This is for calibration, not continuous sampling initiation.
-    
+
     return err_t::NO_ERROR;
 }
 

@@ -49,7 +49,6 @@ int d2d_data_handler_process_bhi360_3d_mapping(const bhi360_3d_mapping_t *data)
     
     LOG_DBG("Processing BHI360 3D mapping from secondary device");
     
-    // Check if this is high-rate quaternion data (gyro values are zero)
     if (data->gyro_x == 0.0f && data->gyro_y == 0.0f && data->gyro_z == 0.0f) {
         // This is quaternion-only data for 3D visualization
         // Forward to 3D orientation service (secondary is left shoe)

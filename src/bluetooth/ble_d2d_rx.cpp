@@ -141,11 +141,14 @@ static ssize_t d2d_start_activity_write(struct bt_conn *conn, const struct bt_ga
     ARG_UNUSED(offset);
     ARG_UNUSED(flags);
     
+    LOG_INF("D2D RX: Received start activity command write, len=%u", len);
+    
     if (len != sizeof(uint8_t)) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
     
     uint8_t value = *((const uint8_t *)buf);
+    LOG_INF("D2D RX: Start activity command value=%u", value);
     
     if (value == 1) {
         struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
@@ -154,7 +157,7 @@ static ssize_t d2d_start_activity_write(struct bt_conn *conn, const struct bt_ga
         struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
         APP_EVENT_SUBMIT(motion_evt);
         
-        LOG_INF("D2D RX: Start Activity Command - submitted events");
+        LOG_INF("D2D RX: Start Activity Command - submitted foot and motion sensor events");
     } else {
         LOG_WRN("D2D RX: Start activity command ignored (value=%u)", value);
     }

@@ -33,6 +33,9 @@ int ble_d2d_tx_send_trigger_bhi360_calibration_command(uint8_t value);
 // Send function for FOTA completion status (secondary -> primary)
 int ble_d2d_tx_send_fota_complete(void);
 
+// Send function for device info (secondary -> primary)
+int ble_d2d_tx_send_device_info(const device_info_msg_t *info);
+
 #ifdef __cplusplus
 }
 #endif
