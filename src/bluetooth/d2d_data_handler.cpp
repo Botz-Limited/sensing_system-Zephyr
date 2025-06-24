@@ -137,9 +137,12 @@ int d2d_data_handler_process_status(uint32_t status)
 
 int d2d_data_handler_process_charge_status(uint8_t charge_status)
 {
-    LOG_DBG("Secondary device charge status: %u", charge_status);
-    
-    // TODO: Update Information Service with secondary battery status
-    
+    LOG_INF("Secondary device charge status: %u%%", charge_status);
+
+    // Forward to Information Service to notify phone
+    // Note: This updates the primary's charge status characteristic with secondary's value
+    // In a real implementation, you might want to have separate characteristics for each device
+    jis_charge_status_notify(charge_status);
+
     return 0;
 }

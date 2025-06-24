@@ -295,11 +295,12 @@ void ble_d2d_tx_set_connection(struct bt_conn *conn) {
     
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary device: Update the GATT service connection
+    LOG_INF("D2D TX: Setting connection for secondary device GATT service");
     d2d_tx_service_set_connection(conn);
 #endif
     
     if (conn) {
-        LOG_INF("D2D TX connection set");
+        LOG_INF("D2D TX connection set (conn=%p)", (void*)conn);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Primary device: Start service discovery when connection is established
         k_sleep(K_MSEC(100)); // Small delay to ensure connection is stable

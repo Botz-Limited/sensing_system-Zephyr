@@ -73,48 +73,56 @@ static uint8_t bhi360_log_available = 0;
 // CCC changed callbacks
 static void foot_sensor_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
+    ARG_UNUSED(attr);
     foot_sensor_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Foot sensor notifications %s", foot_sensor_notify_enabled ? "enabled" : "disabled");
 }
 
 static void bhi360_data1_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
+    ARG_UNUSED(attr);
     bhi360_data1_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("BHI360 data1 notifications %s", bhi360_data1_notify_enabled ? "enabled" : "disabled");
 }
 
 static void bhi360_data2_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
+    ARG_UNUSED(attr);
     bhi360_data2_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("BHI360 data2 notifications %s", bhi360_data2_notify_enabled ? "enabled" : "disabled");
 }
 
 static void bhi360_data3_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
+    ARG_UNUSED(attr);
     bhi360_data3_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("BHI360 data3 notifications %s", bhi360_data3_notify_enabled ? "enabled" : "disabled");
 }
 
 static void status_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
+    ARG_UNUSED(attr);
     status_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Status notifications %s", status_notify_enabled ? "enabled" : "disabled");
 }
 
 static void charge_status_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
+    ARG_UNUSED(attr);
     charge_status_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Charge status notifications %s", charge_status_notify_enabled ? "enabled" : "disabled");
 }
 
 static void foot_log_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
+    ARG_UNUSED(attr);
     foot_log_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Foot log notifications %s", foot_log_notify_enabled ? "enabled" : "disabled");
 }
 
 static void bhi360_log_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
+    ARG_UNUSED(attr);
     bhi360_log_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("BHI360 log notifications %s", bhi360_log_notify_enabled ? "enabled" : "disabled");
 }
@@ -196,18 +204,25 @@ BT_GATT_SERVICE_DEFINE(d2d_tx_svc,
 // Public functions to send notifications
 int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
 {
+    static uint32_t notify_count = 0;
+    notify_count++;
+    
+    LOG_INF("D2D TX: Attempting to send foot sensor data #%u - conn=%s, enabled=%d", 
+            notify_count, primary_conn ? "yes" : "no", foot_sensor_notify_enabled);
+    
     if (!primary_conn || !foot_sensor_notify_enabled) {
+        LOG_WRN("D2D TX: Cannot send foot sensor data - no connection or notifications disabled");
         return -ENOTCONN;
     }
     
     memcpy(&foot_sensor_data, samples, sizeof(foot_samples_t));
     
-    // Foot sensor characteristic is at index 1
+    // Foot sensor characteristic declaration is at index 1
     int err = bt_gatt_notify(primary_conn, &d2d_tx_svc.attrs[1], samples, sizeof(foot_samples_t));
     if (err) {
-        LOG_ERR("Failed to send foot sensor notification: %d", err);
+        LOG_ERR("Failed to send foot sensor notification #%u: %d", notify_count, err);
     } else {
-        LOG_DBG("Sent foot sensor data notification");
+        LOG_INF("D2D TX: Sent foot sensor data notification #%u to primary", notify_count);
     }
     
     return err;
@@ -215,7 +230,11 @@ int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
 
 int d2d_tx_notify_bhi360_data1(const bhi360_3d_mapping_t *data)
 {
+    LOG_INF("D2D TX: Attempting to send BHI360 3D mapping - conn=%s, enabled=%d", 
+            primary_conn ? "yes" : "no", bhi360_data1_notify_enabled);
+    
     if (!primary_conn || !bhi360_data1_notify_enabled) {
+        LOG_WRN("D2D TX: Cannot send BHI360 data1 - no connection or notifications disabled");
         return -ENOTCONN;
     }
     

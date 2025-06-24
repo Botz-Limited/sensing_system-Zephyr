@@ -276,6 +276,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                         msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
                     }
 
+                    LOG_DBG("Foot sensor: Sending data to data thread (logging_active=1)");
                     k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
                 }
             }

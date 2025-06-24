@@ -69,6 +69,15 @@ static bool bhi360_data3_subscribed = false;
 static fota_progress_msg_t fota_progress_value = {0};
 static bool fota_progress_subscribed = false;
 
+// Secondary device information storage (only used on primary)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+static char secondary_manufacturer[32] = "Not Connected";
+static char secondary_model[16] = "Not Connected";
+static char secondary_serial[16] = "Not Connected";
+static char secondary_hw_rev[16] = "Not Connected";
+static char secondary_fw_rev[16] = "Not Connected";
+#endif
+
 // --- Global variables for Current Time Service Notifications ---
 static struct bt_conn *current_time_conn_active = NULL; // Stores the connection object for notifications
 static bool current_time_notifications_enabled = false; // Flag to track CCC state
@@ -86,7 +95,6 @@ void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
 
 static ssize_t jis_bhi360_data3_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-void jis_bhi360_data3_notify(const int* data); // Placeholder, update to your third struct if needed
 
 //Current Time Characteristic
 static ssize_t jis_read_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -121,6 +129,11 @@ static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr* attr, uin
 static ssize_t jis_fota_progress_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 void jis_fota_progress_notify(const fota_progress_msg_t* progress);
+
+// Secondary Device Information Characteristics (Primary only)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+static ssize_t jis_secondary_info_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+#endif
 
 // UUID Defines
 static struct bt_uuid_128 SENSING_INFO_SERVICE_UUID =
@@ -163,6 +176,18 @@ static struct bt_uuid_128 bhi360_data3_uuid =
 // FOTA Progress UUID
 static struct bt_uuid_128 fota_progress_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb5, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// Secondary Device Information UUIDs
+static struct bt_uuid_128 secondary_manufacturer_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb6, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_model_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb7, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_serial_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb8, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_hw_rev_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb9, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_fw_rev_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eba, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 BT_GATT_SERVICE_DEFINE(
     info_service, BT_GATT_PRIMARY_SERVICE(&SENSING_INFO_SERVICE_UUID),
@@ -260,7 +285,41 @@ BT_GATT_SERVICE_DEFINE(
         BT_GATT_PERM_READ_ENCRYPT,
         jis_fota_progress_read, nullptr,
         static_cast<void *>(&fota_progress_value)),
-    BT_GATT_CCC(jis_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT));
+    BT_GATT_CCC(jis_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Secondary Device Information Characteristics
+    BT_GATT_CHARACTERISTIC(&secondary_manufacturer_uuid.uuid,
+        BT_GATT_CHRC_READ,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_info_read, nullptr,
+        secondary_manufacturer),
+
+    BT_GATT_CHARACTERISTIC(&secondary_model_uuid.uuid,
+        BT_GATT_CHRC_READ,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_info_read, nullptr,
+        secondary_model),
+
+    BT_GATT_CHARACTERISTIC(&secondary_serial_uuid.uuid,
+        BT_GATT_CHRC_READ,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_info_read, nullptr,
+        secondary_serial),
+
+    BT_GATT_CHARACTERISTIC(&secondary_hw_rev_uuid.uuid,
+        BT_GATT_CHRC_READ,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_info_read, nullptr,
+        secondary_hw_rev),
+
+    BT_GATT_CHARACTERISTIC(&secondary_fw_rev_uuid.uuid,
+        BT_GATT_CHRC_READ,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_info_read, nullptr,
+        secondary_fw_rev)
+#endif
+    );
 
 // clang-format on
 /**
@@ -946,4 +1005,55 @@ void jis_fota_progress_notify(const fota_progress_msg_t *progress)
         bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&fota_progress_value), sizeof(fota_progress_value));
     }
 }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+// Secondary device info read handler
+static ssize_t jis_secondary_info_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    const char *value = static_cast<const char *>(attr->user_data);
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, value, strlen(value));
+}
+
+// Function to update secondary device information
+void jis_update_secondary_device_info(const char *manufacturer, const char *model, 
+                                     const char *serial, const char *hw_rev, const char *fw_rev)
+{
+    if (manufacturer) {
+        strncpy(secondary_manufacturer, manufacturer, sizeof(secondary_manufacturer) - 1);
+        secondary_manufacturer[sizeof(secondary_manufacturer) - 1] = '\0';
+    }
+    if (model) {
+        strncpy(secondary_model, model, sizeof(secondary_model) - 1);
+        secondary_model[sizeof(secondary_model) - 1] = '\0';
+    }
+    if (serial) {
+        strncpy(secondary_serial, serial, sizeof(secondary_serial) - 1);
+        secondary_serial[sizeof(secondary_serial) - 1] = '\0';
+    }
+    if (hw_rev) {
+        strncpy(secondary_hw_rev, hw_rev, sizeof(secondary_hw_rev) - 1);
+        secondary_hw_rev[sizeof(secondary_hw_rev) - 1] = '\0';
+    }
+    if (fw_rev) {
+        strncpy(secondary_fw_rev, fw_rev, sizeof(secondary_fw_rev) - 1);
+        secondary_fw_rev[sizeof(secondary_fw_rev) - 1] = '\0';
+    }
+    
+    LOG_INF("Updated secondary device info: Mfg=%s, Model=%s, Serial=%s, HW=%s, FW=%s",
+            secondary_manufacturer, secondary_model, secondary_serial, 
+            secondary_hw_rev, secondary_fw_rev);
+}
+
+// Function to clear secondary device info when disconnected
+void jis_clear_secondary_device_info(void)
+{
+    strcpy(secondary_manufacturer, "Not Connected");
+    strcpy(secondary_model, "Not Connected");
+    strcpy(secondary_serial, "Not Connected");
+    strcpy(secondary_hw_rev, "Not Connected");
+    strcpy(secondary_fw_rev, "Not Connected");
+    
+    LOG_INF("Cleared secondary device info");
+}
+#endif
 

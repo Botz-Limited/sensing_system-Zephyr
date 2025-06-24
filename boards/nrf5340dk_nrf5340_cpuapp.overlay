@@ -93,10 +93,14 @@
 
 
 &spi1 {
+    status = "disabled";
+};
+
+&spi2 {
     compatible = "nordic,nrf-spim";
     status = "okay";
-    pinctrl-0 = <&spi1_default_alt>;
-    pinctrl-1 = <&spi1_sleep_alt>;
+    pinctrl-0 = <&spi2_default_alt>;
+    pinctrl-1 = <&spi2_sleep_alt>;
     pinctrl-names = "default", "sleep";
     cs-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>; // CS on P1.6
 
@@ -105,8 +109,8 @@
         status = "okay";
         reg = <0>;
         spi-max-frequency = <8000000>;
-        int-gpios = <&gpio1 2 GPIO_ACTIVE_HIGH>;   // INT on P1.2 (adjust as needed)
-        reset-gpios = <&gpio1 3 GPIO_ACTIVE_LOW>;  // Optional: RESET on P1.3 (adjust as needed)
+        int-gpios = <&gpio1 2 GPIO_ACTIVE_HIGH>;   // INT on P1.2
+        reset-gpios = <&gpio1 3 GPIO_ACTIVE_LOW>;  // Optional: RESET on P1.3
         label = "BHI360";
     };
 };

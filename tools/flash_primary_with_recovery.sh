@@ -1,0 +1,31 @@
+#!/bin/bash
+# Flash script for PRIMARY device (Right foot) with recovery option
+
+cd /home/ee/sensing_fw
+
+echo "Flashing PRIMARY device firmware with recovery..."
+echo "Make sure the RIGHT foot device is connected!"
+read -p "Press Enter to continue..."
+
+# First recover both cores to ensure no access protection issues
+echo "Recovering network core..."
+nrfjprog --recover -f NRF53 --coprocessor CP_NETWORK
+
+echo "Recovering application core..."
+nrfjprog --recover -f NRF53 --coprocessor CP_APPLICATION
+
+# Small delay after recovery
+sleep 2
+
+# Flash network core first
+echo "Flashing network core..."
+nrfjprog --program build_primary/merged_CPUNET.hex --verify --chiperase --reset
+
+# Small delay
+sleep 2
+
+# Flash application core
+echo "Flashing application core..."
+nrfjprog --program build_primary/merged.hex --verify --chiperase --reset
+
+echo "Primary device flashed successfully!"

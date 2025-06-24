@@ -41,6 +41,12 @@
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
+// Constants
+#define VND_MAX_LEN 128  // Maximum length for vendor characteristic data
+
+// External function declarations
+extern "C" void set_current_time_from_epoch(uint32_t new_epoch_time_s);
+
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 static constexpr uint8_t is_little_endian = 1;
 #else

@@ -65,6 +65,7 @@ typedef enum
     MSG_TYPE_TRIGGER_BHI360_CALIBRATION, // Trigger BHI360 calibration
     MSG_TYPE_REQUEST_BHI360_CALIBRATION, // Request calibration data from data module
     MSG_TYPE_BHI360_CALIBRATION_DATA, // Calibration data response from data module
+    MSG_TYPE_DEVICE_INFO, // Device information for D2D sharing
 } msg_type_t;
 
 // Define sender types

@@ -108,6 +108,15 @@ typedef struct {
     uint16_t right_step_count;  // Right foot step count
 } activity_step_count_t;
 
+// Device information structure for D2D sharing
+typedef struct {
+    char manufacturer[32];
+    char model[16];
+    char serial[16];
+    char hw_rev[16];
+    char fw_rev[16];
+} device_info_msg_t;
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -132,6 +141,7 @@ typedef struct
         error_status_msg_t error_status;
         bhi360_calibration_data_t bhi360_calibration;
         activity_step_count_t activity_step_count;
+        device_info_msg_t device_info;
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

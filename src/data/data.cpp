@@ -556,15 +556,17 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
             switch (msg.type)
             {
                 case MSG_TYPE_FOOT_SAMPLES: {
-                    const foot_samples_t *foot_data = &msg.data.foot_samples;
-                    
-                    // Always send data to Bluetooth for real-time transmission
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                    jis_foot_sensor_notify(foot_data);
-#else
-                    // Secondary device: Send to primary via D2D
-                    ble_d2d_tx_send_foot_sensor_data(foot_data);
-#endif
+                const foot_samples_t *foot_data = &msg.data.foot_samples;
+                
+                // Always send data to Bluetooth for real-time transmission
+                #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                LOG_DBG("Data thread: Sending foot sensor data to phone");
+                jis_foot_sensor_notify(foot_data);
+                #else
+                // Secondary device: Send to primary via D2D
+                LOG_INF("Data thread: Sending foot sensor data to primary via D2D");
+                ble_d2d_tx_send_foot_sensor_data(foot_data);
+                #endif
                     
                     // Only attempt logging if filesystem is available and logging is active
                     if (filesystem_available && atomic_get(&logging_foot_active) == 1)

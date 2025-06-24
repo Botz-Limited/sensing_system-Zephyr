@@ -134,6 +134,10 @@ static void populate_cts_value(struct bt_cts_current_time_val *cts_val, const st
 
 // --- RTC Timekeeping Functions ---
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @brief Initializes the RTC counter.
  *
@@ -248,12 +252,20 @@ uint32_t get_current_epoch_time()
     return last_synced_epoch_time_s + elapsed_seconds;
 }
 
+#ifdef __cplusplus
+}
+#endif
 
 // --- Public Accessor Functions for BLE Characteristics ---
 // These functions allow other files (e.g., your BLE service definition file)
 // to get a pointer to the static characteristic value buffer and its size.
 // This is necessary for the BT_GATT_CHARACTERISTIC macro and for sending
 // notifications with `bt_gatt_notify()`.
+
+// --- Public Accessor Functions wrapped with extern "C" ---
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
  * @brief Get a const pointer to the Current Time characteristic's value buffer.
@@ -306,5 +318,9 @@ void update_cts_characteristic_buffer() {
         std::memset(&current_time_char_val_buffer, 0, sizeof(current_time_char_val_buffer));
     }
 }
+
+#ifdef __cplusplus
+}
+#endif
 
 

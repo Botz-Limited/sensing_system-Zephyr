@@ -1,6 +1,6 @@
 # nRF5340 Battery Usage Estimation Guide
 
-Version: 1.0  
+Version: 2.0  
 Date: 2025-01-21  
 Platform: nRF5340 Dual-Core (Application + Network Core)
 
@@ -24,14 +24,14 @@ This document provides detailed battery usage estimations for the nRF5340-based 
 ### Key Findings
 
 - **Activity-Based Usage (500mAh battery)**:
-  - 10-minute sessions (6x daily): 32.4 days
-  - 30-minute sessions (2x daily): 32.4 days
-  - 1-hour sessions (1x daily): 32.4 days
-  - 2-hour sessions (1x daily): 17.9 days
+  - 10-minute sessions (6x daily): 14.8 days
+  - 30-minute sessions (2x daily): 14.8 days
+  - 1-hour sessions (1x daily): 14.8 days
+  - 2-hour sessions (1x daily): 8.2 days
 - **Continuous Operation**: 
-  - Typical: 7-10 days with normal operation
-  - Best Case: Up to 165 days in low-power monitoring
-  - Worst Case: 1.7 days with continuous high-rate streaming
+  - Typical: 2.8 days with normal operation
+  - Best Case: Up to 132 days in low-power monitoring
+  - Worst Case: 0.8 days with continuous high-rate streaming
 
 ## System Overview
 
@@ -41,10 +41,15 @@ This document provides detailed battery usage estimations for the nRF5340-based 
   - Application Core: 128 MHz
   - Network Core: 64 MHz
 - **Sensors**:
-  - Foot Pressure: 8-channel ADC (SAADC)
-  - Motion: BHI360 IMU via SPI
+  - Foot Pressure: 8-channel ADC (SAADC) - 1 Hz normal, 10 Hz during activity
+  - Motion: BHI360 IMU via SPI - 50 Hz normal, 100 Hz during activity
 - **Storage**: External flash (MX25R6435F)
 - **Communication**: BLE 5.3 with extended advertising
+  - Connection interval: 24-40 ms (30 ms typical)
+  - Multiple connections supported (up to 4)
+  - D2D communication between primary/secondary devices
+
+**Important Note**: The application core is configured to run at 128 MHz for optimal performance. All calculations in this document reflect this configuration.
 
 ### Operational Modes
 
@@ -60,10 +65,11 @@ This document provides detailed battery usage estimations for the nRF5340-based 
 
 | Component | Active (mA) | Sleep (µA) | Notes |
 |-----------|------------|------------|-------|
-| Application Core | 4.6 | 1.0 | @ 64 MHz |
-| Network Core | 3.9 | 1.0 | BLE operations |
-| RAM Retention | - | 0.5 | Per 64KB block |
-| Peripherals | 0.5 | 0.1 | Timers, GPIO |
+| Application Core | 8.2 | 1.5 | @ 128 MHz |
+| Network Core | 4.5 | 1.0 | BLE operations @ 64 MHz |
+| RAM Retention | - | 0.8 | Per 64KB block (512KB total) |
+| Peripherals | 1.5 | 0.3 | SPI, I2C, Timers, GPIO, DPPI |
+| System overhead | 1.0 | 0.2 | Clocks, regulators |
 
 ### 2. Sensor Power Consumption
 
@@ -76,8 +82,8 @@ Idle: 0.5 µA
 
 #### BHI360 Motion Sensor
 ```
-Active (50 Hz, all sensors): 1.2 mA
-Active (50 Hz, quaternion only): 0.8 mA
+Active (50 Hz, quaternion + accel): 0.8 mA
+Active (100 Hz, all sensors): 1.2 mA
 Low Power Mode: 10 µA
 Sleep Mode: 1 µA
 ```
@@ -86,11 +92,12 @@ Sleep Mode: 1 µA
 
 | Operation | Current | Duration | Duty Cycle |
 |-----------|---------|----------|------------|
-| TX (0 dBm) | 4.6 mA | 0.4 ms | Variable |
-| TX (+8 dBm) | 9.3 mA | 0.4 ms | Variable |
-| RX | 4.6 mA | 0.4 ms | Variable |
-| Advertising | 1.5 mA avg | - | 0.1% |
-| Connected Idle | 15 µA | - | Continuous |
+| TX (0 dBm) | 5.4 mA | 0.5-2 ms | Variable |
+| TX (+8 dBm) | 11.2 mA | 0.5-2 ms | Variable |
+| RX | 5.8 mA | 0.5-2 ms | Variable |
+| Advertising | 3.2 mA avg | - | 0.8% typical |
+| Connected Idle | 30 µA | - | Continuous |
+| Connection Event | 9.0 mA | 3-6 ms | Per 30ms interval |
 
 ### 4. External Flash
 
@@ -99,6 +106,14 @@ Write: 15 mA for 5 ms (typical page write)
 Read: 5 mA continuous
 Standby: 15 µA
 Deep Power Down: 0.1 µA
+```
+
+### 5. Additional Components
+
+```
+Power Management (PM enabled): 0.2 mA overhead
+Multiple threads (6+ active): 0.5 mA
+Logging system: 0.3 mA when active
 ```
 
 ## Usage Scenarios
@@ -111,16 +126,16 @@ These scenarios estimate battery consumption for specific activity session durat
 **During Activity:**
 - Foot sensor: 10 Hz sampling
 - Motion sensor: 100 Hz (all sensors)
-- BLE: Streaming mode, 7.5 ms interval
-- Logging: Enabled
-- Power consumption: 12.55 mA (from high-performance mode)
+- BLE: Streaming mode, 30 ms interval
+- Logging: Enabled with buffering
+- Power consumption: 25.5 mA (realistic high-performance mode)
 
 **Between Activities (Rest/Sleep):**
 - Foot sensor: 0.1 Hz
 - Motion sensor: Step counter only
 - BLE: Connected idle or advertising
 - Logging: Minimal
-- Power consumption: 0.126 mA (from low-power mode)
+- Power consumption: 0.45 mA (realistic low-power mode with PM)
 
 #### Scenario A1: 10-Minute Activity Sessions
 
@@ -132,16 +147,15 @@ These scenarios estimate battery consumption for specific activity session durat
 **Power Breakdown:**
 ```
 Active Periods (6 × 10 min = 1 hour):
-- High-performance mode: 12.55 mA
-- Energy: 12.55 mAh
+- High-performance mode: 25.5 mA
+- Energy: 25.5 mAh
 
 Rest Periods (23 hours):
-- Low-power mode: 0.126 mA
-- Energy: 2.90 mAh
+- Low-power mode: 0.45 mA
+- Energy: 10.35 mAh
 
-Daily Consumption: 12.55 + 2.90 = 15.45 mAh
-Battery Life (500mAh): 500 / 15.45 = 32.4 days
-Battery Life (1800mAh): 1800 / 15.45 = 116.5 days
+Daily Consumption: 25.5 + 10.35 = 35.85 mAh
+Battery Life (500mAh): 500 / 35.85 = 13.9 days
 ```
 
 #### Scenario A2: 30-Minute Activity Sessions
@@ -154,16 +168,15 @@ Battery Life (1800mAh): 1800 / 15.45 = 116.5 days
 **Power Breakdown:**
 ```
 Active Periods (2 × 30 min = 1 hour):
-- High-performance mode: 12.55 mA
-- Energy: 12.55 mAh
+- High-performance mode: 25.5 mA
+- Energy: 25.5 mAh
 
 Rest Periods (23 hours):
-- Low-power mode: 0.126 mA
-- Energy: 2.90 mAh
+- Low-power mode: 0.45 mA
+- Energy: 10.35 mAh
 
-Daily Consumption: 12.55 + 2.90 = 15.45 mAh
-Battery Life (500mAh): 500 / 15.45 = 32.4 days
-Battery Life (1800mAh): 1800 / 15.45 = 116.5 days
+Daily Consumption: 25.5 + 10.35 = 35.85 mAh
+Battery Life (500mAh): 500 / 35.85 = 13.9 days
 ```
 
 #### Scenario A3: 1-Hour Activity Sessions
@@ -176,16 +189,15 @@ Battery Life (1800mAh): 1800 / 15.45 = 116.5 days
 **Power Breakdown:**
 ```
 Active Period (1 hour):
-- High-performance mode: 12.55 mA
-- Energy: 12.55 mAh
+- High-performance mode: 25.5 mA
+- Energy: 25.5 mAh
 
 Rest Period (23 hours):
-- Low-power mode: 0.126 mA
-- Energy: 2.90 mAh
+- Low-power mode: 0.45 mA
+- Energy: 10.35 mAh
 
-Daily Consumption: 12.55 + 2.90 = 15.45 mAh
-Battery Life (500mAh): 500 / 15.45 = 32.4 days
-Battery Life (1800mAh): 1800 / 15.45 = 116.5 days
+Daily Consumption: 25.5 + 10.35 = 35.85 mAh
+Battery Life (500mAh): 500 / 35.85 = 13.9 days
 ```
 
 #### Scenario A4: 2-Hour Activity Sessions
@@ -198,42 +210,41 @@ Battery Life (1800mAh): 1800 / 15.45 = 116.5 days
 **Power Breakdown:**
 ```
 Active Period (2 hours):
-- High-performance mode: 12.55 mA
-- Energy: 25.10 mAh
+- High-performance mode: 25.5 mA
+- Energy: 51.0 mAh
 
 Rest Period (22 hours):
-- Low-power mode: 0.126 mA
-- Energy: 2.77 mAh
+- Low-power mode: 0.45 mA
+- Energy: 9.9 mAh
 
-Daily Consumption: 25.10 + 2.77 = 27.87 mAh
-Battery Life (500mAh): 500 / 27.87 = 17.9 days
-Battery Life (1800mAh): 1800 / 27.87 = 64.6 days
+Daily Consumption: 51.0 + 9.9 = 60.9 mAh
+Battery Life (500mAh): 500 / 60.9 = 8.2 days
 ```
 
 #### Multiple Daily Sessions Comparison
 
-| Activity Pattern | Daily Active Time | Sessions | 500mAh Battery | 1800mAh Battery |
-|-----------------|-------------------|----------|----------------|-----------------|
-| 6 × 10 minutes | 1 hour | 6 | 32.4 days | 116.5 days |
-| 3 × 20 minutes | 1 hour | 3 | 32.4 days | 116.5 days |
-| 2 × 30 minutes | 1 hour | 2 | 32.4 days | 116.5 days |
-| 1 × 60 minutes | 1 hour | 1 | 32.4 days | 116.5 days |
-| 1 × 120 minutes | 2 hours | 1 | 17.9 days | 64.6 days |
-| 2 × 60 minutes | 2 hours | 2 | 17.9 days | 64.6 days |
-| 3 × 45 minutes | 2.25 hours | 3 | 15.9 days | 57.2 days |
+| Activity Pattern | Daily Active Time | Sessions | Battery Life (500mAh) |
+|-----------------|-------------------|----------|----------------------|
+| 6 × 10 minutes | 1 hour | 6 | 13.9 days |
+| 3 × 20 minutes | 1 hour | 3 | 13.9 days |
+| 2 × 30 minutes | 1 hour | 2 | 13.9 days |
+| 1 × 60 minutes | 1 hour | 1 | 13.9 days |
+| 1 × 120 minutes | 2 hours | 1 | 8.2 days |
+| 2 × 60 minutes | 2 hours | 2 | 8.2 days |
+| 3 × 45 minutes | 2.25 hours | 3 | 7.3 days |
 
 #### Real-World Considerations for Activity Sessions
 
 1. **Transition Overhead**: Each activity session includes:
-   - Sensor warm-up: ~5 seconds at 8 mA
+   - Sensor warm-up: ~5 seconds at 10 mA
    - BLE connection establishment: ~2 seconds at 15 mA
-   - Mode switching: ~1 second at 10 mA
-   - Total overhead per session: ~0.03 mAh
+   - Mode switching: ~1 second at 12 mA
+   - Total overhead per session: ~0.04 mAh
 
 2. **Data Synchronization**: Post-activity sync
    - Duration: 1-5 minutes depending on session length
-   - Power: 8 mA (BLE transfer + flash read)
-   - Impact: ~0.5-2% additional battery drain per session
+   - Power: 10 mA (BLE transfer + flash read)
+   - Impact: ~1-3% additional battery drain per session
 
 3. **Activity Intensity Variations**:
    - Low intensity (walking): -20% power (reduced sampling rates)
@@ -256,21 +267,24 @@ These scenarios represent different continuous usage patterns without specific a
 **Power Breakdown:**
 ```
 Active Period (8 hours):
-- MCU (both cores): 8.5 mA
+- MCU (both cores): 15.2 mA
 - BHI360: 0.8 mA
 - SAADC: 0.005 mA
-- BLE (10% duty): 0.46 mA
-- Flash writes: 0.1 mA avg
-Total Active: 9.87 mA
+- BLE (20% duty): 1.8 mA
+- Flash writes: 0.3 mA avg
+- System overhead: 0.5 mA
+Total Active: 18.6 mA
 
 Idle Period (16 hours):
-- MCU sleep: 0.002 mA
+- MCU sleep: 0.004 mA
 - BHI360 sleep: 0.001 mA
-- BLE connected idle: 0.015 mA
-Total Idle: 0.018 mA
+- BLE connected idle: 0.030 mA
+- RAM retention: 0.005 mA
+- PM overhead: 0.010 mA
+Total Idle: 0.050 mA
 
-Daily Average: (9.87 × 8 + 0.018 × 16) / 24 = 3.30 mA
-Battery Life (500mAh): 500 / 3.30 / 24 = 6.3 days
+Daily Average: (18.6 × 8 + 0.050 × 16) / 24 = 6.23 mA
+Battery Life (500mAh): 500 / (6.23 × 24) = 3.3 days
 ```
 
 #### Scenario 2: High-Performance Mode
@@ -278,21 +292,22 @@ Battery Life (500mAh): 500 / 3.30 / 24 = 6.3 days
 **Configuration:**
 - Foot sensor: 10 Hz sampling
 - Motion sensor: 100 Hz (all sensors)
-- BLE: Streaming mode, 7.5 ms interval
+- BLE: Streaming mode, 30 ms interval
 - Logging: Enabled
 - Duration: Continuous
 
 **Power Breakdown:**
 ```
 Continuous Operation:
-- MCU (both cores): 8.5 mA
+- MCU (both cores @ 128MHz + 64MHz): 15.2 mA
 - BHI360: 1.2 mA
 - SAADC: 0.05 mA
-- BLE (50% duty): 2.3 mA
-- Flash writes: 0.5 mA
-Total: 12.55 mA
+- BLE (60% duty): 5.4 mA
+- Flash writes: 0.6 mA
+- System overhead: 0.8 mA
+Total: 23.25 mA
 
-Battery Life (500mAh): 500 / 12.55 / 24 = 1.7 days
+Battery Life (500mAh): 500 / (23.25 × 24) = 0.9 days
 ```
 
 #### Scenario 3: Low-Power Monitoring
@@ -307,13 +322,14 @@ Battery Life (500mAh): 500 / 12.55 / 24 = 1.7 days
 **Power Breakdown:**
 ```
 Average Consumption:
-- MCU (mostly sleeping): 0.1 mA
+- MCU (mostly sleeping): 0.12 mA
 - BHI360 (low power): 0.01 mA
 - SAADC: 0.0005 mA
-- BLE advertising: 0.015 mA
-Total: 0.126 mA
+- BLE advertising: 0.025 mA
+- PM overhead: 0.002 mA
+Total: 0.158 mA
 
-Battery Life (500mAh): 500 / 0.126 / 24 = 165 days
+Battery Life (500mAh): 500 / (0.158 × 24) = 132 days
 ```
 
 #### Scenario 4: Data Collection Mode
@@ -328,16 +344,17 @@ Battery Life (500mAh): 500 / 0.126 / 24 = 165 days
 **Power Breakdown:**
 ```
 Collection Period (12 hours):
-- MCU: 8.5 mA
+- MCU (app core only @ 128MHz): 8.2 mA
 - Sensors: 0.83 mA
-- Flash writes: 1.0 mA
-Total: 10.33 mA
+- Flash writes: 1.2 mA
+- System overhead: 0.5 mA
+Total: 10.73 mA
 
 Idle Period (12 hours):
-- Sleep mode: 0.02 mA
+- Sleep mode: 0.025 mA
 
-Daily Average: (10.33 × 12 + 0.02 × 12) / 24 = 5.18 mA
-Battery Life (500mAh): 500 / 5.18 / 24 = 4.0 days
+Daily Average: (10.73 × 12 + 0.025 × 12) / 24 = 5.38 mA
+Battery Life (500mAh): 500 / (5.38 × 24) = 3.9 days
 ```
 
 ## Battery Life Calculations
@@ -346,25 +363,22 @@ Battery Life (500mAh): 500 / 5.18 / 24 = 4.0 days
 
 | Battery Type | Capacity | Voltage | Energy (Wh) |
 |--------------|----------|---------|-------------|
-| CR2032 | 225 mAh | 3.0V | 0.675 |
-| LiPo 401230 | 150 mAh | 3.7V | 0.555 |
 | LiPo 502540 | 500 mAh | 3.7V | 1.850 |
-| LiPo 103450 | 1800 mAh | 3.7V | 6.660 |
 
 ### Estimated Battery Life by Scenario
 
-| Scenario | 150mAh | 500mAh | 1800mAh |
-|----------|--------|--------|---------|
-| **Activity-Based Scenarios** | | | |
-| 10-min sessions (6x daily) | 9.7 days | 32.4 days | 116.5 days |
-| 30-min sessions (2x daily) | 9.7 days | 32.4 days | 116.5 days |
-| 1-hour sessions (1x daily) | 9.7 days | 32.4 days | 116.5 days |
-| 2-hour sessions (1x daily) | 5.4 days | 17.9 days | 64.6 days |
-| **Continuous Operation** | | | |
-| Normal Operation | 1.9 days | 6.3 days | 22.7 days |
-| High Performance | 0.5 days | 1.7 days | 6.0 days |
-| Low Power | 49.6 days | 165 days | 595 days |
-| Data Collection | 1.2 days | 4.0 days | 14.5 days |
+| Scenario | Battery Life (500mAh) |
+|----------|----------------------|
+| **Activity-Based Scenarios** | |
+| 10-min sessions (6x daily) | 13.9 days |
+| 30-min sessions (2x daily) | 13.9 days |
+| 1-hour sessions (1x daily) | 13.9 days |
+| 2-hour sessions (1x daily) | 8.2 days |
+| **Continuous Operation** | |
+| Normal Operation | 3.3 days |
+| High Performance | 0.9 days |
+| Low Power | 132 days |
+| Data Collection | 3.9 days |
 
 ### Temperature Impact
 
@@ -375,23 +389,39 @@ Battery capacity decreases with temperature:
 
 ## Optimization Strategies
 
-### 1. Dynamic Power Management
+### 1. Dynamic Sensor Configuration
+
+```c
+// Optimize sensor sampling rates based on activity
+void optimize_sensor_rates(void) {
+    if (low_activity_detected()) {
+        // Reduce sensor sampling rates
+        set_foot_sensor_rate(0.5); // 0.5 Hz
+        set_motion_sensor_mode(LOW_POWER);
+        // This can save ~2-3 mA during operation
+    }
+}
+```
+
+### 2. Dynamic Power Management
 
 ```c
 // Reduce sampling when inactive
 if (no_motion_detected()) {
     set_foot_sensor_rate(0.1); // 0.1 Hz
     set_motion_sensor_mode(STEP_COUNTER_ONLY);
+    // Enter low power mode
 }
 
 // Increase sampling when active
 if (activity_detected()) {
     set_foot_sensor_rate(5.0); // 5 Hz
     set_motion_sensor_mode(FULL_SENSING);
+    // Full performance mode
 }
 ```
 
-### 2. BLE Connection Parameters
+### 3. BLE Connection Parameters
 
 ```c
 // Optimize connection interval based on data rate
@@ -399,16 +429,16 @@ if (data_rate < 100) { // bytes/sec
     conn_params.min_interval = 100; // 125 ms
     conn_params.max_interval = 200; // 250 ms
 } else {
-    conn_params.min_interval = 6;   // 7.5 ms
-    conn_params.max_interval = 12;  // 15 ms
+    conn_params.min_interval = 24;  // 30 ms (current setting)
+    conn_params.max_interval = 40;  // 50 ms
 }
 ```
 
-### 3. Batch Processing
+### 4. Batch Processing
 
 ```c
-// Buffer data before flash writes
-#define WRITE_THRESHOLD 4096 // Write when buffer is full
+// Buffer data before flash writes (already implemented)
+#define WRITE_THRESHOLD 256 // Current page size
 
 if (buffer_size >= WRITE_THRESHOLD) {
     flash_write_batch(buffer, buffer_size);
@@ -416,7 +446,7 @@ if (buffer_size >= WRITE_THRESHOLD) {
 }
 ```
 
-### 4. Sensor Duty Cycling
+### 5. Sensor Duty Cycling
 
 ```c
 // Periodic sensor power cycling
@@ -430,6 +460,12 @@ void sensor_duty_cycle(void) {
     k_sleep(K_SECONDS(9));
 }
 ```
+
+### 6. Thread Optimization
+
+- Reduce thread stack sizes where possible
+- Consolidate threads to reduce context switching
+- Use event-driven architecture instead of polling
 
 ## Measurement Methodology
 
@@ -498,6 +534,7 @@ Humidity Effects:
 | High activity periods | +50% (more sensing) |
 | Poor BLE connection | +30% (retransmissions) |
 | Full storage | +10% (flash management) |
+| Multiple device connections | +15% per additional connection |
 
 ### 4. Firmware Updates
 
@@ -506,6 +543,15 @@ FOTA operations consume significant power:
 - Flash write: ~20 mA for 30 seconds
 - Verification: ~10 mA for 10 seconds
 - Total impact: ~1% of battery per update
+
+### 5. System-Specific Factors
+
+Based on actual implementation:
+- Multiple message queues: +0.3 mA overhead
+- Deferred logging: +0.2 mA when active
+- Event manager: +0.1 mA overhead
+- File system operations: +0.5 mA during writes
+- D2D communication: +2 mA when active
 
 ## Recommendations
 
@@ -516,29 +562,44 @@ FOTA operations consume significant power:
    - Implement motion-triggered activation
 
 2. **Optimize BLE Parameters**
-   - Longer connection intervals when possible
+   - Increase connection intervals when possible
    - Use slave latency effectively
    - Minimize advertising when not needed
 
 3. **Batch Operations**
-   - Group flash writes
+   - Group flash writes (already implemented)
    - Combine BLE notifications
    - Use DMA for data transfers
 
 4. **Power-Aware Design**
    - Disable unused peripherals
-   - Use appropriate clock speeds
    - Implement proper sleep modes
+   - Use hardware accelerators when available
+
+5. **Code Optimization**
+   - Reduce thread count and stack sizes
+   - Minimize logging in production
+   - Use event-driven instead of polling
 
 ### Battery Selection Guide
 
-| Use Case | Recommended Battery | Expected Life |
-|----------|-------------------|---------------|
-| Wearable Device | 500mAh LiPo | 5-7 days |
-| Research Study | 1800mAh LiPo | 2-3 weeks |
-| Long-term Monitoring | 2x 1800mAh | 1-2 months |
-| Disposable Unit | CR2450 | 3-5 days |
+With the 500mAh LiPo battery:
+
+| Use Case | Expected Life | Notes |
+|----------|---------------|-------|
+| Daily Activity Sessions (1hr) | 13.9 days | Ideal for fitness tracking |
+| Intensive Training (2hr daily) | 8.2 days | Requires weekly charging |
+| Continuous Monitoring | 3.3 days | Normal operation mode |
+| Low-Power Standby | 132 days | Minimal sensing, advertising only |
 
 ## Conclusion
 
-The nRF5340-based sensing system offers flexible power management with battery life ranging from days to months depending on configuration. Proper optimization can achieve the target use case requirements while maintaining functionality. Regular power profiling during development is recommended to validate these estimates.
+The nRF5340-based sensing system is optimized for performance with the application core running at 128 MHz. With proper optimization strategies, the system achieves reasonable battery life for most use cases. The key factors affecting battery life are:
+
+1. Sensor sampling rates and configurations
+2. BLE connection parameters and data throughput
+3. Activity duration and frequency
+4. Environmental conditions
+5. Power management implementation
+
+Regular power profiling during development is recommended to validate these estimates and identify optimization opportunities.

@@ -15,6 +15,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <string_view>
 
@@ -41,11 +42,13 @@
 
 #include <app.hpp>
 #include <app_event_manager.h>
+#include <app_version.h>
 #include <caf/events/module_state_event.h>
 #include <errors.hpp>
 #include <events/app_state_event.h>
 #include <events/bluetooth_state_event.h>
 #include <events/data_event.h>
+#include <status_codes.h>
 
 #include "ble_d2d_file_transfer.hpp"
 #include "ble_d2d_rx.hpp"
@@ -59,6 +62,9 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
+// Constants
+#define BLE_ADVERTISING_TIMEOUT_MS 30000  // 30 seconds advertising timeout
+
 /********************************** BTH THREAD ********************************/
 static constexpr int bluetooth_stack_size = CONFIG_BLUETOOTH_MODULE_STACK_SIZE;
 static constexpr int bluetooth_priority = CONFIG_BLUETOOTH_MODULE_PRIORITY;
@@ -71,58 +77,168 @@ static k_tid_t bluetooth_tid;
 #include "ble_d2d_tx.hpp"
 
 static struct bt_conn *d2d_conn = nullptr;
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static void start_scan(void);
+#endif
+
+// Track connections that failed pairing (primary only)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+static struct bt_conn *pending_pairing_conn = nullptr;
+static bool pairing_failed_for_pending = false;
+#endif
+
+// Function to send device info from secondary to primary
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+static void send_device_info_to_primary(void)
+{
+    generic_message_t msg;
+    msg.sender = SENDER_BTH;
+    msg.type = MSG_TYPE_DEVICE_INFO;
+    
+    // For now, use hardcoded values since device_info_service variables are static
+    // In a real implementation, you would add getter functions in device_info_service.cpp
+    strncpy(msg.data.device_info.manufacturer, "Botz Innovation", sizeof(msg.data.device_info.manufacturer) - 1);
+    strncpy(msg.data.device_info.model, "S-01", sizeof(msg.data.device_info.model) - 1);
+    strncpy(msg.data.device_info.serial, "12345", sizeof(msg.data.device_info.serial) - 1);
+    strncpy(msg.data.device_info.hw_rev, "v1.1.0", sizeof(msg.data.device_info.hw_rev) - 1);
+    
+    // Get firmware version from app_version.h
+    char fw_ver[16];
+    snprintf(fw_ver, sizeof(fw_ver), "%d.%d.%d", 
+             APP_VERSION_MAJOR, APP_VERSION_MINOR, APP_PATCHLEVEL);
+    strncpy(msg.data.device_info.fw_rev, fw_ver, sizeof(msg.data.device_info.fw_rev) - 1);
+    
+    // Ensure null termination
+    msg.data.device_info.manufacturer[sizeof(msg.data.device_info.manufacturer) - 1] = '\0';
+    msg.data.device_info.model[sizeof(msg.data.device_info.model) - 1] = '\0';
+    msg.data.device_info.serial[sizeof(msg.data.device_info.serial) - 1] = '\0';
+    msg.data.device_info.hw_rev[sizeof(msg.data.device_info.hw_rev) - 1] = '\0';
+    msg.data.device_info.fw_rev[sizeof(msg.data.device_info.fw_rev) - 1] = '\0';
+    
+    // Send device info directly via D2D TX
+    // Note: We need to implement a D2D TX function for device info
+    // For now, log that we would send it
+    LOG_INF("Device info ready to send via D2D:");
+    LOG_INF("  Manufacturer: %s", msg.data.device_info.manufacturer);
+    LOG_INF("  Model: %s", msg.data.device_info.model);
+    LOG_INF("  Serial: %s", msg.data.device_info.serial);
+    LOG_INF("  HW Rev: %s", msg.data.device_info.hw_rev);
+    LOG_INF("  FW Rev: %s", msg.data.device_info.fw_rev);
+    
+    // TODO: Implement ble_d2d_tx_send_device_info() to send this data
+    // For now, we can use the status message to indicate device info is available
+    // Or we could send it as multiple status messages with encoded data
+}
+#endif
+
+// Called by D2D RX client when secondary device is confirmed
+void bluetooth_d2d_confirmed(struct bt_conn *conn)
+{
+    d2d_conn = conn;
+    LOG_INF("D2D connection confirmed for secondary device");
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Clear the pending pairing failure since this is a valid D2D connection
+    if (pending_pairing_conn == conn) {
+        LOG_INF("Clearing pairing failure for confirmed D2D connection");
+        pending_pairing_conn = nullptr;
+        pairing_failed_for_pending = false;
+    }
+    
+    // IMPORTANT: Set the connection in D2D TX module so it can forward commands
+    ble_d2d_tx_set_connection(conn);
+    LOG_INF("D2D TX connection set for command forwarding");
+#endif
+}
+
+// Called by D2D RX client when no D2D service is found (not a secondary device)
+void bluetooth_d2d_not_found(struct bt_conn *conn)
+{
+    ARG_UNUSED(conn);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    LOG_INF("Device is not a secondary (no D2D TX service found) - this is a phone connection");
+    
+    // Now we know it's a phone, set security
+    int ret = bt_conn_set_security(conn, BT_SECURITY_L2);
+    if (ret != 0)
+    {
+        LOG_ERR("Failed to set security for phone connection (err %d)", ret);
+        // If we can't set security, disconnect
+        bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+    } else {
+        LOG_INF("Security requested for phone connection");
+    }
+    
+    // Clear any pending pairing state
+    if (pending_pairing_conn == conn) {
+        pending_pairing_conn = nullptr;
+        pairing_failed_for_pending = false;
+    }
+#endif
+}
+
+// Forward declaration for primary device
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+static err_t bt_start_advertising(int err);
+#endif
+
+// For secondary (central) role: variables needed early
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+static bt_addr_le_t target_addr; // Store address of target device
+static bool target_found = false; // Flag to indicate we found our target
+#endif
 
 static void d2d_connected(struct bt_conn *conn, uint8_t err)
 {
     if (!err)
     {
-        d2d_conn = conn;
-        
-        // Request MTU exchange for D2D connection
-        static struct bt_gatt_exchange_params d2d_exchange_params;
-        d2d_exchange_params.func = [](struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params) {
-            if (!err) {
-                uint16_t mtu = bt_gatt_get_mtu(conn);
-                LOG_INF("D2D MTU exchange successful: %u", mtu);
-            } else {
-                LOG_WRN("D2D MTU exchange failed: %d", err);
-            }
-        };
-        
-        int ret = bt_gatt_exchange_mtu(conn, &d2d_exchange_params);
-        if (ret) {
-            LOG_WRN("Failed to initiate D2D MTU exchange: %d", ret);
-        }
-        
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        LOG_INF("Secondary device connected!\n");
+        // Check if this is actually a D2D connection
         char addr_str[BT_ADDR_LE_STR_LEN];
         const bt_addr_le_t *addr = bt_conn_get_dst(conn);
         if (addr)
         {
             bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
-            LOG_INF("Connected device address: %s\n", addr_str);
         }
-        else
-        {
-            LOG_WRN("Failed to get connected device address");
-        }
-
-        // Set the secondary connection for FOTA proxy
-        fota_proxy_set_secondary_conn(conn);
-
-        // Set the secondary connection for file proxy
-        file_proxy_set_secondary_conn(conn);
-
-        // Initialize D2D file client for this connection
-        ble_d2d_file_client_init(conn);
         
-        // Start discovery of secondary device's TX service
-        k_sleep(K_MSEC(100)); // Small delay to ensure connection is stable
-        d2d_rx_client_start_discovery(conn);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // For primary device, check if the connecting device has secondary device characteristics
+        // We'll identify it properly after service discovery
+        // For now, we'll set d2d_conn when we discover D2D services
+        LOG_INF("Connection established, will determine if D2D after service discovery");
+#else
+        // For secondary device, any connection is to the primary (D2D)
+        d2d_conn = conn;
+        LOG_INF("Secondary device connected to primary (D2D connection)");
+        
+        // Set the D2D TX connection for the secondary device
+        ble_d2d_tx_set_connection(conn);
+        LOG_INF("D2D TX connection set for secondary device");
+        
+        // Send device information to primary after connection
+        k_sleep(K_MSEC(500)); // Small delay to ensure connection is stable
+        send_device_info_to_primary();
+        
+        // Send a status update to indicate secondary is ready
+        uint32_t connected_status = STATUS_READY;
+        ble_d2d_tx_send_status(connected_status);
+        LOG_INF("Sent ready status to primary device");
+        
+        // MTU exchange will be handled in the main connected() callback
+#endif
+        
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Discovery is now started in the main connected() callback
+        LOG_INF("D2D connection callback triggered");
 #else
         LOG_INF("Connected to primary device!\n");
+        
+        // Stop scanning since we're now connected to the primary device
+        int scan_err = bt_le_scan_stop();
+        if (scan_err) {
+            LOG_WRN("Failed to stop scan after connecting to primary: %d", scan_err);
+        } else {
+            LOG_INF("Stopped scanning after successful connection to primary device");
+        }
 #endif
     }
 }
@@ -133,7 +249,7 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
     {
         d2d_conn = nullptr;
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        LOG_INF("Secondary device disconnected!\n");
+        LOG_INF("Secondary device disconnected! (reason 0x%02x)\n", reason);
 
         // Clear the secondary connection for FOTA proxy
         fota_proxy_set_secondary_conn(NULL);
@@ -143,9 +259,26 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
         
         // Clear D2D RX client
         d2d_rx_client_disconnected();
+        
+        // Clear D2D TX connection
+        ble_d2d_tx_set_connection(NULL);
+        LOG_INF("D2D TX connection cleared");
+        
+        // Clear secondary device info
+        jis_clear_secondary_device_info();
+        
+        // Restart advertising to allow secondary to reconnect
+        LOG_INF("Restarting advertising to allow secondary device to reconnect");
+        bt_start_advertising(0);
 #else
-        LOG_INF("Disconnected from primary device!\n");
-        // Restart scanning after disconnection
+        LOG_INF("Disconnected from primary device! (reason 0x%02x)\n", reason);
+        
+        // Clear D2D TX connection on secondary
+        ble_d2d_tx_set_connection(NULL);
+        LOG_INF("D2D TX connection cleared on secondary");
+        
+        // Reset target found flag and restart scanning after disconnection
+        target_found = false;
         start_scan();
 #endif
     }
@@ -201,6 +334,12 @@ static bool adv_data_has_name(struct net_buf_simple *ad, const char *name)
         if (type == BT_DATA_NAME_COMPLETE || type == BT_DATA_NAME_SHORTENED)
         {
             size_t data_len = len - 1; // Subtract type byte
+            // Debug log
+            char name_buf[32] = {0};
+            size_t copy_len = (data_len < sizeof(name_buf) - 1) ? data_len : sizeof(name_buf) - 1;
+            memcpy(name_buf, &ad->data[i + 2], copy_len);
+            LOG_DBG("[SCAN] Found name in adv: '%s' (looking for '%s')", name_buf, name);
+            
             if (data_len >= name_len && memcmp(&ad->data[i + 2], name, name_len) == 0)
             {
                 return true;
@@ -249,88 +388,141 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, st
     bt_addr_le_to_str(addr, addr_str, sizeof(addr_str));
     LOG_INF("[SCAN] Device found: %s, RSSI: %d, type: %u, adv data len: %u", addr_str, rssi, type, ad ? ad->len : 0);
 
+    // Debug: print raw advertising data
+    if (ad && ad->len > 0) {
+        LOG_HEXDUMP_INF(ad->data, ad->len, "[SCAN] Raw adv data:");
+    }
+
     // Check if this is our target device by name AND UUID
     bool has_name = ad && adv_data_has_name(ad, target_device_name);
     bool has_uuid = ad && adv_data_has_uuid(ad);
 
+    // If we find a device with matching name or UUID in scan response, remember it
+    if ((has_name || has_uuid) && (type == BT_GAP_ADV_TYPE_SCAN_RSP))
+    {
+        if (has_name && has_uuid)
+        {
+            LOG_INF("[SCAN] Perfect match! Found 'SensingGR' with correct UUID at %s (scan response)", addr_str);
+        }
+        else if (has_name)
+        {
+            LOG_INF("[SCAN] Found device with matching name 'SensingGR' at %s (scan response)", addr_str);
+        }
+        else if (has_uuid)
+        {
+            LOG_INF("[SCAN] Found device with matching UUID at %s (scan response)", addr_str);
+        }
+        
+        // Remember this device
+        memcpy(&target_addr, addr, sizeof(bt_addr_le_t));
+        target_found = true;
+        return;
+    }
+
+    // Check if this is a connectable advertisement from our target device
+    if (target_found && bt_addr_le_cmp(addr, &target_addr) == 0)
+    {
+        if (type == BT_GAP_ADV_TYPE_ADV_IND || type == BT_GAP_ADV_TYPE_ADV_DIRECT_IND)
+        {
+            LOG_INF("[SCAN] Found connectable advertisement from our target device!");
+            
+            // Check if we already have a connection object
+            if (conn)
+            {
+                LOG_WRN("[SCAN] Connection already in progress, ignoring");
+                return;
+            }
+
+            int err = bt_le_scan_stop();
+            if (err)
+            {
+                LOG_ERR("[SCAN] Failed to stop scan: %d", err);
+                return;
+            }
+
+            // Longer delay to ensure scan is fully stopped
+            k_msleep(100);
+
+            // Check if we're already connected to the primary device
+            if (d2d_conn != nullptr)
+            {
+                LOG_WRN("[SCAN] Already connected to primary device, ignoring new connection attempt");
+                start_scan();
+                return;
+            }
+
+            err = bt_conn_le_create(addr, &create_param, &conn_param, &conn);
+            if (err)
+            {
+                if (err == -EINVAL)
+                {
+                    LOG_ERR("[SCAN] Failed to create connection: -EINVAL (invalid argument). Possible address type or "
+                            "advertising type mismatch.");
+                }
+                else if (err == -ENOTSUP)
+                {
+                    LOG_ERR("[SCAN] Failed to create connection: -ENOTSUP (operation not supported). Check if advertiser is "
+                            "connectable.");
+                }
+                else if (err == -EIO)
+                {
+                    LOG_ERR("[SCAN] Failed to create connection: -EIO. Controller rejected the request.");
+                }
+                else if (err == -EBUSY)
+                {
+                    LOG_ERR("[SCAN] Failed to create connection: -EBUSY. Connection already in progress.");
+                }
+                else
+                {
+                    LOG_ERR("[SCAN] Failed to create connection: %d", err);
+                }
+                conn = NULL;
+                target_found = false; // Reset target
+                
+                // Add delay before restarting scan to avoid rapid retries
+                k_msleep(1000);
+                start_scan();
+            }
+            else
+            {
+                LOG_INF("[SCAN] Connection initiated to %s", addr_str);
+                target_found = false; // Reset for next time
+            }
+            return;
+        }
+    }
+
+    // For devices that don't match or aren't our target
     if (!has_name && !has_uuid)
     {
         LOG_INF("[SCAN] Skipping device: neither name nor UUID match");
-        return;
-    }
-
-    if (has_name && has_uuid)
-    {
-        LOG_INF("[SCAN] Perfect match! Found 'SensingGR' with correct UUID at %s", addr_str);
-    }
-    else if (has_name)
-    {
-        LOG_INF("[SCAN] Found device with matching name 'SensingGR' at %s", addr_str);
-    }
-    else if (has_uuid)
-    {
-        LOG_INF("[SCAN] Found device with matching UUID at %s", addr_str);
-    }
-
-    if (type != BT_GAP_ADV_TYPE_ADV_IND && type != BT_GAP_ADV_TYPE_ADV_DIRECT_IND)
-    {
-        LOG_WRN("[SCAN] Advertiser is not connectable (type: %u)", type);
-        return;
-    }
-
-    // Check if we already have a connection object and clean it up
-    if (conn)
-    {
-        LOG_WRN("[SCAN] Cleaning up existing connection object");
-        bt_conn_unref(conn);
-        conn = NULL;
-    }
-
-    int err = bt_le_scan_stop();
-    if (err)
-    {
-        LOG_ERR("[SCAN] Failed to stop scan: %d", err);
-    }
-
-    // Small delay to ensure scan is fully stopped
-    k_msleep(10);
-
-    err = bt_conn_le_create(addr, &create_param, &conn_param, &conn);
-    if (err)
-    {
-        if (err == -EINVAL)
-        {
-            LOG_ERR("[SCAN] Failed to create connection: -EINVAL (invalid argument). Possible address type or "
-                    "advertising type mismatch.");
-        }
-        else if (err == -ENOTSUP)
-        {
-            LOG_ERR("[SCAN] Failed to create connection: -ENOTSUP (operation not supported). Check if advertiser is "
-                    "connectable.");
-        }
-        else
-        {
-            LOG_ERR("[SCAN] Failed to create connection: %d", err);
-        }
-        conn = NULL;
-        start_scan();
-    }
-    else
-    {
-        LOG_INF("[SCAN] Connection initiated to %s", addr_str);
     }
 }
 
 static void start_scan(void)
 {
+    // Clean up any existing connection reference before starting scan
+    if (conn) {
+        bt_conn_unref(conn);
+        conn = NULL;
+    }
+    
     struct bt_le_scan_param scan_param = {
         .type = BT_HCI_LE_SCAN_ACTIVE,
         .options = BT_LE_SCAN_OPT_NONE,
         .interval = 0x0010,
         .window = 0x0010,
+        .timeout = 0,
+        .interval_coded = 0,
+        .window_coded = 0,
     };
 
-    bt_le_scan_start(&scan_param, device_found);
+    int err = bt_le_scan_start(&scan_param, device_found);
+    if (err) {
+        LOG_ERR("[SCAN] Failed to start scanning: %d", err);
+    } else {
+        LOG_INF("[SCAN] Scanning started successfully");
+    }
 }
 #endif
 
@@ -346,17 +538,19 @@ struct check_bond_data
     bool found;
 };
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static bt_le_adv_param bt_le_adv_conn_name = {
-    .id{},
-    .sid{},
-    .secondary_max_skip{},
+    .id = 0,
+    .sid = 0,
+    .secondary_max_skip = 0,
     .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_NAME | BT_LE_ADV_OPT_USE_IDENTITY,
     .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
     .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
-    .peer{},
+    .peer = NULL,
 };
+#endif // CONFIG_PRIMARY_DEVICE
+
 static const bt_le_adv_param *bt_le_adv_conn = BT_LE_ADV_CONN_FAST_1;
-;
 
 // FWD declarations
 static bool app_event_handler(const struct app_event_header *aeh);
@@ -378,6 +572,10 @@ K_WORK_DEFINE(ble_handler, ble_timer_handler_function);
 static const struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
     BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(BT_UUID_BAS_VAL), BT_UUID_16_ENCODE(BT_UUID_CTS_VAL)),
+};
+
+/* Scan response data - put the 128-bit UUID here to avoid advertising packet size issues */
+static const struct bt_data sd[] = {
     BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a14, 0xca69, 0x4d97, 0x89a8, 0x001ffc9ec8cd)),
 };
 
@@ -417,8 +615,35 @@ static void pairing_complete(struct bt_conn *conn, bool bonded)
  */
 static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 {
-    LOG_ERR("Pairing Failed (%d). Disconnecting.", reason);
-    bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+    LOG_ERR("Pairing Failed (%d).", reason);
+    
+    // Check if this is a D2D connection that doesn't need pairing
+    bool is_d2d = false;
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // On primary, we can't rely on d2d_conn being set yet since pairing happens before discovery
+    // Instead, we'll let the connection continue and handle it after discovery
+    // For now, don't disconnect any connections on pairing failure
+    LOG_INF("Pairing failed - will determine if D2D after service discovery");
+    // Mark this connection as having failed pairing
+    pending_pairing_conn = conn;
+    pairing_failed_for_pending = true;
+    // Don't disconnect here - let discovery complete first
+#else
+    // On secondary, any connection is to the primary (D2D)
+    is_d2d = true;
+    LOG_INF("Ignoring pairing failure for D2D connection - pairing not required");
+#endif
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (is_d2d) {
+        // Don't disconnect for D2D connections on secondary
+    } else {
+        LOG_ERR("Disconnecting due to pairing failure");
+        bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+    }
+#endif
+    
     k_timer_stop(&ble_timer);
 }
 
@@ -508,6 +733,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
         // Request MTU exchange to avoid small MTU issues
         static struct bt_gatt_exchange_params exchange_params;
         exchange_params.func = [](struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params) {
+            ARG_UNUSED(params);
             if (!err) {
                 uint16_t mtu = bt_gatt_get_mtu(conn);
                 LOG_INF("MTU exchange successful: %u", mtu);
@@ -535,25 +761,51 @@ static void connected(struct bt_conn *conn, uint8_t err)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Debug information service status
         bt_debug_info_service_status(conn);
+        
+        // Log that services are available
+        LOG_INF("=== BLE SERVICES STATUS ===");
+        LOG_INF("Information Service registered with UUID: 0c372eaa-27eb-437e-bef4-775aefaf3c97");
+        LOG_INF("Device Info Service (DIS) registered");
+        LOG_INF("Control Service registered");
+        LOG_INF("All primary device services are available for phone connections");
+        LOG_INF("===========================");
+                
+        // For primary device, we need to determine if this is a D2D connection
+        // Start discovery to identify the device type
+        LOG_INF("PRIMARY: Deferring security setup until device type is identified");
+        LOG_INF("PRIMARY: Starting D2D discovery to identify device type");
+        
+        // Start discovery after a small delay to ensure connection is stable
+        k_sleep(K_MSEC(100));
+        LOG_INF("PRIMARY: Calling d2d_rx_client_start_discovery");
+        d2d_rx_client_start_discovery(conn);
+#else
+        // Secondary device doesn't set security for connections to primary
+        LOG_INF("Secondary device: not setting security for connection to primary");
 #endif
 
-        int ret = bt_conn_set_security(conn, BT_SECURITY_L2);
-        if (ret != 0)
-        {
-            LOG_ERR("failed to set security (err %d)\n", ret);
-        }
-
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        ret = bt_le_adv_stop();
-        if (ret != 0)
+        // Only stop advertising if we already have a secondary device connected
+        // This allows the secondary to connect even when a phone is connected
+        if (d2d_conn != nullptr)
         {
-            LOG_ERR("Failed to stop advertising (err 0x%02x)", ret);
-        }
+            LOG_INF("Secondary already connected, stopping advertising");
+            int ret = bt_le_adv_stop();
+            if (ret != 0)
+            {
+                LOG_ERR("Failed to stop advertising (err 0x%02x)", ret);
+            }
 
-        err_t error = ble_start_hidden();
-        if (error != err_t::NO_ERROR)
+            err_t error = ble_start_hidden();
+            if (error != err_t::NO_ERROR)
+            {
+                LOG_ERR("Failed to start hidden advertising %d", (int)error);
+            }
+        }
+        else
         {
-            LOG_ERR("Failed to start hidden advertising %d", (int)error);
+            LOG_INF("No secondary connected yet, continuing to advertise for secondary device");
+            // Keep advertising so secondary can connect
         }
 #endif
     }
@@ -588,9 +840,23 @@ static bool bonds_present()
  */
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
-    ARG_UNUSED(conn);
-
     LOG_INF("Disconnected (reason 0x%02x)", reason);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Clear pending pairing state if this was the pending connection
+    if (pending_pairing_conn == conn) {
+        pending_pairing_conn = nullptr;
+        pairing_failed_for_pending = false;
+    }
+    
+    // If this wasn't the D2D connection and we don't have a secondary connected,
+    // restart advertising to allow secondary to connect
+    if (conn != d2d_conn && d2d_conn == nullptr)
+    {
+        LOG_INF("Phone disconnected and no secondary connected, restarting advertising");
+        bt_start_advertising(0);
+    }
+#endif
 }
 
 /**
@@ -641,20 +907,37 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
     }
     else
     {
-        LOG_ERR("Security failed: %s level %u err %d\n", addr, level, err);
+        // Check if this is a D2D connection
+        bool is_d2d = false;
+        
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        is_d2d = (conn == d2d_conn);
+#else
+        is_d2d = true;
+#endif
+
+        if (is_d2d && err == BT_SECURITY_ERR_PIN_OR_KEY_MISSING) {
+            LOG_INF("Security failed for D2D connection (err %d) - this is expected, continuing without security", err);
+            
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            // For primary device, if this is the D2D connection and security failed as expected,
+            // we can still proceed with discovery since D2D doesn't require security
+            if (conn == d2d_conn) {
+                LOG_INF("D2D connection security negotiation complete (no security), proceeding with service discovery");
+                // The discovery was already started in d2d_connected, but if it failed due to timing,
+                // we could retry here
+            }
+#endif
+        } else {
+            LOG_ERR("Security failed: %s level %u err %d\n", addr, level, err);
+        }
     }
 }
 
 BT_CONN_CB_DEFINE(conn_callbacks) = {
     .connected = connected,
     .disconnected = disconnected,
-    .recycled{},
-    .le_param_req{},
-    .le_param_updated{},
-    .identity_resolved{},
     .security_changed = security_changed,
-    ._node{},
-
 };
 
 // Currently unused - kept for future power management
@@ -664,9 +947,21 @@ __attribute__((unused)) static void ble_set_power_off()
 int set_bluetooth_name()
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    int err = bt_set_name("SensingGR");
+    const char *name = "SensingGR";
+    int err = bt_set_name(name);
+    if (err == 0) {
+        LOG_INF("Bluetooth device name set to: %s", name);
+    } else {
+        LOG_ERR("Failed to set Bluetooth device name to %s, error: %d", name, err);
+    }
 #else
-    int err = bt_set_name("SensingGL");
+    const char *name = "SensingGL";
+    int err = bt_set_name(name);
+    if (err == 0) {
+        LOG_INF("Bluetooth device name set to: %s", name);
+    } else {
+        LOG_ERR("Failed to set Bluetooth device name to %s, error: %d", name, err);
+    }
 #endif
     return err;
 }
@@ -697,8 +992,8 @@ err_t bt_module_init(void)
         return err_t::BLUETOOTH_ERROR;
     }
 
-    // Small delay to ensure settings are fully loaded
-    k_msleep(10);
+    // Longer delay to ensure settings and identity are fully loaded
+    k_msleep(100);
 
     // Now set the Bluetooth name after settings are loaded
     int err_name = set_bluetooth_name();
@@ -723,6 +1018,11 @@ err_t bt_module_init(void)
     bt_conn_cb_register(&d2d_conn_callbacks);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Log that services are being initialized
+    LOG_INF("Initializing primary device BLE services...");
+    LOG_INF("Information Service UUID: 0c372eaa-27eb-437e-bef4-775aefaf3c97");
+    LOG_INF("Device Info Service, Control Service, and Information Service are registered via BT_GATT_SERVICE_DEFINE");
+    
     ble_d2d_rx_init(); // Accept commands from secondary
 
     // Initialize FOTA proxy service for primary device
@@ -745,6 +1045,18 @@ err_t bt_module_init(void)
     else
     {
         LOG_INF("File proxy service initialized");
+    }
+
+    // Check if we have a valid identity address before advertising
+    bt_addr_le_t addr;
+    size_t count = 1;
+    bt_id_get(&addr, &count);
+    if (count > 0) {
+        char addr_str[BT_ADDR_LE_STR_LEN];
+        bt_addr_le_to_str(&addr, addr_str, sizeof(addr_str));
+        LOG_INF("Bluetooth identity address: %s", addr_str);
+    } else {
+        LOG_WRN("No Bluetooth identity address available");
     }
 
     if (bt_start_advertising(0) == err_t::NO_ERROR)
@@ -796,6 +1108,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     foot_samples_t *foot_data = &msg.data.foot_samples; // Get pointer to data within the message
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_foot_sensor_notify(foot_data);
+#else
+                    // Secondary device: Send to primary via D2D
+                    ble_d2d_tx_send_foot_sensor_data(foot_data);
 #endif
                     break;
                 }
@@ -809,6 +1124,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             (double)mapping_data->gyro_z);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_bhi360_data1_notify(mapping_data);
+#else
+                    // Secondary device: Send to primary via D2D
+                    ble_d2d_tx_send_bhi360_data1(mapping_data);
 #endif
                     break;
                 }
@@ -819,6 +1137,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             (double)lacc_data->x, (double)lacc_data->y, (double)lacc_data->z);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_bhi360_data3_notify(lacc_data);
+#else
+                    // Secondary device: Send to primary via D2D
+                    ble_d2d_tx_send_bhi360_data3(lacc_data);
 #endif
                     break;
                 }
@@ -829,6 +1150,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             get_sender_name(msg.sender), step_data->step_count, step_data->activity_duration_s);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_bhi360_data2_notify(step_data);
+#else
+                    // Secondary device: Send to primary via D2D
+                    ble_d2d_tx_send_bhi360_data2(step_data);
 #endif
                     break;
                 }
@@ -841,6 +1165,10 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_foot_sensor_log_available_notify(log_info->file_sequence_id);
                     jis_foot_sensor_req_id_path_notify(log_info->file_path);
+#else
+                    // Secondary device: Send to primary via D2D
+                    ble_d2d_tx_send_foot_sensor_log_available(log_info->file_sequence_id);
+                    ble_d2d_tx_send_foot_sensor_req_id_path(log_info->file_path);
 #endif
                     break;
                 }
@@ -853,6 +1181,10 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_bhi360_log_available_notify(log_info->file_sequence_id);
                     jis_bhi360_req_id_path_notify(log_info->file_path);
+#else
+                    // Secondary device: Send to primary via D2D
+                    ble_d2d_tx_send_bhi360_log_available(log_info->file_sequence_id);
+                    ble_d2d_tx_send_bhi360_req_id_path(log_info->file_path);
 #endif
                     break;
                 }
@@ -872,6 +1204,11 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             progress->total_size);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_fota_progress_notify(progress);
+#else
+                    // Secondary device: Send FOTA completion status to primary when done
+                    if (!progress->is_active && progress->status == 0 && progress->percent_complete == 100) {
+                        ble_d2d_tx_send_fota_complete();
+                    }
 #endif
                     break;
                 }
@@ -889,6 +1226,67 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     } else {
                         jis_clear_err_status_notify(error_status->error_code);
                     }
+#else
+                    // Secondary device: Send status to primary via D2D
+                    // Convert error status to a status bitmap for D2D transmission
+                    static uint32_t d2d_status = 0;
+                    uint32_t bit_mask = 1 << ((int)error_status->error_code & 0x1F);
+                    if (error_status->is_set) {
+                        d2d_status |= bit_mask;
+                    } else {
+                        d2d_status &= ~bit_mask;
+                    }
+                    ble_d2d_tx_send_status(d2d_status);
+#endif
+                    break;
+                }
+
+                case MSG_TYPE_NEW_ACTIVITY_LOG_FILE: {
+                    // Handle new activity log file notification
+                    new_log_info_msg_t *log_info = &msg.data.new_hardware_log_file;
+                    LOG_INF("Received NEW ACTIVITY LOG FILE notification from %s:", get_sender_name(msg.sender));
+                    LOG_INF("  File Path: %s", log_info->file_path);
+                    LOG_INF("  Sequence ID: %u", log_info->file_sequence_id);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // TODO: Add notification for activity log files if needed
+                    // For now, just log the information
+#endif
+                    break;
+                }
+
+                case MSG_TYPE_ACTIVITY_STEP_COUNT: {
+                    // Handle activity step count data
+                    activity_step_count_t *step_count = &msg.data.activity_step_count;
+                    LOG_INF("Received ACTIVITY STEP COUNT from %s: left=%u, right=%u", 
+                            get_sender_name(msg.sender),
+                            step_count->left_step_count,
+                            step_count->right_step_count);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // TODO: Add notification for activity step count if needed
+#endif
+                    break;
+                }
+
+                case MSG_TYPE_DEVICE_INFO: {
+                    // Handle device information
+                    device_info_msg_t *dev_info = &msg.data.device_info;
+                    LOG_INF("Received DEVICE INFO from %s:", get_sender_name(msg.sender));
+                    LOG_INF("  Manufacturer: %s", dev_info->manufacturer);
+                    LOG_INF("  Model: %s", dev_info->model);
+                    LOG_INF("  Serial: %s", dev_info->serial);
+                    LOG_INF("  HW Rev: %s", dev_info->hw_rev);
+                    LOG_INF("  FW Rev: %s", dev_info->fw_rev);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Update secondary device info in information service
+                    jis_update_secondary_device_info(dev_info->manufacturer, dev_info->model,
+                                                   dev_info->serial, dev_info->hw_rev, 
+                                                   dev_info->fw_rev);
+#else
+                    // Secondary device: Send to primary via D2D
+                    // TODO: Implement D2D TX for device info
+                    // For now, we can use the status field to indicate device info is available
+                    // Or implement a new D2D characteristic for device info
+                    LOG_WRN("D2D device info transmission not yet implemented");
 #endif
                     break;
                 }
@@ -930,19 +1328,50 @@ err_t bt_start_advertising(int err)
 
     bt_stop_advertising();
 
-    err = bt_le_adv_start(&bt_le_adv_conn_name, ad, ARRAY_SIZE(ad), NULL, 0);
+    // Log advertising parameters for debugging
+    LOG_INF("Starting advertising with params: options=0x%02x, interval_min=%d, interval_max=%d", 
+            bt_le_adv_conn_name.options, 
+            bt_le_adv_conn_name.interval_min, 
+            bt_le_adv_conn_name.interval_max);
+
+    err = bt_le_adv_start(&bt_le_adv_conn_name, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 
     if (err)
     {
         LOG_ERR("Advertising failed to start, error=%d", err);
-
-        return err_t::BLUETOOTH_ERROR;
+        
+        // If advertising fails due to identity issues, try without USE_IDENTITY
+        if (err == -ENOENT || err == -EINVAL) {
+            LOG_WRN("Retrying advertising without USE_IDENTITY option");
+            
+            // Create temporary advertising params without USE_IDENTITY
+            struct bt_le_adv_param temp_adv_params = {
+                .id = 0,
+                .sid = 0,
+                .secondary_max_skip = 0,
+                .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_NAME,
+                .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
+                .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
+                .peer = NULL,
+            };
+            
+            err = bt_le_adv_start(&temp_adv_params, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+            if (err) {
+                LOG_ERR("Advertising retry also failed, error=%d", err);
+                return err_t::BLUETOOTH_ERROR;
+            } else {
+                LOG_WRN("Advertising started without USE_IDENTITY");
+            }
+        } else {
+            return err_t::BLUETOOTH_ERROR;
+        }
     }
     else
     {
         LOG_INF("Advertising successfully started");
-        k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
     }
+    
+    k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
     return err_t::NO_ERROR;
 }
 #endif // CONFIG_PRIMARY_DEVICE
@@ -959,7 +1388,7 @@ err_t ble_start_hidden()
 {
     bt_stop_advertising();
 
-    int err = bt_le_adv_start(bt_le_adv_conn, ad, ARRAY_SIZE(ad), NULL, 0);
+    int err = bt_le_adv_start(bt_le_adv_conn, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (err)
     {
         LOG_ERR("Hidden Advertising failed to start, error=%d", err);
@@ -1006,12 +1435,25 @@ static void ble_timer_handler_function(struct k_work *work)
     {
     }
     ble_status_connected = 0;
+    
+    LOG_INF("Bluetooth advertising timeout");
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // For primary device, check if secondary (D2D) is connected
+    if (d2d_conn == nullptr)
+    {
+        // No secondary connected, restart advertising to allow secondary to connect
+        LOG_INF("No secondary device connected, restarting advertising");
+        bt_start_advertising(0);
+        return;
+    }
+#endif
+
     int ret = bt_le_adv_stop();
     if (ret != 0)
     {
         LOG_ERR("Failed to stop (err 0x%02x)", ret);
     }
-    LOG_INF("Bluetooth advertising timeout");
 
     if (bonds_present())
     {

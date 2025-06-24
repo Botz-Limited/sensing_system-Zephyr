@@ -17,6 +17,10 @@
 #include <app.hpp>
 #include <errors.hpp>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void jis_set_err_status_notify(err_t new_device_status);
 void jis_clear_err_status_notify(err_t new_device_status);
 void jis_charge_status_notify(uint8_t new_charge_status);
@@ -40,6 +44,13 @@ void jis_bhi360_step_count_notify(uint32_t step_count);
 // FOTA progress notify function
 void jis_fota_progress_notify(const fota_progress_msg_t* progress);
 
+// Secondary device info functions (primary only)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+void jis_update_secondary_device_info(const char *manufacturer, const char *model, 
+                                     const char *serial, const char *hw_rev, const char *fw_rev);
+void jis_clear_secondary_device_info(void);
+#endif
+
 void cs_log_data_notify(uint8_t stu);
 void cts_notify(void);
 void cs_log_available_hw_notify(uint32_t stu);
@@ -57,7 +68,9 @@ void update_cts_characteristic_buffer(void);
 const void* get_current_time_char_value_ptr(void);
 size_t get_current_time_char_value_size(void);
 
-
+#ifdef __cplusplus
+}
+#endif
 
 static constexpr uint8_t VND_MAX_LEN = 20;
 static constexpr uint16_t BLE_ADVERTISING_TIMEOUT_MS = 30000;
