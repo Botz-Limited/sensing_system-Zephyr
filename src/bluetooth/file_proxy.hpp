@@ -57,6 +57,7 @@ enum file_proxy_target {
 enum file_type {
     FILE_TYPE_FOOT_SENSOR = 0x01,
     FILE_TYPE_BHI360 = 0x02,
+    FILE_TYPE_ACTIVITY = 0x03,
     FILE_TYPE_ALL = 0xFF,
 };
 

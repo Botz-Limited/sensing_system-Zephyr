@@ -244,8 +244,14 @@ extern "C" void orientation_3d_try_send(void)
                                      orientation_3d_service.attr_count, 
                                      &ORIENTATION_3D_CHAR_UUID.uuid);
     if (attr) {
-        bt_gatt_notify(nullptr, attr, &orientation_packet, sizeof(orientation_packet));
-        last_packet_time_ms = current_time;
+        int err = bt_gatt_notify(nullptr, attr, &orientation_packet, sizeof(orientation_packet));
+        if (err) {
+            LOG_WRN("Failed to send 3D orientation notification: %d", err);
+        } else {
+            last_packet_time_ms = current_time;
+        }
+    } else {
+        LOG_WRN("3D Orientation GATT attribute not found, skipping notification");
     }
 #endif
 }

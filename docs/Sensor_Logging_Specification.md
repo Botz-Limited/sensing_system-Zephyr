@@ -511,11 +511,27 @@ sequenceDiagram
     SMP-->>App: Transfer complete
 ```
 
-### Method 2: File Proxy (Secondary Device)
+### Method 2: File Proxy (Secondary Device) - Legacy
 
 **Service UUID:** `7e500001-b5a3-f393-e0a9-e50e24dcca9e`
 
 Used to access logs on secondary devices through the primary device.
+
+**Note**: For new implementations, consider using the SMP Proxy service instead. It allows standard MCUmgr file operations on both devices with the same code. See [SMP Proxy Integration Guide](SMP_Proxy_Integration_Guide.md).
+
+### Method 2a: SMP Proxy (Secondary Device) - Recommended
+
+**Service UUID:** `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`
+
+Use standard MCUmgr file operations for both primary and secondary devices:
+
+```swift
+// Set target to secondary
+writeCharacteristic(smpProxyTargetUUID, value: Data([0x01]))
+
+// Use standard MCUmgr file download
+let fileData = try await mcuMgr.downloadFile("/lfs1/hardware/foot_005.pb")
+```
 
 ### Method 3: Debug Interface
 

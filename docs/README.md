@@ -7,6 +7,7 @@ This directory contains all technical documentation for the Sensing Firmware pro
 ### Core Specifications
 - **[Bluetooth GATT Specification](Bluetooth_GATT_Specification.md)** - Complete BLE services, characteristics, and protocols
   - Includes Information Service, Control Service, Proxy Services, D2D Services
+  - NEW: SMP Proxy Service (Section 7.3) - Unified MCUmgr access for both devices
   - NEW: 3D Orientation Service (Section 7.2)
   - Appendix A: Data rate analysis for 3D orientation
 
@@ -23,11 +24,12 @@ This directory contains all technical documentation for the Sensing Firmware pro
 - **[BHI360 Complete Integration Guide](BHI360_Complete_Integration_Guide.md)** - Step-by-step BHI360 IMU integration
 - **[D2D Communication Complete Guide](D2D_Communication_Complete_Guide.md)** - Device-to-device BLE communication
 - **[FOTA Complete Guide](FOTA_Complete_Guide.md)** - Firmware Over-The-Air update procedures
+- **[SMP Proxy Integration Guide](SMP_Proxy_Integration_Guide.md)** - NEW: Simplified MCUmgr access for mobile apps
 - **[Test Framework Guide](Test_Framework_Guide.md)** - Testing infrastructure and procedures
 
 ### Technical References
 - **[Developer Quick Reference](Developer_Quick_Reference.md)** - Common commands, build instructions, troubleshooting
-- **[nRF5340 Battery Usage Estimation Guide](nRF5340_Battery_Usage_Estimation_Guide.md)** - Power consumption analysis
+- **[nRF5340 Power and Battery Guide](nRF5340_Power_and_Battery_Guide.md)** - Consolidated power management, battery usage, and optimization guide
 - **[Pinout nrf5340dk](Pinout_nrf5340dk.md)** - Hardware pin assignments
 - **[Doxygen Usage](doxygen_usage.md)** - Code documentation generation
 
@@ -53,7 +55,7 @@ This directory contains all technical documentation for the Sensing Firmware pro
 ### For System Architects
 1. Review **[Activity Session Calculated Data Specification](Activity_Session_Calculated_Data_Specification.md)** for data architecture
 2. Check analysis documents for sensor capabilities
-3. Review **[nRF5340 Battery Usage Estimation Guide](nRF5340_Battery_Usage_Estimation_Guide.md)** for power budgets
+3. Review **[nRF5340 Power and Battery Guide](nRF5340_Power_and_Battery_Guide.md)** for power budgets
 
 ## 📝 Document Formats
 

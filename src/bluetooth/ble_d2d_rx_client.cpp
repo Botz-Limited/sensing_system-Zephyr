@@ -20,19 +20,23 @@
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "fota_proxy.hpp"
 #include "file_proxy.hpp"
+#include "smp_proxy.hpp"
 #include "ble_d2d_file_transfer.hpp"
+#include "ble_d2d_smp_client.hpp"
 #endif
 
 LOG_MODULE_REGISTER(d2d_rx_client, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
 // Timing constants for discovery and subscription process
 static constexpr uint32_t DISCOVERY_INITIAL_DELAY_MS = 10;      // Delay before starting discovery
-static constexpr uint32_t SUBSCRIPTION_INITIAL_DELAY_MS = 50;   // Delay before starting subscriptions
-static constexpr uint32_t SUBSCRIPTION_BETWEEN_DELAY_MS = 10;   // Delay between each subscription
-static constexpr uint32_t SUBSCRIPTION_FINAL_DELAY_MS = 25;     // Delay after all subscriptions
-static constexpr uint32_t CONNECTION_STABILIZE_DELAY_MS = 25;   // Delay for connection stabilization
+static constexpr uint32_t SUBSCRIPTION_INITIAL_DELAY_MS = 20;   // Delay before starting subscriptions
+static constexpr uint32_t SUBSCRIPTION_BETWEEN_DELAY_MS = 2;    // Minimal delay between each subscription
+static constexpr uint32_t SUBSCRIPTION_FINAL_DELAY_MS = 10;     // Delay after all subscriptions
+static constexpr uint32_t CONNECTION_STABILIZE_DELAY_MS = 15;   // Delay for connection stabilization
 static constexpr uint32_t RETRY_DELAY_MS = 10;                  // Delay before retrying operations
-static constexpr uint32_t RACE_CONDITION_DELAY_MS = 10;         // Delay to avoid race conditions
+static constexpr uint32_t RACE_CONDITION_DELAY_MS = 5;          // Delay to avoid race conditions
 static constexpr uint32_t RETRY_WAIT_MS = 100;                  // Longer wait before retry on errors
 
 // Service UUID: 75ad68d6-200c-437d-98b5-061862076c5f (must match secondary's TX service)
@@ -67,12 +71,25 @@ static struct bt_uuid_128 d2d_bhi360_log_available_uuid =
 static struct bt_uuid_128 d2d_device_info_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e1, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+static struct bt_uuid_128 d2d_fota_progress_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e3, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
+// Path UUIDs
+static struct bt_uuid_128 d2d_foot_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68d9, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+static struct bt_uuid_128 d2d_bhi360_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68db, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+static struct bt_uuid_128 d2d_activity_log_available_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e4, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+static struct bt_uuid_128 d2d_activity_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e5, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection handle
 static struct bt_conn *secondary_conn = NULL;
 
 // Discovery parameters
 static struct bt_gatt_discover_params discover_params;
-static struct bt_gatt_subscribe_params subscribe_params[9] = {}; // One for each characteristic - zero initialized
+static struct bt_gatt_subscribe_params subscribe_params[14] = {}; // One for each characteristic - zero initialized
 
 // Discovered handles
 static uint16_t service_handle = 0;
@@ -85,6 +102,11 @@ static uint16_t charge_status_handle = 0;
 static uint16_t foot_log_handle = 0;
 static uint16_t bhi360_log_handle = 0;
 static uint16_t device_info_handle = 0;
+static uint16_t fota_progress_handle = 0;
+static uint16_t foot_log_path_handle = 0;
+static uint16_t bhi360_log_path_handle = 0;
+static uint16_t activity_log_available_handle = 0;
+static uint16_t activity_log_path_handle = 0;
 
 // Discovery state
 enum discover_state {
@@ -118,6 +140,11 @@ static uint8_t charge_status_notify_handler(struct bt_conn *conn, struct bt_gatt
 static uint8_t foot_log_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 static uint8_t bhi360_log_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 static uint8_t device_info_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
+static uint8_t fota_progress_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
+static uint8_t foot_log_path_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
+static uint8_t bhi360_log_path_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
+static uint8_t activity_log_available_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
+static uint8_t activity_log_path_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 
 // Work items for deferred subscription
 static void subscribe_work_handler(struct k_work *work);
@@ -131,7 +158,77 @@ struct subscribe_work_data {
     int index;
 };
 
-static struct subscribe_work_data subscribe_work_items[9];
+static struct subscribe_work_data subscribe_work_items[14];
+
+// Delayed work for device info retry
+static void device_info_retry_work_handler(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(device_info_retry_work, device_info_retry_work_handler);
+static int device_info_retry_count = 0;
+
+// Delayed work for SMP discovery
+static void smp_discovery_work_handler(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(smp_discovery_work, smp_discovery_work_handler);
+
+// Track subscription progress
+static atomic_t subscriptions_pending = ATOMIC_INIT(0);
+static atomic_t subscriptions_completed = ATOMIC_INIT(0);
+
+static void smp_discovery_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    if (!secondary_conn) {
+        LOG_WRN("No secondary connection for SMP discovery");
+        return;
+    }
+    
+    // Check if all subscriptions completed
+    int pending = atomic_get(&subscriptions_pending);
+    int completed = atomic_get(&subscriptions_completed);
+    
+    LOG_INF("SMP discovery work: %d subscriptions pending, %d completed", pending, completed);
+    
+    if (pending > 0 && completed < pending) {
+        LOG_WRN("Not all subscriptions completed yet (%d/%d), rescheduling SMP discovery", 
+                completed, pending);
+        k_work_schedule(&smp_discovery_work, K_SECONDS(1));
+        return;
+    }
+    
+    LOG_INF("Starting SMP discovery after D2D RX subscriptions complete");
+    
+    LOG_INF("CONFIG_PRIMARY_DEVICE is enabled");
+    
+    if (!secondary_conn) {
+        LOG_ERR("secondary_conn is NULL!");
+        return;
+    }
+    
+    LOG_INF("Setting SMP client connection...");
+    // Make sure SMP client has the correct connection
+    ble_d2d_smp_client_set_connection(secondary_conn);
+    
+    LOG_INF("Calling ble_d2d_smp_client_discover...");
+    // Start SMP discovery - this is now non-blocking
+    int err = ble_d2d_smp_client_discover(secondary_conn);
+    LOG_INF("ble_d2d_smp_client_discover returned: %d", err);
+    
+    if (err) {
+        LOG_ERR("Failed to discover SMP service: %d", err);
+    } else {
+        LOG_INF("SMP discovery initiated (will complete asynchronously)");
+    }
+}
+
+static void device_info_retry_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    if (!secondary_conn || !device_info_handle) {
+        return;
+    }
+    
+    LOG_INF("Retrying device info subscription (attempt %d)", device_info_retry_count + 1);
+    subscribe_to_characteristic(device_info_handle, device_info_notify_handler, 8);
+}
 
 static void individual_subscribe_work_handler(struct k_work *work)
 {
@@ -139,10 +236,19 @@ static void individual_subscribe_work_handler(struct k_work *work)
     
     if (!secondary_conn) {
         LOG_ERR("No connection for individual subscription work");
+        // Still increment completed count to avoid hanging
+        atomic_inc(&subscriptions_completed);
         return;
     }
     
     LOG_INF("Individual subscription work for handle %u, index %d", data->handle, data->index);
+    
+    // Special handling for device info subscription
+    if (data->handle == device_info_handle && data->index == 8) {
+        // Add a small extra delay before device info subscription
+        k_msleep(5);
+    }
+    
     subscribe_to_characteristic(data->handle, data->notify_func, data->index);
 }
 
@@ -163,110 +269,154 @@ static void perform_subscriptions(void)
     }
     
     LOG_INF("Starting characteristic subscriptions...");
-    LOG_INF("Handles - foot:%u, bhi1:%u, bhi2:%u, bhi3:%u, status:%u, charge:%u, foot_log:%u, bhi_log:%u, dev_info:%u",
+    LOG_INF("Handles - foot:%u, bhi1:%u, bhi2:%u, bhi3:%u, status:%u, charge:%u", 
             foot_sensor_handle, bhi360_data1_handle, bhi360_data2_handle, bhi360_data3_handle,
-            status_handle, charge_status_handle, foot_log_handle, bhi360_log_handle, device_info_handle);
+            status_handle, charge_status_handle);
+    LOG_INF("         foot_log:%u, bhi_log:%u, dev_info:%u, fota:%u",
+            foot_log_handle, bhi360_log_handle, device_info_handle, fota_progress_handle);
+    LOG_INF("         foot_path:%u, bhi_path:%u, act_log:%u, act_path:%u",
+            foot_log_path_handle, bhi360_log_path_handle, activity_log_available_handle, activity_log_path_handle);
     
     // Clear all subscribe params before starting
     memset(subscribe_params, 0, sizeof(subscribe_params));
     
+    // Reset subscription tracking
+    atomic_set(&subscriptions_pending, 0);
+    atomic_set(&subscriptions_completed, 0);
+    
     // Subscribe to all characteristics
     int work_index = 0;
     
-    if (foot_sensor_handle && work_index < 8) {
-        LOG_INF("Scheduling subscription to foot sensor (handle %u)", foot_sensor_handle);
+    // Initialize all work items first
+    if (foot_sensor_handle && work_index < 14) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = foot_sensor_handle;
         subscribe_work_items[work_index].notify_func = foot_sensor_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
-        k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
     }
-    if (bhi360_data1_handle && work_index < 8) {
-        LOG_INF("Scheduling subscription to BHI360 data1 (handle %u)", bhi360_data1_handle);
+    if (bhi360_data1_handle && work_index < 14) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_data1_handle;
         subscribe_work_items[work_index].notify_func = bhi360_data1_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
-        k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
     }
-    if (bhi360_data2_handle && work_index < 8) {
-        LOG_INF("Scheduling subscription to BHI360 data2 (handle %u)", bhi360_data2_handle);
+    if (bhi360_data2_handle && work_index < 14) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_data2_handle;
         subscribe_work_items[work_index].notify_func = bhi360_data2_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
-        k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
     }
-    if (bhi360_data3_handle && work_index < 8) {
-        LOG_INF("Scheduling subscription to BHI360 data3 (handle %u)", bhi360_data3_handle);
+    if (bhi360_data3_handle && work_index < 14) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_data3_handle;
         subscribe_work_items[work_index].notify_func = bhi360_data3_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
-        k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
     }
-    if (status_handle && work_index < 8) {
-        LOG_INF("Scheduling subscription to status (handle %u)", status_handle);
+    if (status_handle && work_index < 14) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = status_handle;
         subscribe_work_items[work_index].notify_func = status_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
-        k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
     }
-    if (charge_status_handle && work_index < 8) {
-        LOG_INF("Scheduling subscription to charge status (handle %u)", charge_status_handle);
+    if (charge_status_handle && work_index < 14) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = charge_status_handle;
         subscribe_work_items[work_index].notify_func = charge_status_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
-        k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
     }
-    if (foot_log_handle && work_index < 8) {
-        LOG_INF("Scheduling subscription to foot log (handle %u)", foot_log_handle);
+    if (foot_log_handle && work_index < 14) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = foot_log_handle;
         subscribe_work_items[work_index].notify_func = foot_log_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
-        k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
     }
-    if (bhi360_log_handle && work_index < 9) {
-        LOG_INF("Scheduling subscription to BHI360 log (handle %u)", bhi360_log_handle);
+    if (bhi360_log_handle && work_index < 14) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_log_handle;
         subscribe_work_items[work_index].notify_func = bhi360_log_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
-        k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
     }
-    if (device_info_handle && work_index < 9) {
-        LOG_INF("Scheduling subscription to device info (handle %u)", device_info_handle);
+    
+    // Add FOTA progress subscription
+    if (fota_progress_handle && work_index < 14) {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = fota_progress_handle;
+        subscribe_work_items[work_index].notify_func = fota_progress_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+    
+    // Add path subscriptions
+    if (foot_log_path_handle && work_index < 14) {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = foot_log_path_handle;
+        subscribe_work_items[work_index].notify_func = foot_log_path_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+    
+    if (bhi360_log_path_handle && work_index < 14) {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = bhi360_log_path_handle;
+        subscribe_work_items[work_index].notify_func = bhi360_log_path_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+    
+    if (activity_log_available_handle && work_index < 14) {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = activity_log_available_handle;
+        subscribe_work_items[work_index].notify_func = activity_log_available_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+    
+    if (activity_log_path_handle && work_index < 14) {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = activity_log_path_handle;
+        subscribe_work_items[work_index].notify_func = activity_log_path_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+    
+    // Try device info subscription as the last one with special handling
+    if (device_info_handle && work_index < 14) {
+        LOG_INF("Attempting device info subscription (handle %u) as last item", device_info_handle);
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = device_info_handle;
         subscribe_work_items[work_index].notify_func = device_info_notify_handler;
         subscribe_work_items[work_index].index = work_index;
-        k_work_submit(&subscribe_work_items[work_index].work);
         work_index++;
+    }
+    
+    LOG_INF("Scheduling %d characteristic subscriptions", work_index);
+    
+    // Set the number of pending subscriptions
+    atomic_set(&subscriptions_pending, work_index);
+    
+    // Now submit all work items with minimal delays
+    for (int i = 0; i < work_index; i++) {
+        LOG_INF("Scheduling subscription %d/%d (handle %u)", i+1, work_index, subscribe_work_items[i].handle);
+        k_work_submit(&subscribe_work_items[i].work);
+        if (i < work_index - 1) {
+            k_msleep(SUBSCRIPTION_BETWEEN_DELAY_MS);
+        }
     }
     LOG_INF("Scheduled %d characteristic subscriptions", work_index);
     
     // Small delay to ensure all subscriptions are processed
     k_msleep(SUBSCRIPTION_FINAL_DELAY_MS);
     LOG_INF("All subscriptions should now be active");
+    
+    // SMP discovery will be triggered automatically when all subscriptions complete
 }
 
 // Work handler for deferred subscription
@@ -307,8 +457,13 @@ static uint8_t foot_sensor_notify_handler(struct bt_conn *conn,
                                          struct bt_gatt_subscribe_params *params,
                                          const void *data, uint16_t length)
 {
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Foot sensor notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
     
-   struct bt_conn_info info;
+    struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
         return BT_GATT_ITER_STOP;
@@ -327,7 +482,6 @@ static uint8_t foot_sensor_notify_handler(struct bt_conn *conn,
 
     const foot_samples_t *samples = (const foot_samples_t *)data;
 
-
     // Process the data through the handler
     d2d_data_handler_process_foot_samples(samples);
 
@@ -338,7 +492,13 @@ static uint8_t bhi360_data1_notify_handler(struct bt_conn *conn,
                                           struct bt_gatt_subscribe_params *params,
                                           const void *data, uint16_t length)
 {
-       struct bt_conn_info info;
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("BHI360 data1 notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
         return BT_GATT_ITER_STOP;
@@ -386,7 +546,13 @@ static uint8_t bhi360_data2_notify_handler(struct bt_conn *conn,
                                           struct bt_gatt_subscribe_params *params,
                                           const void *data, uint16_t length)
 {
-       struct bt_conn_info info;
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("BHI360 data2 notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
         return BT_GATT_ITER_STOP;
@@ -418,7 +584,13 @@ static uint8_t bhi360_data3_notify_handler(struct bt_conn *conn,
                                           struct bt_gatt_subscribe_params *params,
                                           const void *data, uint16_t length)
 {
-       struct bt_conn_info info;
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("BHI360 data3 notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
         return BT_GATT_ITER_STOP;
@@ -450,12 +622,17 @@ static uint8_t status_notify_handler(struct bt_conn *conn,
                                     struct bt_gatt_subscribe_params *params,
                                     const void *data, uint16_t length)
 {
-       struct bt_conn_info info;
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Status notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
         return BT_GATT_ITER_STOP;
     }
-
 
     if (!data) {
         LOG_WRN("Status unsubscribed");
@@ -481,7 +658,13 @@ static uint8_t charge_status_notify_handler(struct bt_conn *conn,
                                            struct bt_gatt_subscribe_params *params,
                                            const void *data, uint16_t length)
 {
-       struct bt_conn_info info;
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Charge status notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
         return BT_GATT_ITER_STOP;
@@ -511,7 +694,13 @@ static uint8_t foot_log_notify_handler(struct bt_conn *conn,
                                       struct bt_gatt_subscribe_params *params,
                                       const void *data, uint16_t length)
 {
-       struct bt_conn_info info;
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Foot log notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
         return BT_GATT_ITER_STOP;
@@ -541,7 +730,13 @@ static uint8_t bhi360_log_notify_handler(struct bt_conn *conn,
                                         struct bt_gatt_subscribe_params *params,
                                         const void *data, uint16_t length)
 {
-       struct bt_conn_info info;
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("BHI360 log notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
         return BT_GATT_ITER_STOP;
@@ -571,6 +766,12 @@ static uint8_t device_info_notify_handler(struct bt_conn *conn,
                                          struct bt_gatt_subscribe_params *params,
                                          const void *data, uint16_t length)
 {
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Device info notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
     struct bt_conn_info info;
     if (!conn || bt_conn_get_info(conn, &info) != 0) {
         LOG_ERR("Invalid connection in callback");
@@ -596,12 +797,190 @@ static uint8_t device_info_notify_handler(struct bt_conn *conn,
     LOG_INF("  HW Rev: %s", dev_info->hw_rev);
     LOG_INF("  FW Rev: %s", dev_info->fw_rev);
 
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Update secondary device info in information service
+// Update secondary device info in information service
     jis_update_secondary_device_info(dev_info->manufacturer, dev_info->model,
                                    dev_info->serial, dev_info->hw_rev, 
                                    dev_info->fw_rev);
-#endif
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+static uint8_t fota_progress_notify_handler(struct bt_conn *conn,
+                                           struct bt_gatt_subscribe_params *params,
+                                           const void *data, uint16_t length)
+{
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("FOTA progress notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0) {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (!data) {
+        LOG_WRN("FOTA progress unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (length != sizeof(fota_progress_msg_t)) {
+        LOG_WRN("Invalid FOTA progress length: %u (expected %u)", length, sizeof(fota_progress_msg_t));
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    const fota_progress_msg_t *progress = (const fota_progress_msg_t *)data;
+    LOG_INF("=== RECEIVED FOTA PROGRESS FROM SECONDARY ===");
+    LOG_INF("  Active: %s", progress->is_active ? "YES" : "NO");
+    LOG_INF("  Status: %u", progress->status);
+    LOG_INF("  Progress: %u%%", progress->percent_complete);
+    LOG_INF("  Bytes: %u/%u", progress->bytes_received, progress->total_size);
+    if (progress->error_code != 0) {
+        LOG_INF("  Error Code: %d", progress->error_code);
+    }
+
+// Forward the secondary FOTA progress to the phone via the secondary FOTA progress characteristic
+    // Forward declaration to ensure it's available
+    extern void jis_secondary_fota_progress_notify(const fota_progress_msg_t* progress);
+    jis_secondary_fota_progress_notify(progress);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+static uint8_t foot_log_path_notify_handler(struct bt_conn *conn,
+                                           struct bt_gatt_subscribe_params *params,
+                                           const void *data, uint16_t length)
+{
+    ARG_UNUSED(length);
+    
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Foot log path notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0) {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (!data) {
+        LOG_WRN("Foot log path unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    const char *path = (const char *)data;
+    LOG_INF("=== RECEIVED FOOT LOG PATH FROM SECONDARY: %s ===", path);
+
+    // Process the data through the handler
+    d2d_data_handler_process_file_path(0, 0, path); // log_id=0, file_type=0 (foot)
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+static uint8_t bhi360_log_path_notify_handler(struct bt_conn *conn,
+                                             struct bt_gatt_subscribe_params *params,
+                                             const void *data, uint16_t length)
+{
+    ARG_UNUSED(length);
+    
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("BHI360 log path notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0) {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (!data) {
+        LOG_WRN("BHI360 log path unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    const char *path = (const char *)data;
+    LOG_INF("=== RECEIVED BHI360 LOG PATH FROM SECONDARY: %s ===", path);
+
+    // Process the data through the handler
+    d2d_data_handler_process_file_path(0, 1, path); // log_id=0, file_type=1 (bhi360)
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+static uint8_t activity_log_available_notify_handler(struct bt_conn *conn,
+                                                   struct bt_gatt_subscribe_params *params,
+                                                   const void *data, uint16_t length)
+{
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Activity log available notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0) {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (!data) {
+        LOG_WRN("Activity log available unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (length != sizeof(uint8_t)) {
+        LOG_WRN("Invalid activity log available length: %u", length);
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    uint8_t log_id = *(const uint8_t *)data;
+    LOG_INF("=== RECEIVED ACTIVITY LOG AVAILABLE FROM SECONDARY: ID=%u ===", log_id);
+
+    // Process the data through the handler
+    d2d_data_handler_process_log_available(log_id, 2); // 2 = activity log type
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+static uint8_t activity_log_path_notify_handler(struct bt_conn *conn,
+                                               struct bt_gatt_subscribe_params *params,
+                                               const void *data, uint16_t length)
+{
+    ARG_UNUSED(length);
+    
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Activity log path notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0) {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (!data) {
+        LOG_WRN("Activity log path unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    const char *path = (const char *)data;
+    LOG_INF("=== RECEIVED ACTIVITY LOG PATH FROM SECONDARY: %s ===", path);
+
+    // Process the data through the handler
+    d2d_data_handler_process_file_path(0, 2, path); // log_id=0, file_type=2 (activity)
 
     return BT_GATT_ITER_CONTINUE;
 }
@@ -641,6 +1020,12 @@ static void write_ccc_alternative(struct bt_conn *conn, uint16_t handle, uint16_
 // Subscribe to a characteristic
 static void subscribe_to_characteristic(uint16_t handle, bt_gatt_notify_func_t notify_func, int index)
 {
+    // Check if we still have a valid secondary connection before subscribing
+    if (!secondary_conn) {
+        LOG_WRN("No secondary connection, skipping subscription for index %d", index);
+        return;
+    }
+    
     if (handle == 0) {
         LOG_DBG("Skipping subscription for index %d - handle is 0", index);
         return;
@@ -692,8 +1077,35 @@ static void subscribe_to_characteristic(uint16_t handle, bt_gatt_notify_func_t n
         ARG_UNUSED(conn);
         if (err) {
             LOG_ERR("Subscribe failed (err %d) for handle %u", err, params->value_handle);
+            
+            // If device info subscription failed, schedule a retry
+            if (params->value_handle == device_info_handle && device_info_retry_count < 3) {
+                device_info_retry_count++;
+                LOG_INF("Scheduling device info subscription retry in 500ms");
+                k_work_schedule(&device_info_retry_work, K_MSEC(500));
+            }
         } else {
             LOG_INF("Subscribed successfully to handle %u", params->value_handle);
+            
+            // Increment completed subscriptions
+            atomic_inc(&subscriptions_completed);
+            
+            // Log progress
+            int completed = atomic_get(&subscriptions_completed);
+            int pending = atomic_get(&subscriptions_pending);
+            LOG_INF("Subscription progress: %d/%d completed", completed, pending);
+            
+            // Reset retry count on success
+            if (params->value_handle == device_info_handle) {
+                device_info_retry_count = 0;
+            }
+            
+// If all subscriptions are complete, start SMP discovery
+            if (completed == pending && pending > 0) {
+                LOG_INF("All D2D RX subscriptions complete, starting SMP discovery");
+                // Schedule SMP discovery with a small delay to avoid stack issues
+                k_work_schedule(&smp_discovery_work, K_MSEC(100));
+            }
         }
     };
     
@@ -910,8 +1322,7 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
                 return BT_GATT_ITER_STOP;
             }
             
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-            // Now we know this is a secondary device, set up D2D connection
+// Now we know this is a secondary device, set up D2D connection
             LOG_INF("Secondary device identified and D2D connection established!");
             
             // Notify that this is a confirmed D2D connection first
@@ -927,12 +1338,14 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             // Set the secondary connection for file proxy
             file_proxy_set_secondary_conn(secondary_conn);
 
+            // Set the secondary connection for SMP proxy
+            smp_proxy_set_secondary_conn(secondary_conn);
+
             // Initialize D2D file client for this connection
             ble_d2d_file_client_init(secondary_conn);
             
             // Small delay before subscribing
             k_msleep(CONNECTION_STABILIZE_DELAY_MS);
-#endif
             
             // Schedule subscriptions to run in system workqueue with a delay
             LOG_INF("Scheduling characteristic subscriptions...");
@@ -962,7 +1375,6 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             // Small delay to ensure connection is stable after discovery
             k_msleep(CONNECTION_STABILIZE_DELAY_MS);
             
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // Now we know this is a secondary device, set up D2D connection
             // Note: secondary_conn is already set in d2d_rx_client_start_discovery
             
@@ -981,12 +1393,14 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             // Set the secondary connection for file proxy
             file_proxy_set_secondary_conn(conn);
 
+            // Set the secondary connection for SMP proxy
+            smp_proxy_set_secondary_conn(conn);
+
             // Initialize D2D file client for this connection
             ble_d2d_file_client_init(conn);
             
             // Small delay before subscribing
             k_msleep(CONNECTION_STABILIZE_DELAY_MS);
-#endif
             
             // Schedule subscriptions to run in system workqueue with a delay
             LOG_INF("Scheduling characteristic subscriptions...");
@@ -1055,6 +1469,26 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
         } else if (bt_uuid_cmp(chrc->uuid, &d2d_device_info_uuid.uuid) == 0) {
             device_info_handle = chrc->value_handle;
             LOG_INF("Found device info characteristic, handle: %u", device_info_handle);
+            characteristics_found++;
+        } else if (bt_uuid_cmp(chrc->uuid, &d2d_fota_progress_uuid.uuid) == 0) {
+            fota_progress_handle = chrc->value_handle;
+            LOG_INF("Found FOTA progress characteristic, handle: %u", fota_progress_handle);
+            characteristics_found++;
+        } else if (bt_uuid_cmp(chrc->uuid, &d2d_foot_log_path_uuid.uuid) == 0) {
+            foot_log_path_handle = chrc->value_handle;
+            LOG_INF("Found foot log path characteristic, handle: %u", foot_log_path_handle);
+            characteristics_found++;
+        } else if (bt_uuid_cmp(chrc->uuid, &d2d_bhi360_log_path_uuid.uuid) == 0) {
+            bhi360_log_path_handle = chrc->value_handle;
+            LOG_INF("Found BHI360 log path characteristic, handle: %u", bhi360_log_path_handle);
+            characteristics_found++;
+        } else if (bt_uuid_cmp(chrc->uuid, &d2d_activity_log_available_uuid.uuid) == 0) {
+            activity_log_available_handle = chrc->value_handle;
+            LOG_INF("Found activity log available characteristic, handle: %u", activity_log_available_handle);
+            characteristics_found++;
+        } else if (bt_uuid_cmp(chrc->uuid, &d2d_activity_log_path_uuid.uuid) == 0) {
+            activity_log_path_handle = chrc->value_handle;
+            LOG_INF("Found activity log path characteristic, handle: %u", activity_log_path_handle);
             characteristics_found++;
         }
     } else if (discovery_state == DISCOVER_DIS) {
@@ -1155,6 +1589,11 @@ void d2d_rx_client_start_discovery(struct bt_conn *conn)
     foot_log_handle = 0;
     bhi360_log_handle = 0;
     device_info_handle = 0;
+    fota_progress_handle = 0;
+    foot_log_path_handle = 0;
+    bhi360_log_path_handle = 0;
+    activity_log_available_handle = 0;
+    activity_log_path_handle = 0;
     
     // Clear all subscribe params to ensure clean state
     memset(subscribe_params, 0, sizeof(subscribe_params));
@@ -1193,11 +1632,25 @@ void d2d_rx_client_disconnected(void)
 {
     // Cancel any pending subscription work
     k_work_cancel(&subscribe_work);
+    k_work_cancel_delayable(&device_info_retry_work);
+    k_work_cancel_delayable(&smp_discovery_work);
+    
+    // Reset retry count
+    device_info_retry_count = 0;
+    
+    // Clear subscribe params immediately to prevent callbacks
+    memset(subscribe_params, 0, sizeof(subscribe_params));
     
     // Release connection reference if we have one
-    if (secondary_conn) {
-        bt_conn_unref(secondary_conn);
-        secondary_conn = NULL;
+    // Use atomic operation to ensure thread safety
+    struct bt_conn *temp_conn = secondary_conn;
+    secondary_conn = NULL;
+    
+    // Memory barrier to ensure secondary_conn = NULL is visible to all threads
+    __sync_synchronize();
+    
+    if (temp_conn) {
+        bt_conn_unref(temp_conn);
     }
     
     discovery_state = DISCOVER_SERVICE;
@@ -1213,6 +1666,11 @@ void d2d_rx_client_disconnected(void)
     foot_log_handle = 0;
     bhi360_log_handle = 0;
     device_info_handle = 0;
+    fota_progress_handle = 0;
+    foot_log_path_handle = 0;
+    bhi360_log_path_handle = 0;
+    activity_log_available_handle = 0;
+    activity_log_path_handle = 0;
     
     // Clear subscribe params
     memset(subscribe_params, 0, sizeof(subscribe_params));
@@ -1232,10 +1690,22 @@ void d2d_rx_client_disconnected(void)
     dis_hw_rev_handle = 0;
     dis_fw_rev_handle = 0;
     
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Clear secondary device info in information service
+// Clear secondary device info in information service
     jis_clear_secondary_device_info();
-#endif
     
     LOG_INF("D2D RX client disconnected");
 }
+
+#else // !CONFIG_PRIMARY_DEVICE
+
+// Stub implementations for secondary device
+void d2d_rx_client_start_discovery(struct bt_conn *conn) 
+{
+    ARG_UNUSED(conn);
+}
+
+void d2d_rx_client_disconnected(void) 
+{
+}
+
+#endif // CONFIG_PRIMARY_DEVICE

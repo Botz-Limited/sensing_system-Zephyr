@@ -21,10 +21,18 @@
 
 ## Overview
 
-The sensing firmware supports FOTA updates for both primary (right foot) and secondary (left foot) devices. The system uses different update mechanisms for each device type:
+The sensing firmware supports FOTA updates for both primary (right foot) and secondary (left foot) devices. The system provides two approaches for updating devices:
 
+### 🎯 Recommended: Unified Approach (SMP Proxy)
+- **Both Devices**: Use standard MCUmgr/SMP protocol through SMP Proxy service
+- **Simpler Integration**: Same code for both devices, just set target (0x00=Primary, 0x01=Secondary)
+- **Standard Libraries**: Works with existing MCUmgr libraries (iOS, Android, Python)
+- **See**: [SMP Proxy Integration Guide](SMP_Proxy_Integration_Guide.md) for implementation
+
+### Legacy: Traditional Approach (FOTA Proxy)
 - **Primary Device**: Direct updates via standard MCUmgr/SMP protocol
-- **Secondary Device**: Updates through FOTA Proxy service on primary device
+- **Secondary Device**: Updates through custom FOTA Proxy service on primary device
+- **Note**: Still supported but requires custom protocol implementation
 
 ### Key Features
 
@@ -408,7 +416,7 @@ sequenceDiagram
 
 ## Mobile App Integration
 
-### Complete Update Flow
+### Complete Update Flow - Traditional Approach
 
 ```swift
 class DeviceManager {
@@ -437,6 +445,49 @@ class DeviceManager {
     }
 }
 ```
+
+### Complete Update Flow - SMP Proxy Approach (Recommended)
+
+The SMP Proxy dramatically simplifies mobile app development by allowing standard MCUmgr libraries to work with both devices:
+
+```swift
+class UnifiedDeviceManager {
+    let smpProxyService = CBUUID(string: "8D53DC1E-1DB7-4CD3-868B-8A527460AA84")
+    let targetCharUUID = CBUUID(string: "DA2E7829-FBCE-4E01-AE9E-261174997C48")
+    let smpDataCharUUID = CBUUID(string: "DA2E7828-FBCE-4E01-AE9E-261174997C48")
+    
+    func updateBothDevices(primary: CBPeripheral, 
+                          primaryFW: Data,
+                          secondaryFW: Data) {
+        // 1. Connect and discover services
+        connect(to: primary)
+        discoverServices()
+        
+        // 2. Create transport that uses proxy characteristic
+        let transport = McuMgrBleTransport(primary)
+        transport.smpCharacteristic = smpDataChar // Use proxy instead of default
+        let dfuManager = FirmwareUpgradeManager(transporter: transport)
+        
+        // 3. Update secondary using standard MCUmgr
+        writeCharacteristic(targetCharUUID, data: Data([0x01])) // Select secondary
+        dfuManager.start(data: secondaryFW)
+        waitForCompletion()
+        
+        // 4. Update primary using standard MCUmgr  
+        writeCharacteristic(targetCharUUID, data: Data([0x00])) // Select primary
+        dfuManager.start(data: primaryFW)
+        waitForCompletion()
+        
+        // 5. Both devices updated with standard MCUmgr!
+    }
+}
+```
+
+**Key Benefits:**
+- No custom protocols to implement
+- Works with all MCUmgr features (FOTA, file access, stats, etc.)
+- Same code pattern for both devices
+- Existing MCUmgr libraries just work
 
 ### Progress Monitoring
 

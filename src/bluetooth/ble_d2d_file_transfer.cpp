@@ -12,6 +12,7 @@
 #include <zephyr/fs/fs_sys.h>
 #include <string.h>
 #include <stdio.h>
+#include "ccc_callback_fix.hpp"
 
 LOG_MODULE_REGISTER(d2d_file_transfer, LOG_LEVEL_INF);
 
@@ -154,13 +155,19 @@ static ssize_t d2d_file_command_write(struct bt_conn *conn, const struct bt_gatt
 // CCC changed callbacks
 static void d2d_file_data_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("d2d_file_data_ccc_changed: attr is NULL");
+        return;
+    }
     LOG_DBG("D2D File data CCC changed: %u", value);
 }
 
 static void d2d_file_status_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("d2d_file_status_ccc_changed: attr is NULL");
+        return;
+    }
     LOG_DBG("D2D File status CCC changed: %u", value);
 }
 
@@ -412,7 +419,17 @@ void ble_d2d_file_transfer_init(void)
 void ble_d2d_file_client_init(struct bt_conn *conn)
 {
     d2d_file_state.conn = conn;
-    LOG_INF("D2D File Transfer client initialized");
+    if (conn) {
+        LOG_INF("D2D File Transfer client initialized");
+    } else {
+        LOG_INF("D2D File Transfer client cleared");
+        // Clear any active state
+        if (d2d_file_state.file_open) {
+            fs_close(&d2d_file_state.file);
+            d2d_file_state.file_open = false;
+        }
+        d2d_file_state.is_active = false;
+    }
 }
 
 void ble_d2d_file_set_callbacks(d2d_file_data_cb_t data_cb, d2d_file_status_cb_t status_cb)

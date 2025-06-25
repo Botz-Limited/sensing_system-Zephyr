@@ -63,12 +63,18 @@ west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 - **Trigger BHI360 Calibration**: `e160ca87-3115-4ad6-9709-8c5ff3bf558b`
 - FOTA Status: `e160ca88-3115-4ad6-9709-8c5ff3bf558b`
 
-### FOTA Proxy Service (Primary Only)
+### FOTA Proxy Service (Primary Only) - Legacy
 - Service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
 - Target: `6e400002-b5a3-f393-e0a9-e50e24dcca9e`
 - Command: `6e400003-b5a3-f393-e0a9-e50e24dcca9e`
 - Data: `6e400004-b5a3-f393-e0a9-e50e24dcca9e`
 - Status: `6e400005-b5a3-f393-e0a9-e50e24dcca9e`
+
+### SMP Proxy Service (Primary Only) - Recommended
+- Service: `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`
+- Target: `DA2E7829-FBCE-4E01-AE9E-261174997C48`
+- SMP Data: `DA2E7828-FBCE-4E01-AE9E-261174997C48`
+- **Usage**: Set target (0x00=Primary, 0x01=Secondary), then use standard MCUmgr
 
 ## 4. Command Values
 
@@ -197,6 +203,24 @@ MSG_TYPE_NEW_ACTIVITY_LOG_FILE      // New log file notification
 - [ ] Status notifications correct
 
 ## 9. Code Patterns
+
+### Using SMP Proxy (Recommended for Mobile Apps)
+
+```swift
+// Update secondary device using standard MCUmgr
+func updateSecondaryDevice(firmware: Data) {
+    // 1. Set target to secondary
+    writeCharacteristic(smpProxyTargetUUID, value: Data([0x01]))
+    
+    // 2. Use standard MCUmgr with proxy data characteristic
+    let transport = McuMgrBleTransport(peripheral)
+    transport.smpCharacteristic = smpProxyDataCharacteristic
+    
+    // 3. Standard MCUmgr operations work transparently!
+    let dfuManager = FirmwareUpgradeManager(transporter: transport)
+    dfuManager.start(data: firmware)
+}
+```
 
 ### Adding New Command (Primary → Secondary)
 

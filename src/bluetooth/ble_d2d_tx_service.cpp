@@ -17,6 +17,7 @@
 #include <app.hpp>
 #include <app_fixed_point.hpp>
 #include <ble_services.hpp>
+#include "ccc_callback_fix.hpp"
 
 LOG_MODULE_REGISTER(d2d_tx_svc, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -52,6 +53,20 @@ static struct bt_uuid_128 d2d_bhi360_log_available_uuid =
 static struct bt_uuid_128 d2d_device_info_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e1, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+// FOTA progress UUID
+static struct bt_uuid_128 d2d_fota_progress_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e3, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
+// Path UUIDs
+static struct bt_uuid_128 d2d_foot_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68d9, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+static struct bt_uuid_128 d2d_bhi360_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68db, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+static struct bt_uuid_128 d2d_activity_log_available_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e4, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+static struct bt_uuid_128 d2d_activity_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e5, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection tracking
 static struct bt_conn *primary_conn = NULL;
 
@@ -65,6 +80,11 @@ static bool charge_status_notify_enabled = false;
 static bool foot_log_notify_enabled = false;
 static bool bhi360_log_notify_enabled = false;
 static bool device_info_notify_enabled = false;
+static bool fota_progress_notify_enabled = false;
+static bool foot_log_path_notify_enabled = false;
+static bool bhi360_log_path_notify_enabled = false;
+static bool activity_log_notify_enabled = false;
+static bool activity_log_path_notify_enabled = false;
 static foot_samples_t foot_sensor_char_value = {0};
 
 // Data buffers - using fixed-point versions for BLE transmission
@@ -77,11 +97,19 @@ static uint8_t charge_status = 0;
 static uint8_t foot_log_available = 0;
 static uint8_t bhi360_log_available = 0;
 static device_info_msg_t device_info_data = {0};
+static fota_progress_msg_t fota_progress_data = {0};
+static char foot_log_path[256] = {0};
+static char bhi360_log_path[256] = {0};
+static uint8_t activity_log_available = 0;
+static char activity_log_path[256] = {0};
 
 // CCC changed callbacks
 static void foot_sensor_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("foot_sensor_ccc_changed: attr is NULL");
+        return;
+    }
     bool was_enabled = foot_sensor_notify_enabled;
     foot_sensor_notify_enabled = value == BT_GATT_CCC_NOTIFY;
     LOG_INF("Foot sensor CCC changed: value=0x%04x, notifications now %s", 
@@ -97,58 +125,132 @@ static void foot_sensor_ccc_changed(const struct bt_gatt_attr *attr, uint16_t va
 
 static void bhi360_data1_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("bhi360_data1_ccc_changed: attr is NULL");
+        return;
+    }
     bhi360_data1_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("BHI360 data1 notifications %s", bhi360_data1_notify_enabled ? "enabled" : "disabled");
 }
 
 static void bhi360_data2_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("bhi360_data2_ccc_changed: attr is NULL");
+        return;
+    }
     bhi360_data2_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("BHI360 data2 notifications %s", bhi360_data2_notify_enabled ? "enabled" : "disabled");
 }
 
 static void bhi360_data3_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("bhi360_data3_ccc_changed: attr is NULL");
+        return;
+    }
     bhi360_data3_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("BHI360 data3 notifications %s", bhi360_data3_notify_enabled ? "enabled" : "disabled");
 }
 
 static void status_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("status_ccc_changed: attr is NULL");
+        return;
+    }
     status_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Status notifications %s", status_notify_enabled ? "enabled" : "disabled");
 }
 
 static void charge_status_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("charge_status_ccc_changed: attr is NULL");
+        return;
+    }
     charge_status_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Charge status notifications %s", charge_status_notify_enabled ? "enabled" : "disabled");
 }
 
 static void foot_log_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("foot_log_ccc_changed: attr is NULL");
+        return;
+    }
     foot_log_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Foot log notifications %s", foot_log_notify_enabled ? "enabled" : "disabled");
 }
 
 static void bhi360_log_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("bhi360_log_ccc_changed: attr is NULL");
+        return;
+    }
     bhi360_log_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("BHI360 log notifications %s", bhi360_log_notify_enabled ? "enabled" : "disabled");
 }
 
 static void device_info_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("device_info_ccc_changed: attr is NULL");
+        return;
+    }
     device_info_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Device info notifications %s", device_info_notify_enabled ? "enabled" : "disabled");
+}
+
+static void fota_progress_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("fota_progress_ccc_changed: attr is NULL");
+        return;
+    }
+    fota_progress_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("FOTA progress notifications %s", fota_progress_notify_enabled ? "enabled" : "disabled");
+}
+
+static void foot_log_path_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("foot_log_path_ccc_changed: attr is NULL");
+        return;
+    }
+    foot_log_path_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Foot log path notifications %s", foot_log_path_notify_enabled ? "enabled" : "disabled");
+}
+
+static void bhi360_log_path_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("bhi360_log_path_ccc_changed: attr is NULL");
+        return;
+    }
+    bhi360_log_path_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("BHI360 log path notifications %s", bhi360_log_path_notify_enabled ? "enabled" : "disabled");
+}
+
+static void activity_log_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("activity_log_ccc_changed: attr is NULL");
+        return;
+    }
+    activity_log_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Activity log notifications %s", activity_log_notify_enabled ? "enabled" : "disabled");
+}
+
+static void activity_log_path_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("activity_log_path_ccc_changed: attr is NULL");
+        return;
+    }
+    activity_log_path_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Activity log path notifications %s", activity_log_path_notify_enabled ? "enabled" : "disabled");
 }
 
 // Read callbacks (optional - for debugging)
@@ -165,7 +267,8 @@ static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr
     return bt_gatt_attr_read(conn, attr, buf, len, offset, value_to_read, sizeof(foot_samples_t));
 }
 
-// GATT Service Definition
+// GATT Service Definition - Only for secondary device
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 BT_GATT_SERVICE_DEFINE(d2d_tx_svc,
     BT_GATT_PRIMARY_SERVICE(&d2d_tx_service_uuid),
     
@@ -231,12 +334,48 @@ BT_GATT_SERVICE_DEFINE(d2d_tx_svc,
                           BT_GATT_PERM_NONE,
                           NULL, NULL, NULL),
     BT_GATT_CCC(device_info_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    
+    // FOTA progress (notify)
+    BT_GATT_CHARACTERISTIC(&d2d_fota_progress_uuid.uuid,
+                          BT_GATT_CHRC_NOTIFY,
+                          BT_GATT_PERM_NONE,
+                          NULL, NULL, NULL),
+    BT_GATT_CCC(fota_progress_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    
+    // Foot log path (notify)
+    BT_GATT_CHARACTERISTIC(&d2d_foot_log_path_uuid.uuid,
+                          BT_GATT_CHRC_NOTIFY,
+                          BT_GATT_PERM_NONE,
+                          NULL, NULL, NULL),
+    BT_GATT_CCC(foot_log_path_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    
+    // BHI360 log path (notify)
+    BT_GATT_CHARACTERISTIC(&d2d_bhi360_log_path_uuid.uuid,
+                          BT_GATT_CHRC_NOTIFY,
+                          BT_GATT_PERM_NONE,
+                          NULL, NULL, NULL),
+    BT_GATT_CCC(bhi360_log_path_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    
+    // Activity log available (notify)
+    BT_GATT_CHARACTERISTIC(&d2d_activity_log_available_uuid.uuid,
+                          BT_GATT_CHRC_NOTIFY,
+                          BT_GATT_PERM_NONE,
+                          NULL, NULL, NULL),
+    BT_GATT_CCC(activity_log_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    
+    // Activity log path (notify)
+    BT_GATT_CHARACTERISTIC(&d2d_activity_log_path_uuid.uuid,
+                          BT_GATT_CHRC_NOTIFY,
+                          BT_GATT_PERM_NONE,
+                          NULL, NULL, NULL),
+    BT_GATT_CCC(activity_log_path_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
+#endif // !CONFIG_PRIMARY_DEVICE
 
 // Public functions to send notifications
 int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
 {
-
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     foot_samples_t temp_foot_data;
     // 1. Get the current epoch timestamp from your RTC module
     // uint32_t current_epoch = get_current_epoch_time(); // TODO: Use this when timestamp is needed
@@ -285,10 +424,15 @@ int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
     }
     
     return err;
+#else
+    // Primary device doesn't have this service
+    return -ENOTSUP;
+#endif
 }
 
 int d2d_tx_notify_bhi360_data1(const bhi360_3d_mapping_t *data)
 {
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     LOG_DBG("D2D TX: BHI360 data1 notify called");
     
     if (!primary_conn) {
@@ -312,6 +456,9 @@ int d2d_tx_notify_bhi360_data1(const bhi360_3d_mapping_t *data)
     }
     
     return err;
+#else
+    return -ENOTSUP;
+#endif
 }
 
 int d2d_tx_notify_bhi360_data2(const bhi360_step_count_t *data)
@@ -456,6 +603,131 @@ int d2d_tx_notify_device_info(const device_info_msg_t *info)
     int err = bt_gatt_notify(primary_conn, char_attr, &device_info_data, sizeof(device_info_data));
     if (err) {
         LOG_ERR("Failed to send device info notification: %d", err);
+    }
+    
+    return err;
+}
+
+int d2d_tx_notify_fota_progress(const fota_progress_msg_t *progress)
+{
+    if (!primary_conn || !fota_progress_notify_enabled) {
+        LOG_WRN("D2D TX: Cannot send FOTA progress - no connection or notifications disabled");
+        return -ENOTCONN;
+    }
+    
+    // Copy the FOTA progress data
+    memcpy(&fota_progress_data, progress, sizeof(fota_progress_msg_t));
+    
+    // FOTA progress characteristic is at index 28 (after device info + CCC)
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[28];
+    int err = bt_gatt_notify(primary_conn, char_attr, &fota_progress_data, sizeof(fota_progress_data));
+    if (err) {
+        LOG_ERR("Failed to send FOTA progress notification: %d", err);
+    } else {
+        LOG_DBG("D2D FOTA progress sent: active=%d, status=%d, percent=%d%%",
+                progress->is_active, progress->status, progress->percent_complete);
+    }
+    
+    return err;
+}
+
+int d2d_tx_notify_foot_log_path(const char *path)
+{
+    if (!primary_conn || !foot_log_path_notify_enabled) {
+        LOG_WRN("D2D TX: Cannot send foot log path - no connection or notifications disabled");
+        return -ENOTCONN;
+    }
+    
+    size_t len = strlen(path) + 1; // Include null terminator
+    if (len > sizeof(foot_log_path)) {
+        len = sizeof(foot_log_path);
+    }
+    
+    memcpy(foot_log_path, path, len);
+    foot_log_path[sizeof(foot_log_path) - 1] = '\0'; // Ensure null termination
+    
+    // Foot log path characteristic is at index 31
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[31];
+    int err = bt_gatt_notify(primary_conn, char_attr, foot_log_path, len);
+    if (err) {
+        LOG_ERR("Failed to send foot log path notification: %d", err);
+    } else {
+        LOG_DBG("D2D foot log path sent: %s", foot_log_path);
+    }
+    
+    return err;
+}
+
+int d2d_tx_notify_bhi360_log_path(const char *path)
+{
+    if (!primary_conn || !bhi360_log_path_notify_enabled) {
+        LOG_WRN("D2D TX: Cannot send BHI360 log path - no connection or notifications disabled");
+        return -ENOTCONN;
+    }
+    
+    size_t len = strlen(path) + 1;
+    if (len > sizeof(bhi360_log_path)) {
+        len = sizeof(bhi360_log_path);
+    }
+    
+    memcpy(bhi360_log_path, path, len);
+    bhi360_log_path[sizeof(bhi360_log_path) - 1] = '\0';
+    
+    // BHI360 log path characteristic is at index 34
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[34];
+    int err = bt_gatt_notify(primary_conn, char_attr, bhi360_log_path, len);
+    if (err) {
+        LOG_ERR("Failed to send BHI360 log path notification: %d", err);
+    } else {
+        LOG_DBG("D2D BHI360 log path sent: %s", bhi360_log_path);
+    }
+    
+    return err;
+}
+
+int d2d_tx_notify_activity_log_available(uint8_t log_id)
+{
+    if (!primary_conn || !activity_log_notify_enabled) {
+        LOG_WRN("D2D TX: Cannot send activity log available - no connection or notifications disabled");
+        return -ENOTCONN;
+    }
+    
+    activity_log_available = log_id;
+    
+    // Activity log available characteristic is at index 37
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[37];
+    int err = bt_gatt_notify(primary_conn, char_attr, &log_id, sizeof(log_id));
+    if (err) {
+        LOG_ERR("Failed to send activity log notification: %d", err);
+    } else {
+        LOG_DBG("D2D activity log available sent: ID=%u", log_id);
+    }
+    
+    return err;
+}
+
+int d2d_tx_notify_activity_log_path(const char *path)
+{
+    if (!primary_conn || !activity_log_path_notify_enabled) {
+        LOG_WRN("D2D TX: Cannot send activity log path - no connection or notifications disabled");
+        return -ENOTCONN;
+    }
+    
+    size_t len = strlen(path) + 1;
+    if (len > sizeof(activity_log_path)) {
+        len = sizeof(activity_log_path);
+    }
+    
+    memcpy(activity_log_path, path, len);
+    activity_log_path[sizeof(activity_log_path) - 1] = '\0';
+    
+    // Activity log path characteristic is at index 40
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[40];
+    int err = bt_gatt_notify(primary_conn, char_attr, activity_log_path, len);
+    if (err) {
+        LOG_ERR("Failed to send activity log path notification: %d", err);
+    } else {
+        LOG_DBG("D2D activity log path sent: %s", activity_log_path);
     }
     
     return err;

@@ -78,7 +78,9 @@ static struct bhy2_dev *bhy2_ptr = nullptr;
 // Forward declarations
 static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
 static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
+#if 0
 static void print_api_error(int8_t rslt, struct bhy2_dev *dev);
+#endif
 static int8_t upload_firmware(struct bhy2_dev *dev);
 static void save_calibration_profile(const struct device *bhi360_dev, 
                                    enum bhi360_sensor_type sensor, const char *sensor_name);

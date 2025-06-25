@@ -33,6 +33,7 @@
 #include <ble_services.hpp>
 #include <util.hpp>
 #include <status_codes.h>
+#include "ccc_callback_fix.hpp"
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -58,16 +59,44 @@ static uint8_t ct_update = 0;
 // --- BHI360 Data Set Characteristics ---
 // 1: 3D Mapping, 2: Step Count, 3: Linear Acceleration
 // Using fixed-point versions for BLE transmission
-static bhi360_3d_mapping_fixed_t bhi360_data1_value_fixed = {0};
-static bhi360_step_count_fixed_t bhi360_data2_value_fixed = {0};
-static bhi360_linear_accel_fixed_t bhi360_data3_value_fixed = {0};
+static bhi360_3d_mapping_fixed_t bhi360_data1_value_fixed = {0, 0, 0, 0, 0, 0, 0, 0};
+static bhi360_step_count_fixed_t bhi360_data2_value_fixed = {0, 0};
+static bhi360_linear_accel_fixed_t bhi360_data3_value_fixed = {0, 0, 0};
 static bool bhi360_data1_subscribed = false;
 static bool bhi360_data2_subscribed = false;
 static bool bhi360_data3_subscribed = false;
 
 // FOTA progress tracking
-static fota_progress_msg_t fota_progress_value = {0};
+static fota_progress_msg_t fota_progress_value = {0, 0, 0, 0, 0};
 static bool fota_progress_subscribed = false;
+
+// Activity log tracking (primary device)
+static uint8_t activity_log_available = 0;
+static bool activity_log_available_subscribed = false;
+static char activity_log_path[util::max_path_length] = {0};
+static bool activity_log_path_subscribed = false;
+
+// Secondary FOTA progress tracking (primary device only)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+static fota_progress_msg_t secondary_fota_progress_value = {0, 0, 0, 0, 0};
+static bool secondary_fota_progress_subscribed = false;
+
+// Secondary file management
+static uint8_t secondary_foot_log_available = 0;
+static bool secondary_foot_log_available_subscribed = false;
+static char secondary_foot_log_path[util::max_path_length] = {0};
+static bool secondary_foot_log_path_subscribed = false;
+
+static uint8_t secondary_bhi360_log_available = 0;
+static bool secondary_bhi360_log_available_subscribed = false;
+static char secondary_bhi360_log_path[util::max_path_length] = {0};
+static bool secondary_bhi360_log_path_subscribed = false;
+
+static uint8_t secondary_activity_log_available = 0;
+static bool secondary_activity_log_available_subscribed = false;
+static char secondary_activity_log_path[util::max_path_length] = {0};
+static bool secondary_activity_log_path_subscribed = false;
+#endif
 
 // Secondary device information storage (only used on primary)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -87,11 +116,11 @@ static bool current_time_notifications_enabled = false; // Flag to track CCC sta
 // BHI360 Data Set Characteristics
 static ssize_t jis_bhi360_data1_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_bhi360_data1_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-void jis_bhi360_data1_notify(const bhi360_3d_mapping_t* data);
+extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t* data);
 
 static ssize_t jis_bhi360_data2_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
+extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
 
 static ssize_t jis_bhi360_data3_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
@@ -130,9 +159,48 @@ static ssize_t jis_fota_progress_read(struct bt_conn* conn, const struct bt_gatt
 static void jis_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 void jis_fota_progress_notify(const fota_progress_msg_t* progress);
 
+// Activity Log Characteristics
+static ssize_t jis_activity_log_available_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_activity_log_available_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_activity_log_available_notify(uint8_t log_id);
+
+static ssize_t jis_activity_log_path_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_activity_log_path_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_activity_log_path_notify(const char* path);
+
 // Secondary Device Information Characteristics (Primary only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static ssize_t jis_secondary_info_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+
+// Secondary FOTA Progress Characteristic
+static ssize_t jis_secondary_fota_progress_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_secondary_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_secondary_fota_progress_notify(const fota_progress_msg_t* progress);
+
+// Secondary File Management Characteristics
+static ssize_t jis_secondary_foot_log_available_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_secondary_foot_log_available_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_secondary_foot_log_available_notify(uint8_t log_id);
+
+static ssize_t jis_secondary_foot_log_path_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_secondary_foot_log_path_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_secondary_foot_log_path_notify(const char* path);
+
+static ssize_t jis_secondary_bhi360_log_available_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_secondary_bhi360_log_available_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_secondary_bhi360_log_available_notify(uint8_t log_id);
+
+static ssize_t jis_secondary_bhi360_log_path_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_secondary_bhi360_log_path_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_secondary_bhi360_log_path_notify(const char* path);
+
+static ssize_t jis_secondary_activity_log_available_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_secondary_activity_log_available_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_secondary_activity_log_available_notify(uint8_t log_id);
+
+static ssize_t jis_secondary_activity_log_path_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_secondary_activity_log_path_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+void jis_secondary_activity_log_path_notify(const char* path);
 #endif
 
 // UUID Defines
@@ -177,6 +245,12 @@ static struct bt_uuid_128 bhi360_data3_uuid =
 static struct bt_uuid_128 fota_progress_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb5, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
+// Activity Log UUIDs (primary device)
+static struct bt_uuid_128 activity_log_available_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec2, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 activity_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec3, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
 // Secondary Device Information UUIDs
 static struct bt_uuid_128 secondary_manufacturer_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb6, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
@@ -188,6 +262,24 @@ static struct bt_uuid_128 secondary_hw_rev_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb9, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 static struct bt_uuid_128 secondary_fw_rev_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eba, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// Secondary FOTA Progress UUID
+static struct bt_uuid_128 secondary_fota_progress_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ebb, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// Secondary File Management UUIDs
+static struct bt_uuid_128 secondary_foot_log_available_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ebc, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_foot_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ebd, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_bhi360_log_available_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ebe, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_bhi360_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ebf, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_activity_log_available_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec0, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 secondary_activity_log_path_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec1, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 BT_GATT_SERVICE_DEFINE(
     info_service, BT_GATT_PRIMARY_SERVICE(&SENSING_INFO_SERVICE_UUID),
@@ -287,6 +379,22 @@ BT_GATT_SERVICE_DEFINE(
         static_cast<void *>(&fota_progress_value)),
     BT_GATT_CCC(jis_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
+    // Activity Log Available Characteristic
+    BT_GATT_CHARACTERISTIC(&activity_log_available_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_activity_log_available_read, nullptr,
+        static_cast<void *>(&activity_log_available)),
+    BT_GATT_CCC(jis_activity_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Activity Log Path Characteristic
+    BT_GATT_CHARACTERISTIC(&activity_log_path_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_activity_log_path_read, nullptr,
+        activity_log_path),
+    BT_GATT_CCC(jis_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary Device Information Characteristics
     BT_GATT_CHARACTERISTIC(&secondary_manufacturer_uuid.uuid,
@@ -317,11 +425,79 @@ BT_GATT_SERVICE_DEFINE(
         BT_GATT_CHRC_READ,
         BT_GATT_PERM_READ_ENCRYPT,
         jis_secondary_info_read, nullptr,
-        secondary_fw_rev)
+        secondary_fw_rev),
+
+    // Secondary FOTA Progress Characteristic
+    BT_GATT_CHARACTERISTIC(&secondary_fota_progress_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_fota_progress_read, nullptr,
+        static_cast<void *>(&secondary_fota_progress_value)),
+    BT_GATT_CCC(jis_secondary_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Secondary Foot Log Available
+    BT_GATT_CHARACTERISTIC(&secondary_foot_log_available_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_foot_log_available_read, nullptr,
+        static_cast<void *>(&secondary_foot_log_available)),
+    BT_GATT_CCC(jis_secondary_foot_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Secondary Foot Log Path
+    BT_GATT_CHARACTERISTIC(&secondary_foot_log_path_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_foot_log_path_read, nullptr,
+        secondary_foot_log_path),
+    BT_GATT_CCC(jis_secondary_foot_log_path_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Secondary BHI360 Log Available
+    BT_GATT_CHARACTERISTIC(&secondary_bhi360_log_available_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_bhi360_log_available_read, nullptr,
+        static_cast<void *>(&secondary_bhi360_log_available)),
+    BT_GATT_CCC(jis_secondary_bhi360_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Secondary BHI360 Log Path
+    BT_GATT_CHARACTERISTIC(&secondary_bhi360_log_path_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_bhi360_log_path_read, nullptr,
+        secondary_bhi360_log_path),
+    BT_GATT_CCC(jis_secondary_bhi360_log_path_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Secondary Activity Log Available
+    BT_GATT_CHARACTERISTIC(&secondary_activity_log_available_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_activity_log_available_read, nullptr,
+        static_cast<void *>(&secondary_activity_log_available)),
+    BT_GATT_CCC(jis_secondary_activity_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Secondary Activity Log Path
+    BT_GATT_CHARACTERISTIC(&secondary_activity_log_path_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_secondary_activity_log_path_read, nullptr,
+        secondary_activity_log_path),
+    BT_GATT_CCC(jis_secondary_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
 #endif
     );
 
 // clang-format on
+
+// Helper function to safely send notifications
+static int safe_gatt_notify(const struct bt_uuid *uuid, const void *data, uint16_t len)
+{
+    auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, uuid);
+    if (!gatt) {
+        LOG_WRN("GATT attribute not found for UUID, skipping notification");
+        return -ENOENT;
+    }
+    return bt_gatt_notify(nullptr, gatt, data, len);
+}
+
 /**
  * @brief
  *
@@ -329,14 +505,18 @@ BT_GATT_SERVICE_DEFINE(
  *
  */
 // Set and notify device status (bitfield)
-void set_device_status(uint32_t new_status)
+extern "C" void set_device_status(uint32_t new_status)
 {
     if (device_status_bitfield != new_status || !init_status_bt_update) {
         device_status_bitfield = new_status;
         if (status_subscribed) {
             auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &STATUS_UUID.uuid);
-            bt_gatt_notify(nullptr, status_gatt, &device_status_bitfield, sizeof(device_status_bitfield));
-            LOG_DBG("Device status updated and notified: 0x%08X", device_status_bitfield);
+            if (status_gatt) {
+                bt_gatt_notify(nullptr, status_gatt, &device_status_bitfield, sizeof(device_status_bitfield));
+                LOG_DBG("Device status updated and notified: 0x%08X", device_status_bitfield);
+            } else {
+                LOG_WRN("Status GATT attribute not found, skipping notification");
+            }
         }
         previous_device_status_bitfield = device_status_bitfield;
         init_status_bt_update = true;
@@ -348,7 +528,7 @@ void set_device_status(uint32_t new_status)
  *
  * @param error_code The error code to convert to status bit
  */
-void jis_set_err_status_notify(err_t error_code)
+extern "C" void jis_set_err_status_notify(err_t error_code)
 {
     uint32_t error_bit = 0;
     
@@ -439,7 +619,7 @@ void jis_set_err_status_notify(err_t error_code)
  *
  * @param error_code The error code to clear from status
  */
-void jis_clear_err_status_notify(err_t error_code)
+extern "C" void jis_clear_err_status_notify(err_t error_code)
 {
     uint32_t error_bit = 0;
     
@@ -545,8 +725,10 @@ void jis_foot_sensor_notify(const foot_samples_t *samples_data)
     {
         auto *status_gatt =
             bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_char_value),
-                       sizeof(foot_sensor_char_value));
+        if (status_gatt) {
+            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_char_value),
+                           sizeof(foot_sensor_char_value));
+        }
     }
 }
 
@@ -559,14 +741,20 @@ void jis_foot_sensor_notify(const foot_samples_t *samples_data)
  */
 static void jis_status_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_status_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     status_subscribed = value == BT_GATT_CCC_NOTIFY;
     LOG_DBG("Status CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
 static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_foot_sensor_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     status_subscribed = value == BT_GATT_CCC_NOTIFY;
     LOG_DBG("Foot Sensor CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
@@ -580,8 +768,11 @@ static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr *attr, uin
  */
 void jis_current_time_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
-    status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    if (!attr) {
+        LOG_ERR("jis_current_time_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    current_time_notifications_enabled = value == BT_GATT_CCC_NOTIFY;
     LOG_DBG("Time CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
@@ -646,7 +837,11 @@ void cts_notify(void)
     }
 
     ct_update = 0U;
-    bt_gatt_notify(NULL, &info_service.attrs[1], &ct, sizeof(ct));
+    if (info_service.attrs && info_service.attr_count > 1) {
+        bt_gatt_notify(NULL, &info_service.attrs[1], &ct, sizeof(ct));
+    } else {
+        LOG_WRN("Information service not ready for CTS notification");
+    }
 }
 
 /**
@@ -661,8 +856,12 @@ void jis_charge_status_notify(uint8_t new_charge_status)
 
     charge_status = new_charge_status;
 
-    bt_gatt_notify_uuid(nullptr, &CHARGE_STATUS_UUID.uuid, info_service.attrs, static_cast<void *>(&charge_status),
-                        sizeof(charge_status));
+    if (info_service.attrs && info_service.attr_count > 0) {
+        bt_gatt_notify_uuid(nullptr, &CHARGE_STATUS_UUID.uuid, info_service.attrs, static_cast<void *>(&charge_status),
+                            sizeof(charge_status));
+    } else {
+        LOG_WRN("Information service not ready for charge status notification");
+    }
 }
 
 /**
@@ -674,9 +873,12 @@ void jis_charge_status_notify(uint8_t new_charge_status)
  */
 static void jis_charge_status_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
-    ARG_UNUSED(value);
-    // status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    if (!attr) {
+        LOG_ERR("jis_charge_status_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    // Note: charge status doesn't use notifications currently
+    LOG_DBG("Charge Status CCC changed to: %d", value);
 }
 
 /**
@@ -705,8 +907,10 @@ void jis_foot_sensor_log_available_notify(uint8_t log_id)
     {
         auto *status_gatt =
             bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_log_available_uuid.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_log_available),
-                       sizeof(foot_sensor_log_available));
+        if (status_gatt) {
+            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_log_available),
+                           sizeof(foot_sensor_log_available));
+        }
     }
 }
 
@@ -720,8 +924,12 @@ void jis_foot_sensor_log_available_notify(uint8_t log_id)
  */
 static void jis_foot_sensor_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) // Renamed
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_foot_sensor_log_available_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     foot_sensor_log_available_subscribed = value == BT_GATT_CCC_NOTIFY; // Renamed
+    LOG_DBG("Foot Sensor Log Available CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
 /**
@@ -761,10 +969,9 @@ void jis_foot_sensor_req_id_path_notify(const char *file_path) // Renamed from c
 
     if (foot_sensor_log_available_subscribed) // Re-using this flag for consistency, consider separate flag for this too
     {
-        auto *status_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count,
-                                                 &foot_sensor_req_id_path_uuid.uuid); // Renamed
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_req_id_path),
-                       sizeof(foot_sensor_req_id_path)); // Renamed
+        safe_gatt_notify(&foot_sensor_req_id_path_uuid.uuid, 
+                        static_cast<void *>(&foot_sensor_req_id_path),
+                        sizeof(foot_sensor_req_id_path));
     }
 }
 
@@ -779,7 +986,10 @@ void jis_foot_sensor_req_id_path_notify(const char *file_path) // Renamed from c
  */
 static void jis_foot_sensor_req_id_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) // Renamed
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_foot_sensor_req_id_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     // For consistency and clarity, ideally, you'd have a separate `foot_sensor_req_id_path_subscribed` flag.
     // For now, I'm setting `foot_sensor_log_available_subscribed` as a placeholder,
     // but you should introduce a dedicated flag like `static bool foot_sensor_req_id_path_subscribed = false;`
@@ -819,9 +1029,9 @@ void jis_bhi360_log_available_notify(uint8_t log_id)
     bhi360_log_available = log_id;
     if (bhi360_log_available_subscribed)
     {
-        auto *status_gatt =
-            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_log_available_uuid.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&bhi360_log_available), sizeof(bhi360_log_available));
+        safe_gatt_notify(&bhi360_log_available_uuid.uuid,
+                        static_cast<void *>(&bhi360_log_available), 
+                        sizeof(bhi360_log_available));
     }
 }
 
@@ -835,7 +1045,10 @@ void jis_bhi360_log_available_notify(uint8_t log_id)
  */
 static void jis_bhi360_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_bhi360_log_available_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     bhi360_log_available_subscribed = value == BT_GATT_CCC_NOTIFY;
     LOG_DBG("BHI360 Log Available CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
@@ -876,9 +1089,9 @@ void jis_bhi360_req_id_path_notify(const char *file_path)
 
     if (bhi360_log_available_subscribed) // Use the dedicated BHI360 subscription flag
     {
-        auto *status_gatt =
-            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_req_id_path_uuid.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&bhi360_req_id_path), sizeof(bhi360_req_id_path));
+        safe_gatt_notify(&bhi360_req_id_path_uuid.uuid,
+                        static_cast<void *>(&bhi360_req_id_path), 
+                        sizeof(bhi360_req_id_path));
     }
 }
 
@@ -892,7 +1105,10 @@ void jis_bhi360_req_id_path_notify(const char *file_path)
  */
 static void jis_bhi360_req_id_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_bhi360_req_id_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     bhi360_log_available_subscribed =
         value == BT_GATT_CCC_NOTIFY; // Using the same flag for now, consider dedicated if logic differs
     LOG_DBG("BHI360 Req ID/Path CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
@@ -917,49 +1133,63 @@ static ssize_t jis_bhi360_req_id_read(struct bt_conn *conn, const struct bt_gatt
 // --- BHI360 Data Set 1 ---
 static void jis_bhi360_data1_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_bhi360_data1_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     bhi360_data1_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("BHI360 Data1 CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 static ssize_t jis_bhi360_data1_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
 {
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_3d_mapping_fixed_t));
 }
-void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
+extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
 {
     // Convert float data to fixed-point for BLE transmission
     convert_3d_mapping_to_fixed(*data, bhi360_data1_value_fixed);
     
     if (bhi360_data1_subscribed) {
-        auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data1_uuid.uuid);
-        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data1_value_fixed), sizeof(bhi360_data1_value_fixed));
+        safe_gatt_notify(&bhi360_data1_uuid.uuid,
+                        static_cast<const void *>(&bhi360_data1_value_fixed), 
+                        sizeof(bhi360_data1_value_fixed));
     }
 }
 // --- BHI360 Data Set 2 ---
 static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_bhi360_data2_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     bhi360_data2_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("BHI360 Data2 CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 static ssize_t jis_bhi360_data2_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
 {
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_step_count_fixed_t));
 }
-void jis_bhi360_data2_notify(const bhi360_step_count_t *data)
+extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t *data)
 {
     // Step count data is already integers, just copy
     bhi360_data2_value_fixed.step_count = data->step_count;
     bhi360_data2_value_fixed.activity_duration_s = data->activity_duration_s;
     
     if (bhi360_data2_subscribed) {
-        auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data2_uuid.uuid);
-        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data2_value_fixed), sizeof(bhi360_data2_value_fixed));
+        safe_gatt_notify(&bhi360_data2_uuid.uuid,
+                        static_cast<const void *>(&bhi360_data2_value_fixed), 
+                        sizeof(bhi360_data2_value_fixed));
     }
 }
 // --- BHI360 Data Set 3 ---
 static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_bhi360_data3_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     bhi360_data3_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("BHI360 Data3 CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 static ssize_t jis_bhi360_data3_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
 {
@@ -971,15 +1201,19 @@ void jis_bhi360_data3_notify(const bhi360_linear_accel_t *data)
     convert_linear_accel_to_fixed(*data, bhi360_data3_value_fixed);
     
     if (bhi360_data3_subscribed) {
-        auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &bhi360_data3_uuid.uuid);
-        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&bhi360_data3_value_fixed), sizeof(bhi360_data3_value_fixed));
+        safe_gatt_notify(&bhi360_data3_uuid.uuid,
+                        static_cast<const void *>(&bhi360_data3_value_fixed), 
+                        sizeof(bhi360_data3_value_fixed));
     }
 }
 
 // --- FOTA Progress ---
 static void jis_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-    ARG_UNUSED(attr);
+    if (!attr) {
+        LOG_ERR("jis_fota_progress_ccc_cfg_changed: attr is NULL");
+        return;
+    }
     fota_progress_subscribed = value == BT_GATT_CCC_NOTIFY;
     LOG_DBG("FOTA Progress CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
@@ -1001,8 +1235,67 @@ void jis_fota_progress_notify(const fota_progress_msg_t *progress)
             fota_progress_value.total_size);
     
     if (fota_progress_subscribed) {
-        auto *gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &fota_progress_uuid.uuid);
-        bt_gatt_notify(nullptr, gatt, static_cast<const void *>(&fota_progress_value), sizeof(fota_progress_value));
+        safe_gatt_notify(&fota_progress_uuid.uuid,
+                        static_cast<const void *>(&fota_progress_value), 
+                        sizeof(fota_progress_value));
+    }
+}
+
+// --- Activity Log Handlers ---
+static void jis_activity_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_activity_log_available_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    activity_log_available_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Activity Log Available CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_activity_log_available_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(activity_log_available));
+}
+
+extern "C" void jis_activity_log_available_notify(uint8_t log_id)
+{
+    activity_log_available = log_id;
+    LOG_INF("Activity Log Available: ID=%u", log_id);
+    
+    if (activity_log_available_subscribed) {
+        safe_gatt_notify(&activity_log_available_uuid.uuid,
+                        static_cast<const void *>(&activity_log_available), 
+                        sizeof(activity_log_available));
+    }
+}
+
+static void jis_activity_log_path_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_activity_log_path_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    activity_log_path_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Activity Log Path CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_activity_log_path_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, strlen(activity_log_path));
+}
+
+extern "C" void jis_activity_log_path_notify(const char *path)
+{
+    memset(activity_log_path, 0, sizeof(activity_log_path));
+    strncpy(activity_log_path, path, sizeof(activity_log_path) - 1);
+    activity_log_path[sizeof(activity_log_path) - 1] = '\0';
+    
+    LOG_INF("Activity Log Path: %s", activity_log_path);
+    
+    if (activity_log_path_subscribed) {
+        safe_gatt_notify(&activity_log_path_uuid.uuid,
+                        static_cast<const void *>(&activity_log_path), 
+                        strlen(activity_log_path) + 1);
     }
 }
 
@@ -1054,6 +1347,217 @@ void jis_clear_secondary_device_info(void)
     strcpy(secondary_fw_rev, "Not Connected");
     
     LOG_INF("Cleared secondary device info");
+}
+
+// Secondary FOTA Progress handlers
+static void jis_secondary_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_secondary_fota_progress_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    secondary_fota_progress_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Secondary FOTA Progress CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_secondary_fota_progress_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(secondary_fota_progress_value));
+}
+
+void jis_secondary_fota_progress_notify(const fota_progress_msg_t *progress)
+{
+    memcpy(&secondary_fota_progress_value, progress, sizeof(secondary_fota_progress_value));
+    
+    LOG_INF("Secondary FOTA Progress: active=%d, status=%d, percent=%d%%, bytes=%u/%u", 
+            secondary_fota_progress_value.is_active,
+            secondary_fota_progress_value.status,
+            secondary_fota_progress_value.percent_complete,
+            secondary_fota_progress_value.bytes_received,
+            secondary_fota_progress_value.total_size);
+    
+    if (secondary_fota_progress_subscribed) {
+        safe_gatt_notify(&secondary_fota_progress_uuid.uuid,
+                        static_cast<const void *>(&secondary_fota_progress_value), 
+                        sizeof(secondary_fota_progress_value));
+    }
+}
+
+// Secondary Foot Log Available handlers
+static void jis_secondary_foot_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_secondary_foot_log_available_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    secondary_foot_log_available_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Secondary Foot Log Available CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_secondary_foot_log_available_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(secondary_foot_log_available));
+}
+
+void jis_secondary_foot_log_available_notify(uint8_t log_id)
+{
+    secondary_foot_log_available = log_id;
+    LOG_INF("Secondary Foot Log Available: ID=%u", log_id);
+    
+    if (secondary_foot_log_available_subscribed) {
+        safe_gatt_notify(&secondary_foot_log_available_uuid.uuid,
+                        static_cast<const void *>(&secondary_foot_log_available), 
+                        sizeof(secondary_foot_log_available));
+    }
+}
+
+// Secondary Foot Log Path handlers
+static void jis_secondary_foot_log_path_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_secondary_foot_log_path_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    secondary_foot_log_path_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Secondary Foot Log Path CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_secondary_foot_log_path_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, strlen(secondary_foot_log_path));
+}
+
+void jis_secondary_foot_log_path_notify(const char *path)
+{
+    memset(secondary_foot_log_path, 0, sizeof(secondary_foot_log_path));
+    strncpy(secondary_foot_log_path, path, sizeof(secondary_foot_log_path) - 1);
+    secondary_foot_log_path[sizeof(secondary_foot_log_path) - 1] = '\0';
+    
+    LOG_INF("Secondary Foot Log Path: %s", secondary_foot_log_path);
+    
+    if (secondary_foot_log_path_subscribed) {
+        safe_gatt_notify(&secondary_foot_log_path_uuid.uuid,
+                        static_cast<const void *>(&secondary_foot_log_path), 
+                        strlen(secondary_foot_log_path) + 1);
+    }
+}
+
+// Secondary BHI360 Log Available handlers
+static void jis_secondary_bhi360_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_secondary_bhi360_log_available_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    secondary_bhi360_log_available_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Secondary BHI360 Log Available CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_secondary_bhi360_log_available_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(secondary_bhi360_log_available));
+}
+
+void jis_secondary_bhi360_log_available_notify(uint8_t log_id)
+{
+    secondary_bhi360_log_available = log_id;
+    LOG_INF("Secondary BHI360 Log Available: ID=%u", log_id);
+    
+    if (secondary_bhi360_log_available_subscribed) {
+        safe_gatt_notify(&secondary_bhi360_log_available_uuid.uuid,
+                        static_cast<const void *>(&secondary_bhi360_log_available), 
+                        sizeof(secondary_bhi360_log_available));
+    }
+}
+
+// Secondary BHI360 Log Path handlers
+static void jis_secondary_bhi360_log_path_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_secondary_bhi360_log_path_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    secondary_bhi360_log_path_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Secondary BHI360 Log Path CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_secondary_bhi360_log_path_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, strlen(secondary_bhi360_log_path));
+}
+
+void jis_secondary_bhi360_log_path_notify(const char *path)
+{
+    memset(secondary_bhi360_log_path, 0, sizeof(secondary_bhi360_log_path));
+    strncpy(secondary_bhi360_log_path, path, sizeof(secondary_bhi360_log_path) - 1);
+    secondary_bhi360_log_path[sizeof(secondary_bhi360_log_path) - 1] = '\0';
+    
+    LOG_INF("Secondary BHI360 Log Path: %s", secondary_bhi360_log_path);
+    
+    if (secondary_bhi360_log_path_subscribed) {
+        safe_gatt_notify(&secondary_bhi360_log_path_uuid.uuid,
+                        static_cast<const void *>(&secondary_bhi360_log_path), 
+                        strlen(secondary_bhi360_log_path) + 1);
+    }
+}
+
+// Secondary Activity Log Available handlers
+static void jis_secondary_activity_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_secondary_activity_log_available_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    secondary_activity_log_available_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Secondary Activity Log Available CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_secondary_activity_log_available_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(secondary_activity_log_available));
+}
+
+void jis_secondary_activity_log_available_notify(uint8_t log_id)
+{
+    secondary_activity_log_available = log_id;
+    LOG_INF("Secondary Activity Log Available: ID=%u", log_id);
+    
+    if (secondary_activity_log_available_subscribed) {
+        safe_gatt_notify(&secondary_activity_log_available_uuid.uuid,
+                        static_cast<const void *>(&secondary_activity_log_available), 
+                        sizeof(secondary_activity_log_available));
+    }
+}
+
+// Secondary Activity Log Path handlers
+static void jis_secondary_activity_log_path_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_secondary_activity_log_path_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    secondary_activity_log_path_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Secondary Activity Log Path CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_secondary_activity_log_path_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, strlen(secondary_activity_log_path));
+}
+
+void jis_secondary_activity_log_path_notify(const char *path)
+{
+    memset(secondary_activity_log_path, 0, sizeof(secondary_activity_log_path));
+    strncpy(secondary_activity_log_path, path, sizeof(secondary_activity_log_path) - 1);
+    secondary_activity_log_path[sizeof(secondary_activity_log_path) - 1] = '\0';
+    
+    LOG_INF("Secondary Activity Log Path: %s", secondary_activity_log_path);
+    
+    if (secondary_activity_log_path_subscribed) {
+        safe_gatt_notify(&secondary_activity_log_path_uuid.uuid,
+                        static_cast<const void *>(&secondary_activity_log_path), 
+                        strlen(secondary_activity_log_path) + 1);
+    }
 }
 #endif
 

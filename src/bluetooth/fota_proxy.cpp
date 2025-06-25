@@ -280,6 +280,16 @@ static ssize_t fota_proxy_status_read(struct bt_conn *conn,
                              &fota_status_value, sizeof(fota_status_value));
 }
 
+// CCC changed callback
+static void fota_proxy_status_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("fota_proxy_status_ccc_changed: attr is NULL");
+        return;
+    }
+    LOG_DBG("FOTA proxy status CCC changed: %u", value);
+}
+
 // GATT Service Definition
 BT_GATT_SERVICE_DEFINE(fota_proxy_svc,
     BT_GATT_PRIMARY_SERVICE(FOTA_PROXY_SERVICE_UUID),
@@ -307,7 +317,7 @@ BT_GATT_SERVICE_DEFINE(fota_proxy_svc,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
                           BT_GATT_PERM_READ,
                           fota_proxy_status_read, NULL, &fota_status_value),
-    BT_GATT_CCC_MANAGED(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CCC(fota_proxy_status_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
 // Forward data to secondary device
@@ -506,8 +516,13 @@ int fota_proxy_notify_status(enum fota_proxy_status status)
     // 5-6: Data characteristic + value
     // 7-8: Status characteristic + value
     // 9: CCC
-    return bt_gatt_notify(NULL, &fota_proxy_svc.attrs[7], 
-                         &fota_status_value, sizeof(fota_status_value));
+    if (fota_proxy_svc.attrs && fota_proxy_svc.attr_count > 7) {
+        return bt_gatt_notify(NULL, &fota_proxy_svc.attrs[7], 
+                             &fota_status_value, sizeof(fota_status_value));
+    } else {
+        LOG_WRN("FOTA proxy service not ready for status notification");
+        return -EINVAL;
+    }
 }
 
 int fota_proxy_handle_secondary_complete(void)

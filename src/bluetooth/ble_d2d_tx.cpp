@@ -68,12 +68,15 @@ static struct bt_uuid_128 d2d_rx_fota_status_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca86, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 static struct bt_uuid_128 d2d_rx_trigger_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca87, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_delete_activity_log_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca88, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
 // Discovered characteristic handles
 struct d2d_discovered_handles {
     uint16_t set_time_handle;
     uint16_t delete_foot_log_handle;
     uint16_t delete_bhi360_log_handle;
+    uint16_t delete_activity_log_handle;
     uint16_t start_activity_handle;
     uint16_t stop_activity_handle;
     uint16_t fota_status_handle;
@@ -85,6 +88,7 @@ static struct d2d_discovered_handles d2d_handles = {
     .set_time_handle = 0,
     .delete_foot_log_handle = 0,
     .delete_bhi360_log_handle = 0,
+    .delete_activity_log_handle = 0,
     .start_activity_handle = 0,
     .stop_activity_handle = 0,
     .fota_status_handle = 0,
@@ -108,6 +112,7 @@ enum discover_state {
     DISCOVER_SET_TIME_CHAR,
     DISCOVER_DELETE_FOOT_LOG_CHAR,
     DISCOVER_DELETE_BHI360_LOG_CHAR,
+    DISCOVER_DELETE_ACTIVITY_LOG_CHAR,
     DISCOVER_START_ACTIVITY_CHAR,
     DISCOVER_STOP_ACTIVITY_CHAR,
     DISCOVER_FOTA_STATUS_CHAR,
@@ -163,6 +168,14 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
         if (bt_uuid_cmp(params->uuid, &d2d_rx_delete_bhi360_log_uuid.uuid) == 0) {
             d2d_handles.delete_bhi360_log_handle = bt_gatt_attr_value_handle(attr);
             LOG_INF("Found delete BHI360 log characteristic, handle: %u", d2d_handles.delete_bhi360_log_handle);
+            discovery_state = DISCOVER_DELETE_ACTIVITY_LOG_CHAR;
+        }
+        break;
+
+    case DISCOVER_DELETE_ACTIVITY_LOG_CHAR:
+        if (bt_uuid_cmp(params->uuid, &d2d_rx_delete_activity_log_uuid.uuid) == 0) {
+            d2d_handles.delete_activity_log_handle = bt_gatt_attr_value_handle(attr);
+            LOG_INF("Found delete activity log characteristic, handle: %u", d2d_handles.delete_activity_log_handle);
             discovery_state = DISCOVER_START_ACTIVITY_CHAR;
         }
         break;
@@ -255,6 +268,9 @@ static void continue_discovery(void)
         break;
     case DISCOVER_DELETE_BHI360_LOG_CHAR:
         discover_params.uuid = &d2d_rx_delete_bhi360_log_uuid.uuid;
+        break;
+    case DISCOVER_DELETE_ACTIVITY_LOG_CHAR:
+        discover_params.uuid = &d2d_rx_delete_activity_log_uuid.uuid;
         break;
     case DISCOVER_START_ACTIVITY_CHAR:
         discover_params.uuid = &d2d_rx_start_activity_uuid.uuid;
@@ -401,8 +417,12 @@ int ble_d2d_tx_send_foot_sensor_log_available(uint8_t log_id) {
 int ble_d2d_tx_send_foot_sensor_req_id_path(const char *path) {
     if (!d2d_conn) return -ENOTCONN;
     LOG_DBG("D2D TX: Sending foot sensor path: %s", path);
-    // Path sending not implemented in GATT service yet
-    return 0;
+    
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_foot_log_path(path);
+#else
+    return -EINVAL;
+#endif
 }
 
 int ble_d2d_tx_send_bhi360_log_available(uint8_t log_id) {
@@ -418,8 +438,12 @@ int ble_d2d_tx_send_bhi360_log_available(uint8_t log_id) {
 int ble_d2d_tx_send_bhi360_req_id_path(const char *path) {
     if (!d2d_conn) return -ENOTCONN;
     LOG_DBG("D2D TX: Sending BHI360 path: %s", path);
-    // Path sending not implemented in GATT service yet
-    return 0;
+    
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_bhi360_log_path(path);
+#else
+    return -EINVAL;
+#endif
 }
 
 int ble_d2d_tx_send_bhi360_data1(const bhi360_3d_mapping_t *data) {
@@ -561,6 +585,33 @@ int ble_d2d_tx_send_delete_bhi360_log_command(uint8_t log_id) {
     return 0;
 }
 
+int ble_d2d_tx_send_delete_activity_log_command(uint8_t log_id) {
+    if (!d2d_conn) {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+    
+    if (!d2d_handles.discovery_complete || d2d_handles.delete_activity_log_handle == 0) {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+    
+    LOG_INF("D2D TX: Forwarding delete activity log command - ID: %u to handle: %u", 
+            log_id, d2d_handles.delete_activity_log_handle);
+    
+    int err = bt_gatt_write_without_response(d2d_conn, 
+                                            d2d_handles.delete_activity_log_handle,
+                                            &log_id, 
+                                            sizeof(log_id), 
+                                            false);
+    if (err) {
+        LOG_ERR("D2D TX: Failed to send delete activity log command (err %d)", err);
+        return err;
+    }
+    
+    return 0;
+}
+
 int ble_d2d_tx_send_start_activity_command(uint8_t value) {
     if (!d2d_conn) {
         LOG_WRN("D2D TX: No connection");
@@ -626,6 +677,22 @@ int ble_d2d_tx_send_device_info(const device_info_msg_t *info) {
 #else
     // Primary device shouldn't call this
     LOG_WRN("Primary device shouldn't send device info via D2D");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_fota_progress(const fota_progress_msg_t *progress) {
+    if (!d2d_conn) return -ENOTCONN;
+    
+    LOG_DBG("D2D TX: Sending FOTA progress: active=%d, status=%d, percent=%d%%",
+            progress->is_active, progress->status, progress->percent_complete);
+    
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Secondary device: Send via GATT notification
+    return d2d_tx_notify_fota_progress(progress);
+#else
+    // Primary device shouldn't send FOTA progress via D2D
+    LOG_WRN("Primary device shouldn't send FOTA progress via D2D");
     return -EINVAL;
 #endif
 }

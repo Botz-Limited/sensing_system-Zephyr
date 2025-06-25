@@ -105,9 +105,28 @@ int d2d_data_handler_process_file_path(uint8_t log_id, uint8_t file_type, const 
     LOG_INF("Secondary device file path - ID: %u, Type: %u, Path: %s", 
             log_id, file_type, path);
     
-    // TODO: Update Information Service with secondary device file paths
-    // This would require adding secondary file path characteristics
-    // to the Information Service
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward declarations
+    extern void jis_secondary_foot_log_path_notify(const char* path);
+    extern void jis_secondary_bhi360_log_path_notify(const char* path);
+    extern void jis_secondary_activity_log_path_notify(const char* path);
+    
+    // Forward to Information Service based on file type
+    switch (file_type) {
+        case 0: // Foot sensor log
+            jis_secondary_foot_log_path_notify(path);
+            break;
+        case 1: // BHI360 log
+            jis_secondary_bhi360_log_path_notify(path);
+            break;
+        case 2: // Activity log
+            jis_secondary_activity_log_path_notify(path);
+            break;
+        default:
+            LOG_WRN("Unknown file type %u", file_type);
+            break;
+    }
+#endif
     
     return 0;
 }
@@ -117,8 +136,28 @@ int d2d_data_handler_process_log_available(uint8_t log_id, uint8_t file_type)
     LOG_INF("Secondary device log available - ID: %u, Type: %u", 
             log_id, file_type);
     
-    // TODO: Update Information Service to notify phone
-    // The phone should then use the File Proxy to retrieve the file
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward declarations
+    extern void jis_secondary_foot_log_available_notify(uint8_t log_id);
+    extern void jis_secondary_bhi360_log_available_notify(uint8_t log_id);
+    extern void jis_secondary_activity_log_available_notify(uint8_t log_id);
+    
+    // Forward to Information Service based on file type
+    switch (file_type) {
+        case 0: // Foot sensor log
+            jis_secondary_foot_log_available_notify(log_id);
+            break;
+        case 1: // BHI360 log
+            jis_secondary_bhi360_log_available_notify(log_id);
+            break;
+        case 2: // Activity log
+            jis_secondary_activity_log_available_notify(log_id);
+            break;
+        default:
+            LOG_WRN("Unknown file type %u", file_type);
+            break;
+    }
+#endif
     
     return 0;
 }

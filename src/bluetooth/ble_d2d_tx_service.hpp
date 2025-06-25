@@ -82,6 +82,41 @@ int d2d_tx_notify_bhi360_log_available(uint8_t log_id);
  */
 int d2d_tx_notify_device_info(const device_info_msg_t *info);
 
+/**
+ * @brief Send FOTA progress notification to primary device
+ * @param progress FOTA progress information
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_fota_progress(const fota_progress_msg_t *progress);
+
+/**
+ * @brief Send foot log path notification to primary device
+ * @param path File path string
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_foot_log_path(const char *path);
+
+/**
+ * @brief Send BHI360 log path notification to primary device
+ * @param path File path string
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_bhi360_log_path(const char *path);
+
+/**
+ * @brief Send activity log available notification to primary device
+ * @param log_id Log ID that is available
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_activity_log_available(uint8_t log_id);
+
+/**
+ * @brief Send activity log path notification to primary device
+ * @param path File path string
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_activity_log_path(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

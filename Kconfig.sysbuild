@@ -16,11 +16,11 @@ config NETCORE_IPC_RADIO_BT_HCI_IPC
 
 config BT_MAX_CONN
 	int
-	default 4
+	default 16
 
 config BT_CTLR_SDC_PERIPHERAL_COUNT
 	int
-	default 4	
+	default 16	
 
 
 

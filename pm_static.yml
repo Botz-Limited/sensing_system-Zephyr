@@ -92,15 +92,15 @@ ram_flash:
   region: ram_flash
   size: 0x0
 rpmsg_nrf53_sram:
-  address: 0x20070000
+  address: 0x20071000
   end_address: 0x20080000
   placement:
     before:
     - end
   region: sram_primary
-  size: 0x10000
+  size: 0xf000
 sram_primary:
   address: 0x20002000
-  end_address: 0x20070000
+  end_address: 0x20071000
   region: sram_primary
-  size: 0x6e000
+  size: 0x6f000

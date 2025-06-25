@@ -201,12 +201,31 @@ float decode_acceleration(int16_t fixed) {
 | Foot Log Path | `...eae` | Read, Notify | char[] | UTF-8 path |
 | BHI360 Log Available | `...eb0` | Read, Notify | uint8_t | Latest log ID |
 | BHI360 Log Path | `...eb1` | Read, Notify | char[] | UTF-8 path |
-| Activity Log Available | `...eb6` | Read, Notify | uint8_t | Latest log ID |
-| Activity Log Path | `...eb7` | Read, Notify | char[] | UTF-8 path |
 | **BHI360 3D Mapping** | `...eb2` | Read, Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
 | **BHI360 Step Count** | `...eb3` | Read, Notify | bhi360_step_count_t | Steps + duration |
 | **BHI360 Linear Accel** | `...eb4` | Read, Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
 | FOTA Progress | `...eb5` | Read, Notify | fota_progress_t | Update status |
+| **Activity Log Available** | `...ec2` | Read, Notify | uint8_t | Latest log ID |
+| **Activity Log Path** | `...ec3` | Read, Notify | char[] | UTF-8 path |
+
+#### Secondary Device Characteristics (Primary Device Only)
+
+These characteristics are only available on the primary device and relay information from the connected secondary device:
+
+| Characteristic | UUID Suffix | Properties | Data Type | Description |
+|----------------|-------------|------------|-----------|-------------|
+| Secondary Manufacturer | `...eb6` | Read | String | Secondary device manufacturer |
+| Secondary Model | `...eb7` | Read | String | Secondary device model |
+| Secondary Serial | `...eb8` | Read | String | Secondary device serial |
+| Secondary HW Rev | `...eb9` | Read | String | Secondary hardware revision |
+| Secondary FW Rev | `...eba` | Read | String | Secondary firmware revision |
+| Secondary FOTA Progress | `...ebb` | Read, Notify | fota_progress_t | Secondary update status |
+| Secondary Foot Log Available | `...ebc` | Read, Notify | uint8_t | Secondary foot log ID |
+| Secondary Foot Log Path | `...ebd` | Read, Notify | char[] | Secondary foot log path |
+| Secondary BHI360 Log Available | `...ebe` | Read, Notify | uint8_t | Secondary BHI360 log ID |
+| Secondary BHI360 Log Path | `...ebf` | Read, Notify | char[] | Secondary BHI360 log path |
+| Secondary Activity Log Available | `...ec0` | Read, Notify | uint8_t | Secondary activity log ID |
+| Secondary Activity Log Path | `...ec1` | Read, Notify | char[] | Secondary activity log path |
 
 ### Status Bitfield
 
@@ -377,11 +396,47 @@ func handle3DOrientation(_ data: Data) {
 }
 ```
 
-### 7.3 File Proxy Service
+### 7.3 SMP Proxy Service
+
+**UUID:** `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`  
+**Availability:** Primary device only  
+**Purpose:** Unified MCUmgr/SMP access to both primary and secondary devices
+
+| Characteristic | UUID Suffix | Properties | Data Type | Description |
+|----------------|-------------|------------|-----------|-------------|
+| Target Selection | `DA2E7829-FBCE-4E01-AE9E-261174997C48` | Read, Write | uint8_t | 0x00=Primary, 0x01=Secondary |
+| SMP Data | `DA2E7828-FBCE-4E01-AE9E-261174997C48` | Write, Notify | byte[] | Standard SMP frames |
+
+#### Benefits
+- Use standard MCUmgr libraries for both devices
+- No custom protocols needed
+- Same code for FOTA, file access, and all MCUmgr operations
+- Transparent forwarding to secondary device
+
+#### Usage Flow
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Primary
+    participant Secondary
+    
+    Note over App: Using standard MCUmgr
+    App->>Primary: Write Target = 0x01
+    App->>Primary: Standard SMP frame
+    Primary->>Primary: Check target
+    Primary->>Secondary: Forward via D2D
+    Secondary->>Secondary: Process SMP
+    Secondary-->>Primary: SMP Response
+    Primary-->>App: Forward Response
+    Note over App: Looks like direct connection!
+```
+
+### 7.4 File Proxy Service
 
 **UUID:** `7e500001-b5a3-f393-e0a9-e50e24dcca9e`  
 **Availability:** Primary device only  
-**Purpose:** Access log files on secondary device
+**Purpose:** Access log files on secondary device (legacy - use SMP Proxy instead)
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
 |----------------|-------------|------------|-----------|-------------|
@@ -440,13 +495,13 @@ typedef struct {
 | D2D Foot Log Path | `...68d9` | Notify | char[] | File path |
 | D2D BHI360 Log Available | `...68da` | Notify | uint8_t | Log ID |
 | D2D BHI360 Log Path | `...68db` | Notify | char[] | File path |
-| D2D Activity Log Available | `...68e1` | Notify | uint8_t | Log ID |
-| D2D Activity Log Path | `...68e2` | Notify | char[] | File path |
 | D2D Foot Samples | `...68dc` | Notify | foot_samples_t | ADC data |
 | **D2D BHI360 3D Mapping** | `...68dd` | Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
 | **D2D BHI360 Step Count** | `...68de` | Notify | bhi360_step_count_t | Steps |
 | **D2D BHI360 Linear Accel** | `...68df` | Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
 | D2D Current Time | `...68e0` | Notify | CTS struct | Time sync |
+| D2D Activity Log Available | `...68e4` | Notify | uint8_t | Log ID |
+| D2D Activity Log Path | `...68e5` | Notify | char[] | File path |
 
 ### 8.3 D2D File Transfer Service
 

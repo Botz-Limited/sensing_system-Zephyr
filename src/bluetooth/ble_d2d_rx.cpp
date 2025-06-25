@@ -35,6 +35,8 @@ static struct bt_uuid_128 d2d_trigger_bhi360_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca87, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 static struct bt_uuid_128 d2d_fota_status_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca86, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_delete_activity_log_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca88, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
 // Helper function to swap endianness if needed
 static uint32_t swap_to_little_endian(uint32_t value)
@@ -259,6 +261,36 @@ static ssize_t d2d_fota_status_write(struct bt_conn *conn, const struct bt_gatt_
     return len;
 }
 
+// Delete Activity Log Command Handler - mirrors control_service.cpp implementation
+static ssize_t d2d_delete_activity_log_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
+                                            const void *buf, uint16_t len, uint16_t offset, uint8_t flags) 
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(flags);
+    
+    if (len != sizeof(uint8_t) || offset != 0) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    
+    uint8_t id_to_delete;
+    memcpy(&id_to_delete, buf, sizeof(uint8_t));
+    
+    generic_message_t delete_msg;
+    delete_msg.sender = SENDER_BTH;  // Use BTH sender as we're acting on behalf of phone
+    delete_msg.type = MSG_TYPE_DELETE_ACTIVITY_LOG;
+    delete_msg.data.delete_cmd.type = RECORD_HARDWARE_ACTIVITY;
+    delete_msg.data.delete_cmd.id = id_to_delete;
+    
+    if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send delete activity log message for ID %u.", id_to_delete);
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
+    
+    LOG_INF("D2D RX: Delete Activity Log Command - ID: %u", id_to_delete);
+    return len;
+}
+
 BT_GATT_SERVICE_DEFINE(d2d_rx_service,
     BT_GATT_PRIMARY_SERVICE(&d2d_rx_service_uuid),
     BT_GATT_CHARACTERISTIC(&d2d_set_time_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_set_time_write, NULL),
@@ -267,7 +299,8 @@ BT_GATT_SERVICE_DEFINE(d2d_rx_service,
     BT_GATT_CHARACTERISTIC(&d2d_start_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_start_activity_write, NULL),
     BT_GATT_CHARACTERISTIC(&d2d_stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_stop_activity_write, NULL),
     BT_GATT_CHARACTERISTIC(&d2d_trigger_bhi360_calibration_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_trigger_bhi360_calibration_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_fota_status_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_fota_status_write, NULL)
+    BT_GATT_CHARACTERISTIC(&d2d_fota_status_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_fota_status_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_delete_activity_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_activity_log_write, NULL)
 );
 
 void ble_d2d_rx_init(void) {

@@ -10,6 +10,7 @@
 #include <zephyr/sys/byteorder.h>
 #include <string.h>
 #include <stdio.h>
+#include <app.hpp>  // For generic_message_t and message types
 
 LOG_MODULE_REGISTER(file_proxy, LOG_LEVEL_INF);
 
@@ -234,6 +235,25 @@ static ssize_t file_proxy_status_read(struct bt_conn *conn,
                              &file_status_value, sizeof(file_status_value));
 }
 
+// CCC changed callbacks
+static void file_proxy_data_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("file_proxy_data_ccc_changed: attr is NULL");
+        return;
+    }
+    LOG_DBG("File proxy data CCC changed: %u", value);
+}
+
+static void file_proxy_status_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("file_proxy_status_ccc_changed: attr is NULL");
+        return;
+    }
+    LOG_DBG("File proxy status CCC changed: %u", value);
+}
+
 // GATT Service Definition
 BT_GATT_SERVICE_DEFINE(file_proxy_svc,
     BT_GATT_PRIMARY_SERVICE(FILE_PROXY_SERVICE_UUID),
@@ -255,14 +275,14 @@ BT_GATT_SERVICE_DEFINE(file_proxy_svc,
                           BT_GATT_CHRC_NOTIFY,
                           BT_GATT_PERM_NONE,
                           NULL, NULL, NULL),
-    BT_GATT_CCC_MANAGED(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CCC(file_proxy_data_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
     
     // Status characteristic (read/notify)
     BT_GATT_CHARACTERISTIC(FILE_PROXY_STATUS_UUID,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
                           BT_GATT_PERM_READ,
                           file_proxy_status_read, NULL, &file_status_value),
-    BT_GATT_CCC_MANAGED(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CCC(file_proxy_status_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 
 // Forward operation to secondary device
@@ -367,14 +387,54 @@ static int handle_primary_file_operation(uint8_t cmd, const uint8_t *data, size_
             file_proxy_state.status = FILE_PROXY_STATUS_SUCCESS;
             break;
             
-        case FILE_PROXY_CMD_DELETE_FILE:
-            // For primary device, use existing delete mechanisms
+        case FILE_PROXY_CMD_DELETE_FILE: {
+            // For primary device, send delete command to data module
             LOG_INF("Deleting file ID %d, type %d", 
                     file_proxy_state.current_file_id,
                     file_proxy_state.current_file_type);
-            // TODO: Send delete command to data module
+            
+            // Create delete message based on file type
+            generic_message_t delete_msg;
+            delete_msg.sender = SENDER_BTH;
+            
+            // Determine message type and record type based on file type
+            switch (file_proxy_state.current_file_type) {
+                case FILE_TYPE_FOOT_SENSOR:
+                    delete_msg.type = MSG_TYPE_DELETE_FOOT_LOG;
+                    delete_msg.data.delete_cmd.type = RECORD_HARDWARE_FOOT_SENSOR;
+                    break;
+                    
+                case FILE_TYPE_BHI360:
+                    delete_msg.type = MSG_TYPE_DELETE_BHI360_LOG;
+                    delete_msg.data.delete_cmd.type = RECORD_HARDWARE_BHI360;
+                    break;
+                    
+                case FILE_TYPE_ACTIVITY:
+                    delete_msg.type = MSG_TYPE_DELETE_ACTIVITY_LOG;
+                    delete_msg.data.delete_cmd.type = RECORD_HARDWARE_ACTIVITY;
+                    break;
+                    
+                default:
+                    LOG_ERR("Unknown file type %d for deletion", file_proxy_state.current_file_type);
+                    file_proxy_state.status = FILE_PROXY_STATUS_ERROR;
+                    return -EINVAL;
+            }
+            
+            delete_msg.data.delete_cmd.id = file_proxy_state.current_file_id;
+            
+            // Send delete message to data module
+            if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
+                LOG_ERR("Failed to send delete message for file ID %u, type %u", 
+                        file_proxy_state.current_file_id, file_proxy_state.current_file_type);
+                file_proxy_state.status = FILE_PROXY_STATUS_ERROR;
+                return -EAGAIN;
+            }
+            
+            LOG_INF("Delete message sent to data module for file ID %u, type %u", 
+                    file_proxy_state.current_file_id, file_proxy_state.current_file_type);
             file_proxy_state.status = FILE_PROXY_STATUS_SUCCESS;
             break;
+        }
             
         case FILE_PROXY_CMD_GET_FILE_INFO: {
             // Return file information
@@ -510,12 +570,22 @@ int file_proxy_notify_status(enum file_proxy_status status)
     
     // Send notification if anyone is subscribed
     // Status characteristic is at index 8
-    return bt_gatt_notify(NULL, &file_proxy_svc.attrs[8], 
-                         &file_status_value, sizeof(file_status_value));
+    if (file_proxy_svc.attrs && file_proxy_svc.attr_count > 8) {
+        return bt_gatt_notify(NULL, &file_proxy_svc.attrs[8], 
+                             &file_status_value, sizeof(file_status_value));
+    } else {
+        LOG_WRN("File proxy service not ready for status notification");
+        return -EINVAL;
+    }
 }
 
 int file_proxy_notify_data(const uint8_t *data, size_t len)
 {
     // Data characteristic is at index 5
-    return bt_gatt_notify(NULL, &file_proxy_svc.attrs[5], data, len);
+    if (file_proxy_svc.attrs && file_proxy_svc.attr_count > 5) {
+        return bt_gatt_notify(NULL, &file_proxy_svc.attrs[5], data, len);
+    } else {
+        LOG_WRN("File proxy service not ready for data notification");
+        return -EINVAL;
+    }
 }

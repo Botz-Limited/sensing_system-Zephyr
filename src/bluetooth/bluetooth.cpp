@@ -53,11 +53,13 @@
 #include "ble_d2d_file_transfer.hpp"
 #include "ble_d2d_rx.hpp"
 #include "ble_d2d_tx.hpp"
+#include "ble_d2d_tx_service.hpp"
 #include "bluetooth_debug.hpp"
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_rx_client.hpp"
 #include "file_proxy.hpp"
 #include "fota_proxy.hpp"
+#include "smp_proxy.hpp"
 #endif
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
@@ -183,10 +185,6 @@ void bluetooth_d2d_not_found(struct bt_conn *conn)
 #endif
 }
 
-// Forward declaration for primary device
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-static err_t bt_start_advertising(int err);
-#endif
 
 // For secondary (central) role: variables needed early
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -281,18 +279,26 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
         // Clear the secondary connection for file proxy
         file_proxy_set_secondary_conn(NULL);
 
+        // Clear the secondary connection for SMP proxy
+        smp_proxy_set_secondary_conn(NULL);
+
         // Clear D2D RX client
         d2d_rx_client_disconnected();
 
         // Clear D2D TX connection
         ble_d2d_tx_set_connection(NULL);
         LOG_INF("D2D TX connection cleared");
+        
+        // Clear D2D file client connection
+        ble_d2d_file_client_init(NULL);
 
         // Clear secondary device info
         jis_clear_secondary_device_info();
 
         // Restart advertising to allow secondary to reconnect
         LOG_INF("Restarting advertising to allow secondary device to reconnect");
+        // Forward declaration to ensure it's available
+        extern err_t bt_start_advertising(int err);
         bt_start_advertising(0);
 #else
         LOG_INF("Disconnected from primary device! (reason 0x%02x)\n", reason);
@@ -586,7 +592,9 @@ static const bt_le_adv_param *bt_le_adv_conn = BT_LE_ADV_CONN_FAST_1;
 static bool app_event_handler(const struct app_event_header *aeh);
 static void ble_timer_expiry_function(struct k_timer *timer_id);
 static void ble_timer_handler_function(struct k_work *work);
-static err_t bt_start_advertising(int err);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+err_t bt_start_advertising(int err);
+#endif
 static err_t bt_stop_advertising(void);
 static err_t ble_start_hidden(void);
 static err_t ble_reset_bonds(void);
@@ -902,11 +910,18 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
         pairing_failed_for_pending = false;
     }
 
+    // Clear phone connection from SMP proxy if this was a phone connection
+    if (conn != d2d_conn) {
+        smp_proxy_clear_phone_conn(conn);
+    }
+
     // If this wasn't the D2D connection and we don't have a secondary connected,
     // restart advertising to allow secondary to connect
     if (conn != d2d_conn && d2d_conn == nullptr)
     {
         LOG_INF("Phone disconnected and no secondary connected, restarting advertising");
+        // Forward declaration to ensure it's available
+        extern err_t bt_start_advertising(int err);
         bt_start_advertising(0);
     }
 #endif
@@ -1077,6 +1092,8 @@ err_t bt_module_init(void)
     static struct bt_conn_cb d2d_conn_callbacks = {
         .connected = d2d_connected,
         .disconnected = d2d_disconnected,
+        .security_changed = NULL,
+        ._node = {}
     };
 
     bt_conn_cb_register(&d2d_conn_callbacks);
@@ -1111,6 +1128,17 @@ err_t bt_module_init(void)
         LOG_INF("File proxy service initialized");
     }
 
+    // Initialize SMP proxy service for primary device
+    int smp_err = smp_proxy_init();
+    if (smp_err != 0)
+    {
+        LOG_ERR("Failed to initialize SMP proxy: %d", smp_err);
+    }
+    else
+    {
+        LOG_INF("SMP proxy service initialized - mobile can use standard MCUmgr!");
+    }
+
     // Check if we have a valid identity address before advertising
     bt_addr_le_t addr;
     size_t count = 1;
@@ -1126,6 +1154,8 @@ err_t bt_module_init(void)
         LOG_WRN("No Bluetooth identity address available");
     }
 
+    // Forward declaration to ensure it's available
+    extern err_t bt_start_advertising(int err);
     if (bt_start_advertising(0) == err_t::NO_ERROR)
     {
         LOG_INF("BLE Started Advertising");
@@ -1137,6 +1167,15 @@ err_t bt_module_init(void)
 #else
     ble_d2d_tx_init();            // Prepare to send data to primary
     ble_d2d_file_transfer_init(); // Initialize D2D file transfer service
+    
+    // MCUmgr SMP Bluetooth transport is automatically registered when enabled
+    #if defined(CONFIG_MCUMGR_TRANSPORT_BT)
+    LOG_INF("MCUmgr SMP Bluetooth transport enabled for secondary device");
+    LOG_INF("SMP service will be available for receiving commands from primary");
+    #else
+    LOG_WRN("MCUmgr Bluetooth transport not enabled in configuration");
+    #endif
+    
     start_scan();                 // Start scanning for primary device
     // Do NOT start advertising or initialize control/info services here
 #endif
@@ -1271,7 +1310,15 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_fota_progress_notify(progress);
 #else
-                    // Secondary device: Send FOTA completion status to primary when done
+                    // Secondary device: Send progress to primary via D2D
+                    int err = ble_d2d_tx_send_fota_progress(progress);
+                    if (err) {
+                        LOG_WRN("Failed to send FOTA progress via D2D: %d", err);
+                    } else {
+                        LOG_DBG("FOTA progress sent to primary via D2D");
+                    }
+                    
+                    // Also send completion status when done
                     if (!progress->is_active && progress->status == 0 && progress->percent_complete == 100)
                     {
                         ble_d2d_tx_send_fota_complete();
@@ -1319,8 +1366,19 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     LOG_INF("  File Path: %s", log_info->file_path);
                     LOG_INF("  Sequence ID: %u", log_info->file_sequence_id);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                    // TODO: Add notification for activity log files if needed
-                    // For now, just log the information
+                    // Primary device: Send activity log notifications
+                    jis_activity_log_available_notify(log_info->file_sequence_id);
+                    jis_activity_log_path_notify(log_info->file_path);
+#else
+                    // Secondary device: Send to primary via D2D
+                    int err = d2d_tx_notify_activity_log_available(log_info->file_sequence_id);
+                    if (err) {
+                        LOG_ERR("Failed to send activity log available via D2D: %d", err);
+                    }
+                    err = d2d_tx_notify_activity_log_path(log_info->file_path);
+                    if (err) {
+                        LOG_ERR("Failed to send activity log path via D2D: %d", err);
+                    }
 #endif
                     break;
                 }
@@ -1516,6 +1574,8 @@ static void ble_timer_handler_function(struct k_work *work)
     {
         // No secondary connected, restart advertising to allow secondary to connect
         LOG_INF("No secondary device connected, restarting advertising");
+        // Forward declaration to ensure it's available
+        extern err_t bt_start_advertising(int err);
         bt_start_advertising(0);
         return;
     }

@@ -26,12 +26,16 @@ int ble_d2d_tx_send_charge_status(uint8_t status);
 int ble_d2d_tx_send_set_time_command(uint32_t epoch_time);
 int ble_d2d_tx_send_delete_foot_log_command(uint8_t log_id);
 int ble_d2d_tx_send_delete_bhi360_log_command(uint8_t log_id);
+int ble_d2d_tx_send_delete_activity_log_command(uint8_t log_id);
 int ble_d2d_tx_send_start_activity_command(uint8_t value);
 int ble_d2d_tx_send_stop_activity_command(uint8_t value);
 int ble_d2d_tx_send_trigger_bhi360_calibration_command(uint8_t value);
 
 // Send function for FOTA completion status (secondary -> primary)
 int ble_d2d_tx_send_fota_complete(void);
+
+// Send function for FOTA progress updates (secondary -> primary)
+int ble_d2d_tx_send_fota_progress(const fota_progress_msg_t *progress);
 
 // Send function for device info (secondary -> primary)
 int ble_d2d_tx_send_device_info(const device_info_msg_t *info);

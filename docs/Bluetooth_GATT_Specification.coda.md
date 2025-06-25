@@ -203,12 +203,12 @@ float decode_acceleration(int16_t fixed) {
 | Foot Log Path | `...eae` | Read, Notify | char[] | UTF-8 path |
 | BHI360 Log Available | `...eb0` | Read, Notify | uint8_t | Latest log ID |
 | BHI360 Log Path | `...eb1` | Read, Notify | char[] | UTF-8 path |
-| Activity Log Available | `...eb6` | Read, Notify | uint8_t | Latest log ID |
-| Activity Log Path | `...eb7` | Read, Notify | char[] | UTF-8 path |
 | **BHI360 3D Mapping** | `...eb2` | Read, Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
 | **BHI360 Step Count** | `...eb3` | Read, Notify | bhi360_step_count_t | Steps + duration |
 | **BHI360 Linear Accel** | `...eb4` | Read, Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
 | FOTA Progress | `...eb5` | Read, Notify | fota_progress_t | Update status |
+| **Activity Log Available** | `...ec2` | Read, Notify | uint8_t | Latest log ID |
+| **Activity Log Path** | `...ec3` | Read, Notify | char[] | UTF-8 path |
 
 ### Status Bitfield
 
@@ -379,7 +379,46 @@ func handle3DOrientation(_ data: Data) {
 }
 ```
 
-### 7.3 File Proxy Service
+### 7.3 SMP Proxy Service
+
+**Service UUID:** `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`  
+**Availability:** Primary device only  
+**Purpose:** Unified MCUmgr/SMP access to both primary and secondary devices
+
+This service allows mobile applications to use standard MCUmgr libraries to communicate with both devices through a single interface.
+
+#### Characteristics
+
+| Characteristic | UUID | Properties | Description |
+|---:|---:|---:|---:|
+| Target Select | `DA2E7829-FBCE-4E01-AE9E-261174997C48` | Write | Select target device |
+| SMP Data | `DA2E7828-FBCE-4E01-AE9E-261174997C48` | Write, Notify | Standard SMP protocol |
+
+#### Target Values
+- `0x00`: Primary device (default)
+- `0x01`: Secondary device
+
+#### Benefits
+- No custom protocols needed
+- Same code for FOTA, file access, and all MCUmgr operations
+- Transparent forwarding to secondary device
+
+#### Usage Example
+
+```swift
+// Set target to secondary
+writeCharacteristic(targetUUID, data: Data([0x01]))
+
+// Use standard MCUmgr with proxy characteristic
+let transport = McuMgrBleTransport(peripheral)
+transport.smpCharacteristic = smpDataCharacteristic
+
+// All MCUmgr operations now work with secondary!
+let dfuManager = FirmwareUpgradeManager(transporter: transport)
+dfuManager.start(data: firmware)
+```
+
+### 7.4 File Proxy Service
 
 **UUID:** `7e500001-b5a3-f393-e0a9-e50e24dcca9e`  
 **Availability:** Primary device only  
@@ -442,13 +481,13 @@ typedef struct {
 | D2D Foot Log Path | `...68d9` | Notify | char[] | File path |
 | D2D BHI360 Log Available | `...68da` | Notify | uint8_t | Log ID |
 | D2D BHI360 Log Path | `...68db` | Notify | char[] | File path |
-| D2D Activity Log Available | `...68e1` | Notify | uint8_t | Log ID |
-| D2D Activity Log Path | `...68e2` | Notify | char[] | File path |
 | D2D Foot Samples | `...68dc` | Notify | foot_samples_t | ADC data |
 | **D2D BHI360 3D Mapping** | `...68dd` | Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
 | **D2D BHI360 Step Count** | `...68de` | Notify | bhi360_step_count_t | Steps |
 | **D2D BHI360 Linear Accel** | `...68df` | Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
 | D2D Current Time | `...68e0` | Notify | CTS struct | Time sync |
+| D2D Activity Log Available | `...68e4` | Notify | uint8_t | Log ID |
+| D2D Activity Log Path | `...68e5` | Notify | char[] | File path |
 
 ### 8.3 D2D File Transfer Service
 

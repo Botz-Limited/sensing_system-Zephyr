@@ -287,6 +287,12 @@ void notify_fota_progress_to_ble()
     if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
         LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
     }
+    
+    #if IS_ENABLED(CONFIG_SECONDARY_DEVICE)
+    // For secondary device, also log that progress would be sent via D2D
+    // Note: Actual D2D sending happens in bluetooth thread
+    LOG_DBG("FOTA progress ready for D2D transmission to primary");
+    #endif
 }
 
 // Public function to get current FOTA progress
