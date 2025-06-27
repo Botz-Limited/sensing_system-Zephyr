@@ -16,6 +16,7 @@
 #include <zephyr/kernel.h>
 #include <app.hpp>
 #include <errors.hpp>
+#include "ble_data_seq.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -43,6 +44,11 @@ void jis_bhi360_step_count_notify(uint32_t step_count);
 
 // FOTA progress notify function
 void jis_fota_progress_notify(const fota_progress_msg_t* progress);
+
+// BLE format notification functions (with sequence numbers)
+void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data);
+void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t *data);
+void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t *data);
 
 // Secondary device info functions (primary only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)

@@ -56,10 +56,13 @@
 #include "ble_d2d_tx_service.hpp"
 #include "bluetooth_debug.hpp"
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "ble_seq_manager.hpp"
+#include "ble_recovery_handler.hpp"
 #include "ble_d2d_rx_client.hpp"
 #include "file_proxy.hpp"
 #include "fota_proxy.hpp"
 #include "smp_proxy.hpp"
+#include "ble_conn_params.hpp"
 #endif
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
@@ -804,6 +807,15 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
         LOG_INF("Connected");
         ble_status_connected = 1;
+        
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Check if this is a reconnection and start recovery if needed
+        BleSequenceManager::getInstance().onReconnect();
+        if (BleSequenceManager::getInstance().isInRecovery()) {
+            LOG_INF("Starting BLE packet recovery after reconnection");
+            BleRecoveryHandler::getInstance().startRecovery();
+        }
+#endif
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Debug information service status
@@ -901,6 +913,11 @@ static bool bonds_present()
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
     LOG_INF("Disconnected (reason 0x%02x)", reason);
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Mark disconnection for potential recovery
+    BleSequenceManager::getInstance().onDisconnect();
+#endif
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Clear pending pairing state if this was the pending connection
@@ -1010,6 +1027,13 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
 BT_CONN_CB_DEFINE(conn_callbacks) = {
     .connected = connected,
     .disconnected = disconnected,
+    .recycled = NULL,
+    .le_param_req = NULL,
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    .le_param_updated = ble_conn_params_on_updated,
+#else
+    .le_param_updated = NULL,
+#endif
     .security_changed = security_changed,
 };
 
@@ -1099,6 +1123,18 @@ err_t bt_module_init(void)
     bt_conn_cb_register(&d2d_conn_callbacks);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Initialize BLE recovery handler (only for primary device)
+    ble_recovery_handler_init();
+    LOG_INF("BLE recovery handler initialized");
+    
+    // Initialize connection parameter manager
+    int conn_params_err = ble_conn_params_init();
+    if (conn_params_err != 0) {
+        LOG_ERR("Failed to initialize connection parameter manager: %d", conn_params_err);
+    } else {
+        LOG_INF("Connection parameter manager initialized");
+    }
+    
     // Log that services are being initialized
     LOG_INF("Initializing primary device BLE services...");
     LOG_INF("Information Service UUID: 0c372eaa-27eb-437e-bef4-775aefaf3c97");

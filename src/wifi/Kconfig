@@ -1,0 +1,20 @@
+config WIFI_MODULE
+	bool "Wifi Module"
+	help
+	  WIFI MODULE
+
+if WIFI_MODULE
+
+module = WIFI_MODULE
+module-str = wifi module
+source "subsys/logging/Kconfig.template.log_config"
+
+config WIFI_MODULE_STACK_SIZE
+	int "Wifi module thread stack size"
+	default 4096
+
+config WIFI_PRIORITY
+	int "Wifi module thread priority"
+	default 6
+
+endif # WIFI_MODULE

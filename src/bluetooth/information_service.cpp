@@ -34,6 +34,7 @@
 #include <util.hpp>
 #include <status_codes.h>
 #include "ccc_callback_fix.hpp"
+#include "ble_seq_manager.hpp"
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -117,6 +118,7 @@ static bool current_time_notifications_enabled = false; // Flag to track CCC sta
 static ssize_t jis_bhi360_data1_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_bhi360_data1_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t* data);
+extern "C" void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t* data);
 
 static ssize_t jis_bhi360_data2_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
@@ -124,6 +126,7 @@ extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
 
 static ssize_t jis_bhi360_data3_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t* data);
 
 //Current Time Characteristic
 static ssize_t jis_read_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -153,6 +156,7 @@ static void jis_bhi360_req_id_ccc_cfg_changed(const struct bt_gatt_attr* attr, u
 // Foot Sensor Characteristic
 static ssize_t jis_foot_sensor_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data);
 
 // FOTA Progress Characteristic
 static ssize_t jis_fota_progress_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -723,11 +727,29 @@ void jis_foot_sensor_notify(const foot_samples_t *samples_data)
 
     if (status_subscribed)
     {
+        // Convert to BLE format with sequence number
+        foot_samples_ble_t ble_data;
+        BleSequenceManager::getInstance().addFootSample(samples_data, &ble_data);
+        
         auto *status_gatt =
             bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
         if (status_gatt) {
-            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_char_value),
-                           sizeof(foot_sensor_char_value));
+            // Send BLE format with sequence number
+            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&ble_data),
+                           sizeof(ble_data));
+        }
+    }
+}
+
+// Helper function to send BLE format data directly (used by recovery)
+extern "C" void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data)
+{
+    if (status_subscribed && data) {
+        auto *status_gatt =
+            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
+        if (status_gatt) {
+            bt_gatt_notify(nullptr, status_gatt, static_cast<const void *>(data),
+                           sizeof(*data));
         }
     }
 }
@@ -1150,9 +1172,23 @@ extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
     convert_3d_mapping_to_fixed(*data, bhi360_data1_value_fixed);
     
     if (bhi360_data1_subscribed) {
+        // Convert to BLE format with sequence number
+        bhi360_3d_mapping_ble_t ble_data;
+        BleSequenceManager::getInstance().addBhi3603D(data, &ble_data);
+        
         safe_gatt_notify(&bhi360_data1_uuid.uuid,
-                        static_cast<const void *>(&bhi360_data1_value_fixed), 
-                        sizeof(bhi360_data1_value_fixed));
+                        static_cast<const void *>(&ble_data), 
+                        sizeof(ble_data));
+    }
+}
+
+// Helper function to send BLE format data directly (used by recovery)
+extern "C" void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t *data)
+{
+    if (bhi360_data1_subscribed && data) {
+        safe_gatt_notify(&bhi360_data1_uuid.uuid,
+                        static_cast<const void *>(data), 
+                        sizeof(*data));
     }
 }
 // --- BHI360 Data Set 2 ---
@@ -1201,9 +1237,23 @@ void jis_bhi360_data3_notify(const bhi360_linear_accel_t *data)
     convert_linear_accel_to_fixed(*data, bhi360_data3_value_fixed);
     
     if (bhi360_data3_subscribed) {
+        // Convert to BLE format with sequence number
+        bhi360_linear_accel_ble_t ble_data;
+        BleSequenceManager::getInstance().addBhi360Accel(data, &ble_data);
+        
         safe_gatt_notify(&bhi360_data3_uuid.uuid,
-                        static_cast<const void *>(&bhi360_data3_value_fixed), 
-                        sizeof(bhi360_data3_value_fixed));
+                        static_cast<const void *>(&ble_data), 
+                        sizeof(ble_data));
+    }
+}
+
+// Helper function to send BLE format data directly (used by recovery)
+extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t *data)
+{
+    if (bhi360_data3_subscribed && data) {
+        safe_gatt_notify(&bhi360_data3_uuid.uuid,
+                        static_cast<const void *>(data), 
+                        sizeof(*data));
     }
 }
 

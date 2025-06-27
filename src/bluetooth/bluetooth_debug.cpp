@@ -70,14 +70,6 @@ void bt_debug_check_services(void)
 {
     LOG_INF("=== Checking GATT Services ===");
     
-    // Information Service UUID
-    struct bt_uuid_128 info_service_uuid = BT_UUID_INIT_128(
-        BT_UUID_128_ENCODE(0x0c372eaa, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
-    
-    // Try to find the information service
-    struct bt_gatt_attr *attr = NULL;
-    struct bt_gatt_service_static *svc = NULL;
-    
     // This is a simplified check - in real implementation you'd iterate through services
     LOG_INF("Information Service should be registered with UUID: 0c372eaa-27eb-437e-bef4-775aefaf3c97");
     LOG_INF("Check if all characteristics are accessible after pairing");

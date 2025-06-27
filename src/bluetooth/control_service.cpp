@@ -35,6 +35,7 @@
 #include <app.hpp>
 #include <app_version.h>
 #include "ccc_callback_fix.hpp"
+#include "ble_conn_params.hpp"
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_tx.hpp"
@@ -126,6 +127,10 @@ static struct bt_uuid_128 delete_secondary_bhi360_log_command_uuid =
 static struct bt_uuid_128 delete_secondary_activity_log_command_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68a, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
+// --- New: UUID for connection parameter control characteristic ---
+static struct bt_uuid_128 conn_param_control_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68b, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
 // Forward declarations for start/stop activity handlers
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
@@ -143,6 +148,10 @@ static ssize_t write_delete_secondary_bhi360_log_command_vnd(struct bt_conn *con
 static void cs_delete_secondary_bhi360_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 static ssize_t write_delete_secondary_activity_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static void cs_delete_secondary_activity_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+
+// Connection parameter control handlers
+static ssize_t write_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t read_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset);
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -228,8 +237,16 @@ BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | B
     BT_GATT_CHARACTERISTIC(&delete_secondary_activity_log_command_uuid.uuid, BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_WRITE_ENCRYPT,
                            nullptr, write_delete_secondary_activity_log_command_vnd, nullptr),
-    BT_GATT_CCC(cs_delete_secondary_activity_log_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+    BT_GATT_CCC(cs_delete_secondary_activity_log_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 #endif
+
+    // Connection Parameter Control Characteristic
+    BT_GATT_CHARACTERISTIC(&conn_param_control_uuid.uuid, 
+                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
+                           read_conn_param_control_vnd, 
+                           write_conn_param_control_vnd, 
+                           nullptr)
 );
 
 /**
@@ -256,6 +273,10 @@ ssize_t read_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_g
 ssize_t write_delete_foot_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
                                           uint16_t len, uint16_t offset, uint8_t flags)
 {
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(flags);
+    
     if (len != sizeof(uint8_t) || offset != 0) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
@@ -313,6 +334,10 @@ ssize_t read_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt
 ssize_t write_delete_bhi360_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
                                            uint16_t len, uint16_t offset, uint8_t flags)
 {
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(flags);
+    
     if (len != sizeof(uint8_t) || offset != 0) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
@@ -410,6 +435,57 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
     LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
     }
 
+    return len;
+}
+
+// --- Connection Parameter Control Handlers ---
+
+/**
+ * @brief Read handler for connection parameter control characteristic
+ * Returns the current connection profile (0=FOREGROUND, 1=BACKGROUND, 2=BACKGROUND_IDLE)
+ */
+static ssize_t read_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
+                                          void *buf, uint16_t len, uint16_t offset)
+{
+    uint8_t current_profile = (uint8_t)ble_conn_params_get_profile();
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_profile, sizeof(current_profile));
+}
+
+/**
+ * @brief Write handler for connection parameter control characteristic
+ * Allows mobile app to request different connection profiles for background execution
+ * 
+ * @param buf Should contain 1 byte: 0=FOREGROUND, 1=BACKGROUND, 2=BACKGROUND_IDLE
+ */
+static ssize_t write_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
+                                           const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t requested_profile = *((const uint8_t *)buf);
+
+    // Validate profile value
+    if (requested_profile >= CONN_PROFILE_MAX) {
+        LOG_ERR("Invalid connection profile requested: %d", requested_profile);
+        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    }
+
+    LOG_INF("Mobile app requested connection profile change to: %d", requested_profile);
+
+    // Update connection parameters
+    int err = ble_conn_params_update(conn, (conn_profile_t)requested_profile);
+    if (err) {
+        LOG_ERR("Failed to update connection parameters: %d", err);
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
+
+    LOG_INF("Connection parameter update initiated successfully");
     return len;
 }
 

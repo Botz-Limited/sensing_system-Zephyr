@@ -16,6 +16,9 @@ list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_d2d_tx_service.cpp)
 list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_d2d_rx_client.cpp)
 list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/smp_proxy.cpp)
 list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_d2d_smp_client.cpp)
+list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_seq_manager.cpp)
+list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_recovery_handler.cpp)
+list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_conn_params.cpp)
 # Don't remove bluetooth_debug.cpp - it's needed for all builds
 
 zephyr_library_compile_options(${SYS_COMPILE_FLAGS})
@@ -34,6 +37,9 @@ zephyr_library_sources_ifdef(CONFIG_PRIMARY_DEVICE
     ble_d2d_rx.cpp  # Primary receives data/status from secondary
     ble_d2d_tx.cpp  # Primary sends commands to secondary
     ble_d2d_rx_client.cpp  # Primary subscribes to secondary's TX service
+    ble_seq_manager.cpp  # BLE sequence management for mobile communication
+    ble_recovery_handler.cpp  # BLE packet recovery for mobile communication
+    ble_conn_params.cpp  # Connection parameter management for background execution
 )
 
 # Secondary device specific services

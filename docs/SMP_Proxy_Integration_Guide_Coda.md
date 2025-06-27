@@ -29,22 +29,23 @@ The SMP Proxy service provides a unified interface for mobile applications to ac
 
 ## How It Works
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    Note over App: Want to update secondary
-    App->>Primary: Write Target = 0x01
-    App->>Primary: Standard SMP command
-    Primary->>Primary: Check target
-    Primary->>Secondary: Forward SMP via D2D
-    Secondary->>Secondary: Process SMP
-    Secondary-->>Primary: SMP Response
-    Primary-->>App: Forward Response
-    Note over App: Looks like direct connection!
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "participant Secondary",
+    "Note over App: Want to update secondary",
+    "App->>Primary: Write Target = 0x01",
+    "App->>Primary: Standard SMP command",
+    "Primary->>Primary: Check target",
+    "Primary->>Secondary: Forward SMP via D2D",
+    "Secondary->>Secondary: Process SMP",
+    "Secondary-->>Primary: SMP Response",
+    "Primary-->>App: Forward Response",
+    "Note over App: Looks like direct connection!"
+  ),
+  "default"
+)
 
 ## Detailed FOTA Sequences
 
@@ -52,105 +53,93 @@ sequenceDiagram
 
 The following sequence shows the exact steps to update the primary device firmware:
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    
-    Note over App,Primary: Step 1: Set Target to Primary
-    App->>Primary: Write Target Char = 0x00
-    Primary-->>App: Write Response
-    
-    Note over App,Primary: Step 2: Get Current Image Info
-    App->>Primary: SMP: Image List Request
-    Primary-->>App: SMP: Image List Response<br/>(slot 0: active, slot 1: empty/old)
-    
-    Note over App,Primary: Step 3: Upload New Firmware
-    App->>Primary: SMP: Image Upload Init<br/>(len, sha256, image=1)
-    Primary-->>App: SMP: Upload Response (offset=0)
-    
-    loop Upload Chunks
-        App->>Primary: SMP: Image Upload Data<br/>(offset, data[up to 512 bytes])
-        Primary-->>App: SMP: Upload Response<br/>(next offset)
-    end
-    
-    Note over App,Primary: Step 4: Verify Upload
-    App->>Primary: SMP: Image List Request
-    Primary-->>App: SMP: Image List Response<br/>(slot 1: new image, pending)
-    
-    Note over App,Primary: Step 5: Test New Image
-    App->>Primary: SMP: Image Test<br/>(hash of new image)
-    Primary-->>App: SMP: Test Response
-    
-    Note over App,Primary: Step 6: Reset to Apply
-    App->>Primary: SMP: OS Reset
-    Primary-->>App: SMP: Reset Response
-    Primary->>Primary: Reboot
-    
-    Note over App,Primary: Step 7: Confirm After Reboot
-    App->>Primary: SMP: Image Confirm
-    Primary-->>App: SMP: Confirm Response
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "Note over App,Primary: Step 1: Set Target to Primary",
+    "App->>Primary: Write Target Char = 0x00",
+    "Primary-->>App: Write Response",
+    "Note over App,Primary: Step 2: Get Current Image Info",
+    "App->>Primary: SMP: Image List Request",
+    "Primary-->>App: SMP: Image List Response<br/>(slot 0: active, slot 1: empty/old)",
+    "Note over App,Primary: Step 3: Upload New Firmware",
+    "App->>Primary: SMP: Image Upload Init<br/>(len, sha256, image=1)",
+    "Primary-->>App: SMP: Upload Response (offset=0)",
+    "loop Upload Chunks",
+    "App->>Primary: SMP: Image Upload Data<br/>(offset, data[up to 512 bytes])",
+    "Primary-->>App: SMP: Upload Response<br/>(next offset)",
+    "end",
+    "Note over App,Primary: Step 4: Verify Upload",
+    "App->>Primary: SMP: Image List Request",
+    "Primary-->>App: SMP: Image List Response<br/>(slot 1: new image, pending)",
+    "Note over App,Primary: Step 5: Test New Image",
+    "App->>Primary: SMP: Image Test<br/>(hash of new image)",
+    "Primary-->>App: SMP: Test Response",
+    "Note over App,Primary: Step 6: Reset to Apply",
+    "App->>Primary: SMP: OS Reset",
+    "Primary-->>App: SMP: Reset Response",
+    "Primary->>Primary: Reboot",
+    "Note over App,Primary: Step 7: Confirm After Reboot",
+    "App->>Primary: SMP: Image Confirm",
+    "Primary-->>App: SMP: Confirm Response"
+  ),
+  "default"
+)
 
 ### FOTA Update - Secondary Device
 
 The following sequence shows the exact steps to update the secondary device firmware:
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    Note over App,Secondary: Step 1: Set Target to Secondary
-    App->>Primary: Write Target Char = 0x01
-    Primary-->>App: Write Response
-    
-    Note over App,Secondary: Step 2: Verify D2D Connection
-    App->>Primary: SMP: Echo Request
-    Primary->>Secondary: Forward SMP via UART
-    Secondary-->>Primary: SMP: Echo Response
-    Primary-->>App: Forward Response
-    
-    Note over App,Secondary: Step 3: Get Current Image Info
-    App->>Primary: SMP: Image List Request
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: Image List Response
-    Primary-->>App: Forward Response<br/>(slot 0: active, slot 1: empty/old)
-    
-    Note over App,Secondary: Step 4: Upload New Firmware
-    App->>Primary: SMP: Image Upload Init<br/>(len, sha256, image=1)
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: Upload Response (offset=0)
-    Primary-->>App: Forward Response
-    
-    loop Upload Chunks (slower due to UART)
-        App->>Primary: SMP: Image Upload Data<br/>(offset, data[256 bytes max])
-        Primary->>Secondary: Forward via UART
-        Secondary-->>Primary: Upload Response
-        Primary-->>App: Forward Response
-    end
-    
-    Note over App,Secondary: Step 5: Test New Image
-    App->>Primary: SMP: Image Test
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: Test Response
-    Primary-->>App: Forward Response
-    
-    Note over App,Secondary: Step 6: Reset Secondary
-    App->>Primary: SMP: OS Reset
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: Reset Response
-    Primary-->>App: Forward Response
-    Secondary->>Secondary: Reboot
-    
-    Note over App,Secondary: Step 7: Wait and Confirm
-    Note over App: Wait 5-10 seconds for boot
-    App->>Primary: SMP: Image Confirm
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: Confirm Response
-    Primary-->>App: Forward Response
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "participant Secondary",
+    "Note over App,Secondary: Step 1: Set Target to Secondary",
+    "App->>Primary: Write Target Char = 0x01",
+    "Primary-->>App: Write Response",
+    "Note over App,Secondary: Step 2: Verify D2D Connection",
+    "App->>Primary: SMP: Echo Request",
+    "Primary->>Secondary: Forward SMP via UART",
+    "Secondary-->>Primary: SMP: Echo Response",
+    "Primary-->>App: Forward Response",
+    "Note over App,Secondary: Step 3: Get Current Image Info",
+    "App->>Primary: SMP: Image List Request",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: Image List Response",
+    "Primary-->>App: Forward Response<br/>(slot 0: active, slot 1: empty/old)",
+    "Note over App,Secondary: Step 4: Upload New Firmware",
+    "App->>Primary: SMP: Image Upload Init<br/>(len, sha256, image=1)",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: Upload Response (offset=0)",
+    "Primary-->>App: Forward Response",
+    "loop Upload Chunks (slower due to UART)",
+    "App->>Primary: SMP: Image Upload Data<br/>(offset, data[256 bytes max])",
+    "Primary->>Secondary: Forward via UART",
+    "Secondary-->>Primary: Upload Response",
+    "Primary-->>App: Forward Response",
+    "end",
+    "Note over App,Secondary: Step 5: Test New Image",
+    "App->>Primary: SMP: Image Test",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: Test Response",
+    "Primary-->>App: Forward Response",
+    "Note over App,Secondary: Step 6: Reset Secondary",
+    "App->>Primary: SMP: OS Reset",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: Reset Response",
+    "Primary-->>App: Forward Response",
+    "Secondary->>Secondary: Reboot",
+    "Note over App,Secondary: Step 7: Wait and Confirm",
+    "Note over App: Wait 5-10 seconds for boot",
+    "App->>Primary: SMP: Image Confirm",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: Confirm Response",
+    "Primary-->>App: Forward Response"
+  ),
+  "default"
+)
 
 ### Key Differences Between Primary and Secondary FOTA
 
@@ -167,109 +156,102 @@ sequenceDiagram
 
 ### File Download - Primary Device
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    
-    Note over App,Primary: Step 1: Set Target to Primary
-    App->>Primary: Write Target Char = 0x00
-    Primary-->>App: Write Response
-    
-    Note over App,Primary: Step 2: Get File Info
-    App->>Primary: SMP: FS Stat Request<br/>(name="/lfs/config.json")
-    Primary-->>App: SMP: FS Stat Response<br/>(size=1024, type=file)
-    
-    Note over App,Primary: Step 3: Download File
-    App->>Primary: SMP: FS Download Request<br/>(name, offset=0)
-    Primary-->>App: SMP: FS Download Response<br/>(data[up to 512], len=1024)
-    
-    loop While offset < len
-        App->>Primary: SMP: FS Download Request<br/>(name, offset)
-        Primary-->>App: SMP: FS Download Response<br/>(data chunk, len)
-    end
-    
-    Note over App: File download complete
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "Note over App,Primary: Step 1: Set Target to Primary",
+    "App->>Primary: Write Target Char = 0x00",
+    "Primary-->>App: Write Response",
+    "Note over App,Primary: Step 2: Get File Info",
+    "App->>Primary: SMP: FS Stat Request<br/>(name=\"/lfs/config.json\")",
+    "Primary-->>App: SMP: FS Stat Response<br/>(size=1024, type=file)",
+    "Note over App,Primary: Step 3: Download File",
+    "App->>Primary: SMP: FS Download Request<br/>(name, offset=0)",
+    "Primary-->>App: SMP: FS Download Response<br/>(data[up to 512], len=1024)",
+    "loop While offset < len",
+    "App->>Primary: SMP: FS Download Request<br/>(name, offset)",
+    "Primary-->>App: SMP: FS Download Response<br/>(data chunk, len)",
+    "end",
+    "Note over App: File download complete"
+  ),
+  "default"
+)
 
 ### File Download - Secondary Device
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    Note over App,Secondary: Step 1: Set Target to Secondary
-    App->>Primary: Write Target Char = 0x01
-    Primary-->>App: Write Response
-    
-    Note over App,Secondary: Step 2: List Files (Optional)
-    App->>Primary: SMP: FS List Request<br/>(path="/lfs")
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: FS List Response
-    Primary-->>App: Forward Response<br/>(file names and sizes)
-    
-    Note over App,Secondary: Step 3: Get File Info
-    App->>Primary: SMP: FS Stat Request<br/>(name="/lfs/foot_5.bin")
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: FS Stat Response
-    Primary-->>App: Forward Response<br/>(size=8192, type=file)
-    
-    Note over App,Secondary: Step 4: Download File
-    App->>Primary: SMP: FS Download Request<br/>(name, offset=0)
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: FS Download Response
-    Primary-->>App: Forward Response<br/>(data[256 bytes], len=8192)
-    
-    loop While offset < len (slower)
-        App->>Primary: SMP: FS Download Request<br/>(name, offset)
-        Primary->>Secondary: Forward via UART
-        Secondary-->>Primary: FS Download Response
-        Primary-->>App: Forward Response
-    end
-    
-    Note over App: File download complete
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "participant Secondary",
+    "Note over App,Secondary: Step 1: Set Target to Secondary",
+    "App->>Primary: Write Target Char = 0x01",
+    "Primary-->>App: Write Response",
+    "Note over App,Secondary: Step 2: List Files (Optional)",
+    "App->>Primary: SMP: FS List Request<br/>(path=\"/lfs\")",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: FS List Response",
+    "Primary-->>App: Forward Response<br/>(file names and sizes)",
+    "Note over App,Secondary: Step 3: Get File Info",
+    "App->>Primary: SMP: FS Stat Request<br/>(name=\"/lfs/foot_5.bin\")",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: FS Stat Response",
+    "Primary-->>App: Forward Response<br/>(size=8192, type=file)",
+    "Note over App,Secondary: Step 4: Download File",
+    "App->>Primary: SMP: FS Download Request<br/>(name, offset=0)",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: FS Download Response",
+    "Primary-->>App: Forward Response<br/>(data[256 bytes], len=8192)",
+    "loop While offset < len (slower)",
+    "App->>Primary: SMP: FS Download Request<br/>(name, offset)",
+    "Primary->>Secondary: Forward via UART",
+    "Secondary-->>Primary: FS Download Response",
+    "Primary-->>App: Forward Response",
+    "end",
+    "Note over App: File download complete"
+  ),
+  "default"
+)
 
 ### File Upload Sequences
 
 #### Upload to Primary Device
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    
-    App->>Primary: Write Target Char = 0x00
-    App->>Primary: SMP: FS Upload Request<br/>(name, len, offset=0, data)
-    Primary-->>App: SMP: FS Upload Response<br/>(offset=512)
-    
-    loop Until complete
-        App->>Primary: SMP: FS Upload Request<br/>(name, len, offset, data)
-        Primary-->>App: SMP: FS Upload Response<br/>(next offset)
-    end
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "App->>Primary: Write Target Char = 0x00",
+    "App->>Primary: SMP: FS Upload Request<br/>(name, len, offset=0, data)",
+    "Primary-->>App: SMP: FS Upload Response<br/>(offset=512)",
+    "loop Until complete",
+    "App->>Primary: SMP: FS Upload Request<br/>(name, len, offset, data)",
+    "Primary-->>App: SMP: FS Upload Response<br/>(next offset)",
+    "end"
+  ),
+  "default"
+)
 
 #### Upload to Secondary Device
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    App->>Primary: Write Target Char = 0x01
-    App->>Primary: SMP: FS Upload Request<br/>(name, len, offset=0, data[256])
-    Primary->>Secondary: Forward Request
-    Secondary-->>Primary: FS Upload Response
-    Primary-->>App: Forward Response<br/>(offset=256)
-    
-    loop Until complete (slower)
-        App->>Primary: SMP: FS Upload Request<br/>(offset, data[256])
-        Primary->>Secondary: Forward via UART
-        Secondary-->>Primary: FS Upload Response
-        Primary-->>App: Forward Response
-    end
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "participant Secondary",
+    "App->>Primary: Write Target Char = 0x01",
+    "App->>Primary: SMP: FS Upload Request<br/>(name, len, offset=0, data[256])",
+    "Primary->>Secondary: Forward Request",
+    "Secondary-->>Primary: FS Upload Response",
+    "Primary-->>App: Forward Response<br/>(offset=256)",
+    "loop Until complete (slower)",
+    "App->>Primary: SMP: FS Upload Request<br/>(offset, data[256])",
+    "Primary->>Secondary: Forward via UART",
+    "Secondary-->>Primary: FS Upload Response",
+    "Primary-->>App: Forward Response",
+    "end"
+  ),
+  "default"
+)
 
 ## Implementation Details
 
@@ -1004,4 +986,5 @@ The SMP Proxy service dramatically simplifies mobile app development by:
 4. Enabling use of existing MCUmgr tools and documentation
 
 Mobile developers can now treat both devices as if they have direct connections, with the firmware handling all the complexity of D2D communication transparently.
+
 > **Note**: For historical reference, the legacy FOTA proxy implementation is documented in [FOTA_Legacy_Guide.md](FOTA_Legacy_Guide.md). However, all new development should use the SMP Proxy approach described in this guide.

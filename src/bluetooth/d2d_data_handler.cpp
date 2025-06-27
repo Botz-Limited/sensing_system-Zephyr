@@ -29,14 +29,14 @@ int d2d_data_handler_process_foot_samples(const foot_samples_t *samples)
     
     LOG_DBG("Processing foot samples from secondary device");
     
-    // TODO: Implement actual processing
-    // 1. Check if we should aggregate with primary foot data
-    // 2. Forward to Information Service for phone notification
-    // 3. Log to file system if logging is active
+    // Forward to Information Service for phone notification
+    // The jis_foot_sensor_notify function will add sequence numbers
+    jis_foot_sensor_notify(samples);
     
-    // For now, just log the first few values
-    LOG_INF("Secondary foot samples: [%u, %u, %u, ...]", 
+    LOG_DBG("Secondary foot samples forwarded to phone: [%u, %u, %u, ...]", 
             samples->values[0], samples->values[1], samples->values[2]);
+    
+    // TODO: Log to file system if logging is active
     
     return 0;
 }
@@ -59,11 +59,12 @@ int d2d_data_handler_process_bhi360_3d_mapping(const bhi360_3d_mapping_t *data)
         LOG_DBG("Updated 3D orientation from secondary: w=%.3f, x=%.3f, y=%.3f, z=%.3f",
                 (double)data->quat_w, (double)data->accel_x, 
                 (double)data->accel_y, (double)data->accel_z);
-    } else {
-        // This is full sensor data for logging
-        // TODO: Forward to Information Service for regular data logging
-        LOG_DBG("Full sensor data from secondary (not just quaternion)");
     }
+    
+    // Always forward to Information Service for phone notification
+    // The jis_bhi360_data1_notify function will add sequence numbers
+    jis_bhi360_data1_notify(data);
+    LOG_DBG("Secondary BHI360 3D mapping data forwarded to phone");
     
     return 0;
 }
@@ -77,8 +78,12 @@ int d2d_data_handler_process_bhi360_step_count(const bhi360_step_count_t *data)
     LOG_DBG("Processing BHI360 step count from secondary: %u steps", 
             data->step_count);
     
-    // TODO: Aggregate with primary step count
-    // Total steps = primary + secondary
+    // Forward to Information Service for phone notification
+    // Note: Step count doesn't use sequence numbers (low update rate)
+    jis_bhi360_data2_notify(data);
+    LOG_DBG("Secondary BHI360 step count forwarded to phone");
+    
+    // TODO: Consider aggregating with primary step count for total steps
     
     return 0;
 }
@@ -91,7 +96,10 @@ int d2d_data_handler_process_bhi360_linear_accel(const bhi360_linear_accel_t *da
     
     LOG_DBG("Processing BHI360 linear accel from secondary device");
     
-    // TODO: Forward to Information Service
+    // Forward to Information Service for phone notification
+    // The jis_bhi360_data3_notify function will add sequence numbers
+    jis_bhi360_data3_notify(data);
+    LOG_DBG("Secondary BHI360 linear accel data forwarded to phone");
     
     return 0;
 }

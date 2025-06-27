@@ -489,49 +489,77 @@ sequenceDiagram
 
 ## 8. File Retrieval Methods
 
-### Method 1: SMP (Simple Management Protocol)
+### Method 1: SMP Proxy (Recommended)
 
-**Service UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
-**Characteristic:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`
+**Service UUID:** `14387800-130c-49e7-b877-2881c89cb258`  
+**Characteristic:** `14387802-130c-49e7-b877-2881c89cb258`
+
+The SMP Proxy service provides unified access to files on both primary and secondary devices using standard MCUmgr protocol:
 
 ```mermaid
 sequenceDiagram
     participant App
-    participant SMP
-    participant FS as File System
+    participant SMP Proxy
+    participant Target Device
     
-    App->>SMP: FS Download<br/>"/lfs1/hardware/foot_005.pb"
+    Note over App: Set target in SMP header<br/>(bit 3: 0=primary, 1=secondary)
     
-    loop File chunks
-        SMP->>FS: Read chunk
-        FS-->>SMP: Data
-        SMP-->>App: Data packet
+    App->>SMP Proxy: FS Download<br/>"/lfs1/hardware/foot_005.pb"
+    
+    alt Primary Device
+        SMP Proxy->>Target Device: Direct access
+    else Secondary Device
+        SMP Proxy->>Target Device: Forward via D2D
     end
     
-    SMP-->>App: Transfer complete
+    loop File chunks
+        Target Device-->>SMP Proxy: Data chunk
+        SMP Proxy-->>App: SMP response
+    end
+    
+    SMP Proxy-->>App: Transfer complete
 ```
 
-### Method 2: File Proxy (Secondary Device) - Legacy
-
-**Service UUID:** `7e500001-b5a3-f393-e0a9-e50e24dcca9e`
-
-Used to access logs on secondary devices through the primary device.
-
-**Note**: For new implementations, consider using the SMP Proxy service instead. It allows standard MCUmgr file operations on both devices with the same code. See [SMP Proxy Integration Guide](SMP_Proxy_Integration_Guide.md).
-
-### Method 2a: SMP Proxy (Secondary Device) - Recommended
-
-**Service UUID:** `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`
-
-Use standard MCUmgr file operations for both primary and secondary devices:
+#### Example: Download from Secondary Device
 
 ```swift
-// Set target to secondary
-writeCharacteristic(smpProxyTargetUUID, value: Data([0x01]))
-
-// Use standard MCUmgr file download
-let fileData = try await mcuMgr.downloadFile("/lfs1/hardware/foot_005.pb")
+// iOS Swift using MCUmgr library
+func downloadSecondaryLog(path: String) async throws -> Data {
+    // Configure transport with SMP proxy
+    let transport = McuMgrBleTransport(peripheral)
+    transport.smpCharacteristic = "14387802-130c-49e7-b877-2881c89cb258"
+    transport.targetDevice = .secondary  // Sets flag bit 3 = 1
+    
+    // Use standard file manager
+    let fileManager = FileSystemManager(transporter: transport)
+    return try await fileManager.download(path)
+}
 ```
+
+#### Example: List Files on Both Devices
+
+```python
+# Python using smpclient
+async def list_all_logs(smp_client):
+    logs = {'primary': [], 'secondary': []}
+    
+    # List primary device logs (target bit = 0)
+    primary_files = await smp_client.fs_list("/lfs1/hardware", target=0)
+    logs['primary'] = [f for f in primary_files if f.endswith('.pb')]
+    
+    # List secondary device logs (target bit = 1)
+    secondary_files = await smp_client.fs_list("/lfs1/hardware", target=1)
+    logs['secondary'] = [f for f in secondary_files if f.endswith('.pb')]
+    
+    return logs
+```
+
+### Method 2: Legacy File Proxy (Secondary Device Only)
+
+**Service UUID:** `14387810-130c-49e7-b877-2881c89cb258`  
+**Characteristic:** `14387811-130c-49e7-b877-2881c89cb258`
+
+This legacy service is still available but not recommended for new implementations. Use the SMP Proxy service instead for unified access to both devices.
 
 ### Method 3: Debug Interface
 
@@ -651,75 +679,132 @@ TIMING STATISTICS:
 
 ### Architecture
 
-The secondary device file access architecture shows how the mobile app can access log files stored on the secondary device through the primary device's proxy services:
+The SMP Proxy architecture provides transparent access to secondary device files through the primary device:
 
 ```mermaid
 graph TB
     subgraph "Mobile App"
-        APP[BLE Client]
+        APP[MCUmgr Client]
     end
     
     subgraph "Primary Device"
-        PROXY[File Proxy Service]
+        SMP[SMP Proxy]
         D2D_C[D2D Client]
     end
     
     subgraph "Secondary Device"
         D2D_S[D2D Server]
+        MCUMGR[MCUmgr Handler]
         LOGS[Log Files]
     end
     
-    APP -->|"1. Request"| PROXY
-    PROXY -->|"2. Forward"| D2D_C
-    D2D_C -->|"3. D2D Transfer"| D2D_S
-    D2D_S -->|"4. Read"| LOGS
-    LOGS -->|"5. Data"| D2D_S
-    D2D_S -->|"6. Response"| D2D_C
-    D2D_C -->|"7. Forward"| PROXY
-    PROXY -->|"8. Send"| APP
+    APP -->|"1. SMP Request<br/>(target=1)"| SMP
+    SMP -->|"2. Check Target"| SMP
+    SMP -->|"3. Forward SMP"| D2D_C
+    D2D_C -->|"4. UART Transfer"| D2D_S
+    D2D_S -->|"5. SMP to MCUmgr"| MCUMGR
+    MCUMGR -->|"6. Read File"| LOGS
+    LOGS -->|"7. File Data"| MCUMGR
+    MCUMGR -->|"8. SMP Response"| D2D_S
+    D2D_S -->|"9. UART Transfer"| D2D_C
+    D2D_C -->|"10. Forward"| SMP
+    SMP -->|"11. BLE Response"| APP
 ```
 
-**Data Flow Steps:**
-1. **Request**: Mobile app sends file request to Primary's File Proxy Service
-2. **Forward**: File Proxy forwards request to D2D Client module
-3. **D2D Transfer**: D2D Client sends request over BLE to Secondary's D2D Server
-4. **Read**: D2D Server reads requested log file from file system
-5. **Data**: File data is read and prepared for transmission
-6. **Response**: D2D Server sends data back to Primary's D2D Client
-7. **Forward**: D2D Client forwards data to File Proxy Service
-8. **Send**: File Proxy sends data to Mobile App via BLE notification
+**Key Advantages:**
+- **Standard Protocol**: Uses MCUmgr/SMP throughout
+- **Transparent Access**: Same API for both devices
+- **No Custom Code**: Leverage existing MCUmgr libraries
+- **Full Feature Set**: All MCUmgr commands work (files, FOTA, stats, etc.)
 
-### File Proxy Commands
+### SMP File Operations
 
-| Command | Value | Parameters | Description |
-|---------|-------|------------|-------------|
-| List Files | 0x01 | File type | Get file list |
-| Read File | 0x02 | File ID | Download file |
-| Delete File | 0x03 | File ID | Remove file |
-| Get Info | 0x04 | File ID | Get metadata |
+Using the SMP Proxy, all standard MCUmgr file operations work seamlessly:
 
-### Usage Example
+| Operation | SMP Command | Target=0 (Primary) | Target=1 (Secondary) |
+|-----------|-------------|-------------------|---------------------|
+| List Files | FS List | Direct access | Via D2D proxy |
+| Download | FS Download | Direct access | Via D2D proxy |
+| Upload | FS Upload | Direct access | Via D2D proxy |
+| Delete | FS Delete | Direct access | Via D2D proxy |
+| File Info | FS Stat | Direct access | Via D2D proxy |
+
+### Usage Examples
+
+#### Download Log from Secondary Device
 
 ```swift
-// iOS Swift
-func downloadSecondaryLog(fileId: UInt8) async throws -> Data {
-    // Set target to secondary
-    try await writeCharacteristic(targetUUID, data: Data([0x01]))
+// iOS Swift with MCUmgr
+func downloadSecondaryLog(path: String) async throws -> Data {
+    // Configure for secondary device
+    let transport = McuMgrBleTransport(peripheral)
+    transport.smpCharacteristic = "14387802-130c-49e7-b877-2881c89cb258"
+    transport.targetDevice = .secondary  // Sets target bit in SMP header
     
-    // Send read command
-    let command = Data([0x02, fileId, 0x01]) // Read, ID, Type=Foot
-    try await writeCharacteristic(commandUUID, data: command)
-    
-    // Collect data chunks
-    var fileData = Data()
-    for await chunk in notificationStream(dataUUID) {
-        fileData.append(chunk)
-        if isComplete(chunk) { break }
-    }
-    
-    return fileData
+    // Standard file download - works transparently!
+    let fileManager = FileSystemManager(transporter: transport)
+    return try await fileManager.download(path)
 }
 ```
+
+#### List All Logs on Both Devices
+
+```kotlin
+// Android Kotlin
+suspend fun listAllLogs(): Map<String, List<String>> {
+    val logs = mutableMapOf<String, MutableList<String>>()
+    
+    // List primary device logs
+    transport.targetDevice = TARGET_PRIMARY
+    val primaryFiles = fileManager.list("/lfs1/hardware")
+    logs["primary"] = primaryFiles.filter { it.endsWith(".pb") }
+    
+    // List secondary device logs
+    transport.targetDevice = TARGET_SECONDARY
+    val secondaryFiles = fileManager.list("/lfs1/hardware")
+    logs["secondary"] = secondaryFiles.filter { it.endsWith(".pb") }
+    
+    return logs
+}
+```
+
+#### Delete Old Logs
+
+```python
+# Python with smpclient
+async def cleanup_old_logs(smp_client, days_to_keep=7):
+    """Delete logs older than specified days on both devices"""
+    
+    for target in [0, 1]:  # Primary and secondary
+        device = "primary" if target == 0 else "secondary"
+        
+        # List all log files
+        files = await smp_client.fs_list("/lfs1/hardware", target=target)
+        
+        for file in files:
+            if file['name'].endswith('.pb'):
+                # Check file age (simplified)
+                if file_is_old(file, days_to_keep):
+                    print(f"Deleting {file['name']} from {device}")
+                    await smp_client.fs_delete(file['name'], target=target)
+```
+
+### Performance Considerations
+
+| Aspect | Primary Device | Secondary Device |
+|--------|---------------|------------------|
+| Chunk Size | 512 bytes | 256 bytes (UART limited) |
+| Throughput | ~20 KB/s | ~5-10 KB/s |
+| Latency | ~50ms | ~100-200ms |
+| Reliability | Direct BLE | Depends on D2D stability |
+
+### Best Practices
+
+1. **Use Appropriate Chunk Sizes**: Smaller chunks for secondary device
+2. **Implement Progress Tracking**: Secondary downloads are slower
+3. **Handle Timeouts**: D2D communication may have delays
+4. **Verify D2D Connection**: Check before secondary operations
+5. **Cache File Lists**: Reduce repeated queries
 
 ---
 
@@ -828,22 +913,38 @@ message ActivitySessionEnd {
 ### Mobile App - Complete Log Download
 
 ```kotlin
-// Android Kotlin
-class LogDownloader(private val bleManager: BleManager) {
+// Android Kotlin using MCUmgr
+class LogDownloader(private val transport: McuMgrBleTransport) {
     
-    suspend fun downloadLatestFootLog(): FootSensorLog? {
-        // 1. Check available logs
+    init {
+        // Configure SMP proxy
+        transport.smpCharacteristic = "14387802-130c-49e7-b877-2881c89cb258"
+    }
+    
+    suspend fun downloadLatestFootLog(fromDevice: DeviceTarget): FootSensorLog? {
+        // 1. Set target device
+        transport.targetDevice = fromDevice
+        
+        // 2. Check available logs via BLE characteristic
         val logId = bleManager.readCharacteristic(FOOT_LOG_AVAILABLE_UUID)
         if (logId == 0) return null
         
-        // 2. Get file path
+        // 3. Get file path
         val path = bleManager.readCharacteristic(FOOT_LOG_PATH_UUID)
         
-        // 3. Download via SMP
-        val fileData = smpClient.downloadFile(path)
+        // 4. Download via SMP proxy
+        val fileManager = FileSystemManager(transport)
+        val fileData = fileManager.download(path)
         
-        // 4. Parse protobuf
+        // 5. Parse protobuf
         return FootSensorLogParser.parse(fileData)
+    }
+    
+    suspend fun downloadFromBothDevices(): Map<String, FootSensorLog?> {
+        return mapOf(
+            "primary" to downloadLatestFootLog(DeviceTarget.PRIMARY),
+            "secondary" to downloadLatestFootLog(DeviceTarget.SECONDARY)
+        )
     }
     
     suspend fun deleteLog(logId: UInt8) {

@@ -1,9 +1,22 @@
 # Bluetooth GATT Specification
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** June 2025  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
+
+---
+
+## Changelog
+
+### Version 2.1 (June 2025)
+- Added Connection Parameter Control characteristic (`...b68b`) to Control Service
+- Added secondary device delete commands (`...b688`, `...b689`, `...b68a`) to Control Service
+- Added detailed documentation for connection profiles (Foreground, Background, Background Idle)
+- Added mobile app integration examples for background execution optimization
+
+### Version 2.0 (June 2025)
+- Initial comprehensive specification
 
 ---
 
@@ -18,9 +31,10 @@
 7. [Proxy Services](#7-proxy-services)
 8. [Device-to-Device (D2D) Services](#8-device-to-device-d2d-services)
 9. [Data Structures](#9-data-structures)
-10. [Integration Examples](#10-integration-examples)
-11. [Error Handling and Status Communication](#11-error-handling-and-status-communication)
-12. [Common BLE Error Codes](#12-common-ble-error-codes)
+10. [Packet Sequencing and Recovery](#10-packet-sequencing-and-recovery)
+11. [Integration Examples](#11-integration-examples)
+12. [Error Handling and Status Communication](#12-error-handling-and-status-communication)
+13. [Common BLE Error Codes](#13-common-ble-error-codes)
 
 ---
 
@@ -208,7 +222,7 @@ float decode_acceleration(int16_t fixed) {
 | **Activity Log Available** | `...ec2` | Read, Notify | uint8_t | Latest log ID |
 | **Activity Log Path** | `...ec3` | Read, Notify | char[] | UTF-8 path |
 
-#### Secondary Device Characteristics (Primary Device Only)
+### Secondary Device Characteristics (Primary Device Only)
 
 These characteristics are only available on the primary device and relay information from the connected secondary device:
 
@@ -226,6 +240,8 @@ These characteristics are only available on the primary device and relay informa
 | Secondary BHI360 Log Path | `...ebf` | Read, Notify | char[] | Secondary BHI360 log path |
 | Secondary Activity Log Available | `...ec0` | Read, Notify | uint8_t | Secondary activity log ID |
 | Secondary Activity Log Path | `...ec1` | Read, Notify | char[] | Secondary activity log path |
+
+**Note:** Secondary device characteristics show "Not Connected" when the secondary device is not connected via D2D.
 
 ### Status Bitfield
 
@@ -260,6 +276,59 @@ These characteristics are only available on the primary device and relay informa
 | Start Activity | `...b684` | Write, Notify | uint8_t | Write 1 to start |
 | Stop Activity | `...b685` | Write, Notify | uint8_t | Write 1 to stop |
 | **Trigger BHI360 Calibration** | `...b686` | Write, Notify | uint8_t | Write 1 to trigger calibration |
+| **Connection Parameter Control** | `...b68b` | Read, Write | uint8_t | Connection profile (0=Foreground, 1=Background, 2=Background Idle) |
+| Delete Secondary Foot Log | `...b688` | Write, Notify | uint8_t | Log ID to delete on secondary |
+| Delete Secondary BHI360 Log | `...b689` | Write, Notify | uint8_t | Log ID to delete on secondary |
+| Delete Secondary Activity Log | `...b68a` | Write, Notify | uint8_t | Log ID to delete on secondary |
+
+### Connection Parameter Control
+
+The Connection Parameter Control characteristic allows mobile applications to optimize BLE connection parameters for different usage scenarios, particularly for background execution on iOS and Android.
+
+#### Connection Profiles
+
+| Profile | Value | Min Interval | Max Interval | Latency | Timeout | Use Case |
+|---------|-------|--------------|--------------|---------|---------|----------|
+| **FOREGROUND** | 0 | 15ms | 30ms | 0 | 4s | Active app, real-time data |
+| **BACKGROUND** | 1 | 50ms | 100ms | 4 | 6s | Background app, balanced |
+| **BACKGROUND_IDLE** | 2 | 200ms | 500ms | 10 | 10s | Idle background, max power saving |
+
+#### Usage Example
+
+```swift
+// iOS - Switch to background mode when app enters background
+func applicationDidEnterBackground() {
+    // Write 0x01 to Connection Parameter Control characteristic
+    let data = Data([0x01]) // BACKGROUND profile
+    peripheral.writeValue(data, for: connParamCharacteristic, type: .withResponse)
+}
+
+func applicationDidBecomeActive() {
+    // Write 0x00 to restore foreground parameters
+    let data = Data([0x00]) // FOREGROUND profile
+    peripheral.writeValue(data, for: connParamCharacteristic, type: .withResponse)
+}
+```
+
+#### Benefits
+
+1. **Extended Background Execution**: Reduces power consumption to stay within iOS/Android background limits
+2. **Adaptive Performance**: Automatically adjusts data rates based on connection profile
+3. **Battery Optimization**: Both phone and device save power during background operation
+4. **Seamless Transitions**: Quick switch between profiles without disconnection
+
+#### Implementation Notes
+
+- The device will request parameter updates from the phone after receiving a profile change
+- The phone may accept, reject, or modify the requested parameters
+- Actual parameters may differ from requested values based on phone capabilities
+- Changes typically take effect within 1-2 seconds
+
+### Secondary Device Commands
+
+The Control Service includes separate characteristics for deleting log files on the secondary device. These commands are only available on the primary device and forward the delete request to the connected secondary device via D2D communication.
+
+**Note**: The regular delete commands (`Delete Foot Log`, `Delete BHI360 Log`, `Delete Activity Log`) only affect the primary device's storage. To delete files on the secondary device, use the corresponding "Delete Secondary" characteristics.
 
 ### Command Flow
 
@@ -402,10 +471,10 @@ func handle3DOrientation(_ data: Data) {
 **Availability:** Primary device only  
 **Purpose:** Unified MCUmgr/SMP access to both primary and secondary devices
 
-| Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+| Characteristic | UUID | Properties | Data Type | Description |
+|----------------|------|------------|-----------|-------------|
 | Target Selection | `DA2E7829-FBCE-4E01-AE9E-261174997C48` | Read, Write | uint8_t | 0x00=Primary, 0x01=Secondary |
-| SMP Data | `DA2E7828-FBCE-4E01-AE9E-261174997C48` | Write, Notify | byte[] | Standard SMP frames |
+| SMP Data | `DA2E7828-FBCE-4E01-AE9E-261174997C48` | Write, Write Without Response, Notify | byte[] | Standard SMP frames |
 
 #### Benefits
 - Use standard MCUmgr libraries for both devices
@@ -500,6 +569,8 @@ typedef struct {
 | **D2D BHI360 Step Count** | `...68de` | Notify | bhi360_step_count_t | Steps |
 | **D2D BHI360 Linear Accel** | `...68df` | Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
 | D2D Current Time | `...68e0` | Notify | CTS struct | Time sync |
+| D2D Device Info | `...68e1` | Notify | device_info_msg_t | Device information |
+| D2D FOTA Progress | `...68e3` | Notify | fota_progress_t | FOTA update status |
 | D2D Activity Log Available | `...68e4` | Notify | uint8_t | Log ID |
 | D2D Activity Log Path | `...68e5` | Notify | char[] | File path |
 
@@ -540,7 +611,7 @@ graph TB
 ### Fixed-Point Structures
 
 ```c
-// BHI360 3D Mapping - 15 bytes
+// BHI360 3D Mapping - 15 bytes (file logging)
 typedef struct {
     int16_t quat_x;        // Quaternion X × 10000
     int16_t quat_y;        // Quaternion Y × 10000
@@ -552,7 +623,7 @@ typedef struct {
     uint8_t quat_accuracy; // Accuracy × 100 (0-300)
 } __packed bhi360_3d_mapping_fixed_t;
 
-// BHI360 Linear Acceleration - 6 bytes
+// BHI360 Linear Acceleration - 6 bytes (file logging)
 typedef struct {
     int16_t x;  // Acceleration X × 1000 (mm/s²)
     int16_t y;  // Acceleration Y × 1000 (mm/s²)
@@ -565,10 +636,43 @@ typedef struct {
     uint32_t activity_duration_s;
 } __packed bhi360_step_count_t;
 
-// Foot Sensor Samples - 16 bytes
+// Foot Sensor Samples - 16 bytes (file logging)
 typedef struct {
     uint16_t values[8];  // 8 ADC channels
 } __packed foot_samples_t;
+```
+
+### BLE Data Structures with Sequence Numbers
+
+For high-rate data streams, BLE transmission includes sequence numbers for packet loss detection:
+
+```c
+// Foot sensor data with sequence - 17 bytes (BLE only)
+typedef struct {
+    uint8_t seq_num;                           // Rolling sequence (0-255)
+    uint16_t values[NUM_FOOT_SENSOR_CHANNELS]; // 8 channels
+} __packed foot_samples_ble_t;
+
+// BHI360 3D mapping with sequence - 16 bytes (BLE only)
+typedef struct {
+    uint8_t seq_num;       // Rolling sequence (0-255)
+    int16_t quat_x;        // Quaternion X × 10000
+    int16_t quat_y;        // Quaternion Y × 10000
+    int16_t quat_z;        // Quaternion Z × 10000
+    int16_t quat_w;        // Quaternion W × 10000
+    int16_t gyro_x;        // Gyroscope X × 10000
+    int16_t gyro_y;        // Gyroscope Y × 10000
+    int16_t gyro_z;        // Gyroscope Z × 10000
+    uint8_t quat_accuracy; // Accuracy × 100
+} __packed bhi360_3d_mapping_ble_t;
+
+// BHI360 linear acceleration with sequence - 7 bytes (BLE only)
+typedef struct {
+    uint8_t seq_num;  // Rolling sequence (0-255)
+    int16_t x;        // Acceleration X × 1000
+    int16_t y;        // Acceleration Y × 1000
+    int16_t z;        // Acceleration Z × 1000
+} __packed bhi360_linear_accel_ble_t;
 
 // FOTA Progress - 15 bytes
 typedef struct {
@@ -589,7 +693,81 @@ typedef struct {
 
 ---
 
-## 10. Integration Examples
+## 10. Packet Sequencing and Recovery
+
+### Overview
+
+High-rate sensor data includes sequence numbers for packet loss detection and limited recovery. This mechanism is used ONLY for BLE transmission, not for file logging.
+
+### Affected Data Types
+
+| Data Type | Update Rate | Sequence Number | Recovery Buffer |
+|-----------|-------------|-----------------|-----------------|
+| Foot Sensor Samples | 20Hz | Yes (8-bit) | 10 packets (~500ms) |
+| BHI360 3D Mapping | 50Hz | Yes (8-bit) | 10 packets (~200ms) |
+| BHI360 Linear Accel | 50Hz | Yes (8-bit) | 10 packets (~200ms) |
+| BHI360 Step Count | 5Hz | No | N/A |
+| Other characteristics | Variable | No | N/A |
+
+### Sequence Number Rules
+
+1. **Range**: 0-255 (8-bit rolling counter)
+2. **Initialization**: Starts at 0 on device boot
+3. **Increment**: +1 for each packet sent
+4. **Rollover**: After 255, next is 0
+5. **Independent**: Each data type has its own sequence counter
+
+### Packet Loss Detection
+
+```swift
+// iOS Example
+func detectPacketLoss(lastSeq: UInt8, currentSeq: UInt8) -> UInt8 {
+    if currentSeq >= lastSeq {
+        return currentSeq - lastSeq - 1
+    } else {
+        // Handle rollover
+        return (255 - lastSeq) + currentSeq
+    }
+}
+```
+
+### Recovery Mechanism
+
+When packet loss is detected, the mobile app can request retransmission of recent packets:
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Device
+    
+    App->>Device: Data packet (seq=10)
+    Note over App: Missing seq 11-14
+    App->>Device: Data packet (seq=15)
+    App->>App: Detect gap
+    App->>Device: Recovery Request<br/>(start=11, end=14)
+    Device->>App: Recovery Response<br/>(4 packets)
+    Device->>App: Retransmit seq 11-14
+```
+
+### Recovery Limitations
+
+- **Buffer Size**: Only last 10 packets are kept
+- **Time Window**: ~500ms for 20Hz data, ~200ms for 50Hz data
+- **Best Effort**: Not all requested packets may be available
+- **Rate Limited**: Max 1 recovery request per second
+
+### Implementation Notes
+
+1. **First Packet**: Apps should ignore sequence check on first packet after connection
+2. **Large Gaps**: If gap > 10 packets, accept the loss and continue
+3. **Statistics**: Track packet loss rate for connection quality monitoring
+4. **Graceful Degradation**: System continues to function with packet loss
+
+For detailed implementation, see [BLE Packet Sequencing and Recovery](BLE_Packet_Sequencing_Recovery.md).
+
+---
+
+## 11. Integration Examples
 
 ### iOS Swift - BLE Characteristic Handler
 
@@ -711,7 +889,7 @@ asyncio.run(update_secondary_device("XX:XX:XX:XX:XX:XX", firmware_data))
 
 ---
 
-## 11. Error Handling and Status Communication
+## 12. Error Handling and Status Communication
 
 ### Status Characteristic Details
 
@@ -863,7 +1041,7 @@ fun parseDeviceStatus(statusValue: Int): List<String> {
    - Temporary file system errors
    - Queue full (usually transient)
 
-## 12. Common BLE Error Codes
+## 13. Common BLE Error Codes
 
 | Error | Code | Description | Solution |
 |-------|------|-------------|----------|
