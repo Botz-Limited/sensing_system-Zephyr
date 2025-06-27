@@ -68,7 +68,7 @@ static bool bhi360_data2_subscribed = false;
 static bool bhi360_data3_subscribed = false;
 
 // FOTA progress tracking
-static fota_progress_msg_t fota_progress_value = {0, 0, 0, 0, 0};
+static fota_progress_msg_t fota_progress_value = {false, 0, 0, 0, 0, 0};
 static bool fota_progress_subscribed = false;
 
 // Activity log tracking (primary device)
@@ -79,7 +79,7 @@ static bool activity_log_path_subscribed = false;
 
 // Secondary FOTA progress tracking (primary device only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-static fota_progress_msg_t secondary_fota_progress_value = {0, 0, 0, 0, 0};
+static fota_progress_msg_t secondary_fota_progress_value = {false, 0, 0, 0, 0, 0};
 static bool secondary_fota_progress_subscribed = false;
 
 // Secondary file management
@@ -108,6 +108,14 @@ static char secondary_hw_rev[16] = "Not Connected";
 static char secondary_fw_rev[16] = "Not Connected";
 #endif
 
+// Total step count (aggregated from both feet)
+static bhi360_step_count_fixed_t total_step_count_value = {0, 0};
+static bool total_step_count_subscribed = false;
+
+// Activity step count (steps during current activity)
+static bhi360_step_count_fixed_t activity_step_count_value = {0, 0};
+static bool activity_step_count_subscribed = false;
+
 // --- Global variables for Current Time Service Notifications ---
 static struct bt_conn *current_time_conn_active = NULL; // Stores the connection object for notifications
 static bool current_time_notifications_enabled = false; // Flag to track CCC state
@@ -127,6 +135,16 @@ extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
 static ssize_t jis_bhi360_data3_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t* data);
+
+// Total step count characteristic
+static ssize_t jis_total_step_count_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_total_step_count_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration);
+
+// Activity step count characteristic
+static ssize_t jis_activity_step_count_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_activity_step_count_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_activity_step_count_notify(uint32_t activity_steps);
 
 //Current Time Characteristic
 static ssize_t jis_read_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -255,6 +273,14 @@ static struct bt_uuid_128 activity_log_available_uuid =
 static struct bt_uuid_128 activity_log_path_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec3, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
+// Total Step Count UUID (aggregated from both feet)
+static struct bt_uuid_128 total_step_count_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec4, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// Activity Step Count UUID (steps during current activity)
+static struct bt_uuid_128 activity_step_count_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec5, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
 // Secondary Device Information UUIDs
 static struct bt_uuid_128 secondary_manufacturer_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb6, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
@@ -361,6 +387,8 @@ BT_GATT_SERVICE_DEFINE(
         static_cast<void *>(&bhi360_data1_value_fixed)),
     BT_GATT_CCC(jis_bhi360_data1_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
+    // Individual foot step count characteristic - DEPRECATED
+    // Only aggregated step counts (total and activity) should be used by mobile apps
     BT_GATT_CHARACTERISTIC(&bhi360_data2_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
         BT_GATT_PERM_READ_ENCRYPT,
@@ -374,6 +402,22 @@ BT_GATT_SERVICE_DEFINE(
         jis_bhi360_data3_read, nullptr,
         static_cast<void *>(&bhi360_data3_value_fixed)),
     BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Total Step Count Characteristic (aggregated from both feet)
+    BT_GATT_CHARACTERISTIC(&total_step_count_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_total_step_count_read, nullptr,
+        static_cast<void *>(&total_step_count_value)),
+    BT_GATT_CCC(jis_total_step_count_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Activity Step Count Characteristic (steps during current activity)
+    BT_GATT_CHARACTERISTIC(&activity_step_count_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_activity_step_count_read, nullptr,
+        static_cast<void *>(&activity_step_count_value)),
+    BT_GATT_CCC(jis_activity_step_count_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // FOTA Progress Characteristic
     BT_GATT_CHARACTERISTIC(&fota_progress_uuid.uuid,
@@ -524,6 +568,37 @@ extern "C" void set_device_status(uint32_t new_status)
         }
         previous_device_status_bitfield = device_status_bitfield;
         init_status_bt_update = true;
+    }
+}
+
+// --- Activity Step Count Handlers ---
+static void jis_activity_step_count_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_activity_step_count_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    activity_step_count_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Activity Step Count CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_activity_step_count_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_step_count_fixed_t));
+}
+
+extern "C" void jis_activity_step_count_notify(uint32_t activity_steps)
+{
+    // Update the activity step count value
+    activity_step_count_value.step_count = activity_steps;
+    activity_step_count_value.activity_duration_s = 0;  // Deprecated - always 0
+    
+    LOG_DBG("Activity Step Count: steps=%u", activity_steps);
+    
+    if (activity_step_count_subscribed) {
+        safe_gatt_notify(&activity_step_count_uuid.uuid,
+                        static_cast<const void *>(&activity_step_count_value), 
+                        sizeof(activity_step_count_value));
     }
 }
 
@@ -1209,13 +1284,37 @@ extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t *data)
 {
     // Step count data is already integers, just copy
     bhi360_data2_value_fixed.step_count = data->step_count;
-    bhi360_data2_value_fixed.activity_duration_s = data->activity_duration_s;
+    bhi360_data2_value_fixed.activity_duration_s = 0;  // Deprecated - always 0
     
     if (bhi360_data2_subscribed) {
         safe_gatt_notify(&bhi360_data2_uuid.uuid,
                         static_cast<const void *>(&bhi360_data2_value_fixed), 
                         sizeof(bhi360_data2_value_fixed));
     }
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Also update secondary step count for aggregation
+    // This function is called from d2d_data_handler when secondary data arrives
+    // We need to tell the bluetooth module about the secondary update
+    static uint32_t last_secondary_steps = 0;
+    static uint32_t last_secondary_duration = 0;
+    
+    // Check if this is likely secondary data (different from last known secondary)
+    // This is a bit of a hack - ideally we'd have a separate function for secondary
+    if (data->step_count != last_secondary_steps || data->activity_duration_s != last_secondary_duration) {
+        // Send a message to bluetooth module with secondary step count
+        generic_message_t msg = {};
+        msg.sender = SENDER_D2D_SECONDARY;  // Indicate it's from D2D
+        msg.type = MSG_TYPE_BHI360_STEP_COUNT;
+        msg.data.bhi360_step_count = *data;
+        
+        if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) == 0) {
+            last_secondary_steps = data->step_count;
+            last_secondary_duration = data->activity_duration_s;
+            LOG_DBG("Sent secondary step count to bluetooth module for aggregation");
+        }
+    }
+#endif
 }
 // --- BHI360 Data Set 3 ---
 static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
@@ -1610,4 +1709,35 @@ void jis_secondary_activity_log_path_notify(const char *path)
     }
 }
 #endif
+
+// --- Total Step Count Handlers ---
+static void jis_total_step_count_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_total_step_count_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    total_step_count_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Total Step Count CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_total_step_count_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_step_count_fixed_t));
+}
+
+extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration)
+{
+    // Update the total step count value
+    total_step_count_value.step_count = total_steps;
+    total_step_count_value.activity_duration_s = 0;  // Deprecated - always 0
+    
+    LOG_DBG("Total Step Count: steps=%u", total_steps);
+    
+    if (total_step_count_subscribed) {
+        safe_gatt_notify(&total_step_count_uuid.uuid,
+                        static_cast<const void *>(&total_step_count_value), 
+                        sizeof(total_step_count_value));
+    }
+}
 

@@ -45,6 +45,10 @@ void jis_bhi360_step_count_notify(uint32_t step_count);
 // FOTA progress notify function
 void jis_fota_progress_notify(const fota_progress_msg_t* progress);
 
+// Step count notify functions
+extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration);
+extern "C" void jis_activity_step_count_notify(uint32_t activity_steps);
+
 // BLE format notification functions (with sequence numbers)
 void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data);
 void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t *data);

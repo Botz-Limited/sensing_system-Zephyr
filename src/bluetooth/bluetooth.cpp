@@ -65,6 +65,10 @@
 #include "ble_conn_params.hpp"
 #endif
 
+// External function declarations
+extern "C" void jis_activity_step_count_notify(uint32_t activity_steps);
+extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration);
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
 // Constants
@@ -95,7 +99,7 @@ static bool pairing_failed_for_pending = false;
 
 // Function to send device info from secondary to primary
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-static void send_device_info_to_primary(void)
+void send_device_info_to_primary(void)
 {
     generic_message_t msg;
     msg.sender = SENDER_BTH;
@@ -1116,7 +1120,15 @@ err_t bt_module_init(void)
     static struct bt_conn_cb d2d_conn_callbacks = {
         .connected = d2d_connected,
         .disconnected = d2d_disconnected,
+        .recycled = NULL,
+        .le_param_req = NULL,
+        .le_param_updated = NULL,
+#if defined(CONFIG_BT_SMP)
+        .identity_resolved = NULL,
+#endif
+#if defined(CONFIG_BT_SMP) || defined(CONFIG_BT_CLASSIC)
         .security_changed = NULL,
+#endif
         ._node = {}
     };
 
@@ -1231,6 +1243,14 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
     init_rtc_time();
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Static variables for step count aggregation
+    static uint32_t primary_step_count = 0;
+    static uint32_t secondary_step_count = 0;
+    static uint32_t primary_activity_steps = 0;
+    static uint32_t secondary_activity_steps = 0;
+#endif
+
     while (true)
     {
         // Wait indefinitely for a message to appear in the queue.
@@ -1287,13 +1307,68 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_BHI360_STEP_COUNT: {
                     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
-                    LOG_INF("Received BHI360 Step Count from %s: Steps=%u, ActivityDuration=%u s",
-                            get_sender_name(msg.sender), step_data->step_count, step_data->activity_duration_s);
+                    
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                    jis_bhi360_data2_notify(step_data);
+                    // Check if this is activity step count (from SENDER_MOTION_SENSOR)
+                    if (msg.sender == SENDER_MOTION_SENSOR) {
+                        // This is activity step count from primary
+                        primary_activity_steps = step_data->step_count;
+                        
+                        // Calculate total activity steps
+                        uint32_t total_activity_steps = primary_activity_steps + secondary_activity_steps;
+                        LOG_INF("Activity Step Count - Primary=%u, Secondary=%u, Total=%u", 
+                                primary_activity_steps, secondary_activity_steps, total_activity_steps);
+                        
+                        jis_activity_step_count_notify(total_activity_steps);
+                        break;
+                    }
+                    
+                    LOG_INF("Received BHI360 Step Count from %s: Steps=%u",
+                            get_sender_name(msg.sender), step_data->step_count);
+                    
+                    // Update step counts based on sender
+                    if (msg.sender == SENDER_BHI360_THREAD) {
+                        // Primary global step count from motion sensor
+                        primary_step_count = step_data->step_count;
+                    } else if (msg.sender == SENDER_D2D_SECONDARY) {
+                        // Secondary global step count from D2D
+                        secondary_step_count = step_data->step_count;
+                    }
+                    
+                    // Don't notify individual step counts anymore - only aggregated counts
+                    // jis_bhi360_data2_notify(step_data);
+                    
+                    // Calculate and notify total global steps
+                    uint32_t total_steps = primary_step_count + secondary_step_count;
+                    
+                    LOG_DBG("Global step aggregation: Primary=%u, Secondary=%u, Total=%u", 
+                            primary_step_count, secondary_step_count, total_steps);
+                    
+                    jis_total_step_count_notify(total_steps, 0);  // Duration always 0
 #else
+                    LOG_INF("Secondary device sending step count: %u", step_data->step_count);
                     // Secondary device: Send to primary via D2D
                     ble_d2d_tx_send_bhi360_data2(step_data);
+#endif
+                    break;
+                }
+
+                case MSG_TYPE_ACTIVITY_STEP_COUNT: {
+                    // This is specifically for activity step counts
+                    bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
+                    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    if (msg.sender == SENDER_D2D_SECONDARY) {
+                        // Activity step count from secondary
+                        secondary_activity_steps = step_data->step_count;
+                        
+                        // Calculate total activity steps
+                        uint32_t total_activity_steps = primary_activity_steps + secondary_activity_steps;
+                        LOG_INF("Secondary Activity Step Count Update - Secondary=%u, Total=%u", 
+                                secondary_activity_steps, total_activity_steps);
+                        
+                        jis_activity_step_count_notify(total_activity_steps);
+                    }
 #endif
                     break;
                 }
@@ -1334,6 +1409,16 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // If you send commands via char arrays in the union
                     char *command_str = msg.data.command_str;
                     LOG_INF("Received Command from %s: '%s'", get_sender_name(msg.sender), command_str);
+                    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    if (strcmp(command_str, "RESET_ACTIVITY_STEPS") == 0) {
+                        // Reset activity step counts
+                        primary_activity_steps = 0;
+                        secondary_activity_steps = 0;
+                        jis_activity_step_count_notify(0);  // Notify 0 activity steps
+                        LOG_INF("Activity step counts reset to 0");
+                    }
+#endif
                     break;
                 }
 
@@ -1419,17 +1504,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     break;
                 }
 
-                case MSG_TYPE_ACTIVITY_STEP_COUNT: {
-                    // Handle activity step count data
-                    activity_step_count_t *step_count = &msg.data.activity_step_count;
-                    LOG_INF("Received ACTIVITY STEP COUNT from %s: left=%u, right=%u", get_sender_name(msg.sender),
-                            step_count->left_step_count, step_count->right_step_count);
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                    // TODO: Add notification for activity step count if needed
-#endif
-                    break;
-                }
-
+                
                 case MSG_TYPE_DEVICE_INFO: {
                     // Handle device information
                     device_info_msg_t *dev_info = &msg.data.device_info;

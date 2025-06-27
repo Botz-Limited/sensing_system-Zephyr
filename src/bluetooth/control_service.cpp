@@ -39,12 +39,32 @@
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_tx.hpp"
+#include "ble_d2d_tx_queue.hpp"
 #endif
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // Constants
 #define VND_MAX_LEN 128  // Maximum length for vendor characteristic data
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+// Helper macro to forward D2D commands with automatic queuing if not ready
+#define FORWARD_D2D_COMMAND(func, cmd_type, value, desc) \
+    do { \
+        int err = func(value); \
+        if (err == -EINVAL && !ble_d2d_tx_is_ready()) { \
+            LOG_INF("D2D TX not ready, queuing " desc); \
+            err = ble_d2d_tx_queue_command(cmd_type, &value); \
+            if (err) { \
+                LOG_ERR("Failed to queue " desc ": %d", err); \
+            } \
+        } else if (err) { \
+            LOG_ERR("Failed to forward " desc " to secondary: %d", err); \
+        } else { \
+            LOG_INF("Successfully forwarded " desc " to secondary"); \
+        } \
+    } while (0)
+#endif
 
 // External function declarations
 extern "C" void set_current_time_from_epoch(uint32_t new_epoch_time_s);
@@ -421,13 +441,9 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
     
     #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Forward the command to secondary device
-    LOG_INF("Forwarding start activity command to secondary device");
-    int err = ble_d2d_tx_send_start_activity_command(value);
-    if (err) {
-    LOG_ERR("Failed to forward start activity command to secondary: %d", err);
-    } else {
-    LOG_INF("Successfully forwarded start activity command to secondary");
-    }
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command, 
+                        D2D_TX_CMD_START_ACTIVITY, value, 
+                        "start activity command");
     #endif
     
     LOG_INF("Submitted start activity events for foot sensor and motion sensor (input=1).");
@@ -510,13 +526,9 @@ static ssize_t write_delete_secondary_foot_log_command_vnd(struct bt_conn *conn,
     memcpy(&id_to_delete, buf, sizeof(uint8_t));
 
     // Only forward to secondary device
-    int err = ble_d2d_tx_send_delete_foot_log_command(id_to_delete);
-    if (err) {
-        LOG_ERR("Failed to forward delete foot log command to secondary: %d", err);
-        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-    }
-
-    LOG_INF("Forwarded delete secondary foot log command for ID %u", id_to_delete);
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_delete_foot_log_command,
+                        D2D_TX_CMD_DELETE_FOOT_LOG, id_to_delete,
+                        "delete foot log command");
     return len;
 }
 
@@ -549,13 +561,9 @@ static ssize_t write_delete_secondary_bhi360_log_command_vnd(struct bt_conn *con
     memcpy(&id_to_delete, buf, sizeof(uint8_t));
 
     // Only forward to secondary device
-    int err = ble_d2d_tx_send_delete_bhi360_log_command(id_to_delete);
-    if (err) {
-        LOG_ERR("Failed to forward delete BHI360 log command to secondary: %d", err);
-        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-    }
-
-    LOG_INF("Forwarded delete secondary BHI360 log command for ID %u", id_to_delete);
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_delete_bhi360_log_command,
+                        D2D_TX_CMD_DELETE_BHI360_LOG, id_to_delete,
+                        "delete BHI360 log command");
     return len;
 }
 
@@ -588,13 +596,9 @@ static ssize_t write_delete_secondary_activity_log_command_vnd(struct bt_conn *c
     memcpy(&id_to_delete, buf, sizeof(uint8_t));
 
     // Only forward to secondary device
-    int err = ble_d2d_tx_send_delete_activity_log_command(id_to_delete);
-    if (err) {
-        LOG_ERR("Failed to forward delete activity log command to secondary: %d", err);
-        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-    }
-
-    LOG_INF("Forwarded delete secondary activity log command for ID %u", id_to_delete);
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_delete_activity_log_command,
+                        D2D_TX_CMD_DELETE_ACTIVITY_LOG, id_to_delete,
+                        "delete activity log command");
     return len;
 }
 
@@ -688,7 +692,9 @@ static ssize_t write_trigger_bhi360_calibration_vnd(struct bt_conn *conn, const 
 
         #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Forward the command to secondary device
-        ble_d2d_tx_send_trigger_bhi360_calibration_command(value);
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_trigger_bhi360_calibration_command,
+                            D2D_TX_CMD_TRIGGER_CALIBRATION, value,
+                            "trigger calibration command");
         #endif
 
         LOG_INF("Triggered BHI360 calibration (input=1).");
@@ -742,7 +748,9 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn, const struc
 
         #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Forward the command to secondary device
-        ble_d2d_tx_send_stop_activity_command(value);
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
+                            D2D_TX_CMD_STOP_ACTIVITY, value,
+                            "stop activity command");
         #endif
 
         LOG_INF("Submitted stop activity events for foot sensor and motion sensor (input=1).");
@@ -795,7 +803,19 @@ static ssize_t write_set_time_control_vnd(struct bt_conn *conn,
 
   #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
   // Forward the command to secondary device
-  ble_d2d_tx_send_set_time_command(temp_value);
+  int err = ble_d2d_tx_send_set_time_command(temp_value);
+  if (err == -EINVAL && !ble_d2d_tx_is_ready()) {
+      // D2D TX not ready yet, queue the command
+      LOG_INF("D2D TX not ready, queuing set time command");
+      err = ble_d2d_tx_queue_command(D2D_TX_CMD_SET_TIME, &temp_value);
+      if (err) {
+          LOG_ERR("Failed to queue set time command: %d", err);
+      }
+  } else if (err) {
+      LOG_ERR("Failed to forward set time command to secondary: %d", err);
+  } else {
+      LOG_INF("Successfully forwarded set time command to secondary");
+  }
   #endif
 
   return len;

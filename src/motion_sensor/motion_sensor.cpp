@@ -18,6 +18,7 @@
 #include <cstdio>
 
 #include <app.hpp>
+#include <app_version.h>
 #include <app_event_manager.h>
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
@@ -63,6 +64,12 @@ static const struct device *const bhi360_dev = DEVICE_DT_GET(BHI360_NODE);
 // Use atomic for thread-safe access to logging state
 static atomic_t logging_active = ATOMIC_INIT(0);
 static float configured_sample_rate = 50.0f;
+
+// Step count tracking variables (file scope for access across functions)
+static uint32_t latest_step_count = 0;  // Global step count from sensor
+static uint32_t activity_start_step_count = 0;  // Step count when activity started
+static uint32_t latest_activity_step_count = 0;  // Steps during current activity
+static bool activity_logging_active = false;
 
 // Sensor IDs for BHI360 virtual sensors
 static constexpr uint8_t QUAT_SENSOR_ID = BHY2_SENSOR_ID_RV;
@@ -358,7 +365,6 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
     static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0, latest_quat_w = 0, latest_quat_accuracy = 0;
     static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;
     static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
-    static uint32_t latest_step_count = 0;
     static uint64_t latest_timestamp = 0;
 
     // Synchronization tracking
@@ -446,6 +452,28 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             }
             latest_step_count = (callback_info->data_ptr[0]) | (callback_info->data_ptr[1] << 8) |
                                 (callback_info->data_ptr[2] << 16) | (callback_info->data_ptr[3] << 24);
+            
+            // Calculate activity step count if activity is active
+            if (activity_logging_active) {
+                latest_activity_step_count = latest_step_count - activity_start_step_count;
+                
+                // Send activity step count update to bluetooth (only during logging)
+                if (atomic_get(&logging_active) == 1) {
+                    generic_message_t activity_step_msg{};
+                    activity_step_msg.sender = SENDER_MOTION_SENSOR;  // Different sender to indicate activity steps
+                    activity_step_msg.type = MSG_TYPE_BHI360_STEP_COUNT;  // Reuse same message type
+                    activity_step_msg.data.bhi360_step_count.step_count = latest_activity_step_count;
+                    activity_step_msg.data.bhi360_step_count.activity_duration_s = 0;
+                    
+                    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    k_msgq_put(&bluetooth_msgq, &activity_step_msg, K_NO_WAIT);
+                    #else
+                    // Secondary device: Send activity steps to primary via D2D using dedicated function
+                    ble_d2d_tx_send_activity_step_count(&activity_step_msg.data.bhi360_step_count);
+                    #endif
+                }
+            }
+            
             // Step counter updates independently, don't wait for it
             // It will be included with whatever value it has when motion sensors sync
             break;
@@ -540,12 +568,12 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             ble_d2d_tx_send_bhi360_data3(&lmsg.data.bhi360_linear_accel);
 #endif
 
-            // Step count
+            // Step count (global count, no duration)
             generic_message_t smsg{};
             smsg.sender = SENDER_BHI360_THREAD;
             smsg.type = MSG_TYPE_BHI360_STEP_COUNT;
             smsg.data.bhi360_step_count.step_count = latest_step_count;
-            smsg.data.bhi360_step_count.activity_duration_s = 0; // Fill if available
+            smsg.data.bhi360_step_count.activity_duration_s = 0;  // Deprecated - always 0
             #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
 #else
@@ -557,14 +585,13 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             generic_message_t activity_msg{};
             activity_msg.sender = SENDER_MOTION_SENSOR;
             activity_msg.type = MSG_TYPE_ACTIVITY_STEP_COUNT;
-            // For now, we'll put all steps on the left foot (primary device)
-            // In the future, this could be split based on device role
+            // Send activity-specific step count (not global count)
             #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-            activity_msg.data.activity_step_count.left_step_count = latest_step_count;
+            activity_msg.data.activity_step_count.left_step_count = latest_activity_step_count;
             activity_msg.data.activity_step_count.right_step_count = 0;
             #else
             activity_msg.data.activity_step_count.left_step_count = 0;
-            activity_msg.data.activity_step_count.right_step_count = latest_step_count;
+            activity_msg.data.activity_step_count.right_step_count = latest_activity_step_count;
             #endif
             k_msgq_put(&data_msgq, &activity_msg, K_NO_WAIT);
         }
@@ -895,6 +922,21 @@ static bool app_event_handler(const struct app_event_header *aeh)
         // Trigger the same logic as auto-start logging for BHI360
         if (atomic_get(&logging_active) == 0)
         {
+            // Mark activity as started and capture current step count
+            activity_logging_active = true;
+            activity_start_step_count = latest_step_count;
+            latest_activity_step_count = 0;
+            LOG_INF("Activity started - capturing baseline step count: %u", activity_start_step_count);
+            
+            // Notify bluetooth to reset activity step count
+            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            generic_message_t reset_msg{};
+            reset_msg.sender = SENDER_MOTION_SENSOR;
+            reset_msg.type = MSG_TYPE_COMMAND;
+            strncpy(reset_msg.data.command_str, "RESET_ACTIVITY_STEPS", sizeof(reset_msg.data.command_str) - 1);
+            reset_msg.data.command_str[sizeof(reset_msg.data.command_str) - 1] = '\0';
+            k_msgq_put(&bluetooth_msgq, &reset_msg, K_NO_WAIT);
+            #endif
             generic_message_t cmd_msg = {};
             cmd_msg.sender = SENDER_BHI360_THREAD;
             cmd_msg.type = MSG_TYPE_COMMAND;
@@ -902,7 +944,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
             cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
             // Use the actual BHI360 sample rate here
             cmd_msg.sampling_frequency = configured_sample_rate;
-            strncpy(cmd_msg.fw_version, CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION, sizeof(cmd_msg.fw_version) - 1);
+            strncpy(cmd_msg.fw_version, APP_VERSION_STRING, sizeof(cmd_msg.fw_version) - 1);
             cmd_msg.fw_version[sizeof(cmd_msg.fw_version) - 1] = '\0';
 
             LOG_INF("Motion sensor sending start command: '%s', type: %d", cmd_msg.data.command_str, cmd_msg.type);
@@ -922,7 +964,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
             activity_cmd_msg.sender = SENDER_MOTION_SENSOR;
             activity_cmd_msg.type = MSG_TYPE_COMMAND;
             activity_cmd_msg.sampling_frequency = configured_sample_rate;
-            strncpy(activity_cmd_msg.fw_version, CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION, sizeof(activity_cmd_msg.fw_version) - 1);
+            strncpy(activity_cmd_msg.fw_version, APP_VERSION_STRING, sizeof(activity_cmd_msg.fw_version) - 1);
             activity_cmd_msg.fw_version[sizeof(activity_cmd_msg.fw_version) - 1] = '\0';
             strncpy(activity_cmd_msg.data.command_str, "START_LOGGING_ACTIVITY", sizeof(activity_cmd_msg.data.command_str) - 1);
             activity_cmd_msg.data.command_str[sizeof(activity_cmd_msg.data.command_str) - 1] = '\0';
@@ -944,6 +986,9 @@ static bool app_event_handler(const struct app_event_header *aeh)
         LOG_INF("Received motion_sensor_stop_activity_event");
         if (atomic_get(&logging_active) == 1)
         {
+            // Mark activity as stopped
+            activity_logging_active = false;
+            LOG_INF("Activity stopped - total activity steps: %u", latest_activity_step_count);
             generic_message_t cmd_msg = {};
             cmd_msg.sender = SENDER_BHI360_THREAD;
             cmd_msg.type = MSG_TYPE_COMMAND;
@@ -981,6 +1026,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     }
     return false;
 }
+
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, module_state_event);

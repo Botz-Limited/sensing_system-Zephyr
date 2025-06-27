@@ -9,6 +9,10 @@
 #include "ble_d2d_tx_service.hpp"
 #endif
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "ble_d2d_tx_queue.hpp"
+#endif
+
 LOG_MODULE_REGISTER(ble_d2d_tx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 /*
@@ -70,6 +74,8 @@ static struct bt_uuid_128 d2d_rx_trigger_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca87, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 static struct bt_uuid_128 d2d_rx_delete_activity_log_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca88, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_request_device_info_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
 // Discovered characteristic handles
 struct d2d_discovered_handles {
@@ -81,6 +87,7 @@ struct d2d_discovered_handles {
     uint16_t stop_activity_handle;
     uint16_t fota_status_handle;
     uint16_t trigger_calibration_handle;
+    uint16_t request_device_info_handle;
     bool discovery_complete;
 };
 
@@ -93,6 +100,7 @@ static struct d2d_discovered_handles d2d_handles = {
     .stop_activity_handle = 0,
     .fota_status_handle = 0,
     .trigger_calibration_handle = 0,
+    .request_device_info_handle = 0,
     .discovery_complete = false
 };
 
@@ -117,6 +125,7 @@ enum discover_state {
     DISCOVER_STOP_ACTIVITY_CHAR,
     DISCOVER_FOTA_STATUS_CHAR,
     DISCOVER_TRIGGER_CALIBRATION_CHAR,
+    DISCOVER_REQUEST_DEVICE_INFO_CHAR,
     DISCOVER_COMPLETE
 };
 
@@ -208,9 +217,38 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
         if (bt_uuid_cmp(params->uuid, &d2d_rx_trigger_calibration_uuid.uuid) == 0) {
             d2d_handles.trigger_calibration_handle = bt_gatt_attr_value_handle(attr);
             LOG_INF("Found trigger calibration characteristic, handle: %u", d2d_handles.trigger_calibration_handle);
+            discovery_state = DISCOVER_REQUEST_DEVICE_INFO_CHAR;
+        }
+        break;
+
+    case DISCOVER_REQUEST_DEVICE_INFO_CHAR:
+        if (bt_uuid_cmp(params->uuid, &d2d_rx_request_device_info_uuid.uuid) == 0) {
+            d2d_handles.request_device_info_handle = bt_gatt_attr_value_handle(attr);
+            LOG_INF("Found request device info characteristic, handle: %u", d2d_handles.request_device_info_handle);
             discovery_state = DISCOVER_COMPLETE;
             d2d_handles.discovery_complete = true;
             LOG_INF("D2D service discovery complete!");
+            
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            // Process any queued commands
+            ble_d2d_tx_process_queued_commands();
+#endif
+            
+            // Request device info immediately after discovery
+            if (d2d_handles.request_device_info_handle != 0) {
+                k_sleep(K_MSEC(50)); // Small delay to ensure secondary is ready
+                uint8_t value = 1;
+                int err = bt_gatt_write_without_response(d2d_conn, 
+                                                        d2d_handles.request_device_info_handle,
+                                                        &value, 
+                                                        sizeof(value), 
+                                                        false);
+                if (err) {
+                    LOG_ERR("Failed to request device info: %d", err);
+                } else {
+                    LOG_INF("Requested device info from secondary (after D2D TX discovery)");
+                }
+            }
         }
         break;
 
@@ -284,6 +322,9 @@ static void continue_discovery(void)
     case DISCOVER_TRIGGER_CALIBRATION_CHAR:
         discover_params.uuid = &d2d_rx_trigger_calibration_uuid.uuid;
         break;
+    case DISCOVER_REQUEST_DEVICE_INFO_CHAR:
+        discover_params.uuid = &d2d_rx_request_device_info_uuid.uuid;
+        break;
     default:
         LOG_INF("Discovery sequence complete");
         return;
@@ -303,6 +344,9 @@ void ble_d2d_tx_init(void) {
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Initialize the GATT service for secondary device
     d2d_tx_service_init();
+#else
+    // Initialize the command queue for primary device
+    ble_d2d_tx_queue_init();
 #endif
 }
 
@@ -465,6 +509,18 @@ int ble_d2d_tx_send_bhi360_data2(const bhi360_step_count_t *data) {
     
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     return d2d_tx_notify_bhi360_data2(data);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_activity_step_count(const bhi360_step_count_t *data) {
+    if (!d2d_conn) return -ENOTCONN;
+    
+    LOG_DBG("D2D TX: Sending activity step count data");
+    
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_activity_step_count(data);
 #else
     return -EINVAL;
 #endif
@@ -693,6 +749,40 @@ int ble_d2d_tx_send_fota_progress(const fota_progress_msg_t *progress) {
 #else
     // Primary device shouldn't send FOTA progress via D2D
     LOG_WRN("Primary device shouldn't send FOTA progress via D2D");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_request_device_info(void) {
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn) {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+    
+    if (!d2d_handles.discovery_complete || d2d_handles.request_device_info_handle == 0) {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+    
+    uint8_t value = 1;
+    LOG_INF("D2D TX: Requesting device info from secondary (handle: %u)", 
+            d2d_handles.request_device_info_handle);
+    
+    int err = bt_gatt_write_without_response(d2d_conn, 
+                                            d2d_handles.request_device_info_handle,
+                                            &value, 
+                                            sizeof(value), 
+                                            false);
+    if (err) {
+        LOG_ERR("D2D TX: Failed to request device info (err %d)", err);
+        return err;
+    }
+    
+    return 0;
+#else
+    // Secondary device doesn't request device info
+    LOG_WRN("Secondary device shouldn't request device info");
     return -EINVAL;
 #endif
 }

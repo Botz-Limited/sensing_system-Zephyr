@@ -103,6 +103,14 @@ int d2d_data_handler_process_status(uint32_t status);
  */
 int d2d_data_handler_process_charge_status(uint8_t charge_status);
 
+/**
+ * @brief Handle activity step count from secondary device
+ * 
+ * @param data Activity step count data
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_data_handler_process_activity_step_count(const bhi360_step_count_t *data);
+
 #ifdef __cplusplus
 }
 #endif

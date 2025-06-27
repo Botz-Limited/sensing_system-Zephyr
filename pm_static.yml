@@ -1,106 +1,48 @@
-app:
-  address: 0x20200
-  end_address: 0x100000
-  region: flash_primary
-  size: 0xdfe00
-external_flash:
-  address: 0x800000
-  end_address: 0x800000
-  region: external_flash
-  size: 0x0
-littlefs_storage:
-  address: 0x120000
-  device: DT_CHOSEN(nordic_pm_ext_flash)
-  end_address: 0x800000
-  placement:
-    before:
-    - tfm_storage
-    - end
-  region: external_flash
-  size: 0x6e0000
+# Partition Manager static configuration
+# This ensures proper partition layout to prevent overlaps
+
 mcuboot:
   address: 0x0
-  end_address: 0x20000
-  placement:
-    align:
-      end: 0x1000
-    before:
-    - mcuboot_primary
+  size: 0x15000
   region: flash_primary
-  size: 0x20000
+
 mcuboot_pad:
-  address: 0x20000
-  end_address: 0x20200
-  placement:
-    before:
-    - mcuboot_primary_app
-  region: flash_primary
+  address: 0x15000
   size: 0x200
-mcuboot_primary:
-  address: 0x20000
-  end_address: 0x100000
-  orig_span: &id001
-  - mcuboot_pad
-  - app
   region: flash_primary
-  size: 0xe0000
-  span: *id001
-mcuboot_primary_1:
-  address: 0x0
-  device: nordic_ram_flash_controller
-  end_address: 0x40000
-  region: ram_flash
-  size: 0x40000
-mcuboot_primary_app:
-  address: 0x20200
-  end_address: 0x100000
-  orig_span: &id002
-  - app
+
+app:
+  address: 0x15200
+  size: 0x6ae00
   region: flash_primary
-  size: 0xdfe00
-  span: *id002
+
+# Settings partition - internal flash
+settings_storage:
+  address: 0x80000
+  size: 0x10000
+  region: flash_primary
+
+# MCUBoot secondary slot - external flash
 mcuboot_secondary:
   address: 0x0
-  device: DT_CHOSEN(nordic_pm_ext_flash)
-  end_address: 0xe0000
+  size: 0x80000
   region: external_flash
-  share_size:
-  - mcuboot_primary
-  size: 0xe0000
+  
+# LittleFS partition - external flash (after MCUBoot secondary)
+littlefs:
+  address: 0x80000
+  size: 0x6e0000
+  region: external_flash
+
+# Network core update slot - external flash
 mcuboot_secondary_1:
-  address: 0xe0000
-  device: DT_CHOSEN(nordic_pm_ext_flash)
-  end_address: 0x120000
-  region: external_flash
+  address: 0x760000
   size: 0x40000
-otp:
-  address: 0xff8100
-  end_address: 0xff83fc
-  region: otp
-  size: 0x2fc
-pcd_sram:
-  address: 0x20000000
-  end_address: 0x20002000
-  placement:
-    after:
-    - start
-  region: sram_primary
-  size: 0x2000
-ram_flash:
-  address: 0x40000
-  end_address: 0x40000
-  region: ram_flash
-  size: 0x0
-rpmsg_nrf53_sram:
-  address: 0x20071000
-  end_address: 0x20080000
-  placement:
-    before:
-    - end
-  region: sram_primary
-  size: 0xf000
-sram_primary:
-  address: 0x20002000
-  end_address: 0x20071000
-  region: sram_primary
-  size: 0x6f000
+  region: external_flash
+
+# External flash total size is 0x800000 (8MB)
+external_flash:
+  address: 0x0
+  size: 0x800000
+  device: MX25R64
+  region: external_flash

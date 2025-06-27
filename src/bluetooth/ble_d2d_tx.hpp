@@ -18,6 +18,7 @@ int ble_d2d_tx_send_bhi360_log_available(uint8_t log_id);
 int ble_d2d_tx_send_bhi360_req_id_path(const char *path);
 int ble_d2d_tx_send_bhi360_data1(const bhi360_3d_mapping_t *data);
 int ble_d2d_tx_send_bhi360_data2(const bhi360_step_count_t *data);
+int ble_d2d_tx_send_activity_step_count(const bhi360_step_count_t *data);
 int ble_d2d_tx_send_bhi360_data3(const bhi360_linear_accel_t *data);
 int ble_d2d_tx_send_status(uint32_t status);
 int ble_d2d_tx_send_charge_status(uint8_t status);
@@ -39,6 +40,9 @@ int ble_d2d_tx_send_fota_progress(const fota_progress_msg_t *progress);
 
 // Send function for device info (secondary -> primary)
 int ble_d2d_tx_send_device_info(const device_info_msg_t *info);
+
+// Request device info from secondary (primary only)
+int ble_d2d_tx_request_device_info(void);
 
 #ifdef __cplusplus
 }

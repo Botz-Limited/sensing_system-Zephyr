@@ -36,6 +36,7 @@ zephyr_library_sources_ifdef(CONFIG_PRIMARY_DEVICE
     d2d_data_handler.cpp  # Handles D2D data from secondary
     ble_d2d_rx.cpp  # Primary receives data/status from secondary
     ble_d2d_tx.cpp  # Primary sends commands to secondary
+    ble_d2d_tx_queue.cpp  # Queue for D2D TX commands when not ready
     ble_d2d_rx_client.cpp  # Primary subscribes to secondary's TX service
     ble_seq_manager.cpp  # BLE sequence management for mobile communication
     ble_recovery_handler.cpp  # BLE packet recovery for mobile communication

@@ -38,6 +38,10 @@ static struct bt_uuid_128 d2d_fota_status_uuid =
 static struct bt_uuid_128 d2d_delete_activity_log_command_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca88, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
+// Request device info command UUID
+static struct bt_uuid_128 d2d_request_device_info_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
 // Helper function to swap endianness if needed
 static uint32_t swap_to_little_endian(uint32_t value)
 {
@@ -291,6 +295,37 @@ static ssize_t d2d_delete_activity_log_write(struct bt_conn *conn, const struct 
     return len;
 }
 
+// Write handler for request device info command
+static ssize_t d2d_request_device_info_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                             const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t value = *((const uint8_t *)buf);
+    
+    if (value == 1) {
+        LOG_INF("Received request for device info from primary");
+        
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Send device info immediately (only on secondary device)
+        extern void send_device_info_to_primary(void);
+        send_device_info_to_primary();
+#else
+        // Primary device shouldn't receive this request
+        LOG_WRN("Primary device received device info request - ignoring");
+#endif
+    }
+
+    return len;
+}
+
 BT_GATT_SERVICE_DEFINE(d2d_rx_service,
     BT_GATT_PRIMARY_SERVICE(&d2d_rx_service_uuid),
     BT_GATT_CHARACTERISTIC(&d2d_set_time_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_set_time_write, NULL),
@@ -300,7 +335,8 @@ BT_GATT_SERVICE_DEFINE(d2d_rx_service,
     BT_GATT_CHARACTERISTIC(&d2d_stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_stop_activity_write, NULL),
     BT_GATT_CHARACTERISTIC(&d2d_trigger_bhi360_calibration_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_trigger_bhi360_calibration_write, NULL),
     BT_GATT_CHARACTERISTIC(&d2d_fota_status_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_fota_status_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_delete_activity_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_activity_log_write, NULL)
+    BT_GATT_CHARACTERISTIC(&d2d_delete_activity_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_activity_log_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_request_device_info_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_request_device_info_write, NULL)
 );
 
 void ble_d2d_rx_init(void) {

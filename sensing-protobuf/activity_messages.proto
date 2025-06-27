@@ -12,8 +12,9 @@ enum ActivityMessageType {
 
 // --- Activity Data Message ---
 message ActivityData {
-  uint32 step_count = 1;
-  uint32 delta_ms = 2 [(nanopb).int_size = IS_16]; // Delta time in milliseconds from previous packet (2 bytes, max 65535ms)
+  uint32 left_step_count = 1;   // Left foot step count
+  uint32 right_step_count = 2;  // Right foot step count  
+  uint32 delta_ms = 3 [(nanopb).int_size = IS_16]; // Delta time in milliseconds from previous packet (2 bytes, max 65535ms)
 }
 
 // Activity specific message for logging session metadata

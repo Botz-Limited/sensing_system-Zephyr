@@ -1,9 +1,40 @@
 # Bluetooth GATT Specification
 
-**Version:** 2.1  
-**Date:** June 2025  
+**Version:** 2.4  
+**Date:** January 2025  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
+
+---
+
+## Changelog
+
+### Version 2.4 (January 2025)
+- Modified Information Service to only send aggregated step counts to mobile phones
+- Individual foot step counts (BHI360 Step Count) are now deprecated for phone communication
+- D2D communication between primary and secondary devices remains unchanged
+- Mobile apps should use Total Step Count and Activity Step Count characteristics only
+
+### Version 2.3 (January 2025)
+- Added D2D Activity Step Count characteristic (`76ad68e6-...`) for secondary device activity steps
+- Fixed activity step count separation between primary and secondary devices
+- Removed unreliable heuristic for detecting activity steps from secondary
+- Added Total Step Count characteristic (`...ec4`) for aggregated steps from both feet
+- Added Activity Step Count characteristic (`...ec5`) for activity-specific step counting
+- Deprecated `activity_duration_s` field in `bhi360_step_count_t` - now always 0
+
+### Version 2.2 (January 2025)
+- Updated step count characteristics to provide count only (time tracking moved to separate characteristics)
+- Clarified that BHI360 Step Count (`...eb3`) provides global step count
+
+### Version 2.1 (June 2025)
+- Added Connection Parameter Control characteristic (`...b68b`) to Control Service
+- Added secondary device delete commands (`...b688`, `...b689`, `...b68a`) to Control Service
+- Added detailed documentation for connection profiles (Foreground, Background, Background Idle)
+- Added mobile app integration examples for background execution optimization
+
+### Version 2.0 (June 2025)
+- Initial comprehensive specification
 
 ---
 
@@ -176,8 +207,10 @@ float decode_acceleration(int16_t fixed) {
 | BHI360 Log Available | `...eb0` | Read, Notify | uint8_t | Latest log ID |
 | BHI360 Log Path | `...eb1` | Read, Notify | char[] | UTF-8 path |
 | **BHI360 3D Mapping** | `...eb2` | Read, Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
-| **BHI360 Step Count** | `...eb3` | Read, Notify | bhi360_step_count_t | Steps + duration |
+| **BHI360 Step Count** | `...eb3` | Read, Notify | step_count_only_t | **DEPRECATED** - Individual foot steps |
 | **BHI360 Linear Accel** | `...eb4` | Read, Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
+| **Total Step Count** | `...ec4` | Read, Notify | step_count_only_t | Aggregated both feet |
+| **Activity Step Count** | `...ec5` | Read, Notify | step_count_only_t | Activity-specific steps |
 | FOTA Progress | `...eb5` | Read, Notify | fota_progress_t | Update status |
 | **Activity Log Available** | `...ec2` | Read, Notify | uint8_t | Latest log ID |
 | **Activity Log Path** | `...ec3` | Read, Notify | char[] | UTF-8 path |
@@ -202,6 +235,44 @@ These characteristics are only available on the primary device and relay informa
 | Secondary Activity Log Path | `...ec1` | Read, Notify | char[] | Secondary activity log path |
 
 **Note:** Secondary device characteristics show "Not Connected" when the secondary device is not connected via D2D.
+
+### Step Count Characteristics
+
+The Information Service provides aggregated step count characteristics for mobile applications:
+
+| Characteristic | Description | Behavior | Status |
+|---:|---:|---:|---:|
+| **BHI360 Step Count** | Individual foot global count | Always counting from boot | **DEPRECATED** - Do not use |
+| **Total Step Count** | Sum of both feet global counts | Always active | **RECOMMENDED** |
+| **Activity Step Count** | Steps during current activity only | 0 when no activity, resets on start | **RECOMMENDED** |
+
+**Important Note**: As of version 2.4, mobile applications should only use the aggregated step count characteristics (Total Step Count and Activity Step Count). The individual foot step count characteristic (BHI360 Step Count) is deprecated and no longer sends notifications to conserve bandwidth and simplify mobile app implementation.
+
+#### Step Count Behavior
+
+1. **Global Counts** (BHI360 Step Count, Total Step Count):
+   - Start at 0 on device boot
+   - Continuously increment throughout device operation
+   - Never reset except on device restart
+   - Continue counting regardless of activity state
+
+2. **Activity Step Count**:
+   - Shows 0 when no activity is active
+   - Resets to 0 when activity starts (via Control Service)
+   - Counts only during active sessions
+   - Freezes at final value when activity stops
+   - Remains at last value until next activity
+
+#### Data Format
+
+All step count characteristics use the same 4-byte format:
+```c
+typedef struct {
+    uint32_t step_count;  // Step count value
+} __packed step_count_only_t;
+```
+
+**Note**: The `activity_duration_s` field in legacy structures is deprecated and always set to 0. Time-based metrics should be calculated by the mobile application using its own timers or GPS data.
 
 ### Status Bitfield
 
@@ -476,7 +547,8 @@ typedef struct {
 | D2D BHI360 Log Path | `...68db` | Notify | char[] | File path |
 | D2D Foot Samples | `...68dc` | Notify | foot_samples_t | ADC data |
 | **D2D BHI360 3D Mapping** | `...68dd` | Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
-| **D2D BHI360 Step Count** | `...68de` | Notify | bhi360_step_count_t | Steps |
+| **D2D BHI360 Step Count** | `...68de` | Notify | bhi360_step_count_t | Steps (for aggregation) |
+| **D2D Activity Step Count** | `...68e6` | Notify | bhi360_step_count_t | Activity-specific steps |
 | **D2D BHI360 Linear Accel** | `...68df` | Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
 | D2D Current Time | `...68e0` | Notify | CTS struct | Time sync |
 | D2D Device Info | `...68e1` | Notify | device_info_msg_t | Device information |
@@ -540,10 +612,15 @@ typedef struct {
     int16_t z;  // Acceleration Z × 1000 (mm/s²)
 } __packed bhi360_linear_accel_fixed_t;
 
-// BHI360 Step Count - 8 bytes
+// Step Count Only - 4 bytes (no duration)
 typedef struct {
     uint32_t step_count;
-    uint32_t activity_duration_s;
+} __packed step_count_only_t;
+
+// Legacy Step Count - 8 bytes (for backward compatibility)
+typedef struct {
+    uint32_t step_count;
+    uint32_t activity_duration_s;  // DEPRECATED - always 0
 } __packed bhi360_step_count_t;
 
 // Foot Sensor Samples - 16 bytes (file logging)

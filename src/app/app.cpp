@@ -33,6 +33,7 @@
 #include <zephyr/sys/timeutil.h>
 
 #include <app.hpp>
+#include <app_version.h>
 #include <errors.hpp>
 
 #if IS_ENABLED(CONFIG_SECONDARY_DEVICE)
@@ -314,7 +315,7 @@ void app_log(const char *fmt, ...)
 
 void initializing_entry()
 {
-    LOG_INF("Sensing FW version: %s, Sensing HW version: %s", CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION,
+    LOG_INF("Sensing FW version: %s, Sensing HW version: %s", APP_VERSION_STRING,
             CONFIG_HARDWARE_STRING);
 
     // To initialise message que here

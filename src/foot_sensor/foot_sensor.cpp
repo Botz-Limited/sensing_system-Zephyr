@@ -55,6 +55,7 @@ extern "C"
 }
 
 #include <app.hpp>
+#include <app_version.h>
 #include <ble_services.hpp>
 #include <errors.hpp>
 #include <foot_sensor.hpp>
@@ -541,7 +542,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
             strncpy(cmd_msg.data.command_str, "START_LOGGING_FOOT_SENSOR", sizeof(cmd_msg.data.command_str) - 1);
             cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
             cmd_msg.sampling_frequency = SAADC_SAMPLE_RATE_HZ_NORMAL;
-            strncpy(cmd_msg.fw_version, CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION, sizeof(cmd_msg.fw_version) - 1);
+            strncpy(cmd_msg.fw_version, APP_VERSION_STRING, sizeof(cmd_msg.fw_version) - 1);
             cmd_msg.fw_version[sizeof(cmd_msg.fw_version) - 1] = '\0';
 
             int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);

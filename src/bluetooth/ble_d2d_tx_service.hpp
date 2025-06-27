@@ -117,6 +117,13 @@ int d2d_tx_notify_activity_log_available(uint8_t log_id);
  */
 int d2d_tx_notify_activity_log_path(const char *path);
 
+/**
+ * @brief Send activity step count notification to primary device
+ * @param data Activity step count data
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_activity_step_count(const bhi360_step_count_t *data);
+
 #ifdef __cplusplus
 }
 #endif

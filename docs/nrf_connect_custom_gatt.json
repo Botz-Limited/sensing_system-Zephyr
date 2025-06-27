@@ -90,6 +90,18 @@
           "descriptors": []
         },
         {
+          "uuid": "0c372ec4-27eb-437e-bef4-775aefaf3c97",
+          "name": "Total Step Count",
+          "properties": ["read", "notify"],
+          "descriptors": []
+        },
+        {
+          "uuid": "0c372ec5-27eb-437e-bef4-775aefaf3c97",
+          "name": "Activity Step Count",
+          "properties": ["read", "notify"],
+          "descriptors": []
+        },
+        {
           "uuid": "0c372eb6-27eb-437e-bef4-775aefaf3c97",
           "name": "Secondary Manufacturer",
           "properties": ["read"],

@@ -27,13 +27,14 @@ int d2d_data_handler_process_foot_samples(const foot_samples_t *samples)
         return -EINVAL;
     }
     
+    LOG_INF("Received foot sensor data from secondary");
     LOG_DBG("Processing foot samples from secondary device");
     
     // Forward to Information Service for phone notification
     // The jis_foot_sensor_notify function will add sequence numbers
     jis_foot_sensor_notify(samples);
     
-    LOG_DBG("Secondary foot samples forwarded to phone: [%u, %u, %u, ...]", 
+    LOG_INF("Secondary foot samples forwarded to phone: [%u, %u, %u, ...]", 
             samples->values[0], samples->values[1], samples->values[2]);
     
     // TODO: Log to file system if logging is active
@@ -78,12 +79,14 @@ int d2d_data_handler_process_bhi360_step_count(const bhi360_step_count_t *data)
     LOG_DBG("Processing BHI360 step count from secondary: %u steps", 
             data->step_count);
     
-    // Forward to Information Service for phone notification
-    // Note: Step count doesn't use sequence numbers (low update rate)
-    jis_bhi360_data2_notify(data);
-    LOG_DBG("Secondary BHI360 step count forwarded to phone");
+    // Don't forward individual step counts to phone anymore
+    // The bluetooth module will handle aggregation when it receives
+    // step counts from both primary (via message queue) and secondary
+    // jis_bhi360_data2_notify(data);
+    LOG_DBG("Secondary BHI360 step count received for aggregation");
     
-    // TODO: Consider aggregating with primary step count for total steps
+    // The bluetooth module will handle aggregation when it receives
+    // step counts from both primary (via message queue) and secondary (via this notification)
     
     return 0;
 }
@@ -190,5 +193,30 @@ int d2d_data_handler_process_charge_status(uint8_t charge_status)
     // In a real implementation, you might want to have separate characteristics for each device
     jis_charge_status_notify(charge_status);
 
+    return 0;
+}
+
+int d2d_data_handler_process_activity_step_count(const bhi360_step_count_t *data)
+{
+    if (!data) {
+        return -EINVAL;
+    }
+    
+    LOG_DBG("Processing activity step count from secondary: %u steps", 
+            data->step_count);
+    
+    // Send to bluetooth module for aggregation
+    // Use a different sender to indicate this is activity steps from secondary
+    generic_message_t msg = {};
+    msg.sender = SENDER_D2D_SECONDARY;
+    msg.type = MSG_TYPE_ACTIVITY_STEP_COUNT;  // Use activity step count message type
+    msg.data.bhi360_step_count = *data;
+    
+    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) == 0) {
+        LOG_DBG("Sent secondary activity step count to bluetooth module");
+    } else {
+        LOG_ERR("Failed to send secondary activity step count to bluetooth module");
+    }
+    
     return 0;
 }

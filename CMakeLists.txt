@@ -6,7 +6,9 @@ include(util)
 
 # Before find_package(Zephyr)
 set(BUILD_VERSION_FROM_GIT OFF)
-set(CONFIG_APP_VERSION "1.0.0")
+
+# Note: Version is managed by the VERSION file in the root directory
+# This generates APP_VERSION_STRING, APP_VERSION_MAJOR, etc. automatically
 
 #export compile commands for clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -23,11 +25,18 @@ list(APPEND ZEPHYR_EXTRA_MODULES
    ${CMAKE_CURRENT_SOURCE_DIR}/drivers
 )
 
-set(CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION "\"${VERSION}\"" CACHE STRING "MCUboot image version")
-
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(SENSING LANGUAGES C CXX ASM)
+
+# Set MCUboot image version from the VERSION file
+# After find_package(Zephyr), we have access to the version from VERSION file
+if(CONFIG_BOOTLOADER_MCUBOOT)
+    # Use the version string generated from VERSION file
+    # This will be something like "1.0.0" or "1.0.0-dev" if EXTRAVERSION is set
+    set(CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION "\"${APPLICATION_VERSION_STRING}\"" CACHE STRING "MCUboot image version")
+    message(STATUS "MCUboot image version: ${CONFIG_MCUBOOT_IMGTOOL_SIGN_VERSION}")
+endif()
 
 # Protobuf (Config different due to NCS)
 set(PROTOC_OPTIONS "-I${CMAKE_CURRENT_SOURCE_DIR}")

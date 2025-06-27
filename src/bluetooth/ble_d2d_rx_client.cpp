@@ -23,6 +23,7 @@
 #include "smp_proxy.hpp"
 #include "ble_d2d_file_transfer.hpp"
 #include "ble_d2d_smp_client.hpp"
+#include "ble_d2d_tx.hpp"
 #endif
 
 LOG_MODULE_REGISTER(d2d_rx_client, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
@@ -84,12 +85,16 @@ static struct bt_uuid_128 d2d_activity_log_available_uuid =
 static struct bt_uuid_128 d2d_activity_log_path_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e5, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+// Activity step count UUID
+static struct bt_uuid_128 d2d_activity_step_count_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e6, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection handle
 static struct bt_conn *secondary_conn = NULL;
 
 // Discovery parameters
 static struct bt_gatt_discover_params discover_params;
-static struct bt_gatt_subscribe_params subscribe_params[14] = {}; // One for each characteristic - zero initialized
+static struct bt_gatt_subscribe_params subscribe_params[15] = {}; // One for each characteristic - zero initialized
 
 // Discovered handles
 static uint16_t service_handle = 0;
@@ -107,6 +112,7 @@ static uint16_t foot_log_path_handle = 0;
 static uint16_t bhi360_log_path_handle = 0;
 static uint16_t activity_log_available_handle = 0;
 static uint16_t activity_log_path_handle = 0;
+static uint16_t activity_step_count_handle = 0;
 
 // Discovery state
 enum discover_state {
@@ -145,6 +151,7 @@ static uint8_t foot_log_path_notify_handler(struct bt_conn *conn, struct bt_gatt
 static uint8_t bhi360_log_path_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 static uint8_t activity_log_available_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 static uint8_t activity_log_path_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
+static uint8_t activity_step_count_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 
 // Work items for deferred subscription
 static void subscribe_work_handler(struct k_work *work);
@@ -158,7 +165,7 @@ struct subscribe_work_data {
     int index;
 };
 
-static struct subscribe_work_data subscribe_work_items[14];
+static struct subscribe_work_data subscribe_work_items[15];
 
 // Delayed work for device info retry
 static void device_info_retry_work_handler(struct k_work *work);
@@ -379,7 +386,7 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
-    if (activity_log_path_handle && work_index < 14) {
+    if (activity_log_path_handle && work_index < 15) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = activity_log_path_handle;
         subscribe_work_items[work_index].notify_func = activity_log_path_notify_handler;
@@ -387,8 +394,16 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
+    if (activity_step_count_handle && work_index < 15) {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = activity_step_count_handle;
+        subscribe_work_items[work_index].notify_func = activity_step_count_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+    
     // Try device info subscription as the last one with special handling
-    if (device_info_handle && work_index < 14) {
+    if (device_info_handle && work_index < 15) {
         LOG_INF("Attempting device info subscription (handle %u) as last item", device_info_handle);
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = device_info_handle;
@@ -985,6 +1000,43 @@ static uint8_t activity_log_path_notify_handler(struct bt_conn *conn,
     return BT_GATT_ITER_CONTINUE;
 }
 
+static uint8_t activity_step_count_notify_handler(struct bt_conn *conn,
+                                                 struct bt_gatt_subscribe_params *params,
+                                                 const void *data, uint16_t length)
+{
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Activity step count notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0) {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    if (!data) {
+        LOG_WRN("Activity step count unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (length != sizeof(bhi360_step_count_t)) {
+        LOG_WRN("Invalid activity step count length: %u", length);
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    const bhi360_step_count_t *steps = (const bhi360_step_count_t *)data;
+    LOG_INF("=== RECEIVED ACTIVITY STEP COUNT FROM SECONDARY ===");
+    LOG_INF("  Activity Steps: %u", steps->step_count);
+
+    // Process the data through the handler
+    d2d_data_handler_process_activity_step_count(steps);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
 // Alternative subscription method using write to CCC
 static void write_ccc_alternative(struct bt_conn *conn, uint16_t handle, uint16_t ccc_handle)
 {
@@ -1100,10 +1152,23 @@ static void subscribe_to_characteristic(uint16_t handle, bt_gatt_notify_func_t n
                 device_info_retry_count = 0;
             }
             
-// If all subscriptions are complete, start SMP discovery
+// If all subscriptions are complete, request device info and start SMP discovery
             if (completed == pending && pending > 0) {
-                LOG_INF("All D2D RX subscriptions complete, starting SMP discovery");
+                LOG_INF("All D2D RX subscriptions complete");
+                
+                // Request device info from secondary
+                // Note: This might fail if D2D TX discovery hasn't completed yet
+                // In that case, we'll request it after TX discovery completes
+                LOG_INF("Requesting device info from secondary");
+                int err = ble_d2d_tx_request_device_info();
+                if (err == -EINVAL) {
+                    LOG_INF("D2D TX discovery not complete yet, will request device info later");
+                } else if (err) {
+                    LOG_WRN("Failed to request device info: %d", err);
+                }
+                
                 // Schedule SMP discovery with a small delay to avoid stack issues
+                LOG_INF("Scheduling SMP discovery");
                 k_work_schedule(&smp_discovery_work, K_MSEC(100));
             }
         }
@@ -1490,6 +1555,10 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             activity_log_path_handle = chrc->value_handle;
             LOG_INF("Found activity log path characteristic, handle: %u", activity_log_path_handle);
             characteristics_found++;
+        } else if (bt_uuid_cmp(chrc->uuid, &d2d_activity_step_count_uuid.uuid) == 0) {
+            activity_step_count_handle = chrc->value_handle;
+            LOG_INF("Found activity step count characteristic, handle: %u", activity_step_count_handle);
+            characteristics_found++;
         }
     } else if (discovery_state == DISCOVER_DIS) {
         if (bt_uuid_cmp(params->uuid, BT_UUID_DIS) == 0) {
@@ -1594,6 +1663,7 @@ void d2d_rx_client_start_discovery(struct bt_conn *conn)
     bhi360_log_path_handle = 0;
     activity_log_available_handle = 0;
     activity_log_path_handle = 0;
+    activity_step_count_handle = 0;
     
     // Clear all subscribe params to ensure clean state
     memset(subscribe_params, 0, sizeof(subscribe_params));
@@ -1671,6 +1741,7 @@ void d2d_rx_client_disconnected(void)
     bhi360_log_path_handle = 0;
     activity_log_available_handle = 0;
     activity_log_path_handle = 0;
+    activity_step_count_handle = 0;
     
     // Clear subscribe params
     memset(subscribe_params, 0, sizeof(subscribe_params));

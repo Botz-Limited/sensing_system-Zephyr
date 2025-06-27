@@ -695,10 +695,9 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             sensor_data_messages_ActivityLogMessage_init_default;
                         activity_log_msg.which_payload = sensor_data_messages_ActivityLogMessage_activity_data_tag;
 
-                        // Populate Activity data fields
-                        // Combine left and right step counts into total step count
-                        activity_log_msg.payload.activity_data.step_count = 
-                            activity_data->left_step_count + activity_data->right_step_count;
+                        // Populate Activity data fields with separate left/right counts
+                        activity_log_msg.payload.activity_data.left_step_count = activity_data->left_step_count;
+                        activity_log_msg.payload.activity_data.right_step_count = activity_data->right_step_count;
 
                         // Calculate delta time
                         uint32_t current_time_ms = (uint32_t)k_uptime_get();
