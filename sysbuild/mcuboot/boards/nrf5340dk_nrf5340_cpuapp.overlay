@@ -3,7 +3,6 @@
 	compatible = "nordic,nrf5340-dk-nrf5340-cpuapp";
 
 	chosen {
-		zephyr,code-partition = &boot_partition;
 		nordic,pm-ext-flash = &mx25r64;
 	};
 };

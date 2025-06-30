@@ -35,12 +35,16 @@
 #include <app.hpp>
 #include <app_version.h>
 #include <errors.hpp>
+#include <zephyr/sys/reboot.h>
 
 #if IS_ENABLED(CONFIG_SECONDARY_DEVICE)
 #include "../bluetooth/ble_d2d_tx.hpp"
 #endif
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_APP_MODULE_LOG_LEVEL); // NOLINT
+
+// FOTA reset work
+static struct k_work_delayable fota_reset_work;
 
 // FOTA progress tracking structure
 struct fota_progress_state {
@@ -56,6 +60,14 @@ struct fota_progress_state {
 
 void initializing_entry();
 
+// FOTA reset handler
+static void fota_reset_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    LOG_INF("Performing system reset to apply new firmware...");
+    sys_reboot(SYS_REBOOT_WARM);
+}
+
 K_MSGQ_DEFINE(bluetooth_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(motion_sensor_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
@@ -70,8 +82,6 @@ static struct k_thread app_thread_data;
 static k_tid_t app_tid;
 void app_entry(void * /*unused*/, void * /*unused*/, void * /*unused*/);
 
-// Forward declaration for BLE notification
-void notify_fota_progress_to_ble();
 
 // FOTA callback handlers
 mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_status, 
@@ -93,8 +103,20 @@ mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_st
     fota_progress.is_active = true;
     fota_progress.status = 1; // in_progress
     
-    // Notify BLE
-    notify_fota_progress_to_ble();
+    // Send FOTA progress message to Bluetooth thread
+    generic_message_t msg;
+    msg.sender = SENDER_NONE;
+    msg.type = MSG_TYPE_FOTA_PROGRESS;
+    msg.data.fota_progress.is_active = fota_progress.is_active;
+    msg.data.fota_progress.status = fota_progress.status;
+    msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
+    msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
+    msg.data.fota_progress.total_size = fota_progress.total_size;
+    msg.data.fota_progress.error_code = fota_progress.error_code;
+    
+    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
+    }
     
     return MGMT_CB_OK;
 }
@@ -135,8 +157,20 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
                         fota_progress.bytes_received,
                         fota_progress.total_size);
                 
-                // Notify BLE
-                notify_fota_progress_to_ble();
+                // Send FOTA progress message to Bluetooth thread
+                generic_message_t msg;
+                msg.sender = SENDER_NONE;
+                msg.type = MSG_TYPE_FOTA_PROGRESS;
+                msg.data.fota_progress.is_active = fota_progress.is_active;
+                msg.data.fota_progress.status = fota_progress.status;
+                msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
+                msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
+                msg.data.fota_progress.total_size = fota_progress.total_size;
+                msg.data.fota_progress.error_code = fota_progress.error_code;
+                
+                if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
+                }
             }
         }
     }
@@ -179,7 +213,21 @@ mgmt_cb_return fota_pending_callback(uint32_t event, enum mgmt_cb_return prev_st
             fota_progress.chunks_received, fota_progress.chunks_written);
     
     fota_progress.status = 2; // pending
-    notify_fota_progress_to_ble();
+    
+    // Send FOTA progress message to Bluetooth thread
+    generic_message_t msg;
+    msg.sender = SENDER_NONE;
+    msg.type = MSG_TYPE_FOTA_PROGRESS;
+    msg.data.fota_progress.is_active = fota_progress.is_active;
+    msg.data.fota_progress.status = fota_progress.status;
+    msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
+    msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
+    msg.data.fota_progress.total_size = fota_progress.total_size;
+    msg.data.fota_progress.error_code = fota_progress.error_code;
+    
+    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
+    }
     
     return MGMT_CB_OK;
 }
@@ -199,7 +247,21 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     LOG_INF("FOTA Image confirmed!");
     fota_progress.is_active = false;
     fota_progress.status = 3; // confirmed
-    notify_fota_progress_to_ble();
+    
+    // Send FOTA progress message to Bluetooth thread
+    generic_message_t msg;
+    msg.sender = SENDER_NONE;
+    msg.type = MSG_TYPE_FOTA_PROGRESS;
+    msg.data.fota_progress.is_active = fota_progress.is_active;
+    msg.data.fota_progress.status = fota_progress.status;
+    msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
+    msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
+    msg.data.fota_progress.total_size = fota_progress.total_size;
+    msg.data.fota_progress.error_code = fota_progress.error_code;
+    
+    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
+    }
     
     #if IS_ENABLED(CONFIG_SECONDARY_DEVICE)
     // Secondary device needs to notify primary that FOTA is complete
@@ -209,6 +271,10 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
         LOG_ERR("Failed to notify primary of FOTA completion: %d", err);
     }
     #endif
+    
+    // Schedule a system reset to apply the new firmware
+    LOG_INF("Scheduling system reset in 2 seconds to apply new firmware...");
+    k_work_schedule(&fota_reset_work, K_SECONDS(2));
     
     return MGMT_CB_OK;
 }
@@ -230,7 +296,21 @@ mgmt_cb_return fota_stopped_callback(uint32_t event, enum mgmt_cb_return prev_st
     if (rc) {
         fota_progress.error_code = *rc;
     }
-    notify_fota_progress_to_ble();
+    
+    // Send FOTA progress message to Bluetooth thread
+    generic_message_t msg;
+    msg.sender = SENDER_NONE;
+    msg.type = MSG_TYPE_FOTA_PROGRESS;
+    msg.data.fota_progress.is_active = fota_progress.is_active;
+    msg.data.fota_progress.status = fota_progress.status;
+    msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
+    msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
+    msg.data.fota_progress.total_size = fota_progress.total_size;
+    msg.data.fota_progress.error_code = fota_progress.error_code;
+    
+    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
+    }
     
     return MGMT_CB_OK;
 }
@@ -269,32 +349,6 @@ static struct mgmt_callback fota_callbacks[] = {
     },
 };
 
-// Function to send FOTA progress via message queue to Bluetooth thread
-void notify_fota_progress_to_ble()
-{
-    generic_message_t msg;
-    msg.sender = SENDER_NONE;
-    msg.type = MSG_TYPE_FOTA_PROGRESS;
-    
-    // Pack progress data
-    msg.data.fota_progress.is_active = fota_progress.is_active;
-    msg.data.fota_progress.status = fota_progress.status;
-    msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
-    msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
-    msg.data.fota_progress.total_size = fota_progress.total_size;
-    msg.data.fota_progress.error_code = fota_progress.error_code;
-    
-    // Send to Bluetooth thread
-    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
-    }
-    
-    #if IS_ENABLED(CONFIG_SECONDARY_DEVICE)
-    // For secondary device, also log that progress would be sent via D2D
-    // Note: Actual D2D sending happens in bluetooth thread
-    LOG_DBG("FOTA progress ready for D2D transmission to primary");
-    #endif
-}
 
 // Public function to get current FOTA progress
 struct fota_progress_state* get_fota_progress()
@@ -326,6 +380,9 @@ void initializing_entry()
 static void app_init()
 {
     initializing_entry();
+
+    // Initialize FOTA reset work
+    k_work_init_delayable(&fota_reset_work, fota_reset_handler);
 
     // Register all FOTA callbacks
     for (size_t i = 0; i < ARRAY_SIZE(fota_callbacks); i++) {

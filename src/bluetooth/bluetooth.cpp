@@ -48,6 +48,8 @@
 #include <events/app_state_event.h>
 #include <events/bluetooth_state_event.h>
 #include <events/data_event.h>
+#include <events/foot_sensor_event.h>
+#include <events/motion_sensor_event.h>
 #include <status_codes.h>
 
 #include "ble_d2d_file_transfer.hpp"
@@ -62,8 +64,8 @@
 #include "file_proxy.hpp"
 #include "fota_proxy.hpp"
 #include "smp_proxy.hpp"
-#include "ble_conn_params.hpp"
 #endif
+#include "ble_conn_params.hpp"
 
 // External function declarations
 extern "C" void jis_activity_step_count_notify(uint32_t activity_steps);
@@ -96,6 +98,21 @@ static void start_scan(void);
 static struct bt_conn *pending_pairing_conn = nullptr;
 static bool pairing_failed_for_pending = false;
 #endif
+
+// Helper callback for finding active connections
+static void find_active_conn_cb(struct bt_conn *conn, void *data)
+{
+    struct bt_conn **active_conn = (struct bt_conn **)data;
+    
+    // If we haven't found a connection yet and this one is valid
+    if (*active_conn == NULL && conn != NULL) {
+        struct bt_conn_info info;
+        if (bt_conn_get_info(conn, &info) == 0) {
+            // Found an active connection, reference it
+            *active_conn = bt_conn_ref(conn);
+        }
+    }
+}
 
 // Function to send device info from secondary to primary
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -1163,7 +1180,7 @@ err_t bt_module_init(void)
     else
     {
         LOG_INF("FOTA proxy service initialized");
-    }
+    } 
 
     // Initialize file proxy service for primary device
     int file_err = file_proxy_init();
@@ -1174,7 +1191,7 @@ err_t bt_module_init(void)
     else
     {
         LOG_INF("File proxy service initialized");
-    }
+    } 
 
     // Initialize SMP proxy service for primary device
     int smp_err = smp_proxy_init();
@@ -1185,7 +1202,7 @@ err_t bt_module_init(void)
     else
     {
         LOG_INF("SMP proxy service initialized - mobile can use standard MCUmgr!");
-    }
+    } 
 
     // Check if we have a valid identity address before advertising
     bt_addr_le_t addr;
@@ -1428,6 +1445,126 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     LOG_INF("Received FOTA Progress: active=%d, status=%d, percent=%d%%, bytes=%u/%u",
                             progress->is_active, progress->status, progress->percent_complete, progress->bytes_received,
                             progress->total_size);
+                    
+                    // Check if FOTA is starting (status = 1 means in_progress)
+                    static bool fota_was_active = false;
+                    if (progress->is_active && progress->status == 1 && !fota_was_active) {
+                        LOG_WRN("FOTA update starting - stopping advertising and reducing BLE activity");
+                        
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                        // Stop advertising to prevent new connections during FOTA
+                        int adv_err = bt_le_adv_stop();
+                        if (adv_err && adv_err != -EALREADY) {
+                            LOG_ERR("Failed to stop advertising: %d", adv_err);
+                        } else {
+                            LOG_INF("Advertising stopped for FOTA update");
+                        }
+                        
+                        // Stop the BLE timer to prevent advertising restart
+                        k_timer_stop(&ble_timer);
+                        LOG_INF("BLE timer stopped for FOTA update");
+                        
+                        // Request connection parameter update to reduce BLE activity
+                        // Use BACKGROUND_IDLE profile for minimal interference
+                        struct bt_conn *active_conn = NULL;
+                        bt_conn_foreach(BT_CONN_TYPE_LE, find_active_conn_cb, &active_conn);
+                        
+                        if (active_conn) {
+                            LOG_INF("Updating connection parameters for FOTA - switching to BACKGROUND_IDLE profile");
+                            int conn_err = ble_conn_params_update(active_conn, CONN_PROFILE_BACKGROUND_IDLE);
+                            if (conn_err) {
+                                LOG_ERR("Failed to update connection parameters: %d", conn_err);
+                            }
+                            bt_conn_unref(active_conn);
+                        }
+#else
+                        // For secondary device, stop scanning
+                        int scan_err = bt_le_scan_stop();
+                        if (scan_err && scan_err != -EALREADY) {
+                            LOG_ERR("Failed to stop scanning: %d", scan_err);
+                        } else {
+                            LOG_INF("Scanning stopped for FOTA update");
+                        }
+#endif
+                        
+                        // Send message to stop all logging and reduce activity
+                        generic_message_t stop_logging_msg = {};
+                        stop_logging_msg.sender = SENDER_BTH;
+                        stop_logging_msg.type = MSG_TYPE_COMMAND;
+                        strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING", sizeof(stop_logging_msg.data.command_str) - 1);
+                        
+                        // Stop all logging in data module (this will close all open files)
+                        if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {
+                            LOG_WRN("Failed to send STOP_LOGGING command to data module");
+                        } else {
+                            LOG_INF("Sent STOP_LOGGING command to data module for FOTA");
+                        }
+                        
+                        // Send FOTA_IN_PROGRESS to other modules
+                        generic_message_t fota_msg = {};
+                        fota_msg.sender = SENDER_BTH;
+                        fota_msg.type = MSG_TYPE_COMMAND;
+                        strncpy(fota_msg.data.command_str, "FOTA_IN_PROGRESS", sizeof(fota_msg.data.command_str) - 1);
+                        
+                        // Notify motion sensor to reduce update rate
+                        if (k_msgq_put(&motion_sensor_msgq, &fota_msg, K_NO_WAIT) != 0) {
+                            LOG_WRN("Failed to notify motion sensor about FOTA");
+                        }
+                        
+                        // Also stop activity if it's running
+                        struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
+                        if (foot_evt) {
+                            APP_EVENT_SUBMIT(foot_evt);
+                            LOG_INF("Submitted stop activity event for foot sensor (FOTA starting)");
+                        }
+                        
+                        struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
+                        if (motion_evt) {
+                            APP_EVENT_SUBMIT(motion_evt);
+                            LOG_INF("Submitted stop activity event for motion sensor (FOTA starting)");
+                        }
+                        
+                        fota_was_active = true;
+                    }
+                    
+                    // Check if FOTA is complete or failed
+                    if (fota_was_active && (!progress->is_active || progress->status == 3 || progress->status == 4)) {
+                        LOG_INF("FOTA update complete/failed - resuming normal BLE operation");
+                        
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                        // Restart advertising if no connections
+                        struct bt_conn *active_conn = NULL;
+                        bt_conn_foreach(BT_CONN_TYPE_LE, find_active_conn_cb, &active_conn);
+                        
+                        if (!active_conn) {
+                            LOG_INF("No active connections, restarting advertising");
+                            bt_start_advertising(0);
+                        } else {
+                            // Restore normal connection parameters
+                            LOG_INF("Restoring normal connection parameters - switching to FOREGROUND profile");
+                            ble_conn_params_update(active_conn, CONN_PROFILE_FOREGROUND);
+                            bt_conn_unref(active_conn);
+                        }
+#else
+                        // For secondary device, restart scanning if not connected
+                        if (d2d_conn == nullptr) {
+                            LOG_INF("Not connected to primary, restarting scanning");
+                            start_scan();
+                        }
+#endif
+                        
+                        // Notify other modules that FOTA is complete
+                        generic_message_t fota_complete_msg = {};
+                        fota_complete_msg.sender = SENDER_BTH;
+                        fota_complete_msg.type = MSG_TYPE_COMMAND;
+                        strncpy(fota_complete_msg.data.command_str, "FOTA_COMPLETE", sizeof(fota_complete_msg.data.command_str) - 1);
+                        
+                        k_msgq_put(&data_msgq, &fota_complete_msg, K_NO_WAIT);
+                        k_msgq_put(&motion_sensor_msgq, &fota_complete_msg, K_NO_WAIT);
+                        
+                        fota_was_active = false;
+                    }
+                    
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_fota_progress_notify(progress);
 #else
@@ -1610,6 +1747,7 @@ err_t bt_start_advertising(int err)
     else
     {
         LOG_INF("Advertising successfully started");
+        LOG_WRN("Firmware version: %s", APP_VERSION_STRING);
     }
 
     k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);

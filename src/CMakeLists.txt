@@ -7,5 +7,3 @@ add_subdirectory(motion_sensor)
 add_subdirectory(packetizer)
 add_subdirectory(battery)
 
-# Add FOTA fix utilities
-target_sources(app PRIVATE fota_fix.cpp)
