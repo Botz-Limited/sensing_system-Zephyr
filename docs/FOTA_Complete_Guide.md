@@ -219,6 +219,37 @@ python test/smp_proxy_test.py --device "Sensing Device"
 2. **mcumgr CLI**: Test individual operations
 3. **BLE Scanners**: Verify service advertisement
 
+## Critical Infrastructure Improvements
+
+Recent updates have addressed several critical issues in the FOTA and D2D mechanisms:
+
+### 1. Thread-Safe Connection Management
+- **Issue**: Race conditions when multiple threads accessed connection pointers
+- **Solution**: Centralized `BleConnectionManager` with mutex protection
+- **Benefit**: Eliminates crashes and connection state corruption
+
+### 2. Buffer Overflow Protection
+- **Issue**: Fixed buffer sizes without bounds checking in SMP proxy
+- **Solution**: Enhanced `smp_proxy_safe.cpp` with strict validation
+- **Benefit**: Prevents security vulnerabilities and malformed packet attacks
+
+### 3. FOTA Synchronization
+- **Issue**: No coordination between primary and secondary device updates
+- **Solution**: `FotaSyncManager` with state machine and timeouts
+- **Benefit**: Reliable dual-device updates without connection loss
+
+### 4. Retry Mechanism
+- **Issue**: Single attempt for critical operations leading to failures
+- **Solution**: `RetryManager` with exponential backoff and jitter
+- **Benefit**: Automatic recovery from transient failures
+
+### 5. Memory Safety
+- **Issue**: Potential memory leaks in dynamic allocations
+- **Solution**: RAII patterns and scoped buffers throughout
+- **Benefit**: No memory leaks, predictable resource usage
+
+These improvements ensure robust and reliable FOTA operations even in challenging conditions.
+
 ## Migration from Legacy Approach
 
 If you have existing implementations using the legacy FOTA proxy approach, migration is straightforward:
@@ -227,6 +258,7 @@ If you have existing implementations using the legacy FOTA proxy approach, migra
 2. Replace custom protocol code with MCUmgr library calls
 3. Remove separate file proxy implementation
 4. Test thoroughly with both primary and secondary devices
+5. Consider integrating the new safety components for improved reliability
 
 ## Summary
 

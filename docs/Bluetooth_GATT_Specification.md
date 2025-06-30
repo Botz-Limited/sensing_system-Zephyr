@@ -1,6 +1,6 @@
 # Bluetooth GATT Specification
 
-**Version:** 2.4  
+**Version:** 2.5  
 **Date:** January 2025  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
@@ -8,6 +8,11 @@
 ---
 
 ## Changelog
+
+### Version 2.5 (January 2025)
+- Identified UUID conflicts between 3D Orientation Service and Information Service characteristics
+- Documented actual MCUmgr SMP service UUIDs vs. documentation discrepancies
+- Added notes about implementation issues to be fixed in future firmware updates
 
 ### Version 2.4 (January 2025)
 - Modified Information Service to only send aggregated step counts to mobile phones
@@ -463,6 +468,8 @@ sequenceDiagram
 **Availability:** Primary device only  
 **Purpose:** High-rate 3D orientation data for real-time visualization
 
+**Note:** There is a UUID conflict in the current implementation. The 3D Orientation characteristic UUID (`...2ec1`) conflicts with Secondary Activity Log Path. This should be fixed in a future firmware update by changing the 3D Orientation characteristic to a different UUID (e.g., `...2ec6`).
+
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
 |----------------|-------------|------------|-----------|-------------|
 | 3D Orientation | `...2ec1` | Read, Notify | orientation_3d_packet_t | Combined quaternions |
@@ -749,11 +756,13 @@ typedef struct {
 } __packed fota_progress_t;
 ```
 
-### SMP Service
+### Standard MCUmgr SMP Service
 
 **UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
 **Characteristic:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`  
 **Purpose:** MCUmgr protocol for firmware updates and file access
+
+**Note:** The UUIDs mentioned in some documentation (`14387800-130c-49e7-b877-2881c89cb258`) appear to be from an older version. The current implementation uses the standard MCUmgr SMP service UUID shown above.
 
 ---
 

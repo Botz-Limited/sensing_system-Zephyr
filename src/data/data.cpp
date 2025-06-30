@@ -832,10 +832,10 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             k_msleep(10);
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING") == 0) && 
-                             ((atomic_get(&logging_foot_active) == 1) || (atomic_get(&logging_bhi360_active) == 1) || (atomic_get(&logging_activity_active) == 1)))
+                    else if (strcmp(msg.data.command_str, "STOP_LOGGING") == 0)
                     {
-                        LOG_INF("Command: Stopping all logging.");
+                        // Handle STOP_LOGGING command - stop all active logging
+                        LOG_INF("Command: Stopping all logging (STOP_LOGGING).");
                         err_t foot_status = err_t::NO_ERROR;
                         err_t bhi360_status = err_t::NO_ERROR;
                         err_t activity_status = err_t::NO_ERROR;

@@ -670,6 +670,37 @@ config FOTA_PROXY_TIMEOUT_SEC
    - GATT operations
    - Connection management
 
+## Critical Infrastructure Improvements
+
+Recent updates have addressed several critical issues in the FOTA and D2D mechanisms:
+
+### 1. Thread-Safe Connection Management
+- **Issue**: Race conditions when multiple threads accessed connection pointers
+- **Solution**: Centralized `BleConnectionManager` with mutex protection
+- **Benefit**: Eliminates crashes and connection state corruption
+
+### 2. Buffer Overflow Protection
+- **Issue**: Fixed buffer sizes without bounds checking in SMP proxy
+- **Solution**: Enhanced `smp_proxy_safe.cpp` with strict validation
+- **Benefit**: Prevents security vulnerabilities and malformed packet attacks
+
+### 3. FOTA Synchronization
+- **Issue**: No coordination between primary and secondary device updates
+- **Solution**: `FotaSyncManager` with state machine and timeouts
+- **Benefit**: Reliable dual-device updates without connection loss
+
+### 4. Retry Mechanism
+- **Issue**: Single attempt for critical operations leading to failures
+- **Solution**: `RetryManager` with exponential backoff and jitter
+- **Benefit**: Automatic recovery from transient failures
+
+### 5. Memory Safety
+- **Issue**: Potential memory leaks in dynamic allocations
+- **Solution**: RAII patterns and scoped buffers throughout
+- **Benefit**: No memory leaks, predictable resource usage
+
+These improvements ensure robust and reliable FOTA operations even in challenging conditions.
+
 ## Security Considerations
 
 1. **Firmware Signing**: All firmware must be cryptographically signed

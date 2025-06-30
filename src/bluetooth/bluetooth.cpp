@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string_view>
+#include <errno.h>
 
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
@@ -61,6 +62,7 @@
 #include "ble_seq_manager.hpp"
 #include "ble_recovery_handler.hpp"
 #include "ble_d2d_rx_client.hpp"
+#include "ble_d2d_tx_queue.hpp"
 #include "file_proxy.hpp"
 #include "fota_proxy.hpp"
 #include "smp_proxy.hpp"
@@ -1470,12 +1472,29 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         bt_conn_foreach(BT_CONN_TYPE_LE, find_active_conn_cb, &active_conn);
                         
                         if (active_conn) {
-                            LOG_INF("Updating connection parameters for FOTA - switching to BACKGROUND_IDLE profile");
-                            int conn_err = ble_conn_params_update(active_conn, CONN_PROFILE_BACKGROUND_IDLE);
-                            if (conn_err) {
-                                LOG_ERR("Failed to update connection parameters: %d", conn_err);
+                            // Check if connection is in a state where parameters can be updated
+                            struct bt_conn_info info;
+                            int info_err = bt_conn_get_info(active_conn, &info);
+                            if (info_err == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+                                LOG_INF("Updating connection parameters for FOTA - switching to BACKGROUND_IDLE profile");
+                                int conn_err = ble_conn_params_update(active_conn, CONN_PROFILE_BACKGROUND_IDLE);
+                                if (conn_err) {
+                                    if (conn_err == -EINVAL) {
+                                        LOG_WRN("Connection parameter update failed: Invalid parameters or connection state");
+                                    } else if (conn_err == -EALREADY) {
+                                        LOG_WRN("Connection parameter update already in progress");
+                                    } else {
+                                        LOG_ERR("Failed to update connection parameters: %d", conn_err);
+                                    }
+                                    // Continue with FOTA even if parameter update fails
+                                }
+                            } else {
+                                LOG_WRN("Connection not in valid state for parameter update (state: %d)", 
+                                        info_err == 0 ? info.state : -1);
                             }
                             bt_conn_unref(active_conn);
+                        } else {
+                            LOG_DBG("No active connection found for parameter update");
                         }
 #else
                         // For secondary device, stop scanning
@@ -1523,6 +1542,33 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             APP_EVENT_SUBMIT(motion_evt);
                             LOG_INF("Submitted stop activity event for motion sensor (FOTA starting)");
                         }
+                        
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                        // Send stop activity command to secondary device using the existing mechanism
+                        if (d2d_conn != nullptr) {
+                            LOG_INF("Sending stop activity command to secondary device for FOTA");
+                            uint8_t stop_value = 1;  // 1 = stop activity
+                            int d2d_err = ble_d2d_tx_send_stop_activity_command(stop_value);
+                            if (d2d_err != 0) {
+                                // If sending failed for any reason, try to queue it
+                                if (d2d_err == -EINVAL) {
+                                    LOG_INF("D2D service discovery not complete, queuing stop activity command");
+                                } else {
+                                    LOG_WRN("Direct send failed (%d), attempting to queue stop activity command", d2d_err);
+                                }
+                                d2d_err = ble_d2d_tx_queue_command(D2D_TX_CMD_STOP_ACTIVITY, &stop_value);
+                                if (d2d_err) {
+                                    LOG_ERR("Failed to queue stop activity command: %d", d2d_err);
+                                } else {
+                                    LOG_INF("Stop activity command queued for secondary device (will be sent after D2D discovery completes)");
+                                }
+                            } else {
+                                LOG_INF("Stop activity command sent to secondary device");
+                            }
+                        } else {
+                            LOG_DBG("No secondary device connected, skipping D2D stop command");
+                        }
+#endif
                         
                         fota_was_active = true;
                     }

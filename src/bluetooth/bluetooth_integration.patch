@@ -1,0 +1,75 @@
+diff --git a/src/bluetooth/bluetooth.cpp b/src/bluetooth/bluetooth.cpp
+index 1234567..abcdefg 100644
+--- a/src/bluetooth/bluetooth.cpp
++++ b/src/bluetooth/bluetooth.cpp
+@@ -1,6 +1,8 @@
+ #include "bluetooth.hpp"
++#include "ble_connection_manager.hpp"
++#include "fota_sync_manager.hpp"
++#include "retry_manager.hpp"
+ 
+-static struct bt_conn *active_conn = nullptr;
+-static struct bt_conn *d2d_conn = nullptr;
++// Remove static connection pointers - now managed by BleConnectionManager
+ 
+ static void connected(struct bt_conn *conn, uint8_t err)
+ {
+@@ -10,8 +12,8 @@ static void connected(struct bt_conn *conn, uint8_t err)
+         return;
+     }
+ 
+-    // If we haven't found a connection yet and this one is valid
+-    if (*active_conn == NULL && conn != NULL) {
++    BleConnectionManager& conn_mgr = BleConnectionManager::getInstance();
++    
++    if (!conn_mgr.hasPhoneConnection() && conn != NULL) {
+         struct bt_conn_info info;
+         if (bt_conn_get_info(conn, &info) == 0) {
+             // This is a phone connection (peripheral role)
+             if (info.role == BT_CONN_ROLE_PERIPHERAL) {
+-                *active_conn = bt_conn_ref(conn);
++                conn_mgr.setPhoneConnection(conn);
+                 LOG_INF("Phone connected!");
+             }
+         }
+@@ -20,7 +22,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
+ #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+     // Check if this is a D2D connection (central role)
+     if (info.role == BT_CONN_ROLE_CENTRAL) {
+-        d2d_conn = bt_conn_ref(conn);
++        conn_mgr.setSecondaryConnection(conn);
+         LOG_INF("Secondary device connected!");
+         
+         // Set the secondary connection for proxies
+@@ -35,15 +37,17 @@ static void connected(struct bt_conn *conn, uint8_t err)
+ 
+ static void disconnected(struct bt_conn *conn, uint8_t reason)
+ {
++    BleConnectionManager& conn_mgr = BleConnectionManager::getInstance();
++    
+ #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+-    if (conn == d2d_conn) {
++    if (conn_mgr.isD2DConnection(conn)) {
+         LOG_INF("Secondary device disconnected! (reason 0x%02x)\n", reason);
+-        bt_conn_unref(d2d_conn);
+-        d2d_conn = nullptr;
++        conn_mgr.clearSecondaryConnection();
+         
+         // Clear the secondary connection for proxies
+         fota_proxy_set_secondary_conn(NULL);
+         file_proxy_set_secondary_conn(NULL);
+         smp_proxy_set_secondary_conn(NULL);
++        
++        // Abort any ongoing FOTA if secondary disconnects
++        FotaSyncManager::getInstance().abortFota("Secondary device disconnected");
+     }
+ #endif
+ 
+-    if (conn == *active_conn) {
++    if (conn_mgr.isPhoneConnection(conn)) {
+         LOG_INF("Phone disconnected (reason 0x%02x)\n", reason);
+-        bt_conn_unref(*active_conn);
+-        *active_conn = nullptr;
++        conn_mgr.clearPhoneConnection();
+     }
+ }
