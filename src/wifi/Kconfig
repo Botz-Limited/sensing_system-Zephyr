@@ -13,7 +13,7 @@ config WIFI_MODULE_STACK_SIZE
 	int "Wifi module thread stack size"
 	default 4096
 
-config WIFI_PRIORITY
+config WIFI_MODULE_PRIORITY
 	int "Wifi module thread priority"
 	default 6
 

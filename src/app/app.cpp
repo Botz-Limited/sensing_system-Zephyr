@@ -428,6 +428,8 @@ const char *get_sender_name(sender_type_t sender)
             return "D2D Secondary";
         case SENDER_MOTION_SENSOR:
             return "Motion Sensor";
+        case SENDER_WIFI:
+            return "WiFi";
         case SENDER_NONE:
             return "None/Unknown";
         default:

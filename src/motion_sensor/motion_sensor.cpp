@@ -23,13 +23,14 @@
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
 #include <events/motion_sensor_event.h>
+#include <events/wifi_event.h>
 #include <motion_sensor.hpp>
 #include <status_codes.h>
 #include <ble_services.hpp>
 
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "../bluetooth/ble_d2d_tx.hpp"
-#endif
+#endif /* CONFIG_WIFI_NRF70 */
 
 // Include 3D orientation service for high-rate updates
 #include "../bluetooth/orientation_3d_service.hpp"
@@ -63,6 +64,7 @@ static const struct device *const bhi360_dev = DEVICE_DT_GET(BHI360_NODE);
 
 // Use atomic for thread-safe access to logging state
 static atomic_t logging_active = ATOMIC_INIT(0);
+static atomic_t wifi_active = ATOMIC_INIT(0);
 static float configured_sample_rate = 50.0f;
 
 // Step count tracking variables (file scope for access across functions)
@@ -533,6 +535,14 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             msg.type = MSG_TYPE_BHI360_LOG_RECORD;
             msg.data.bhi360_log_record = record;
             k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
+
+            // Also send to WiFi module if WiFi is active
+#if defined(CONFIG_WIFI_NRF70)
+            if (atomic_get(&wifi_active) == 1)
+            {
+                k_msgq_put(&wifi_msgq, &msg, K_NO_WAIT);
+            }
+#endif
 
             // Send individual values to Bluetooth module
             // 3D mapping with actual gyro data and quaternion
@@ -1024,6 +1034,18 @@ static bool app_event_handler(const struct app_event_header *aeh)
         }
         return false;
     }
+    if (is_wifi_connected_event(aeh))
+    {
+        LOG_INF("Motion sensor: WiFi connected - enabling WiFi data transmission");
+        atomic_set(&wifi_active, 1);
+        return false;
+    }
+    if (is_wifi_disconnected_event(aeh))
+    {
+        LOG_INF("Motion sensor: WiFi disconnected - disabling WiFi data transmission");
+        atomic_set(&wifi_active, 0);
+        return false;
+    }
     return false;
 }
 
@@ -1034,6 +1056,8 @@ APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_start_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_stop_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, wifi_connected_event);
+APP_EVENT_SUBSCRIBE(MODULE, wifi_disconnected_event);
 
 /* 
  * DRIVER_INTEGRATION SUMMARY:

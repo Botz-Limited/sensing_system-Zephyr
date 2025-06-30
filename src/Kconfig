@@ -6,6 +6,8 @@ rsource "foot_sensor/Kconfig"
 rsource "motion_sensor/Kconfig"
 rsource "packetizer/Kconfig"
 rsource "battery/Kconfig"
+rsource "wifi/Kconfig"
+
 
 # Sensor Criticality Configuration
 choice PRIMARY_SENSING_FUNCTION

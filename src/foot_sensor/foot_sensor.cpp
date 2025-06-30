@@ -29,6 +29,7 @@
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
 #include <events/foot_sensor_event.h>
+#include <events/wifi_event.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -93,6 +94,7 @@ void TIMER0_IRQHandler(void);
 
 // Use atomic for thread-safe access to logging state
 static atomic_t logging_active = ATOMIC_INIT(0);
+static atomic_t wifi_active = ATOMIC_INIT(0);
 
 // ADJUSTMENT: Added __aligned(4) for DMA-safe memory alignment
 static int16_t saadc_buffer[BUFFER_COUNT][SAADC_BUFFER_SIZE] __aligned(4);
@@ -165,7 +167,7 @@ static void foot_sensor_init()
 #else
         LOG_ERR("Foot sensor initialization failed (critical)");
         module_set_state(MODULE_STATE_ERROR);
-#endif
+#endif /* CONFIG_WIFI_NRF70 */
         return;
     }
 
@@ -305,6 +307,17 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                     {
                         LOG_WRN("Failed to send foot sensor data to data module");
                     }
+
+                    // Also send to WiFi module if WiFi is active
+#if defined(CONFIG_WIFI_NRF70)
+                    if (atomic_get(&wifi_active) == 1)
+                    {
+                        if (k_msgq_put(&wifi_msgq, &msg, K_NO_WAIT) != 0)
+                        {
+                            LOG_WRN("Failed to send foot sensor data to wifi module");
+                        }
+                    }
+#endif
                 }
             }
             break;
@@ -581,6 +594,18 @@ static bool app_event_handler(const struct app_event_header *aeh)
         }
         return false;
     }
+    if (is_wifi_connected_event(aeh))
+    {
+        LOG_INF("Foot sensor: WiFi connected - enabling WiFi data transmission");
+        atomic_set(&wifi_active, 1);
+        return false;
+    }
+    if (is_wifi_disconnected_event(aeh))
+    {
+        LOG_INF("Foot sensor: WiFi disconnected - disabling WiFi data transmission");
+        atomic_set(&wifi_active, 0);
+        return false;
+    }
     return false;
 }
 
@@ -590,3 +615,5 @@ APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_start_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_stop_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, wifi_connected_event);
+APP_EVENT_SUBSCRIBE(MODULE, wifi_disconnected_event);

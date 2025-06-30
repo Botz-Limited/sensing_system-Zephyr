@@ -6,4 +6,4 @@ add_subdirectory(foot_sensor)
 add_subdirectory(motion_sensor)
 add_subdirectory(packetizer)
 add_subdirectory(battery)
-
+add_subdirectory(wifi)

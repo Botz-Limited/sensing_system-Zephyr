@@ -36,6 +36,7 @@ enum class err_t
     FLASH_FAILURE = -28,
     INVALID_PARAMETER = -29,
     QUEUE_FULL = -30,
+    WIFI_ERROR = -31,
 };
 
 #endif // APP_INCLUDE_ERRORS_H_

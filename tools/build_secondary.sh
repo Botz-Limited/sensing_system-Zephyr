@@ -9,12 +9,17 @@ echo "This will enable the central role on the network core for connecting to pr
 # Clean previous build
 rm -rf build_secondary
 
-# Build with secondary device configuration and network core central support
-west build --build-dir /home/ee/sensing_fw/build_secondary /home/ee/sensing_fw/ \
-    --board nrf5340dk/nrf5340/cpuapp \
-    --sysbuild \
-    -- -DCONFIG_PRIMARY_DEVICE=n \
-       -Dipc_radio_EXTRA_CONF_FILE=/home/ee/sensing_fw/sysbuild/ipc_radio/prj_secondary.conf
+# Base west command
+WEST_CMD="west build --build-dir /home/ee/sensing_fw/build_secondary /home/ee/sensing_fw/ --board nrf5340dk/nrf5340/cpuapp --sysbuild -- -DCONFIG_PRIMARY_DEVICE=n -Dipc_radio_EXTRA_CONF_FILE=/home/ee/sensing_fw/sysbuild/ipc_radio/prj_secondary.conf"
+
+# Check for --with-wifi flag
+if [[ "$*" == *"--with-wifi"* ]]; then
+    echo "Including Wi-Fi configuration..."
+    WEST_CMD+=" -DEXTRA_CONF_FILE=/home/ee/sensing_fw/prj_wifi.conf"
+fi
+
+# Execute the build command
+$WEST_CMD
 
 if [ $? -eq 0 ]; then
     echo ""

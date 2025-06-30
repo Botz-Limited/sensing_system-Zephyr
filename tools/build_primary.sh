@@ -12,12 +12,17 @@ echo "  - Advertise as 'SensingGR'"
 # Clean previous build
 rm -rf build_primary
 
-# Build with primary device configuration and network core without central role
-west build --build-dir /home/ee/sensing_fw/build_primary /home/ee/sensing_fw/ \
-    --board nrf5340dk/nrf5340/cpuapp \
-    --sysbuild \
-    -- -DCONFIG_PRIMARY_DEVICE=y \
-       -Dipc_radio_EXTRA_CONF_FILE=/home/ee/sensing_fw/sysbuild/ipc_radio/prj_primary.conf
+# Base west command
+WEST_CMD="west build --build-dir /home/ee/sensing_fw/build_primary /home/ee/sensing_fw/ --board nrf5340dk/nrf5340/cpuapp --sysbuild -- -DCONFIG_PRIMARY_DEVICE=y -Dipc_radio_EXTRA_CONF_FILE=/home/ee/sensing_fw/sysbuild/ipc_radio/prj_primary.conf"
+
+# Check for --with-wifi flag
+if [[ "$*" == *"--with-wifi"* ]]; then
+    echo "Including Wi-Fi configuration..."
+    WEST_CMD+=" -DEXTRA_CONF_FILE=/home/ee/sensing_fw/prj_wifi.conf"
+fi
+
+# Execute the build command
+$WEST_CMD
 
 if [ $? -eq 0 ]; then
     echo ""
