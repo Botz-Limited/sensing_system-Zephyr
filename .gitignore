@@ -14,6 +14,12 @@ external/
 *~
 .DS_Store
 
+# Hidden directories
+.*/
+.devcontainer/
+.github/
+.qodo/
+
 # Compiled files
 *.o
 *.a
@@ -50,3 +56,6 @@ compile_commands.json
 
 # West workspace
 .west/
+
+# Test environments
+smp_test_env/
