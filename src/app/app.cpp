@@ -148,8 +148,8 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         (fota_progress.bytes_received - fota_progress.last_reported_bytes >= 102400)) {
         
         // Calculate approximate progress based on typical firmware size
-        // Most firmware images are between 200KB-500KB
-        uint32_t estimated_size = 400000; // 400KB typical size
+        // Primary firmware is typically around 780KB based on build output
+        uint32_t estimated_size = 780000; // 780KB typical size for primary
         uint8_t estimated_percent = MIN((fota_progress.bytes_received * 100) / estimated_size, 99);
         
         LOG_INF("FOTA Progress: %u bytes received (%u chunks) - Estimated %u%%",
