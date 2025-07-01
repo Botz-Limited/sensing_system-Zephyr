@@ -67,6 +67,21 @@ struct fota_progress_state {
     uint32_t net_core_size; // Learned size of net core
 } fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0, 0, true, 0, 0};
 
+// Initialize FOTA progress to clean state
+static void init_fota_progress(void)
+{
+    fota_progress.is_active = false;
+    fota_progress.total_size = 0;
+    fota_progress.bytes_received = 0;
+    fota_progress.percent_complete = 0;
+    fota_progress.chunks_received = 0;
+    fota_progress.chunks_written = 0;
+    fota_progress.status = 0;
+    fota_progress.error_code = 0;
+    fota_progress.last_reported_bytes = 0;
+    // Keep learned sizes
+}
+
 void initializing_entry();
 
 // FOTA reset handler
@@ -343,19 +358,19 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     }
 #endif
     
-    fota_progress.is_active = false;
+    // Don't mark inactive yet - wait for reset
     fota_progress.status = 3; // confirmed
     
     // Send FOTA progress message to Bluetooth thread
     generic_message_t msg;
     msg.sender = SENDER_NONE;
     msg.type = MSG_TYPE_FOTA_PROGRESS;
-    msg.data.fota_progress.is_active = fota_progress.is_active;
-    msg.data.fota_progress.status = fota_progress.status;
-    msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
+    msg.data.fota_progress.is_active = true; // Still active until reset
+    msg.data.fota_progress.status = 3; // confirmed
+    msg.data.fota_progress.percent_complete = 100;
     msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
-    msg.data.fota_progress.total_size = fota_progress.total_size;
-    msg.data.fota_progress.error_code = fota_progress.error_code;
+    msg.data.fota_progress.total_size = fota_progress.bytes_received;
+    msg.data.fota_progress.error_code = 0;
     
     if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
         LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
@@ -379,7 +394,10 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     } else {
         // This was the app core, network core update will follow
         LOG_INF("Application core update confirmed - waiting for network core update...");
-        // Don't reset yet, wait for network core update
+        // Reset is_first_image flag for next update
+        fota_progress.is_first_image = false;
+        // Clean up for next image but keep sizes
+        init_fota_progress();
     }
     
     return MGMT_CB_OK;
