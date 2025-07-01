@@ -61,7 +61,8 @@ struct fota_progress_state {
     uint8_t status; // 0=idle, 1=in_progress, 2=pending, 3=confirmed, 4=error
     int32_t error_code;
     uint32_t last_reported_bytes;
-} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t last_completed_size; // Size of last successful FOTA
+} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 void initializing_entry();
 
@@ -147,9 +148,24 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         if ((fota_progress.chunks_received % 10 == 0) || 
         (fota_progress.bytes_received - fota_progress.last_reported_bytes >= 102400)) {
         
-        // Calculate approximate progress based on typical firmware size
-        // Primary firmware is typically around 780KB based on build output
-        uint32_t estimated_size = 780000; // 780KB typical size for primary
+        // Calculate approximate progress based on configured or learned firmware size
+        uint32_t estimated_size;
+        
+#if IS_ENABLED(CONFIG_FOTA_DYNAMIC_SIZE_DETECTION)
+        // Use last successful FOTA size if available
+        if (fota_progress.last_completed_size > 0) {
+            estimated_size = fota_progress.last_completed_size;
+        } else
+#endif
+        {
+            // Fall back to configured estimates
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            estimated_size = CONFIG_FOTA_PRIMARY_SIZE_ESTIMATE;
+#else
+            estimated_size = CONFIG_FOTA_SECONDARY_SIZE_ESTIMATE;
+#endif
+        }
+        
         uint8_t estimated_percent = MIN((fota_progress.bytes_received * 100) / estimated_size, 99);
         
         LOG_INF("FOTA Progress: %u bytes received (%u chunks) - Estimated %u%%",
@@ -247,6 +263,15 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     ARG_UNUSED(data_size);
     
     LOG_INF("FOTA Image confirmed!");
+    
+#if IS_ENABLED(CONFIG_FOTA_DYNAMIC_SIZE_DETECTION)
+    // Save the size for future FOTA operations
+    if (fota_progress.bytes_received > 0) {
+        fota_progress.last_completed_size = fota_progress.bytes_received;
+        LOG_INF("Saved FOTA size for future updates: %u bytes", fota_progress.last_completed_size);
+    }
+#endif
+    
     fota_progress.is_active = false;
     fota_progress.status = 3; // confirmed
     

@@ -7,6 +7,7 @@ rsource "motion_sensor/Kconfig"
 rsource "packetizer/Kconfig"
 rsource "battery/Kconfig"
 rsource "wifi/Kconfig"
+rsource "Kconfig.fota"
 
 
 # Sensor Criticality Configuration

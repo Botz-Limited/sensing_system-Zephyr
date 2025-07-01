@@ -1,0 +1,25 @@
+menu "FOTA Configuration"
+
+config FOTA_PRIMARY_SIZE_ESTIMATE
+    int "Estimated primary firmware size in bytes"
+    default 780000
+    help
+      Estimated size of primary firmware for progress calculation.
+      Update this based on your typical build size.
+
+config FOTA_SECONDARY_SIZE_ESTIMATE
+    int "Estimated secondary firmware size in bytes"
+    default 400000
+    help
+      Estimated size of secondary firmware for progress calculation.
+      Secondary is typically smaller than primary.
+
+config FOTA_DYNAMIC_SIZE_DETECTION
+    bool "Enable dynamic FOTA size detection"
+    default y
+    help
+      When enabled, the system will remember the size of the last
+      successful FOTA update and use it for future progress calculations.
+      Falls back to configured estimates if no previous size is known.
+
+endmenu
