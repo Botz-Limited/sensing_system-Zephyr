@@ -1,0 +1,10 @@
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:52:8:bhy2_klio_read_pattern	288	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:86:8:bhy2_klio_read_reset_driver_status	32	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:114:8:bhy2_klio_write_pattern	272	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:131:8:bhy2_klio_set_pattern_states	24	dynamic
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:155:8:bhy2_klio_set_state	16	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:177:8:bhy2_klio_get_state	24	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:203:8:bhy2_klio_similarity_score	560	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:262:8:bhy2_klio_similarity_score_multiple	304	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:317:8:bhy2_klio_set_parameter	264	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_klio.c:336:8:bhy2_klio_get_parameter	296	static

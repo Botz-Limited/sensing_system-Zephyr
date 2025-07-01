@@ -1,0 +1,4 @@
+/home/ee/ncs/zephyr/include/zephyr/sys/crc.h:93:10:crc16	4	static
+/home/ee/ncs/zephyr/include/zephyr/sys/crc.h:123:10:crc16_reflect	4	static
+/home/ee/ncs/zephyr/include/zephyr/sys/crc.h:173:10:crc16_ccitt	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/crc.h:210:10:crc16_itu_t	0	static

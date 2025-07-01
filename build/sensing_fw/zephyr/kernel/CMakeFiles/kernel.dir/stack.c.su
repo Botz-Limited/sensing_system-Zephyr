@@ -1,0 +1,6 @@
+/home/ee/ncs/zephyr/kernel/include/ksched.h:159:20:unpend_thread_no_timeout	8	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:2910:6:k_stack_init	0	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:904:16:z_impl_k_stack_alloc_init	16	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:2942:5:k_stack_cleanup	8	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:921:12:z_impl_k_stack_push	32	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:938:12:z_impl_k_stack_pop	40	static

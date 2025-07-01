@@ -1,0 +1,145 @@
+on:
+  workflow_call
+
+env:
+  APPLICATION_ROOT_PATH: /__w/juna-fw/juna-fw
+
+jobs:
+  get-git-data:
+    name: Get Git Data
+    runs-on: ubuntu-22.04
+    outputs:
+      all: ${{ steps.data.outputs.all }} 
+      sha: ${{ steps.data.outputs.sha }} 
+      tag: ${{ steps.data.outputs.tag }} 
+      branch: ${{ steps.data.outputs.branch }} 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.1
+        with:
+          fetch-depth: 0
+          
+      - name: Query Git
+        id: data
+        run: |
+          SHA=$(git rev-parse --short ${GITHUB_SHA})
+          TAG=$(git describe --tags --abbrev=0)
+          BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "all=$TAG-$BRANCH-$SHA" >> $GITHUB_OUTPUT
+
+  run-posix-tests:
+    name: Run Posix Tests
+    runs-on: ubuntu-22.04
+    needs: [get-git-data]
+
+    container: 
+      image: ghcr.io/chiaro/juna-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.0
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          ssh-key:  ${{ secrets.JUNA_SSH_KEY }}
+
+      - name: Apply container owner mismatch workaround
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+
+      - name: Run twister for native_sim
+        run: ./tools/twister-unit-tests.sh
+      
+      - name: Upload Twister reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: juna-twister-report-${{ needs.get-git-data.outputs.all}}
+          path: reports/*
+          if-no-files-found: error
+      
+      - name: Publish Unit Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2.10.0
+        if: always()
+        with:
+          files: |
+            reports/**/twister_suite_report.xml
+
+  build-app:
+    name: Build Application
+    runs-on: ubuntu-22.04
+    needs: [get-git-data]
+
+    container: 
+      image: ghcr.io/chiaro/juna-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.0
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          ssh-key: ${{ secrets.JUNA_SSH_KEY }}
+
+      - name: Apply container owner mismatch workaround
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+
+      - name: Set Build Key
+        run: echo "${{ secrets.JUNA_FW_PRIVATE_KEY }}" >| /home/ee/ncs/bootloader/mcuboot/root-rsa-2048.pem
+
+      - name: Configure and Build
+        run: west build -b JUNA@E -p
+    
+      - name: Upload program artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: juna-build-artifacts-${{ needs.get-git-data.outputs.all}}
+          path: build/artifacts
+          if-no-files-found: error
+
+
+  generate-pdfs:
+    name: Generate Docs PDFs
+    runs-on: ubuntu-22.04
+    needs: [get-git-data]
+
+    container: 
+      image: ghcr.io/chiaro/juna-dev:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.1.0
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          ssh-key: ${{ secrets.JUNA_SSH_KEY }}
+
+      - name: Apply container owner mismatch workaround
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+
+      - name: Set Puppeteer Cache Dir
+        run: echo "PUPPETEER_CACHE_DIR=/root/.cache/puppeteer" >> $GITHUB_ENV
+
+      - name: Allow use of the pandoc_all_docs script
+        run: chmod 777 tools/pandoc_all_docs.py
+
+      - name: Generate docs
+        run: python3 tools/pandoc_all_docs.py
+
+      - name: Upload images
+        uses: actions/upload-artifact@v4
+        with:
+          name: juna-docs-${{ needs.get-git-data.outputs.all}}
+          path: docs_pdf
+          if-no-files-found: error

@@ -1,0 +1,2 @@
+/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq.h:70:14:metal_irq_save_disable	0	static
+/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq.h:76:6:metal_irq_restore_enable	0	static

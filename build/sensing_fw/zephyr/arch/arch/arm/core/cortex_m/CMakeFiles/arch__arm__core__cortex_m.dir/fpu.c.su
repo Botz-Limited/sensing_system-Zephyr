@@ -1,0 +1,2 @@
+/home/ee/ncs/zephyr/include/zephyr/arch/arm/cortex_m/fpu.h:17:6:z_arm_save_fp_context	8	static
+/home/ee/ncs/zephyr/include/zephyr/arch/arm/cortex_m/fpu.h:18:6:z_arm_restore_fp_context	0	static

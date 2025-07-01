@@ -1,0 +1,7 @@
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:5464:6:k_heap_init	8	static
+/home/ee/ncs/zephyr/kernel/kheap.c:23:12:statics_init	8	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:5487:7:k_heap_aligned_alloc	72	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:5511:7:k_heap_alloc	16	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:5536:7:k_heap_calloc	16	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:5562:7:k_heap_realloc	64	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:5575:6:k_heap_free	24	static

@@ -1,0 +1,14 @@
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:144:13:nvmc_wait_ready	0	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:287:13:flash_nrf_pages_layout	0	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:297:1:flash_nrf_get_parameters	0	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:443:13:shift_write_context	0	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:275:12:flash_nrf_get_size	8	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:110:20:is_regular_addr_valid	16	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:378:12:erase_op	16	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:532:12:erase	24	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:226:12:flash_nrf_erase	32	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:450:12:write_op	8	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:548:12:write	24	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:185:12:flash_nrf_write	32	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:150:12:flash_nrf_read	24	static
+/home/ee/ncs/zephyr/drivers/flash/soc_flash_nrf.c:315:12:nrf_flash_init	8	static

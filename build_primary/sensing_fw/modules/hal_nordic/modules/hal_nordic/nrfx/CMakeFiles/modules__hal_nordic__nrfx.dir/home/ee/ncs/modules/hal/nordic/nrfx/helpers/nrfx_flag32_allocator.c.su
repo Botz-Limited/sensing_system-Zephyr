@@ -1,0 +1,3 @@
+/home/ee/ncs/modules/hal/nordic/nrfx/helpers/nrfx_flag32_allocator.h:78:6:nrfx_flag32_is_allocated	0	static
+/home/ee/ncs/modules/hal/nordic/nrfx/helpers/nrfx_flag32_allocator.h:97:12:nrfx_flag32_alloc	8	static
+/home/ee/ncs/modules/hal/nordic/nrfx/helpers/nrfx_flag32_allocator.h:112:12:nrfx_flag32_free	4	static

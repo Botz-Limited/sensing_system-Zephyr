@@ -1,0 +1,6 @@
+/home/ee/ncs/modules/crypto/mbedtls/library/cipher_wrap.c:260:13:aes_ctx_free	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/cipher_wrap.c:247:14:aes_ctx_alloc	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/cipher_wrap.c:234:12:aes_setkey_dec_wrap	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/cipher_wrap.c:241:12:aes_setkey_enc_wrap	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/cipher_wrap.c:170:12:aes_crypt_cbc_wrap	16	static
+/home/ee/ncs/modules/crypto/mbedtls/library/cipher_wrap.c:163:12:aes_crypt_ecb_wrap	8	static

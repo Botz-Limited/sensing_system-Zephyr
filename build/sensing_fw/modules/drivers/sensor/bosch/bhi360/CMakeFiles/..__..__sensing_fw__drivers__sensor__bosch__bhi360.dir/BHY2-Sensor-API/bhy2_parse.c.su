@@ -1,0 +1,7 @@
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.c:42:6:bhy2_parse_temperature_celsius	0	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.c:50:6:bhy2_parse_humidity	0	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.c:57:6:bhy2_parse_pressure	0	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.c:65:6:bhy2_parse_altitude	0	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.c:70:6:bhy2_parse_quaternion	0	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.c:79:6:bhy2_parse_xyz	0	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_parse.c:86:6:bhy2_parse_orientation	0	static

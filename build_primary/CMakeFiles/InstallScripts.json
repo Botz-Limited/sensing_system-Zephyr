@@ -1,0 +1,14 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/ee/sensing_fw/build_primary/cmake_install.cmake",
+		"/home/ee/sensing_fw/build_primary/_sysbuild/cmake_install.cmake",
+		"/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/cmake_install.cmake",
+		"/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/bootloader/cmake_install.cmake",
+		"/home/ee/sensing_fw/build_primary/modules/nrf/cmake_install.cmake",
+		"/home/ee/sensing_fw/build_primary/modules/mcuboot/cmake_install.cmake",
+		"/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/boards/cmake_install.cmake",
+		"/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/soc/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

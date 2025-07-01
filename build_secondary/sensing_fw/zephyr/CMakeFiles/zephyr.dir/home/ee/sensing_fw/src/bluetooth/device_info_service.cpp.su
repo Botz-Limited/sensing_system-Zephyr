@@ -1,0 +1,6 @@
+/home/ee/sensing_fw/src/bluetooth/device_info_service.cpp:105:16:ssize_t read_str(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/device_info_service.cpp:112:13:const char* dis_get_manufacturer()	0	static
+/home/ee/sensing_fw/src/bluetooth/device_info_service.cpp:117:13:const char* dis_get_model()	0	static
+/home/ee/sensing_fw/src/bluetooth/device_info_service.cpp:122:13:const char* dis_get_serial()	0	static
+/home/ee/sensing_fw/src/bluetooth/device_info_service.cpp:127:13:const char* dis_get_hw_revision()	0	static
+/home/ee/sensing_fw/src/bluetooth/device_info_service.cpp:132:13:const char* dis_get_fw_revision()	0	static

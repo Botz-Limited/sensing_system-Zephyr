@@ -1,0 +1,7 @@
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt/src/os_mgmt.c:1045:12:os_mgmt_translate_error_code	0	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt/src/os_mgmt.c:357:13:os_mgmt_reset_work_handler	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt/src/os_mgmt.c:1124:13:os_mgmt_register_group	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt/src/os_mgmt.c:447:1:os_mgmt_bootloader_info	56	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt/src/os_mgmt.c:410:1:os_mgmt_mcumgr_params	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt/src/os_mgmt.c:364:12:os_mgmt_reset	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt/src/os_mgmt.c:147:12:os_mgmt_echo	48	static

@@ -1,0 +1,5 @@
+/home/ee/ncs/zephyr/subsys/bluetooth/host/uuid.c:31:13:uuid_to_uuid128	8	static
+/home/ee/ncs/zephyr/subsys/bluetooth/host/uuid.c:50:12:uuid128_cmp	48	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/uuid.h:5224:5:bt_uuid_cmp	8	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/uuid.h:5238:6:bt_uuid_create	4	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/uuid.h:5249:6:bt_uuid_to_str	48	static

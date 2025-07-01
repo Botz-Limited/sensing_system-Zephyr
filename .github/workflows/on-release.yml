@@ -1,0 +1,101 @@
+name: On Release
+
+on:
+  release:
+    types: [prereleased]
+
+jobs:
+
+  build-and-test:
+    uses: ./.github/workflows/common.yml
+    secrets: inherit
+
+  push-image:
+    name: Build and Push image
+    runs-on: ubuntu-22.04
+    env:
+       REGISTRY: ghcr.io
+       IMAGE_NAME: chiaro/juna-dev
+
+    steps:
+      - name: Set up SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.JUNA_SSH_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.0
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          ssh-key: ${{ secrets.JUNA_SSH_KEY }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3.0.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5.0.0
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
+
+  release:
+    name: "Add Artifacts to Release"
+    runs-on: ubuntu-22.04
+    needs: [build-and-test, push-image]
+    
+    steps:
+      - name: Set up SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+            ssh-private-key: ${{ secrets.JUNA_SSH_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4.1.0
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          ssh-key: ${{ secrets.JUNA_SSH_KEY }}
+
+      - name: install Zip
+        run: sudo apt-get update && sudo apt-get install -y zip hub 
+
+      - name: Make directories for artifact
+        run: mkdir download_artifacts release_artifacts
+
+      - name: Download docs artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: download_artifacts
+
+      - name: Zip Docs and move to correct dir
+        run: |
+          for dir in download_artifacts/juna-docs-*; do
+              [[ -d $dir ]] && zip -r "release_artifacts/$(basename $dir).zip" "$dir"
+          done
+
+      - name: Zip Test Output and move to correct dir
+        run: |
+          for dir in download_artifacts/juna-twister-report-*; do
+              [[ -d $dir ]] && zip -r "release_artifacts/$(basename $dir).zip" "$dir"
+          done
+
+      - name: Move Build artifacts to correct dir
+        run: |
+          for dir in download_artifacts/juna-build-artifacts-*; do
+              if [[ -d $dir ]]; then
+                  cp "$dir"/*.hex "$dir"/*.zip release_artifacts/
+              fi
+          done
+
+      - name: Upload
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag_name="${{ github.event.release.tag_name }}"
+          hub release edit $(find release_artifacts -type f -printf "-a %p ") -m "" "$tag_name"

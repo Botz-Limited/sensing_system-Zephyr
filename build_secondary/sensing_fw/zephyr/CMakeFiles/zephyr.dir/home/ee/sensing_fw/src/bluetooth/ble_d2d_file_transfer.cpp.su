@@ -1,0 +1,16 @@
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:165:13:void d2d_file_status_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:156:13:void d2d_file_data_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:175:13:void get_file_path(char*, size_t, uint8_t, uint8_t)	32	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:564:23:int32_t k_msleep(int32_t)	8	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1455:19:int bt_gatt_notify(bt_conn*, const bt_gatt_attr*, const void*, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:414:6:void ble_d2d_file_transfer_init()	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:419:6:void ble_d2d_file_client_init(bt_conn*)	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:435:6:void ble_d2d_file_set_callbacks(d2d_file_data_cb_t, d2d_file_status_cb_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:441:5:int ble_d2d_file_send_command(d2d_file_cmd, const uint8_t*, size_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:452:5:int ble_d2d_file_send_data(const uint8_t*, size_t, uint16_t)	8	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:470:5:int ble_d2d_file_send_status(d2d_file_status)	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:186:12:int handle_list_command()	464	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:287:12:int handle_read_command(uint8_t, uint8_t)	416	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:342:12:int handle_delete_command(uint8_t, uint8_t)	168	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:364:12:int handle_info_command(uint8_t, uint8_t)	168	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:84:16:ssize_t d2d_file_command_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	32	static

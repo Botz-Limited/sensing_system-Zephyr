@@ -1,0 +1,2 @@
+/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/system/zephyr/mutex.h:74:20:__metal_mutex_acquire	8	static
+/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/condition.h:64:5:metal_condition_wait	24	static

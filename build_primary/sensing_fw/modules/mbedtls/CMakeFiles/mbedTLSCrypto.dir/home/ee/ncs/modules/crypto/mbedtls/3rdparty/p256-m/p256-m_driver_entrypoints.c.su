@@ -1,0 +1,8 @@
+/home/ee/ncs/modules/crypto/mbedtls/3rdparty/p256-m/p256-m_driver_entrypoints.c:45:21:p256_to_psa_error	0	static
+/home/ee/ncs/modules/crypto/mbedtls/3rdparty/p256-m/p256-m_driver_entrypoints.c:238:21:p256_verify_hash_with_public_key	8	static
+/home/ee/ncs/modules/crypto/mbedtls/3rdparty/p256-m/p256-m_driver_entrypoints.c:61:14:p256_transparent_import_key	24	static
+/home/ee/ncs/modules/crypto/mbedtls/3rdparty/p256-m/p256-m_driver_entrypoints.c:106:14:p256_transparent_export_public_key	8	static
+/home/ee/ncs/modules/crypto/mbedtls/3rdparty/p256-m/p256-m_driver_entrypoints.c:138:14:p256_transparent_generate_key	72	static
+/home/ee/ncs/modules/crypto/mbedtls/3rdparty/p256-m/p256-m_driver_entrypoints.c:168:14:p256_transparent_key_agreement	8	static
+/home/ee/ncs/modules/crypto/mbedtls/3rdparty/p256-m/p256-m_driver_entrypoints.c:203:14:p256_transparent_sign_hash	8	static
+/home/ee/ncs/modules/crypto/mbedtls/3rdparty/p256-m/p256-m_driver_entrypoints.c:261:14:p256_transparent_verify_hash	88	static

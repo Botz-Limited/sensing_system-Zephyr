@@ -1,0 +1,15 @@
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:46:17:uint32_t swap_to_little_endian(uint32_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:239:16:ssize_t d2d_fota_status_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:299:16:ssize_t d2d_request_device_info_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:269:16:ssize_t d2d_delete_activity_log_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	584	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:205:16:ssize_t d2d_trigger_bhi360_calibration_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	584	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:112:16:ssize_t d2d_delete_bhi360_log_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	584	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:82:16:ssize_t d2d_delete_foot_log_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	584	static
+/home/ee/sensing_fw/include/events/foot_sensor_event.h:37:1:foot_sensor_stop_activity_event* new_foot_sensor_stop_activity_event()	8	static
+/home/ee/sensing_fw/include/events/motion_sensor_event.h:37:1:motion_sensor_stop_activity_event* new_motion_sensor_stop_activity_event()	8	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:175:16:ssize_t d2d_stop_activity_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	24	static
+/home/ee/sensing_fw/include/events/foot_sensor_event.h:31:1:foot_sensor_start_activity_event* new_foot_sensor_start_activity_event()	8	static
+/home/ee/sensing_fw/include/events/motion_sensor_event.h:31:1:motion_sensor_start_activity_event* new_motion_sensor_start_activity_event()	8	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:142:16:ssize_t d2d_start_activity_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:57:16:ssize_t d2d_set_time_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx.cpp:342:6:void ble_d2d_rx_init()	0	static

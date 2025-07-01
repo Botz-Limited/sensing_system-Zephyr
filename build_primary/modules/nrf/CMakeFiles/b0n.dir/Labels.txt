@@ -1,0 +1,13 @@
+# Target labels
+ b0n
+# Source files and their labels
+/home/ee/sensing_fw/build_primary/modules/nrf/CMakeFiles/b0n
+/home/ee/sensing_fw/build_primary/modules/nrf/CMakeFiles/b0n.rule
+/home/ee/sensing_fw/build_primary/modules/nrf/CMakeFiles/b0n-complete.rule
+/home/ee/sensing_fw/build_primary/modules/nrf/b0n-prefix/src/b0n-stamp/b0n-build.rule
+/home/ee/sensing_fw/build_primary/modules/nrf/b0n-prefix/src/b0n-stamp/b0n-configure.rule
+/home/ee/sensing_fw/build_primary/modules/nrf/b0n-prefix/src/b0n-stamp/b0n-download.rule
+/home/ee/sensing_fw/build_primary/modules/nrf/b0n-prefix/src/b0n-stamp/b0n-install.rule
+/home/ee/sensing_fw/build_primary/modules/nrf/b0n-prefix/src/b0n-stamp/b0n-mkdir.rule
+/home/ee/sensing_fw/build_primary/modules/nrf/b0n-prefix/src/b0n-stamp/b0n-patch.rule
+/home/ee/sensing_fw/build_primary/modules/nrf/b0n-prefix/src/b0n-stamp/b0n-update.rule

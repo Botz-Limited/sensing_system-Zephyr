@@ -1,0 +1,6 @@
+/home/ee/ncs/zephyr/kernel/mutex.c:82:16:new_prio_for_inheritance	0	static
+/home/ee/ncs/zephyr/kernel/include/ksched.h:159:20:unpend_thread_no_timeout	8	static
+/home/ee/ncs/zephyr/kernel/mutex.c:91:13:adjust_owner_prio	8	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:956:12:z_impl_k_mutex_init	0	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:972:12:z_impl_k_mutex_lock	32	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:989:12:z_impl_k_mutex_unlock	24	static

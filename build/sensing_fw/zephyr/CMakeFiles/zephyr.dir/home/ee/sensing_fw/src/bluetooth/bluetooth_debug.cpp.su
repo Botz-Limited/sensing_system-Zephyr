@@ -1,0 +1,9 @@
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/addr.h:242:19:int bt_addr_le_to_str(const bt_addr_le_t*, char*, size_t)	64	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth_debug.cpp:55:20:bt_debug_list_bonds()::<lambda(const bt_bond_info*, void*)>	104	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/bluetooth_debug.cpp:55:20:static constexpr void bt_debug_list_bonds()::<lambda(const bt_bond_info*, void*)>::_FUN(const bt_bond_info*, void*)	8	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth_debug.cpp:17:6:void bt_debug_check_security(bt_conn*)	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth_debug.cpp:49:6:void bt_debug_list_bonds()	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth_debug.cpp:69:6:void bt_debug_check_services()	16	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth_debug.cpp:79:6:void bt_debug_force_repairing(bt_conn*)	88	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/bluetooth_debug.cpp:105:6:void bt_debug_test_characteristic_access()	16	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth_debug.cpp:116:6:void bt_debug_info_service_status(bt_conn*)	24	static

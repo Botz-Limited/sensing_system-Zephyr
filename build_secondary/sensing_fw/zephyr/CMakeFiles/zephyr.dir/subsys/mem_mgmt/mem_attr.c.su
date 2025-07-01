@@ -1,0 +1,2 @@
+/home/ee/ncs/zephyr/include/zephyr/mem_mgmt/mem_attr.h:77:8:mem_attr_get_regions	0	static
+/home/ee/ncs/zephyr/include/zephyr/mem_mgmt/mem_attr.h:106:5:mem_attr_check_buf	0	static

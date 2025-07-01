@@ -1,0 +1,6 @@
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:414:6:void ble_d2d_file_transfer_init()	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:419:6:void ble_d2d_file_client_init(bt_conn*)	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:435:6:void ble_d2d_file_set_callbacks(d2d_file_data_cb_t, d2d_file_status_cb_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:441:5:int ble_d2d_file_send_command(d2d_file_cmd, const uint8_t*, size_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:452:5:int ble_d2d_file_send_data(const uint8_t*, size_t, uint16_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_file_transfer.cpp:470:5:int ble_d2d_file_send_status(d2d_file_status)	0	static

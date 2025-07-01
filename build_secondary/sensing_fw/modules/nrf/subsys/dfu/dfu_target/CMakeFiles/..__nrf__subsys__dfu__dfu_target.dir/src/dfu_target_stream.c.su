@@ -1,0 +1,6 @@
+/home/ee/ncs/nrf/include/dfu/dfu_target_stream.h:25:26:dfu_target_stream_get_stream	0	static
+/home/ee/ncs/nrf/include/dfu/dfu_target_stream.h:65:5:dfu_target_stream_init	40	static
+/home/ee/ncs/nrf/include/dfu/dfu_target_stream.h:80:5:dfu_target_stream_offset_get	8	static
+/home/ee/ncs/nrf/include/dfu/dfu_target_stream.h:90:5:dfu_target_stream_write	16	static
+/home/ee/ncs/nrf/include/dfu/dfu_target_stream.h:100:5:dfu_target_stream_done	16	static
+/home/ee/ncs/nrf/include/dfu/dfu_target_stream.h:109:5:dfu_target_stream_reset	8	static

@@ -1,0 +1,7 @@
+/home/ee/sensing_fw/src/bluetooth/ble_conn_params.cpp:75:5:int ble_conn_params_init()	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_conn_params.cpp:132:16:conn_profile_t ble_conn_params_get_profile()	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_conn_params.cpp:143:6:void ble_conn_params_update_data_rates(conn_profile_t)	104	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_conn_params.cpp:82:5:int ble_conn_params_update(bt_conn*, conn_profile_t)	104	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_conn_params.cpp:171:6:bool ble_conn_params_is_aggregation_enabled()	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_conn_params.cpp:182:9:uint8_t ble_conn_params_get_aggregation_count()	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_conn_params.cpp:193:6:void ble_conn_params_on_updated(bt_conn*, uint16_t, uint16_t, uint16_t)	88	dynamic,bounded

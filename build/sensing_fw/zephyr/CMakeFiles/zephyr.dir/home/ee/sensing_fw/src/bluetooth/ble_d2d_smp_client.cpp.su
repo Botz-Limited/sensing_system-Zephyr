@@ -1,0 +1,8 @@
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_smp_client.cpp:123:16:uint8_t notify_func(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_smp_client.cpp:150:13:void discovery_timeout_handler(k_work*)	16	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_smp_client.cpp:48:16:uint8_t discover_func(bt_conn*, const bt_gatt_attr*, bt_gatt_discover_params*)	32	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_smp_client.cpp:164:5:int ble_d2d_smp_client_init(d2d_smp_response_cb_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_smp_client.cpp:176:6:void ble_d2d_smp_client_set_connection(bt_conn*)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_smp_client.cpp:199:5:int ble_d2d_smp_client_send(const uint8_t*, size_t)	48	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_smp_client.cpp:240:6:bool ble_d2d_smp_client_is_ready()	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_smp_client.cpp:245:5:int ble_d2d_smp_client_discover(bt_conn*)	24	static

@@ -1,0 +1,2 @@
+/home/ee/ncs/zephyr/lib/posix/options/getopt/getopt.c:48:6:getopt_init	8	static
+/home/ee/ncs/zephyr/include/zephyr/posix/unistd.h:61:5:getopt	24	static

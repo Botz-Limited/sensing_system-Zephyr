@@ -1,0 +1,14 @@
+default: sensing_fw
+build_dir: /home/ee/sensing_fw/build
+domains:
+  - name: sensing_fw
+    build_dir: /home/ee/sensing_fw/build/sensing_fw
+  - name: mcuboot
+    build_dir: /home/ee/sensing_fw/build/mcuboot
+  - name: ipc_radio
+    build_dir: /home/ee/sensing_fw/build/ipc_radio
+  - name: b0n
+    build_dir: /home/ee/sensing_fw/build/b0n
+flash_order:
+  - ipc_radio
+  - sensing_fw

@@ -1,0 +1,5 @@
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt_client/src/os_mgmt_client.c:43:12:reset_res_fn	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/os_mgmt_client/src/os_mgmt_client.c:89:12:echo_res_fn	248	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/grp/os_mgmt/os_mgmt_client.h:41:6:os_mgmt_client_init	0	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/grp/os_mgmt/os_mgmt_client.h:63:5:os_mgmt_client_reset	24	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/grp/os_mgmt/os_mgmt_client.h:53:5:os_mgmt_client_echo	144	static

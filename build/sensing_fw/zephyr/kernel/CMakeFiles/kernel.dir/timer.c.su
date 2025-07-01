@@ -1,0 +1,7 @@
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:6163:6:z_timer_expiration_handler	24	static
+/home/ee/ncs/zephyr/kernel/include/ksched.h:77:20:z_reschedule_unlocked	8	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:1658:6:k_timer_init	0	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:457:13:z_impl_k_timer_start	24	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:476:13:z_impl_k_timer_stop	8	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:493:17:z_impl_k_timer_status_get	24	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:509:17:z_impl_k_timer_status_sync	32	static

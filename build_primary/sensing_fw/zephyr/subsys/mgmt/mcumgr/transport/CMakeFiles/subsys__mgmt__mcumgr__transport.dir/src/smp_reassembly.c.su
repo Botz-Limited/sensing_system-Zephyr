@@ -1,0 +1,6 @@
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp_reassembly.c:18:6:smp_reassembly_init	0	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp_reassembly.c:24:5:smp_reassembly_expected	0	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp_reassembly.c:33:5:smp_reassembly_collect	24	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp_reassembly.c:86:5:smp_reassembly_complete	16	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp_reassembly.c:103:5:smp_reassembly_drop	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp_reassembly.c:116:7:smp_reassembly_get_ud	0	static

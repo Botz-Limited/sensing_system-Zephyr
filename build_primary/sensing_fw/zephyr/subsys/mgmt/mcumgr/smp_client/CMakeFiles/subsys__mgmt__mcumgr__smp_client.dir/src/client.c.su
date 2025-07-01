@@ -1,0 +1,17 @@
+/home/ee/ncs/zephyr/include/zephyr/sys/slist.h:408:1:sys_slist_remove	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/slist.h:450:1:sys_slist_find_and_remove	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:145:35:smp_client_cmd_req_allocate	0	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:52:13:smp_client_handle_reqs	16	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:276:13:smp_read_hdr	0	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:184:35:smp_client_response_discover	24	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:66:13:smp_header_init	8	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:1907:23:k_uptime_delta	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:160:13:smp_cmd_add_to_list	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:134:12:smp_client_init	8	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp_client.h:50:5:smp_client_object_init	8	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp_client.h:86:17:smp_client_buf_allocation	48	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp_client.h:94:6:smp_client_buf_free	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:170:13:smp_client_cmd_req_free	16	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp_client.h:72:5:smp_client_single_response	16	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp_client/src/client.c:79:13:smp_client_transport_work_fn	32	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp_client.h:109:5:smp_client_send_cmd	48	static

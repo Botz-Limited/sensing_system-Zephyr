@@ -1,0 +1,9 @@
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:564:23:k_msleep	8	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/bhi360_calibration.c:40:5:bhi360_perform_gyro_foc	40	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/bhi360_calibration.c:84:5:bhi360_perform_accel_foc	40	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/bhi360_calibration.c:131:5:bhi360_get_calibration_profile	40	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/bhi360_calibration.c:183:5:bhi360_set_calibration_profile	24	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/bhi360_calibration.c:232:5:bhi360_get_calibration_status	48	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/bhi360_calibration.c:284:5:bhi360_perform_full_calibration	32	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/bhi360_calibration.c:320:5:bhi360_save_calibration_to_flash	1048	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/bhi360_calibration.c:344:5:bhi360_load_calibration_from_flash	16	static

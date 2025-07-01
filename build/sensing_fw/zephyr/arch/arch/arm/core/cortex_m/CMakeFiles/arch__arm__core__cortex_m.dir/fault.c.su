@@ -1,0 +1,12 @@
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:140:13:memory_fault_recoverable	0	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:642:20:z_arm_is_synchronous_svc	0	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:902:32:get_esf	16	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:183:17:mem_manage_fault	32	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:342:12:bus_fault	32	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:504:17:usage_fault	16	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:717:17:hard_fault	24	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:616:13:debug_monitor	16	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:784:13:reserved_exception	72	dynamic,bounded
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:794:17:fault_handle	8	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:1044:6:z_arm_fault	128	static
+/home/ee/ncs/zephyr/arch/arm/core/cortex_m/fault.c:1117:6:z_arm_fault_init	0	static

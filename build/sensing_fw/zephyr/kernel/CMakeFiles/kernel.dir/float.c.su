@@ -1,0 +1,2 @@
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1551:12:z_impl_k_float_disable	8	static
+/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1567:12:z_impl_k_float_enable	8	static

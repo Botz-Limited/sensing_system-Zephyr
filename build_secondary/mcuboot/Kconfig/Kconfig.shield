@@ -1,0 +1,2 @@
+osource "/home/ee/sensing_fw/boards/shields/*/Kconfig.shield"
+osource "/home/ee/ncs/nrf/boards/shields/*/Kconfig.shield"

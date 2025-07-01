@@ -1,0 +1,14 @@
+name: On Push to Branch
+on:
+  push:
+    branches-ignore:
+      - trunk
+    tags-ignore:
+      - '*'
+  workflow_dispatch:
+
+jobs:
+
+  build-and-test:
+    uses: ./.github/workflows/common.yml
+    secrets: inherit

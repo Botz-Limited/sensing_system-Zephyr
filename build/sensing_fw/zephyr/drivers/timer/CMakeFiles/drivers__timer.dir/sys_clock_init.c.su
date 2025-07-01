@@ -1,0 +1,2 @@
+/home/ee/ncs/zephyr/include/zephyr/drivers/timer/system_timer.h:73:6:sys_clock_set_timeout	0	static
+/home/ee/ncs/zephyr/include/zephyr/drivers/timer/system_timer.h:87:6:sys_clock_idle_exit	0	static

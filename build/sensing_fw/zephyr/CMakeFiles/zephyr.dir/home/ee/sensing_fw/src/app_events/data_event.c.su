@@ -1,0 +1,2 @@
+/home/ee/sensing_fw/src/app_events/data_event.c:11:13:log_data_event	0	static
+/home/ee/sensing_fw/src/app_events/data_event.c:29:13:log_calibration_event	0	static

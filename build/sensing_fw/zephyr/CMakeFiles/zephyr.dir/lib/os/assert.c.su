@@ -1,0 +1,2 @@
+/home/ee/ncs/zephyr/include/zephyr/sys/__assert.h:92:6:assert_post_action	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/__assert.h:35:26:assert_print	16	static

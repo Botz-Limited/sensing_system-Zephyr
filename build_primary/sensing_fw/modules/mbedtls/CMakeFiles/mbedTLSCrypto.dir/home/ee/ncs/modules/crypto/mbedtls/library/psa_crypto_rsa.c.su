@@ -1,0 +1,2 @@
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_rsa.c:515:14:mbedtls_psa_asymmetric_encrypt	0	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_rsa.c:609:14:mbedtls_psa_asymmetric_decrypt	0	static

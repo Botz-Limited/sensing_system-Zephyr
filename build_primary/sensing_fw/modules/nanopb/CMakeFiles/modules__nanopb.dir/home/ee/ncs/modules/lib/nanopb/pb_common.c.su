@@ -1,0 +1,11 @@
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:8:13:load_descriptor_values	16	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:122:13:advance_iterator	0	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:277:14:pb_const_cast	0	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:156:6:pb_field_iter_begin	16	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:166:6:pb_field_iter_begin_extension	16	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:188:6:pb_field_iter_next	8	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:195:6:pb_field_iter_find	16	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:246:6:pb_field_iter_find_extension	16	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:290:6:pb_field_iter_begin_const	16	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:295:6:pb_field_iter_begin_extension_const	8	static
+/home/ee/ncs/modules/lib/nanopb/pb_common.c:300:6:pb_default_field_callback	8	static

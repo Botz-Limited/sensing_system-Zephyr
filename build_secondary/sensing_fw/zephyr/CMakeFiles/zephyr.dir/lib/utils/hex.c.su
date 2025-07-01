@@ -1,0 +1,4 @@
+/home/ee/ncs/zephyr/include/zephyr/sys/util.h:542:5:char2hex	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/util.h:552:5:hex2char	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/util.h:564:8:bin2hex	32	static
+/home/ee/ncs/zephyr/include/zephyr/sys/util.h:576:8:hex2bin	40	static

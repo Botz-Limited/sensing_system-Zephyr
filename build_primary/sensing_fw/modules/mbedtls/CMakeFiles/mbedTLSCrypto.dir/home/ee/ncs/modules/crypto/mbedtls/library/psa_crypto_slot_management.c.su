@@ -1,0 +1,15 @@
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:195:16:psa_get_key_slots_initialized	0	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:331:5:psa_is_valid_key_id	0	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:383:21:psa_get_and_lock_key_slot_in_memory	16	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:430:14:psa_initialize_key_slots	0	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:451:6:psa_wipe_all_key_slots	16	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:595:14:psa_reserve_free_key_slot	24	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:798:14:psa_get_and_lock_key_slot	16	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:891:14:psa_unregister_read	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:925:14:psa_unregister_read_under_mutex	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:943:14:psa_validate_key_location	0	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:968:14:psa_validate_key_persistence	0	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:987:14:psa_open_key	0	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:1015:14:psa_close_key	16	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:1056:14:psa_purge_key	16	static
+/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_slot_management.c:1091:6:mbedtls_psa_get_stats	8	static

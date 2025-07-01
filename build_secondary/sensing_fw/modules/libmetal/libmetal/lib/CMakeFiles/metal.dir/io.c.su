@@ -1,0 +1,4 @@
+/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/io.h:98:1:metal_io_init	56	static
+/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/io.h:341:5:metal_io_block_read	24	static
+/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/io.h:352:5:metal_io_block_write	24	static
+/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/io.h:363:5:metal_io_block_set	24	static

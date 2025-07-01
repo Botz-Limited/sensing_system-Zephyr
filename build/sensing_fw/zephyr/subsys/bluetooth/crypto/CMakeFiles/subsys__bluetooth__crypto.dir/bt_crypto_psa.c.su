@@ -1,0 +1,2 @@
+/home/ee/ncs/modules/crypto/mbedtls/include/psa/crypto_struct.h:383:20:psa_extend_key_usage_flags	0	static
+/home/ee/ncs/zephyr/subsys/bluetooth/crypto/bt_crypto_psa.c:19:5:bt_crypto_aes_cmac	80	static

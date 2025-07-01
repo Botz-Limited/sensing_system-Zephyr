@@ -1,0 +1,8 @@
+{
+    "codium.codeCompletion.enable": false,
+    "git.ignoreLimitWarning": true,
+    "nrf-connect.debugging.bindings": {
+        "${workspaceFolder}/build_primary": "Launch build_primary",
+        "${workspaceFolder}/build_primary/ipc_radio": "Launch build_primary"
+    }
+}

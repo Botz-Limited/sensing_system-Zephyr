@@ -1,0 +1,81 @@
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1682:13:void jis_secondary_activity_log_path_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1654:13:void jis_secondary_activity_log_available_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1623:13:void jis_secondary_bhi360_log_path_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1595:13:void jis_secondary_bhi360_log_available_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1564:13:void jis_secondary_foot_log_path_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1536:13:void jis_secondary_foot_log_available_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1502:13:void jis_secondary_fota_progress_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1421:13:void jis_activity_log_path_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1394:13:void jis_activity_log_available_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1360:13:void jis_fota_progress_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:575:13:void jis_activity_step_count_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1714:13:void jis_total_step_count_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1320:13:void jis_bhi360_data3_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1270:13:void jis_bhi360_data2_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1231:13:void jis_bhi360_data1_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1203:13:void jis_bhi360_req_id_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1143:13:void jis_bhi360_log_available_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1084:13:void jis_foot_sensor_req_id_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:971:13:void jis_charge_status_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1022:13:void jis_foot_sensor_log_available_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:849:13:void jis_foot_sensor_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:839:13:void jis_status_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:866:6:void jis_current_time_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1692:16:ssize_t jis_secondary_activity_log_path_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1664:16:ssize_t jis_secondary_activity_log_available_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1633:16:ssize_t jis_secondary_bhi360_log_path_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1605:16:ssize_t jis_secondary_bhi360_log_available_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1574:16:ssize_t jis_secondary_foot_log_path_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1546:16:ssize_t jis_secondary_foot_log_available_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1512:16:ssize_t jis_secondary_fota_progress_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1453:16:ssize_t jis_secondary_info_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1431:16:ssize_t jis_activity_log_path_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1404:16:ssize_t jis_activity_log_available_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1370:16:ssize_t jis_fota_progress_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:585:16:ssize_t jis_activity_step_count_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1724:16:ssize_t jis_total_step_count_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1329:16:ssize_t jis_bhi360_data3_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1279:16:ssize_t jis_bhi360_data2_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1240:16:ssize_t jis_bhi360_data1_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1224:16:ssize_t jis_bhi360_req_id_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1163:16:ssize_t jis_bhi360_log_available_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1108:16:ssize_t jis_foot_sensor_req_id_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:992:16:ssize_t jis_charge_status_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1042:16:ssize_t jis_foot_sensor_log_available_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:913:16:ssize_t jis_foot_sensor_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:906:16:ssize_t jis_status_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:876:16:ssize_t jis_read_current_time(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	56	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1455:19:int bt_gatt_notify(bt_conn*, const bt_gatt_attr*, const void*, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:539:12:int safe_gatt_notify(const bt_uuid*, const void*, uint16_t)	24	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1492:19:int bt_gatt_notify_uuid(bt_conn*, const bt_uuid*, const bt_gatt_attr*, const void*, uint16_t)	32	static
+/home/ee/sensing_fw/include/app_fixed_point.hpp:109:13:void convert_3d_mapping_to_fixed(const bhi360_3d_mapping_t&, bhi360_3d_mapping_fixed_t&)	0	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:556:17:void set_device_status(uint32_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:590:17:void jis_activity_step_count_notify(uint32_t)	8	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:610:17:void jis_set_err_status_notify(err_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:701:17:void jis_clear_err_status_notify(err_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:792:6:void jis_foot_sensor_notify(const foot_samples_t*)	56	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:820:17:void jis_foot_sensor_notify_ble(const foot_samples_ble_t*)	8	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:929:6:void cts_notify()	8	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:950:6:void jis_charge_status_notify(uint8_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:998:6:void jis_foot_sensor_log_available_notify(uint8_t)	8	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1060:6:void jis_foot_sensor_req_id_path_notify(const char*)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1124:6:void jis_bhi360_log_available_notify(uint8_t)	8	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1180:6:void jis_bhi360_req_id_path_notify(const char*)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1244:17:void jis_bhi360_data1_notify(const bhi360_3d_mapping_t*)	24	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1261:17:void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t*)	8	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1283:17:void jis_bhi360_data2_notify(const bhi360_step_count_t*)	568	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1333:6:void jis_bhi360_data3_notify(const bhi360_linear_accel_t*)	16	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1350:17:void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t*)	8	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1375:6:void jis_fota_progress_notify(const fota_progress_msg_t*)	8	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1409:17:void jis_activity_log_available_notify(uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1436:17:void jis_activity_log_path_notify(const char*)	56	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1460:6:void jis_update_secondary_device_info(const char*, const char*, const char*, const char*, const char*)	104	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1490:6:void jis_clear_secondary_device_info()	24	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1517:6:void jis_secondary_fota_progress_notify(const fota_progress_msg_t*)	32	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1551:6:void jis_secondary_foot_log_available_notify(uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1579:6:void jis_secondary_foot_log_path_notify(const char*)	56	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1610:6:void jis_secondary_bhi360_log_available_notify(uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1638:6:void jis_secondary_bhi360_log_path_notify(const char*)	56	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1669:6:void jis_secondary_activity_log_available_notify(uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1697:6:void jis_secondary_activity_log_path_notify(const char*)	56	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/information_service.cpp:1729:17:void jis_total_step_count_notify(uint32_t, uint32_t)	8	static

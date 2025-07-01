@@ -1,0 +1,2 @@
+/home/ee/ncs/zephyr/subsys/shell/modules/kernel_service/thread/stacks.c:53:12:cmd_kernel_thread_stacks	80	static
+/home/ee/ncs/zephyr/subsys/shell/modules/kernel_service/thread/stacks.c:22:13:shell_stack_dump	56	static

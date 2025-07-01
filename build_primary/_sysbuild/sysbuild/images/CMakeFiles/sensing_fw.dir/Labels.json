@@ -1,0 +1,43 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/CMakeFiles/sensing_fw"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/CMakeFiles/sensing_fw.rule"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/CMakeFiles/sensing_fw-complete.rule"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/sensing_fw-prefix/src/sensing_fw-stamp/sensing_fw-build.rule"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/sensing_fw-prefix/src/sensing_fw-stamp/sensing_fw-configure.rule"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/sensing_fw-prefix/src/sensing_fw-stamp/sensing_fw-download.rule"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/sensing_fw-prefix/src/sensing_fw-stamp/sensing_fw-install.rule"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/sensing_fw-prefix/src/sensing_fw-stamp/sensing_fw-mkdir.rule"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/sensing_fw-prefix/src/sensing_fw-stamp/sensing_fw-patch.rule"
+		},
+		{
+			"file" : "/home/ee/sensing_fw/build_primary/_sysbuild/sysbuild/images/sensing_fw-prefix/src/sensing_fw-stamp/sensing_fw-update.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"sensing_fw"
+		],
+		"name" : "sensing_fw"
+	}
+}

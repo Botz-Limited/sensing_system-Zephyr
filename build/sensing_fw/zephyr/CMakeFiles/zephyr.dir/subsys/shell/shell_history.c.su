@@ -1,0 +1,7 @@
+/home/ee/ncs/zephyr/subsys/shell/shell_history.c:95:13:add_to_head	16	static
+/home/ee/ncs/zephyr/subsys/shell/shell_history.c:106:13:remove_from_tail	8	static
+/home/ee/ncs/zephyr/include/zephyr/shell/shell_history.h:68:6:z_shell_history_mode_exit	0	static
+/home/ee/ncs/zephyr/include/zephyr/shell/shell_history.h:82:6:z_shell_history_get	16	static
+/home/ee/ncs/zephyr/include/zephyr/shell/shell_history.h:61:6:z_shell_history_purge	8	static
+/home/ee/ncs/zephyr/include/zephyr/shell/shell_history.h:95:6:z_shell_history_put	48	static
+/home/ee/ncs/zephyr/include/zephyr/shell/shell_history.h:51:6:z_shell_history_init	0	static

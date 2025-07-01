@@ -1,0 +1,36 @@
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:909:13:void count_bonds(const bt_bond_info*, void*)	0	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:936:13:void disconnected(bt_conn*, uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:1833:13:void ble_timer_expiry_function(k_timer*)	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:659:13:void pairing_complete(bt_conn*, bool)	56	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:680:13:void pairing_failed(bt_conn*, bt_security_err)	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:1924:7:err_t bt_stop_advertising()	16	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:916:13:bool bonds_present()	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:1812:7:err_t ble_start_hidden()	32	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:1855:13:void ble_timer_handler_function(k_work*)	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:741:13:bool is_connection_bonded(bt_conn*)	24	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/addr.h:242:19:int bt_addr_le_to_str(const bt_addr_le_t*, char*, size_t)	64	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:985:13:void security_changed(bt_conn*, bt_security_t, bt_security_err)	152	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:802:32:connected(bt_conn*, uint8_t)::<lambda(bt_conn*, uint8_t, bt_gatt_exchange_params*)>	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:802:32:static constexpr void connected(bt_conn*, uint8_t)::<lambda(bt_conn*, uint8_t, bt_gatt_exchange_params*)>::_FUN(bt_conn*, uint8_t, bt_gatt_exchange_params*)	8	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:560:13:void start_scan()	32	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:776:13:void connected(bt_conn*, uint8_t)	104	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:373:13:bool adv_data_has_name(net_buf_simple*, const char*)	64	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:410:13:bool adv_data_has_uuid(net_buf_simple*)	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:731:13:void check_bond(const bt_bond_info*, void*)	8	static
+/home/ee/ncs/zephyr/include/zephyr/kernel.h:564:23:int32_t k_msleep(int32_t)	8	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:441:13:void device_found(const bt_addr_le_t*, int8_t, uint8_t, net_buf_simple*)	288	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:294:13:void d2d_disconnected(bt_conn*, uint8_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:221:13:void d2d_connected(bt_conn*, uint8_t)	56	static
+/home/ee/sensing_fw/include/events/foot_sensor_event.h:37:1:foot_sensor_stop_activity_event* new_foot_sensor_stop_activity_event()	8	static
+/home/ee/sensing_fw/include/events/motion_sensor_event.h:37:1:motion_sensor_stop_activity_event* new_motion_sensor_stop_activity_event()	8	static
+/home/ee/ncs/nrf/include/caf/events/module_state_event.h:243:1:module_state_event* new_module_state_event()	8	static
+/home/ee/ncs/nrf/include/caf/events/module_state_event.h:312:20:void module_set_state(module_state)	8	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:1257:6:void bluetooth_process(void*, void*, void*)	2256	dynamic
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:121:6:void send_device_info_to_primary()	752	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:250:50:d2d_connected(bt_conn*, uint8_t)::<lambda(k_work*)>	24	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:250:50:static constexpr void d2d_connected(bt_conn*, uint8_t)::<lambda(k_work*)>::_FUN(k_work*)	8	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:165:6:void bluetooth_d2d_confirmed(bt_conn*)	16	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:186:6:void bluetooth_d2d_not_found(bt_conn*)	0	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:1067:5:int set_bluetooth_name()	104	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:1104:7:err_t bt_module_init()	56	static
+/home/ee/sensing_fw/src/bluetooth/bluetooth.cpp:1935:13:bool app_event_handler(const app_event_header*)	8	static

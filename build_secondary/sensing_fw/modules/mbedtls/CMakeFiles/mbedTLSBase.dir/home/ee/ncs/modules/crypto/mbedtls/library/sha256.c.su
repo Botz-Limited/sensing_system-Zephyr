@@ -1,0 +1,9 @@
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:225:6:mbedtls_sha256_init	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:230:6:mbedtls_sha256_free	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:239:6:mbedtls_sha256_clone	8	static
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:248:5:mbedtls_sha256_starts	0	static
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:492:5:mbedtls_internal_sha256_process	328	static
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:582:15:mbedtls_internal_sha256_process_many	24	static
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:645:5:mbedtls_sha256_update	24	static
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:700:5:mbedtls_sha256_finish	16	static
+/home/ee/ncs/modules/crypto/mbedtls/library/sha256.c:773:5:mbedtls_sha256	128	static
