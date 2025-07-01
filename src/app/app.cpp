@@ -258,10 +258,19 @@ mgmt_cb_return fota_pending_callback(uint32_t event, enum mgmt_cb_return prev_st
     ARG_UNUSED(data);
     ARG_UNUSED(data_size);
     
+    LOG_INF("=== FOTA PENDING CALLBACK ===");
+    LOG_INF("=== FOTA PENDING CALLBACK ===");
+    LOG_INF("=== FOTA PENDING CALLBACK TRIGGERED (sequence %d) ===", fota_progress.update_sequence);
     LOG_INF("FOTA Transfer complete, pending verification");
     LOG_INF("Total chunks: %u received, %u written", 
             fota_progress.chunks_received, fota_progress.chunks_written);
     LOG_INF("Total size: %u bytes", fota_progress.bytes_received);
+    
+    if (fota_progress.update_sequence == 1) {
+        LOG_INF("App core transfer complete, pending verification");
+    } else if (fota_progress.update_sequence == 2) {
+        LOG_INF("Network core transfer complete, pending verification");
+    }
     
     fota_progress.status = 2; // pending
     fota_progress.percent_complete = 100; // Transfer complete
@@ -296,15 +305,14 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     ARG_UNUSED(data);
     ARG_UNUSED(data_size);
     
+    LOG_INF("=== FOTA CONFIRMED CALLBACK (sequence %d) ===", fota_progress.update_sequence);
+    
+    LOG_INF("=== FOTA CONFIRMED CALLBACK TRIGGERED (sequence %d) ===", fota_progress.update_sequence);
     fota_progress.status = 3; // confirmed
     
     if (fota_progress.update_sequence == 1) {
         LOG_INF("=== APP CORE UPDATE CONFIRMED (%u bytes) ===", fota_progress.bytes_received);
-        LOG_INF("Waiting for network core update...");
-    } else if (fota_progress.update_sequence == 2) {
-        LOG_INF("=== NETWORK CORE UPDATE CONFIRMED (%u bytes) ===", fota_progress.bytes_received);
-        LOG_INF("=== ALL UPDATES COMPLETE ===");
-    }
+        LOG_INF("
     
     // Send FOTA progress message to Bluetooth thread
     generic_message_t msg;
