@@ -3666,6 +3666,7 @@
 /home/ee/sensing_fw/drivers/sensor/bosch/Kconfig
 /home/ee/sensing_fw/drivers/sensor/bosch/bhi360/Kconfig
 /home/ee/sensing_fw/src/Kconfig
+/home/ee/sensing_fw/src/Kconfig.fota
 /home/ee/sensing_fw/src/app/Kconfig
 /home/ee/sensing_fw/src/app_events/Kconfig
 /home/ee/sensing_fw/src/battery/Kconfig

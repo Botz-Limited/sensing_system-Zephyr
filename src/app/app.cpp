@@ -150,25 +150,36 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         
         // Calculate approximate progress based on configured or learned firmware size
         uint32_t estimated_size;
+        bool is_netcore = false;
         
 #if IS_ENABLED(CONFIG_FOTA_DYNAMIC_SIZE_DETECTION)
         // Use last successful FOTA size if available
         if (fota_progress.last_completed_size > 0) {
             estimated_size = fota_progress.last_completed_size;
+            // Detect if this is likely a netcore update based on size
+            is_netcore = (estimated_size < 200000);
         } else
 #endif
         {
             // Fall back to configured estimates
+            // Try to detect netcore update by early chunk pattern
+            if (fota_progress.chunks_received > 5 && fota_progress.bytes_received < 10000) {
+                // Small size after several chunks suggests netcore
+                estimated_size = CONFIG_FOTA_NETCORE_SIZE_ESTIMATE;
+                is_netcore = true;
+            } else {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-            estimated_size = CONFIG_FOTA_PRIMARY_SIZE_ESTIMATE;
+                estimated_size = CONFIG_FOTA_PRIMARY_SIZE_ESTIMATE;
 #else
-            estimated_size = CONFIG_FOTA_SECONDARY_SIZE_ESTIMATE;
+                estimated_size = CONFIG_FOTA_SECONDARY_SIZE_ESTIMATE;
 #endif
+            }
         }
         
         uint8_t estimated_percent = MIN((fota_progress.bytes_received * 100) / estimated_size, 99);
         
-        LOG_INF("FOTA Progress: %u bytes received (%u chunks) - Estimated %u%%",
+        LOG_INF("FOTA Progress (%s): %u bytes received (%u chunks) - Estimated %u%%",
+        is_netcore ? "Network Core" : "App Core",
         fota_progress.bytes_received,
         fota_progress.chunks_received,
         estimated_percent);

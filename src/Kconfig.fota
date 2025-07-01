@@ -4,15 +4,25 @@ config FOTA_PRIMARY_SIZE_ESTIMATE
     int "Estimated primary firmware size in bytes"
     default 780000
     help
-      Estimated size of primary firmware for progress calculation.
-      Update this based on your typical build size.
+      Estimated size of primary firmware app core for progress calculation.
+      Network core is updated separately with its own progress.
+      Update this based on your typical app core build size.
 
 config FOTA_SECONDARY_SIZE_ESTIMATE
     int "Estimated secondary firmware size in bytes"
-    default 400000
+    default 780000
     help
-      Estimated size of secondary firmware for progress calculation.
-      Secondary is typically smaller than primary.
+      Estimated size of secondary firmware app core for progress calculation.
+      Network core is updated separately with its own progress.
+      Secondary typically has similar size to primary.
+
+config FOTA_NETCORE_SIZE_ESTIMATE
+    int "Estimated network core firmware size in bytes"
+    default 160000
+    help
+      Estimated size of network core firmware for progress calculation.
+      This is typically much smaller than the application core.
+      Default is 160KB for nRF5340 network core.
 
 config FOTA_DYNAMIC_SIZE_DETECTION
     bool "Enable dynamic FOTA size detection"
