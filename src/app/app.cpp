@@ -73,25 +73,30 @@ void initializing_entry();
 static void fota_reset_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    LOG_INF("FOTA update complete - Resetting system to apply new firmware...");
+    LOG_INF("=== FOTA UPDATE COMPLETE ===");
+    LOG_INF("Preparing to reset system to apply new firmware...");
     
     // Send final status update before reset
     generic_message_t msg;
     msg.sender = SENDER_NONE;
     msg.type = MSG_TYPE_FOTA_PROGRESS;
     msg.data.fota_progress.is_active = true;
-    msg.data.fota_progress.status = 2; // pending (about to reset)
+    msg.data.fota_progress.status = 3; // confirmed (about to reset)
     msg.data.fota_progress.percent_complete = 100;
     msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
     msg.data.fota_progress.total_size = fota_progress.bytes_received;
     msg.data.fota_progress.error_code = 0;
     
-    k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT);
+    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send final FOTA status");
+    } else {
+        LOG_INF("Final FOTA status sent to Bluetooth");
+    }
     
-    // Give time for the message to be sent
-    k_sleep(K_MSEC(100));
+    // Give more time for the message to be sent and logged
+    k_sleep(K_MSEC(500));
     
-    LOG_INF("Resetting NOW...");
+    LOG_INF("=== RESETTING SYSTEM NOW ===");
     sys_reboot(SYS_REBOOT_WARM);
 }
 
@@ -138,19 +143,26 @@ mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_st
     fota_progress.is_active = true;
     fota_progress.status = 1; // in_progress
     
-    // Toggle first image flag for multi-image updates
-    fota_progress.is_first_image = !was_first;
+    // For multi-image updates: first update is app core, second is net core
+    // If this is starting and we just completed a large update, this must be net core
+    if (was_first && saved_app_size > 500000) {
+        fota_progress.is_first_image = false; // This is network core
+        LOG_INF("Starting network core update (second image)");
+    } else {
+        fota_progress.is_first_image = true; // This is app core
+        LOG_INF("Starting application core update (first image)");
+    }
     
-    // Send FOTA progress message to Bluetooth thread
+    // Send FOTA progress message to Bluetooth thread with zeroed values
     generic_message_t msg;
     msg.sender = SENDER_NONE;
     msg.type = MSG_TYPE_FOTA_PROGRESS;
-    msg.data.fota_progress.is_active = fota_progress.is_active;
-    msg.data.fota_progress.status = fota_progress.status;
-    msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
-    msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
-    msg.data.fota_progress.total_size = fota_progress.total_size;
-    msg.data.fota_progress.error_code = fota_progress.error_code;
+    msg.data.fota_progress.is_active = true;
+    msg.data.fota_progress.status = 1;
+    msg.data.fota_progress.percent_complete = 0;
+    msg.data.fota_progress.bytes_received = 0;
+    msg.data.fota_progress.total_size = 0;
+    msg.data.fota_progress.error_code = 0;
     
     if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
         LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
@@ -193,15 +205,7 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         bool is_netcore = false;
         
         // Determine which image this is
-        if (!fota_progress.is_first_image) {
-            // Second image is always network core
-            is_netcore = true;
-            if (fota_progress.net_core_size > 0) {
-                estimated_size = fota_progress.net_core_size;
-            } else {
-                estimated_size = CONFIG_FOTA_NETCORE_SIZE_ESTIMATE;
-            }
-        } else {
+        if (fota_progress.is_first_image) {
             // First image is app core
             is_netcore = false;
             if (fota_progress.app_core_size > 0) {
@@ -212,6 +216,14 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
 #else
                 estimated_size = CONFIG_FOTA_SECONDARY_SIZE_ESTIMATE;
 #endif
+            }
+        } else {
+            // Second image is network core
+            is_netcore = true;
+            if (fota_progress.net_core_size > 0) {
+                estimated_size = fota_progress.net_core_size;
+            } else {
+                estimated_size = CONFIG_FOTA_NETCORE_SIZE_ESTIMATE;
             }
         }
         

@@ -6,7 +6,7 @@
  * alternatively user defined BUILD_VERSION.
  */
 
-#define APP_COMMIT                   fd04ca6bd1bd
-#define APP_COMMIT_STRING            "fd04ca6bd1bd"
+#define APP_COMMIT                   052cf6e9ba82
+#define APP_COMMIT_STRING            "052cf6e9ba82"
 
 #endif /* _APP_COMMIT_H_ */

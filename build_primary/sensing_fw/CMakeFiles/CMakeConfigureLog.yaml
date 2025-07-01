@@ -139,8 +139,8 @@ events:
     checks:
       - "Looking for include file stdatomic.h"
     directories:
-      source: "/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-n7ph8D"
-      binary: "/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-n7ph8D"
+      source: "/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-mt5AJH"
+      binary: "/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-mt5AJH"
     cmakeVariables:
       CMAKE_C_FLAGS: ""
       CMAKE_C_FLAGS_DEBUG: "-g"
@@ -150,12 +150,12 @@ events:
       variable: "HAVE_STDATOMIC_H"
       cached: true
       stdout: |
-        Change Dir: '/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-n7ph8D'
+        Change Dir: '/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-mt5AJH'
         
-        Run Build Command(s): /usr/bin/ninja -v cmTC_e361e
-        [1/2] /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc   -c -o CMakeFiles/cmTC_e361e.dir/HAVE_STDATOMIC_H.c.obj -c /home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-n7ph8D/HAVE_STDATOMIC_H.c
-        [2/2] : && /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc -c  CMakeFiles/cmTC_e361e.dir/HAVE_STDATOMIC_H.c.obj -o cmTC_e361e   && :
-        arm-zephyr-eabi-gcc: warning: CMakeFiles/cmTC_e361e.dir/HAVE_STDATOMIC_H.c.obj: linker input file unused because linking not done
+        Run Build Command(s): /usr/bin/ninja -v cmTC_66864
+        [1/2] /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc   -c -o CMakeFiles/cmTC_66864.dir/HAVE_STDATOMIC_H.c.obj -c /home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-mt5AJH/HAVE_STDATOMIC_H.c
+        [2/2] : && /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc -c  CMakeFiles/cmTC_66864.dir/HAVE_STDATOMIC_H.c.obj -o cmTC_66864   && :
+        arm-zephyr-eabi-gcc: warning: CMakeFiles/cmTC_66864.dir/HAVE_STDATOMIC_H.c.obj: linker input file unused because linking not done
         
       exitCode: 0
   -
@@ -167,8 +167,8 @@ events:
     checks:
       - "Looking for include file fcntl.h"
     directories:
-      source: "/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-lymJia"
-      binary: "/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-lymJia"
+      source: "/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-1tsIoY"
+      binary: "/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-1tsIoY"
     cmakeVariables:
       CMAKE_C_FLAGS: " -Wall -Wextra"
       CMAKE_C_FLAGS_DEBUG: "-g"
@@ -178,12 +178,12 @@ events:
       variable: "HAVE_FCNTL_H"
       cached: true
       stdout: |
-        Change Dir: '/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-lymJia'
+        Change Dir: '/home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-1tsIoY'
         
-        Run Build Command(s): /usr/bin/ninja -v cmTC_1fa3e
-        [1/2] /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc   -Wall -Wextra -c -o CMakeFiles/cmTC_1fa3e.dir/HAVE_FCNTL_H.c.obj -c /home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-lymJia/HAVE_FCNTL_H.c
-        [2/2] : && /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc -Wall -Wextra -c  CMakeFiles/cmTC_1fa3e.dir/HAVE_FCNTL_H.c.obj -o cmTC_1fa3e   && :
-        arm-zephyr-eabi-gcc: warning: CMakeFiles/cmTC_1fa3e.dir/HAVE_FCNTL_H.c.obj: linker input file unused because linking not done
+        Run Build Command(s): /usr/bin/ninja -v cmTC_947a8
+        [1/2] /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc   -Wall -Wextra -c -o CMakeFiles/cmTC_947a8.dir/HAVE_FCNTL_H.c.obj -c /home/ee/sensing_fw/build_primary/sensing_fw/CMakeFiles/CMakeScratch/TryCompile-1tsIoY/HAVE_FCNTL_H.c
+        [2/2] : && /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/bin/arm-zephyr-eabi-gcc -Wall -Wextra -c  CMakeFiles/cmTC_947a8.dir/HAVE_FCNTL_H.c.obj -o cmTC_947a8   && :
+        arm-zephyr-eabi-gcc: warning: CMakeFiles/cmTC_947a8.dir/HAVE_FCNTL_H.c.obj: linker input file unused because linking not done
         
       exitCode: 0
 ...
