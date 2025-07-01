@@ -1,2 +1,0 @@
-"nrf":"/home/ee/ncs/nrf":"/home/ee/ncs/nrf/sysbuild"
-"mcuboot":"/home/ee/ncs/bootloader/mcuboot":"/home/ee/ncs/bootloader/mcuboot/boot/zephyr/sysbuild"

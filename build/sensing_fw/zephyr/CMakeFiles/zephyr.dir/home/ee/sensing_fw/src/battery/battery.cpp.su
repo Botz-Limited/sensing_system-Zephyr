@@ -1,5 +1,0 @@
-/home/ee/sensing_fw/src/battery/battery.cpp:46:13:void battery_update_work_handler(k_work*)	8	static
-/home/ee/ncs/nrf/include/caf/events/module_state_event.h:243:1:module_state_event* new_module_state_event()	8	static
-/home/ee/ncs/nrf/include/caf/events/module_state_event.h:312:20:void module_set_state(module_state)	8	static
-/home/ee/sensing_fw/src/battery/battery.cpp:54:6:void battery_monitor_init()	24	static
-/home/ee/sensing_fw/src/battery/battery.cpp:62:13:bool app_event_handler(const app_event_header*)	8	static

@@ -1,6 +1,0 @@
-/home/ee/sensing_fw/build/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq_controller.h:119:5:metal_irq_handle	8	static
-/home/ee/ncs/modules/hal/libmetal/libmetal/lib/softirq.c:28:13:metal_softirq_set_enable	0	static
-/home/ee/sensing_fw/build/sensing_fw/modules/libmetal/libmetal/lib/include/metal/softirq.h:61:6:metal_softirq_set	0	static
-/home/ee/sensing_fw/build/sensing_fw/modules/libmetal/libmetal/lib/include/metal/softirq.h:32:5:metal_softirq_init	8	static
-/home/ee/sensing_fw/build/sensing_fw/modules/libmetal/libmetal/lib/include/metal/softirq.h:52:5:metal_softirq_allocate	8	static
-/home/ee/sensing_fw/build/sensing_fw/modules/libmetal/libmetal/lib/include/metal/softirq.h:39:6:metal_softirq_dispatch	8	static

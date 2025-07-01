@@ -1,2 +1,0 @@
-/home/ee/ncs/zephyr/kernel/idle.c:21:6:idle	8	static
-/home/ee/ncs/zephyr/include/zephyr/arch/arch_interface.h:1259:6:arch_spin_relax	8	static

@@ -1,3 +1,0 @@
-/home/ee/ncs/zephyr/include/zephyr/drivers/bluetooth.h:241:17:bt_hci_evt_create	16	static
-/home/ee/ncs/zephyr/include/zephyr/drivers/bluetooth.h:255:17:bt_hci_cmd_complete_create	16	static
-/home/ee/ncs/zephyr/include/zephyr/drivers/bluetooth.h:269:17:bt_hci_cmd_status_create	16	static

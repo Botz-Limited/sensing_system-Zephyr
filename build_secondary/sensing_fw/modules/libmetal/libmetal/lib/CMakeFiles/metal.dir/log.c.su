@@ -1,5 +1,0 @@
-/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/log.h:71:6:metal_default_log_handler	0	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/log.h:44:6:metal_set_log_handler	0	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/log.h:50:19:metal_get_log_handler	0	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/log.h:56:6:metal_set_log_level	0	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/log.h:62:22:metal_get_log_level	0	static

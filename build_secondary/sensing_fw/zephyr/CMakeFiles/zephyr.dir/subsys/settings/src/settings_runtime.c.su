@@ -1,4 +1,0 @@
-/home/ee/ncs/zephyr/subsys/settings/src/settings_runtime.c:18:16:settings_runtime_read_cb	16	static
-/home/ee/ncs/zephyr/include/zephyr/settings/settings.h:651:5:settings_runtime_set	32	static
-/home/ee/ncs/zephyr/include/zephyr/settings/settings.h:662:5:settings_runtime_get	24	static
-/home/ee/ncs/zephyr/include/zephyr/settings/settings.h:671:5:settings_runtime_commit	16	static

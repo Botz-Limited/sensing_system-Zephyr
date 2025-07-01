@@ -1,2 +1,0 @@
-/home/ee/ncs/zephyr/subsys/pm/device_system_managed.c:80:6:pm_resume_devices	0	static
-/home/ee/ncs/zephyr/subsys/pm/device_system_managed.c:84:6:pm_suspend_devices	0	static

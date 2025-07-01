@@ -1,9 +1,0 @@
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:138:13:cmac_pad	4	static
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:55:12:cmac_multiply_by_u	8	static
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:96:12:cmac_generate_subkeys	56	static
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:156:5:mbedtls_cipher_cmac_starts	16	static
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:198:5:mbedtls_cipher_cmac_update	56	static
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:268:5:mbedtls_cipher_cmac_finish	88	static
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:327:5:mbedtls_cipher_cmac_reset	16	static
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:347:5:mbedtls_cipher_cmac	96	static
-/home/ee/ncs/modules/crypto/mbedtls/library/cmac.c:387:5:mbedtls_aes_cmac_prf_128	72	static

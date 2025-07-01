@@ -1,8 +1,0 @@
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service.cpp:119:13:void orientation_3d_ccc_cfg_changed(const bt_gatt_attr*, uint16_t)	56	dynamic,bounded
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service.cpp:109:16:ssize_t orientation_3d_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	24	static
-/home/ee/ncs/zephyr/include/zephyr/kernel.h:1878:24:uint32_t k_uptime_get_32()	8	static
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1455:19:int bt_gatt_notify(bt_conn*, const bt_gatt_attr*, const void*, uint16_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service.cpp:185:17:void orientation_3d_try_send()	24	static
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service.cpp:134:17:void orientation_3d_update_primary(float, float, float, float)	8	static
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service.cpp:163:17:void orientation_3d_update_secondary(float, float, float, float)	8	static
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service.cpp:262:24:const char* orientation_3d_get_service_uuid_str()	32	static

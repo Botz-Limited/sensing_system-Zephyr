@@ -143,7 +143,8 @@ mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_st
     ARG_UNUSED(data);
     ARG_UNUSED(data_size);
     
-    LOG_INF("FOTA Started!");
+    LOG_INF("FOTA Started! Previous state: is_first_image=%d, app_size=%u, net_size=%u", 
+            fota_progress.is_first_image, fota_progress.app_core_size, fota_progress.net_core_size);
     
     // Reset progress tracking but keep learned sizes
     uint32_t saved_app_size = fota_progress.app_core_size;
@@ -209,6 +210,7 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         // Log first chunk
         if (fota_progress.chunks_received == 1) {
             LOG_INF("FOTA transfer started - First chunk received, size: %u bytes", check->req->size);
+            LOG_INF("Using is_first_image=%d for size estimation", fota_progress.is_first_image);
         }
         
         // Log progress every 5 chunks or every 50KB
@@ -244,11 +246,12 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         
         uint8_t estimated_percent = MIN((fota_progress.bytes_received * 100) / estimated_size, 99);
         
-        LOG_INF("FOTA Progress (%s): %u bytes received (%u chunks) - Estimated %u%%",
+        LOG_INF("FOTA Progress (%s): %u bytes received (%u chunks) - Estimated %u%% (size: %u)",
         is_netcore ? "Network Core" : "App Core",
         fota_progress.bytes_received,
         fota_progress.chunks_received,
-        estimated_percent);
+        estimated_percent,
+        estimated_size);
         
         fota_progress.last_reported_bytes = fota_progress.bytes_received;
         
@@ -394,10 +397,9 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     } else {
         // This was the app core, network core update will follow
         LOG_INF("Application core update confirmed - waiting for network core update...");
-        // Reset is_first_image flag for next update
-        fota_progress.is_first_image = false;
-        // Clean up for next image but keep sizes
+        // Clean up for next image but keep sizes and set flag for network core
         init_fota_progress();
+        fota_progress.is_first_image = false; // Next update is network core
     }
     
     return MGMT_CB_OK;
@@ -507,6 +509,9 @@ static void app_init()
 
     // Initialize FOTA reset work
     k_work_init_delayable(&fota_reset_work, fota_reset_handler);
+    
+    // Initialize FOTA progress to clean state
+    init_fota_progress();
 
     // Register all FOTA callbacks
     for (size_t i = 0; i < ARRAY_SIZE(fota_callbacks); i++) {

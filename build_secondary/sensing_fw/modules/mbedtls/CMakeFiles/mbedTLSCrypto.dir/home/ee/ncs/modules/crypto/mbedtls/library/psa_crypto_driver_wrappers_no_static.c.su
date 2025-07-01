@@ -1,3 +1,0 @@
-/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_driver_wrappers_no_static.c:115:14:psa_driver_wrapper_get_key_buffer_size	0	static
-/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_driver_wrappers_no_static.c:157:14:psa_driver_wrapper_export_public_key	40	static
-/home/ee/ncs/modules/crypto/mbedtls/library/psa_crypto_driver_wrappers_no_static.c:271:14:psa_driver_wrapper_get_builtin_key	0	static

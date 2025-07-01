@@ -1,3 +1,0 @@
-/home/ee/ncs/zephyr/include/zephyr/shell/shell_fprintf.h:77:6:z_shell_fprintf_buffer_flush	8	static
-/home/ee/ncs/zephyr/include/zephyr/shell/shell_fprintf.h:69:6:z_shell_fprintf_fmt	16	static
-/home/ee/ncs/zephyr/subsys/shell/shell_fprintf.c:11:12:out_func	16	static

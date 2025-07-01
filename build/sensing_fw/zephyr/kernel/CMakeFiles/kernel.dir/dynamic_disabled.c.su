@@ -1,2 +1,0 @@
-/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:23:27:z_impl_k_thread_stack_alloc	0	static
-/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:40:12:z_impl_k_thread_stack_free	0	static

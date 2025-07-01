@@ -1,4 +1,0 @@
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx_queue.cpp:14:6:void ble_d2d_tx_queue_init()	16	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx_queue.cpp:21:5:int ble_d2d_tx_queue_command(d2d_tx_cmd_type, const void*)	32	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx_queue.cpp:55:6:void ble_d2d_tx_process_queued_commands()	40	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx_queue.cpp:124:6:bool ble_d2d_tx_is_ready()	0	static

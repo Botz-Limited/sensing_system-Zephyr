@@ -1,6 +1,0 @@
-/home/ee/ncs/zephyr/kernel/fatal.c:60:20:reason_to_str	0	static
-/home/ee/ncs/zephyr/kernel/fatal.c:49:20:thread_name_get	8	static
-/home/ee/ncs/zephyr/kernel/fatal.c:21:27:arch_system_halt	0	static
-/home/ee/ncs/zephyr/include/zephyr/fatal.h:68:6:k_sys_fatal_error_handler	16	static
-/home/ee/ncs/zephyr/include/zephyr/fatal.h:37:20:k_fatal_halt	8	static
-/home/ee/ncs/zephyr/include/zephyr/fatal.h:84:6:z_fatal_error	128	dynamic,bounded

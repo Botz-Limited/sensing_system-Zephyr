@@ -1,2 +1,0 @@
-/home/ee/ncs/zephyr/subsys/shell/modules/kernel_service/thread/list.c:110:12:cmd_kernel_thread_list	8	static
-/home/ee/ncs/zephyr/subsys/shell/modules/kernel_service/thread/list.c:62:13:shell_tdata_dump	80	static

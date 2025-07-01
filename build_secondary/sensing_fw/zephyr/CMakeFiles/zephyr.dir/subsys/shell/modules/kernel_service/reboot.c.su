@@ -1,2 +1,0 @@
-/home/ee/ncs/zephyr/subsys/shell/modules/kernel_service/reboot.c:24:12:cmd_kernel_reboot_cold	8	static
-/home/ee/ncs/zephyr/subsys/shell/modules/kernel_service/reboot.c:12:12:cmd_kernel_reboot_warm	8	static

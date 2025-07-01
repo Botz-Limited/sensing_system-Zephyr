@@ -1,2 +1,0 @@
-/home/ee/ncs/modules/crypto/mbedtls/library/platform_util.c:94:6:mbedtls_platform_zeroize	8	static
-/home/ee/ncs/modules/crypto/mbedtls/library/platform_util.c:139:6:mbedtls_zeroize_and_free	8	static

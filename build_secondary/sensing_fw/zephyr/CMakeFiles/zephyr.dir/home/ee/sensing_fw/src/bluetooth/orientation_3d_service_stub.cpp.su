@@ -1,4 +1,0 @@
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service_stub.cpp:18:6:void orientation_3d_update_primary(float, float, float, float)	0	static
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service_stub.cpp:24:6:void orientation_3d_update_secondary(float, float, float, float)	0	static
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service_stub.cpp:30:6:void orientation_3d_try_send()	0	static
-/home/ee/sensing_fw/src/bluetooth/orientation_3d_service_stub.cpp:35:13:const char* orientation_3d_get_service_uuid_str()	0	static

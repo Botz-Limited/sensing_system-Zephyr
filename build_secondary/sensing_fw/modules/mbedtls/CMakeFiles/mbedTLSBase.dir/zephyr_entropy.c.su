@@ -1,2 +1,0 @@
-/home/ee/ncs/zephyr/modules/mbedtls/zephyr_entropy.c:13:12:get_random_data	16	static
-/home/ee/ncs/zephyr/modules/mbedtls/zephyr_entropy.c:58:14:mbedtls_psa_external_get_random	16	static

@@ -1,5 +1,0 @@
-/home/ee/ncs/zephyr/drivers/flash/flash_page_layout.c:11:12:flash_get_page_info	24	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/zephyr/include/generated/zephyr/syscalls/flash.h:175:12:z_impl_flash_get_page_info_by_offs	8	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/zephyr/include/generated/zephyr/syscalls/flash.h:200:12:z_impl_flash_get_page_info_by_idx	8	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/zephyr/include/generated/zephyr/syscalls/flash.h:225:15:z_impl_flash_get_page_count	16	static
-/home/ee/ncs/zephyr/include/zephyr/drivers/flash.h:486:6:flash_page_foreach	56	static

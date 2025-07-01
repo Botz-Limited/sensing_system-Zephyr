@@ -1,5 +1,0 @@
-/home/ee/ncs/zephyr/kernel/include/ksched.h:159:20:unpend_thread_no_timeout	8	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1071:12:z_impl_k_sem_init	0	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1106:13:z_impl_k_sem_give	24	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1089:12:z_impl_k_sem_take	32	static
-/home/ee/sensing_fw/build_secondary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1123:13:z_impl_k_sem_reset	16	static

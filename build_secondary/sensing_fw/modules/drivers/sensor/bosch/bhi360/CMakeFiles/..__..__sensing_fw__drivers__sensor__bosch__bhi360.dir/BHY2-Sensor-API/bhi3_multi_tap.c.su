@@ -1,5 +1,0 @@
-/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3_multi_tap.c:65:8:bhi3_multi_tap_set_config	8	static
-/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3_multi_tap.c:94:8:bhi3_multi_tap_get_config	24	static
-/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3_multi_tap.c:131:8:bhi3_multi_tap_detector_set_config	8	static
-/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3_multi_tap.c:160:8:bhi3_multi_tap_detector_get_config	24	static
-/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3_multi_tap.c:197:8:bhi3_multi_tap_parse_data	0	static

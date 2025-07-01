@@ -1,2 +1,0 @@
-/home/ee/ncs/zephyr/include/zephyr/kernel.h:1878:24:uint32_t k_uptime_get_32()	8	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_quaternion.cpp:27:5:int ble_d2d_tx_send_quaternion_3d(float, float, float, float)	72	static

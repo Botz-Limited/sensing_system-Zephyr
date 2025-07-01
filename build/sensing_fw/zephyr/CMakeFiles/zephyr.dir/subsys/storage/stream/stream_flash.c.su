@@ -1,8 +1,0 @@
-/home/ee/sensing_fw/build/sensing_fw/zephyr/include/generated/zephyr/syscalls/flash.h:78:19:flash_erase	8	static
-/home/ee/ncs/zephyr/subsys/storage/stream/stream_flash.c:255:13:find_flash_total_size	16	static
-/home/ee/ncs/zephyr/subsys/storage/stream/stream_flash.c:272:19:inspect_device	24	static
-/home/ee/ncs/zephyr/include/zephyr/storage/stream_flash.h:140:5:stream_flash_erase_page	32	static
-/home/ee/ncs/zephyr/subsys/storage/stream/stream_flash.c:125:12:flash_sync	24	static
-/home/ee/ncs/zephyr/include/zephyr/storage/stream_flash.h:125:5:stream_flash_buffered_write	40	static
-/home/ee/ncs/zephyr/include/zephyr/storage/stream_flash.h:102:8:stream_flash_bytes_written	0	static
-/home/ee/ncs/zephyr/include/zephyr/storage/stream_flash.h:90:5:stream_flash_init	40	static

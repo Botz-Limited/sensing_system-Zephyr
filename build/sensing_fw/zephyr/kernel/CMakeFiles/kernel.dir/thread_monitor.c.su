@@ -1,3 +1,0 @@
-/home/ee/ncs/zephyr/kernel/thread_monitor.c:15:6:z_thread_monitor_exit	16	static
-/home/ee/ncs/zephyr/include/zephyr/kernel.h:123:6:k_thread_foreach	24	static
-/home/ee/ncs/zephyr/include/zephyr/kernel.h:184:6:k_thread_foreach_unlocked	24	static

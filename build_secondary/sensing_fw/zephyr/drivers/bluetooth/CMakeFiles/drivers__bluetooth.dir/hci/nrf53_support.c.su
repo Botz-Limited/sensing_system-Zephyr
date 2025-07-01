@@ -1,3 +1,0 @@
-/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_spu.h:993:24:nrf_spu_extdomain_set	8	static
-/home/ee/ncs/zephyr/drivers/bluetooth/hci/nrf53_support.c:19:5:bt_hci_transport_teardown	8	static
-/home/ee/ncs/zephyr/drivers/bluetooth/hci/nrf53_support.c:29:5:bt_hci_transport_setup	8	static
