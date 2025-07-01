@@ -46,6 +46,10 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_APP_MODULE_LOG_LEVEL); // NOLINT
 // FOTA reset work
 static struct k_work_delayable fota_reset_work;
 
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
 // FOTA progress tracking structure
 struct fota_progress_state {
     bool is_active;
@@ -143,9 +147,15 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         if ((fota_progress.chunks_received % 10 == 0) || 
         (fota_progress.bytes_received - fota_progress.last_reported_bytes >= 102400)) {
         
-        LOG_INF("FOTA Progress: %u bytes received (%u chunks)",
+        // Calculate approximate progress based on typical firmware size
+        // Most firmware images are between 200KB-500KB
+        uint32_t estimated_size = 400000; // 400KB typical size
+        uint8_t estimated_percent = MIN((fota_progress.bytes_received * 100) / estimated_size, 99);
+        
+        LOG_INF("FOTA Progress: %u bytes received (%u chunks) - Estimated %u%%",
         fota_progress.bytes_received,
-        fota_progress.chunks_received);
+        fota_progress.chunks_received,
+        estimated_percent);
         
         fota_progress.last_reported_bytes = fota_progress.bytes_received;
         
@@ -155,9 +165,9 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         msg.type = MSG_TYPE_FOTA_PROGRESS;
         msg.data.fota_progress.is_active = fota_progress.is_active;
         msg.data.fota_progress.status = fota_progress.status;
-        msg.data.fota_progress.percent_complete = 0; // Can't calculate without total size
+        msg.data.fota_progress.percent_complete = estimated_percent;
         msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
-        msg.data.fota_progress.total_size = 0; // Unknown
+        msg.data.fota_progress.total_size = estimated_size; // Estimated
         msg.data.fota_progress.error_code = fota_progress.error_code;
         
         if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {

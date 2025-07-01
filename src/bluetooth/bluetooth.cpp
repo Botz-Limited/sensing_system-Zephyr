@@ -1476,11 +1476,16 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             struct bt_conn_info info;
                             int info_err = bt_conn_get_info(active_conn, &info);
                             if (info_err == 0 && info.state == BT_CONN_STATE_CONNECTED) {
-                                LOG_INF("Updating connection parameters for FOTA - switching to BACKGROUND_IDLE profile");
-                                int conn_err = ble_conn_params_update(active_conn, CONN_PROFILE_BACKGROUND_IDLE);
+                                LOG_INF("Updating connection parameters for FOTA - switching to BACKGROUND profile");
+                                int conn_err = ble_conn_params_update(active_conn, CONN_PROFILE_BACKGROUND);
                                 if (conn_err) {
                                     if (conn_err == -EINVAL) {
-                                        LOG_WRN("Connection parameter update failed: Invalid parameters or connection state");
+                                        LOG_WRN("Connection parameter update failed: Invalid parameters, trying FOREGROUND");
+                                        // Try FOREGROUND profile as fallback
+                                        conn_err = ble_conn_params_update(active_conn, CONN_PROFILE_FOREGROUND);
+                                        if (conn_err == 0) {
+                                            LOG_INF("Using FOREGROUND profile for FOTA instead");
+                                        }
                                     } else if (conn_err == -EALREADY) {
                                         LOG_WRN("Connection parameter update already in progress");
                                     } else {
