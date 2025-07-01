@@ -122,8 +122,10 @@ mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_st
     
     LOG_INF("FOTA Started!");
     
-    // Reset progress tracking
+    // Reset progress tracking but keep last_completed_size for learning
+    uint32_t saved_size = fota_progress.last_completed_size;
     memset(&fota_progress, 0, sizeof(fota_progress));
+    fota_progress.last_completed_size = saved_size; // Restore for next update
     fota_progress.is_active = true;
     fota_progress.status = 1; // in_progress
     
@@ -188,9 +190,10 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
 #endif
         {
             // Fall back to configured estimates
-            // Try to detect netcore update by early chunk pattern
-            if (fota_progress.chunks_received > 5 && fota_progress.bytes_received < 10000) {
-                // Small size after several chunks suggests netcore
+            // Try to detect netcore update by early chunk pattern or if we've seen this size before
+            if ((fota_progress.chunks_received > 5 && fota_progress.bytes_received < 10000) ||
+                (fota_progress.last_completed_size > 0 && fota_progress.last_completed_size < 200000)) {
+                // Small size after several chunks or previous small update suggests netcore
                 estimated_size = CONFIG_FOTA_NETCORE_SIZE_ESTIMATE;
                 is_netcore = true;
             } else {
@@ -301,13 +304,20 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     ARG_UNUSED(data);
     ARG_UNUSED(data_size);
     
-    LOG_INF("FOTA Image confirmed!");
+    LOG_INF("FOTA Image confirmed! Total bytes: %u", fota_progress.bytes_received);
     
 #if IS_ENABLED(CONFIG_FOTA_DYNAMIC_SIZE_DETECTION)
     // Save the size for future FOTA operations
     if (fota_progress.bytes_received > 0) {
         fota_progress.last_completed_size = fota_progress.bytes_received;
         LOG_INF("Saved FOTA size for future updates: %u bytes", fota_progress.last_completed_size);
+        
+        // Detect if this was a netcore update
+        if (fota_progress.last_completed_size < 200000) {
+            LOG_INF("This appears to be a network core update (~159KB)");
+        } else {
+            LOG_INF("This appears to be an application core update (~780KB)");
+        }
     }
 #endif
     
@@ -338,9 +348,17 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     }
     #endif
     
-    // Schedule a system reset to apply the new firmware
-    LOG_INF("Scheduling system reset in 2 seconds to apply new firmware...");
-    k_work_schedule(&fota_reset_work, K_SECONDS(2));
+    // For multi-image updates, only reset after the last image
+    // Network core updates are typically last and smaller
+    if (fota_progress.bytes_received < 200000) {
+        // This was likely the network core (final image)
+        LOG_INF("Network core update confirmed - scheduling system reset in 2 seconds...");
+        k_work_schedule(&fota_reset_work, K_SECONDS(2));
+    } else {
+        // This was the app core, network core update will follow
+        LOG_INF("Application core update confirmed - waiting for network core update...");
+        // Don't reset yet, wait for network core update
+    }
     
     return MGMT_CB_OK;
 }

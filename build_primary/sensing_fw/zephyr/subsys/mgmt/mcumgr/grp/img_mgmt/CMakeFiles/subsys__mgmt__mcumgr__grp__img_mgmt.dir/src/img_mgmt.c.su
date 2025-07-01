@@ -12,7 +12,7 @@
 /home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/grp/img_mgmt/img_mgmt.h:234:5:img_mgmt_read_info	72	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/img_mgmt/src/img_mgmt.c:433:1:img_mgmt_erase	72	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/img_mgmt/src/img_mgmt.c:715:1:img_mgmt_upload_log	40	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/img_mgmt/src/img_mgmt.c:738:1:img_mgmt_upload	256	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/img_mgmt/src/img_mgmt.c:738:1:img_mgmt_upload	264	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/img_mgmt/src/img_mgmt.c:377:1:img_mgmt_find_by_ver	24	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/img_mgmt/src/img_mgmt.c:398:1:img_mgmt_find_by_hash	48	static
 /home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/grp/img_mgmt/img_mgmt.h:243:5:img_mgmt_my_version	8	static

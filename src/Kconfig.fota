@@ -18,11 +18,11 @@ config FOTA_SECONDARY_SIZE_ESTIMATE
 
 config FOTA_NETCORE_SIZE_ESTIMATE
     int "Estimated network core firmware size in bytes"
-    default 160000
+    default 159000
     help
       Estimated size of network core firmware for progress calculation.
       This is typically much smaller than the application core.
-      Default is 160KB for nRF5340 network core.
+      Default is 159KB for nRF5340 network core (actual ~158.5KB).
 
 config FOTA_DYNAMIC_SIZE_DETECTION
     bool "Enable dynamic FOTA size detection"
