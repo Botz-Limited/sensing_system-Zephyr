@@ -1460,7 +1460,29 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             progress->is_active, progress->status, progress->percent_complete, progress->bytes_received,
                             progress->total_size);
                     
+                    // Detect completion between app core and net core
+                    static bool app_core_done = false;
                     // Check if FOTA is starting (status = 1 means in_progress)
+                    
+                    // App core complete: status=2 and large size
+                    if (progress->status == 2 && progress->bytes_received > 500000 && !app_core_done) {
+                        LOG_INF("===========================================");
+                        LOG_INF("=== APP CORE UPDATE COMPLETE ===");
+                        LOG_INF("Size: %u bytes", progress->bytes_received);
+                        LOG_INF("Waiting for network core update...");
+                        LOG_INF("===========================================");
+                        app_core_done = true;
+                    }
+                    
+                    // Net core complete: status=2 and small size
+                    if (progress->status == 2 && progress->bytes_received < 200000 && progress->bytes_received > 100000) {
+                        LOG_INF("===========================================");
+                        LOG_INF("=== NETWORK CORE UPDATE COMPLETE ===");
+                        LOG_INF("Size: %u bytes", progress->bytes_received);
+                        LOG_INF("=== ALL FOTA UPDATES COMPLETE ===");
+                        LOG_INF("===========================================");
+                        app_core_done = false;
+                    }
                     static bool fota_was_active = false;
                     if (progress->is_active && progress->status == 1 && !fota_was_active) {
                         LOG_WRN("FOTA update starting - stopping advertising and reducing BLE activity");
