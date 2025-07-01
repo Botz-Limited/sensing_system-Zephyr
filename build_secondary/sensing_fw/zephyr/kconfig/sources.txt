@@ -3666,6 +3666,7 @@
 /home/ee/sensing_fw/drivers/sensor/bosch/Kconfig
 /home/ee/sensing_fw/drivers/sensor/bosch/bhi360/Kconfig
 /home/ee/sensing_fw/src/Kconfig
+/home/ee/sensing_fw/src/Kconfig.fota
 /home/ee/sensing_fw/src/app/Kconfig
 /home/ee/sensing_fw/src/app_events/Kconfig
 /home/ee/sensing_fw/src/battery/Kconfig
@@ -3674,4 +3675,5 @@
 /home/ee/sensing_fw/src/foot_sensor/Kconfig
 /home/ee/sensing_fw/src/motion_sensor/Kconfig
 /home/ee/sensing_fw/src/packetizer/Kconfig
+/home/ee/sensing_fw/src/wifi/Kconfig
 /opt/toolchains/zephyr-sdk-0.17.0/cmake/zephyr/Kconfig

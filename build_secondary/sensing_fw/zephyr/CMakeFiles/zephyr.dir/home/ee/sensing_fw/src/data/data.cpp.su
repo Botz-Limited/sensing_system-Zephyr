@@ -22,27 +22,27 @@
 /home/ee/sensing_fw/src/data/data.cpp:1413:13:bool encode_string_callback(pb_ostream_t*, const pb_field_t*, void* const*)	16	static
 /home/ee/ncs/nrf/include/caf/events/module_state_event.h:243:1:module_state_event* new_module_state_event()	8	static
 /home/ee/ncs/nrf/include/caf/events/module_state_event.h:312:20:void module_set_state(module_state)	8	static
-/home/ee/sensing_fw/src/data/data.cpp:1081:5:int delete_oldest_log_files(const char*, const char*)	288	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:1081:5:int delete_oldest_log_files(const char*, const char*)	248	dynamic,bounded
 /home/ee/sensing_fw/src/data/data.cpp:1186:7:err_t close_directory(fs_dir_t*)	24	static
-/home/ee/sensing_fw/src/data/data.cpp:1202:5:int find_latest_log_file(const char*, record_type_t, char*, const char*)	288	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:1202:5:int find_latest_log_file(const char*, record_type_t, char*, const char*)	248	dynamic,bounded
 /home/ee/sensing_fw/src/data/data.cpp:2216:7:err_t type_and_id_to_path(record_type_t, uint8_t, char*)	32	static
-/home/ee/sensing_fw/src/data/data.cpp:2237:7:err_t delete_by_type_and_id(record_type_t, uint8_t)	952	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:2546:7:err_t delete_oldest_log_file_checked(const char*, const char*)	272	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2237:7:err_t delete_by_type_and_id(record_type_t, uint8_t)	792	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2546:7:err_t delete_oldest_log_file_checked(const char*, const char*)	232	dynamic,bounded
 /home/ee/sensing_fw/src/data/data.cpp:1344:13:bool check_filesystem_space_and_cleanup()	32	static
 /home/ee/sensing_fw/src/data/data.cpp:1854:14:err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSensorLogMessage*)	160	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:1540:7:err_t end_foot_sensor_logging()	688	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:1540:7:err_t end_foot_sensor_logging()	656	dynamic,bounded
 /home/ee/sensing_fw/src/data/data.cpp:1910:14:err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMessage*)	160	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:1752:7:err_t end_bhi360_logging()	728	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:1752:7:err_t end_bhi360_logging()	696	dynamic,bounded
 /home/ee/sensing_fw/src/data/data.cpp:2166:14:err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLogMessage*)	160	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:2073:7:err_t end_activity_logging()	688	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:1433:7:err_t start_foot_sensor_logging(uint32_t, const char*)	344	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:1660:7:err_t start_bhi360_logging(uint32_t, const char*)	344	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:1966:7:err_t start_activity_logging(uint32_t, const char*)	344	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:2619:5:int close_all_files_in_directory(const char*)	552	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:2684:5:int delete_all_files_in_directory(const char*)	504	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:2786:7:err_t save_bhi360_calibration_data(const bhi360_calibration_data_t*)	168	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:2865:7:err_t load_bhi360_calibration_data(uint8_t)	1536	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:2959:7:err_t get_bhi360_calibration_data(uint8_t, uint8_t*, size_t, size_t*)	440	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2073:7:err_t end_activity_logging()	656	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:1433:7:err_t start_foot_sensor_logging(uint32_t, const char*)	272	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:1660:7:err_t start_bhi360_logging(uint32_t, const char*)	312	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:1966:7:err_t start_activity_logging(uint32_t, const char*)	272	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2619:5:int close_all_files_in_directory(const char*)	480	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2684:5:int delete_all_files_in_directory(const char*)	432	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2786:7:err_t save_bhi360_calibration_data(const bhi360_calibration_data_t*)	128	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2865:7:err_t load_bhi360_calibration_data(uint8_t)	1496	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2959:7:err_t get_bhi360_calibration_data(uint8_t, uint8_t*, size_t, size_t*)	400	dynamic,bounded
 /home/ee/sensing_fw/src/data/data.cpp:3046:7:err_t store_bhi360_calibration_data(uint8_t, const uint8_t*, size_t)	528	static
 /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/arm-zephyr-eabi/include/c++/12.2.0/bits/stl_vector.h:1891:7:constexpr std::vector<_Tp, _Alloc>::size_type std::vector<_Tp, _Alloc>::_M_check_len(size_type, const char*) const [with _Tp = LogFileEntry; _Alloc = std::allocator<LogFileEntry>]	32	static
 /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/arm-zephyr-eabi/include/c++/12.2.0/bits/stl_algobase.h:527:5:constexpr _OI std::__copy_move_a(_II, _II, _OI) [with bool _IsMove = true; _II = __gnu_cxx::__normal_iterator<LogFileEntry*, vector<LogFileEntry> >; _OI = __gnu_cxx::__normal_iterator<LogFileEntry*, vector<LogFileEntry> >]	16	static
@@ -65,7 +65,7 @@
 /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/arm-zephyr-eabi/include/c++/12.2.0/bits/stl_algo.h:1802:5:constexpr void std::__insertion_sort(_RandomAccessIterator, _RandomAccessIterator, _Compare) [with _RandomAccessIterator = __gnu_cxx::__normal_iterator<LogFileEntry*, vector<LogFileEntry> >; _Compare = __gnu_cxx::__ops::_Iter_comp_iter<cap_and_reindex_log_files(const char*, const char*, uint8_t, uint8_t)::<lambda(const LogFileEntry&, const LogFileEntry&)> >]	48	static
 /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/arm-zephyr-eabi/include/c++/12.2.0/bits/stl_algo.h:1844:5:constexpr void std::__final_insertion_sort(_RandomAccessIterator, _RandomAccessIterator, _Compare) [with _RandomAccessIterator = __gnu_cxx::__normal_iterator<LogFileEntry*, vector<LogFileEntry> >; _Compare = __gnu_cxx::__ops::_Iter_comp_iter<cap_and_reindex_log_files(const char*, const char*, uint8_t, uint8_t)::<lambda(const LogFileEntry&, const LogFileEntry&)> >]	16	static
 /opt/toolchains/zephyr-sdk-0.17.0/arm-zephyr-eabi/arm-zephyr-eabi/include/c++/12.2.0/bits/stl_algo.h:1932:5:constexpr void std::__sort(_RandomAccessIterator, _RandomAccessIterator, _Compare) [with _RandomAccessIterator = __gnu_cxx::__normal_iterator<LogFileEntry*, vector<LogFileEntry> >; _Compare = __gnu_cxx::__ops::_Iter_comp_iter<cap_and_reindex_log_files(const char*, const char*, uint8_t, uint8_t)::<lambda(const LogFileEntry&, const LogFileEntry&)> >]	16	static
-/home/ee/sensing_fw/src/data/data.cpp:2442:7:err_t cap_and_reindex_log_files(const char*, const char*, uint8_t, uint8_t)	576	dynamic,bounded
-/home/ee/sensing_fw/src/data/data.cpp:390:6:void proccess_data(void*, void*, void*)	1328	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:2442:7:err_t cap_and_reindex_log_files(const char*, const char*, uint8_t, uint8_t)	384	dynamic,bounded
+/home/ee/sensing_fw/src/data/data.cpp:390:6:void proccess_data(void*, void*, void*)	1264	dynamic,bounded
 /home/ee/sensing_fw/src/data/data.cpp:287:14:err_t data_init()	56	static
 /home/ee/sensing_fw/src/data/data.cpp:2735:13:bool app_event_handler(const app_event_header*)	24	static

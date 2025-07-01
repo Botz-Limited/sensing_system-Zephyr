@@ -38,7 +38,7 @@ int main(void)
         {
             LOG_INF("Successfully, uploaded image ");
         } 
-        //LOG_INF("Ready to go");
+        LOG_INF("Ready to go");
         module_set_state(MODULE_STATE_READY);
     }
      while (1)

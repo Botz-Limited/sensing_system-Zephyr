@@ -70,7 +70,25 @@ void initializing_entry();
 static void fota_reset_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    LOG_INF("Performing system reset to apply new firmware...");
+    LOG_INF("FOTA update complete - Resetting system to apply new firmware...");
+    
+    // Send final status update before reset
+    generic_message_t msg;
+    msg.sender = SENDER_NONE;
+    msg.type = MSG_TYPE_FOTA_PROGRESS;
+    msg.data.fota_progress.is_active = true;
+    msg.data.fota_progress.status = 2; // pending (about to reset)
+    msg.data.fota_progress.percent_complete = 100;
+    msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
+    msg.data.fota_progress.total_size = fota_progress.bytes_received;
+    msg.data.fota_progress.error_code = 0;
+    
+    k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT);
+    
+    // Give time for the message to be sent
+    k_sleep(K_MSEC(100));
+    
+    LOG_INF("Resetting NOW...");
     sys_reboot(SYS_REBOOT_WARM);
 }
 
@@ -137,6 +155,9 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
     ARG_UNUSED(group);
     ARG_UNUSED(abort_more);
     
+    // Log every chunk for debugging
+    LOG_DBG("FOTA chunk callback triggered, data_size=%zu", data_size);
+    
     if (data && data_size >= sizeof(struct img_mgmt_upload_check)) {
         struct img_mgmt_upload_check *check = (struct img_mgmt_upload_check *)data;
         
@@ -144,9 +165,14 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         fota_progress.chunks_received++;
         fota_progress.bytes_received = check->req->off + check->req->size;
         
-        // Log progress every 10 chunks or every 100KB
-        if ((fota_progress.chunks_received % 10 == 0) || 
-        (fota_progress.bytes_received - fota_progress.last_reported_bytes >= 102400)) {
+        // Log first chunk
+        if (fota_progress.chunks_received == 1) {
+            LOG_INF("FOTA transfer started - First chunk received, size: %u bytes", check->req->size);
+        }
+        
+        // Log progress every 5 chunks or every 50KB
+        if ((fota_progress.chunks_received % 5 == 0) || 
+        (fota_progress.bytes_received - fota_progress.last_reported_bytes >= 51200)) {
         
         // Calculate approximate progress based on configured or learned firmware size
         uint32_t estimated_size;
@@ -240,8 +266,10 @@ mgmt_cb_return fota_pending_callback(uint32_t event, enum mgmt_cb_return prev_st
     LOG_INF("FOTA Transfer complete, pending verification");
     LOG_INF("Total chunks: %u received, %u written", 
             fota_progress.chunks_received, fota_progress.chunks_written);
+    LOG_INF("Total size: %u bytes", fota_progress.bytes_received);
     
     fota_progress.status = 2; // pending
+    fota_progress.percent_complete = 100; // Transfer complete
     
     // Send FOTA progress message to Bluetooth thread
     generic_message_t msg;

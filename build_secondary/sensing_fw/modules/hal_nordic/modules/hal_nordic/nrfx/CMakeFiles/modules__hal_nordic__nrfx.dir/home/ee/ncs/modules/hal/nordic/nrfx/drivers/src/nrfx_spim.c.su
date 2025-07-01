@@ -26,5 +26,6 @@
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_spim.h:370:12:nrfx_spim_xfer	24	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_spim.h:403:12:nrfx_spim_xfer_dcx	8	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_spim.h:444:6:nrfx_spim_abort	8	static
+/home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_spim.c:1020:1:nrfx_spim_1_irq_handler	8	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_spim.c:1020:1:nrfx_spim_2_irq_handler	8	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_spim.c:1020:1:nrfx_spim_4_irq_handler	8	static

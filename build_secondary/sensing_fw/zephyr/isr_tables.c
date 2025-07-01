@@ -84,23 +84,23 @@ struct _isr_table_entry __sw_isr_table _sw_isr_table[69] = {
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 2 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 3 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 4 */
-	{(const void *)0x69dc5, (ISR)0x89935}, /* 5 */
+	{(const void *)0x66b51, (ISR)0x866e5}, /* 5 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 6 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 7 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 8 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 9 */
-	{(const void *)0x6c89d, (ISR)0x89935}, /* 10 */
-	{(const void *)0x6c889, (ISR)0x89935}, /* 11 */
+	{(const void *)0x69629, (ISR)0x866e5}, /* 10 */
+	{(const void *)0x69615, (ISR)0x866e5}, /* 11 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 12 */
-	{(const void *)0x6a701, (ISR)0x89935}, /* 13 */
-	{(const void *)0x0, (ISR)0x6bf3d}, /* 14 */
-	{(const void *)0x0, (ISR)0x3c9b9}, /* 15 */
+	{(const void *)0x6748d, (ISR)0x866e5}, /* 13 */
+	{(const void *)0x0, (ISR)0x68cc9}, /* 14 */
+	{(const void *)0x0, (ISR)0x3a11d}, /* 15 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 16 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 17 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 18 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 19 */
-	{(const void *)0x8f194, (ISR)0x86607}, /* 20 */
-	{(const void *)0x0, (ISR)0x65af1}, /* 21 */
+	{(const void *)0x8bf44, (ISR)0x833a5}, /* 20 */
+	{(const void *)0x0, (ISR)0x62c01}, /* 21 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 22 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 23 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 24 */
@@ -121,8 +121,8 @@ struct _isr_table_entry __sw_isr_table _sw_isr_table[69] = {
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 39 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 40 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 41 */
-	{(const void *)0x6a899, (ISR)0x89935}, /* 42 */
-	{(const void *)0x6b3d9, (ISR)0x89935}, /* 43 */
+	{(const void *)0x67625, (ISR)0x866e5}, /* 42 */
+	{(const void *)0x68165, (ISR)0x866e5}, /* 43 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 44 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 45 */
 	{(const void *)0x0, (ISR)z_irq_spurious}, /* 46 */

@@ -1399,6 +1399,7 @@ zephyr_udc0: &usbd {
 
     aliases {
         rtc0 = &rtc0;
+        wifi0 = &nrf7002;
     };
 
 
@@ -1482,6 +1483,35 @@ zephyr_udc0: &usbd {
     status = "disabled";
 };
 
+&spi4 {
+ compatible = "nordic,nrf-spim";
+ status = "okay";
+ pinctrl-0 = <&spi4_default>;
+ pinctrl-1 = <&spi4_sleep>;
+ pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio1 12 (1 << 0)>;
+
+ nrf7002: nrf7002@0 {
+  compatible = "nordic,nrf7002-spi";
+  reg = <0>;
+  spi-max-frequency = <32000000>;
+  host-irq-gpios = <&gpio1 7 (0 << 0)>;
+  iovdd-ctrl-gpios = <&gpio1 8 (0 << 0)>;
+  bucken-gpios = <&gpio1 9 (0 << 0)>;
+        wifi-max-tx-pwr-2g-dsss = <20>;
+        wifi-max-tx-pwr-2g-mcs0 = <20>;
+        wifi-max-tx-pwr-2g-mcs7 = <20>;
+        wifi-max-tx-pwr-5g-low-mcs0 = <20>;
+        wifi-max-tx-pwr-5g-low-mcs7 = <20>;
+        wifi-max-tx-pwr-5g-mid-mcs0 = <20>;
+        wifi-max-tx-pwr-5g-mid-mcs7 = <20>;
+        wifi-max-tx-pwr-5g-high-mcs0 = <20>;
+        wifi-max-tx-pwr-5g-high-mcs7 = <20>;
+        label = "NRF7002";
+        status = "okay";
+ };
+};
+
 &spi2 {
     compatible = "nordic,nrf-spim";
     status = "okay";
@@ -1534,13 +1564,30 @@ zephyr_udc0: &usbd {
     };
 
     spi2_sleep_alt: spi2_sleep_alt {
-    group1 {
-        psels = <((((((1) * 32U) + (9)) & 0x1FFU) << 0U) | ((4U & 0xFFU) << 24U))>,
+        group1 {
+            psels = <((((((1) * 32U) + (9)) & 0x1FFU) << 0U) | ((4U & 0xFFU) << 24U))>,
             <((((((1) * 32U) + (8)) & 0x1FFU) << 0U) | ((5U & 0xFFU) << 24U))>,
             <((((((1) * 32U) + (7)) & 0x1FFU) << 0U) | ((6U & 0xFFU) << 24U))>;
-        low-power-enable;
+            low-power-enable;
+        };
     };
-};
+
+ spi4_default: spi4_default {
+  group1 {
+   psels = <((((((1) * 32U) + (15)) & 0x1FFU) << 0U) | ((4U & 0xFFU) << 24U))>,
+     <((((((1) * 32U) + (13)) & 0x1FFU) << 0U) | ((5U & 0xFFU) << 24U))>,
+     <((((((1) * 32U) + (14)) & 0x1FFU) << 0U) | ((6U & 0xFFU) << 24U))>;
+  };
+ };
+
+ spi4_sleep: spi4_sleep {
+  group1 {
+   psels = <((((((1) * 32U) + (15)) & 0x1FFU) << 0U) | ((4U & 0xFFU) << 24U))>,
+     <((((((1) * 32U) + (13)) & 0x1FFU) << 0U) | ((5U & 0xFFU) << 24U))>,
+     <((((((1) * 32U) + (14)) & 0x1FFU) << 0U) | ((6U & 0xFFU) << 24U))>;
+   low-power-enable;
+  };
+ };
 
  uart2_default_alt: uart2_default_alt {
   group1 {

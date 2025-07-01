@@ -1,6 +1,6 @@
 /home/ee/ncs/nrf/include/caf/events/module_state_event.h:243:1:module_state_event* new_module_state_event()	8	static
 /home/ee/ncs/nrf/include/caf/events/module_state_event.h:312:20:void module_set_state(module_state)	8	static
-/home/ee/sensing_fw/src/packetizer/packetizer.cpp:77:13:void packetizer_init()	16	static
+/home/ee/sensing_fw/src/packetizer/packetizer.cpp:77:13:void packetizer_init()	8	static
 /home/ee/sensing_fw/src/packetizer/packetizer.cpp:237:13:bool app_event_handler(const app_event_header*)	8	static
 /home/ee/sensing_fw/src/packetizer/packetizer.cpp:86:6:bool packetizer_init(packetizer*, uint16_t)	8	static
 /home/ee/sensing_fw/src/packetizer/packetizer.cpp:110:14:eResult packetizer_ingest(packetizer*, const uint8_t*, size_t)	24	static
