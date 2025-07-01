@@ -1169,6 +1169,10 @@ err_t bt_module_init(void)
     // Log that services are being initialized
     LOG_INF("Initializing primary device BLE services...");
     LOG_INF("Information Service UUID: 0c372eaa-27eb-437e-bef4-775aefaf3c97");
+    
+    // Clear any stale FOTA progress from Information Service
+    fota_progress_msg_t clean_progress = {0};
+    jis_fota_progress_notify(&clean_progress);
     LOG_INF("Device Info Service, Control Service, and Information Service are registered via BT_GATT_SERVICE_DEFINE");
 
     ble_d2d_rx_init(); // Accept commands from secondary
@@ -1444,6 +1448,14 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_FOTA_PROGRESS: {
                     // Handle FOTA progress updates
                     fota_progress_msg_t *progress = &msg.data.fota_progress;
+                    
+                    // Debug: Log stale messages
+                    if (!progress->is_active && progress->bytes_received > 0) {
+                        LOG_WRN("Stale FOTA progress detected: bytes=%u, percent=%d%% (ignoring)",
+                                progress->bytes_received, progress->percent_complete);
+                        break; // Ignore stale messages
+                    }
+                    
                     LOG_INF("Received FOTA Progress: active=%d, status=%d, percent=%d%%, bytes=%u/%u",
                             progress->is_active, progress->status, progress->percent_complete, progress->bytes_received,
                             progress->total_size);

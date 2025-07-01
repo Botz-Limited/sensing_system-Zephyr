@@ -62,7 +62,18 @@ struct fota_progress_state {
     int32_t error_code;
     uint32_t last_reported_bytes;
     uint8_t update_sequence; // 0=none, 1=app core, 2=net core
-} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+} fota_progress = {
+    .is_active = false,
+    .total_size = 0,
+    .bytes_received = 0,
+    .percent_complete = 0,
+    .chunks_received = 0,
+    .chunks_written = 0,
+    .status = 0,
+    .error_code = 0,
+    .last_reported_bytes = 0,
+    .update_sequence = 0
+};
 
 // Initialize FOTA progress to clean state
 static void init_fota_progress(void)
@@ -435,7 +446,11 @@ static void app_init()
     k_work_init_delayable(&fota_reset_work, fota_reset_handler);
     
     // Initialize FOTA progress to clean state
-    init_fota_progress();
+    memset(&fota_progress, 0, sizeof(fota_progress));
+    fota_progress.is_active = false;
+    fota_progress.status = 0;
+    fota_progress.update_sequence = 0;
+    LOG_INF("FOTA progress initialized to clean state");
 
     // Register all FOTA callbacks
     for (size_t i = 0; i < ARRAY_SIZE(fota_callbacks); i++) {

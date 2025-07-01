@@ -1374,6 +1374,13 @@ static ssize_t jis_fota_progress_read(struct bt_conn *conn, const struct bt_gatt
 
 void jis_fota_progress_notify(const fota_progress_msg_t *progress)
 {
+    // If FOTA is starting (transitioning to active with status 1), ensure clean values
+    if (progress->is_active && progress->status == 1 && 
+        progress->bytes_received == 0 && progress->percent_complete == 0) {
+        // This is a fresh start, clear any stale data
+        memset(&fota_progress_value, 0, sizeof(fota_progress_value));
+    }
+    
     memcpy(&fota_progress_value, progress, sizeof(fota_progress_value));
     
     LOG_DBG("FOTA Progress: active=%d, status=%d, percent=%d%%, bytes=%u/%u", 

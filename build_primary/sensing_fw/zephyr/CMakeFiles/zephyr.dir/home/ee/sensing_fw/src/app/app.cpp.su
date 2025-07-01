@@ -1,18 +1,18 @@
-/home/ee/sensing_fw/src/app/app.cpp:71:13:void init_fota_progress()	0	static
-/home/ee/sensing_fw/src/app/app.cpp:279:16:mgmt_cb_return fota_chunk_written_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	0	static
-/home/ee/sensing_fw/src/app/app.cpp:134:16:mgmt_cb_return fota_started_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	592	static
-/home/ee/sensing_fw/src/app/app.cpp:190:16:mgmt_cb_return fota_chunk_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	576	static
-/home/ee/sensing_fw/src/app/app.cpp:297:16:mgmt_cb_return fota_pending_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	576	static
-/home/ee/sensing_fw/src/app/app.cpp:408:16:mgmt_cb_return fota_stopped_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	584	static
-/home/ee/sensing_fw/src/app/app.cpp:335:16:mgmt_cb_return fota_confirmed_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	576	static
+/home/ee/sensing_fw/src/app/app.cpp:231:16:mgmt_cb_return fota_chunk_written_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	0	static
+/home/ee/sensing_fw/src/app/app.cpp:79:13:void init_fota_progress()	16	static
+/home/ee/sensing_fw/src/app/app.cpp:117:16:mgmt_cb_return fota_started_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	584	static
+/home/ee/sensing_fw/src/app/app.cpp:163:16:mgmt_cb_return fota_chunk_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	576	static
+/home/ee/sensing_fw/src/app/app.cpp:249:16:mgmt_cb_return fota_pending_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	576	static
+/home/ee/sensing_fw/src/app/app.cpp:343:16:mgmt_cb_return fota_stopped_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	584	static
+/home/ee/sensing_fw/src/app/app.cpp:287:16:mgmt_cb_return fota_confirmed_callback(uint32_t, mgmt_cb_return, int32_t*, uint16_t*, bool*, void*, size_t)	576	static
 /home/ee/ncs/nrf/include/caf/events/module_state_event.h:243:1:module_state_event* new_module_state_event()	8	static
 /home/ee/ncs/nrf/include/caf/events/module_state_event.h:312:20:void module_set_state(module_state)	8	static
 /home/ee/ncs/zephyr/include/zephyr/kernel.h:564:23:int32_t k_msleep(int32_t)	8	static
-/home/ee/sensing_fw/src/app/app.cpp:528:6:void app_entry(void*, void*, void*)	8	static
-/home/ee/sensing_fw/src/app/app.cpp:88:13:void fota_reset_handler(k_work*)	576	static
-/home/ee/sensing_fw/src/app/app.cpp:506:13:void app_init()	40	static
-/home/ee/sensing_fw/src/app/app.cpp:571:13:bool app_event_handler(const app_event_header*)	8	static
-/home/ee/sensing_fw/src/app/app.cpp:480:29:fota_progress_state* get_fota_progress()	0	static
-/home/ee/sensing_fw/src/app/app.cpp:485:6:)	272	static
-/home/ee/sensing_fw/src/app/app.cpp:496:6:void initializing_entry()	0	static
-/home/ee/sensing_fw/src/app/app.cpp:544:13:const char* get_sender_name(sender_type_t)	0	static
+/home/ee/sensing_fw/src/app/app.cpp:467:6:void app_entry(void*, void*, void*)	8	static
+/home/ee/sensing_fw/src/app/app.cpp:90:13:void fota_reset_handler(k_work*)	8	static
+/home/ee/sensing_fw/src/app/app.cpp:441:13:void app_init()	40	static
+/home/ee/sensing_fw/src/app/app.cpp:510:13:bool app_event_handler(const app_event_header*)	8	static
+/home/ee/sensing_fw/src/app/app.cpp:415:29:fota_progress_state* get_fota_progress()	0	static
+/home/ee/sensing_fw/src/app/app.cpp:420:6:)	272	static
+/home/ee/sensing_fw/src/app/app.cpp:431:6:void initializing_entry()	0	static
+/home/ee/sensing_fw/src/app/app.cpp:483:13:const char* get_sender_name(sender_type_t)	0	static
