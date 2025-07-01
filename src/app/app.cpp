@@ -61,25 +61,16 @@ struct fota_progress_state {
     uint8_t status; // 0=idle, 1=in_progress, 2=pending, 3=confirmed, 4=error
     int32_t error_code;
     uint32_t last_reported_bytes;
-    uint32_t last_completed_size; // Size of last successful FOTA
-    bool is_first_image; // True for first image in multi-image update
-    uint32_t app_core_size; // Learned size of app core
-    uint32_t net_core_size; // Learned size of net core
-} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0, 0, true, 0, 0};
+    uint8_t update_sequence; // 0=none, 1=app core, 2=net core
+} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 // Initialize FOTA progress to clean state
 static void init_fota_progress(void)
 {
-    fota_progress.is_active = false;
-    fota_progress.total_size = 0;
-    fota_progress.bytes_received = 0;
-    fota_progress.percent_complete = 0;
-    fota_progress.chunks_received = 0;
-    fota_progress.chunks_written = 0;
-    fota_progress.status = 0;
-    fota_progress.error_code = 0;
-    fota_progress.last_reported_bytes = 0;
-    // Keep learned sizes
+    // Reset everything except update_sequence
+    uint8_t saved_seq = fota_progress.update_sequence;
+    memset(&fota_progress, 0, sizeof(fota_progress));
+    fota_progress.update_sequence = saved_seq;
 }
 
 void initializing_entry();
@@ -89,29 +80,10 @@ static void fota_reset_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
     LOG_INF("=== FOTA UPDATE COMPLETE ===");
-    LOG_INF("Preparing to reset system to apply new firmware...");
-    
-    // Send final status update before reset
-    generic_message_t msg;
-    msg.sender = SENDER_NONE;
-    msg.type = MSG_TYPE_FOTA_PROGRESS;
-    msg.data.fota_progress.is_active = true;
-    msg.data.fota_progress.status = 3; // confirmed (about to reset)
-    msg.data.fota_progress.percent_complete = 100;
-    msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
-    msg.data.fota_progress.total_size = fota_progress.bytes_received;
-    msg.data.fota_progress.error_code = 0;
-    
-    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to send final FOTA status");
-    } else {
-        LOG_INF("Final FOTA status sent to Bluetooth");
-    }
-    
-    // Give more time for the message to be sent and logged
-    k_sleep(K_MSEC(500));
-    
     LOG_INF("=== RESETTING SYSTEM NOW ===");
+    
+    // Reset sequence for next FOTA session
+    fota_progress.update_sequence = 0;
     sys_reboot(SYS_REBOOT_WARM);
 }
 
@@ -143,30 +115,20 @@ mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_st
     ARG_UNUSED(data);
     ARG_UNUSED(data_size);
     
-    LOG_INF("FOTA Started! Previous state: is_first_image=%d, app_size=%u, net_size=%u", 
-            fota_progress.is_first_image, fota_progress.app_core_size, fota_progress.net_core_size);
+    // Increment sequence to track which update this is
+    fota_progress.update_sequence++;
     
-    // Reset progress tracking but keep learned sizes
-    uint32_t saved_app_size = fota_progress.app_core_size;
-    uint32_t saved_net_size = fota_progress.net_core_size;
-    bool was_first = fota_progress.is_first_image;
-    
-    memset(&fota_progress, 0, sizeof(fota_progress));
-    
-    // Restore learned sizes
-    fota_progress.app_core_size = saved_app_size;
-    fota_progress.net_core_size = saved_net_size;
+    // Reset progress but keep sequence
+    init_fota_progress();
     fota_progress.is_active = true;
     fota_progress.status = 1; // in_progress
     
-    // For multi-image updates: first update is app core, second is net core
-    // If this is starting and we just completed a large update, this must be net core
-    if (was_first && saved_app_size > 500000) {
-        fota_progress.is_first_image = false; // This is network core
-        LOG_INF("Starting network core update (second image)");
+    if (fota_progress.update_sequence == 1) {
+        LOG_INF("=== APP CORE UPDATE STARTED (sequence %d) ===", fota_progress.update_sequence);
+    } else if (fota_progress.update_sequence == 2) {
+        LOG_INF("=== NETWORK CORE UPDATE STARTED (sequence %d) ===", fota_progress.update_sequence);
     } else {
-        fota_progress.is_first_image = true; // This is app core
-        LOG_INF("Starting application core update (first image)");
+        LOG_WRN("Unexpected update sequence: %d", fota_progress.update_sequence);
     }
     
     // Send FOTA progress message to Bluetooth thread with zeroed values
@@ -207,51 +169,30 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         fota_progress.chunks_received++;
         fota_progress.bytes_received = check->req->off + check->req->size;
         
-        // Log first chunk
-        if (fota_progress.chunks_received == 1) {
-            LOG_INF("FOTA transfer started - First chunk received, size: %u bytes", check->req->size);
-            LOG_INF("Using is_first_image=%d for size estimation", fota_progress.is_first_image);
-        }
-        
         // Log progress every 5 chunks or every 50KB
         if ((fota_progress.chunks_received % 5 == 0) || 
         (fota_progress.bytes_received - fota_progress.last_reported_bytes >= 51200)) {
         
-        // Calculate approximate progress based on configured or learned firmware size
+        // Get size based on update sequence
         uint32_t estimated_size;
-        bool is_netcore = false;
+        const char *core_name;
         
-        // Determine which image this is
-        if (fota_progress.is_first_image) {
-            // First image is app core
-            is_netcore = false;
-            if (fota_progress.app_core_size > 0) {
-                estimated_size = fota_progress.app_core_size;
-            } else {
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                estimated_size = CONFIG_FOTA_PRIMARY_SIZE_ESTIMATE;
-#else
-                estimated_size = CONFIG_FOTA_SECONDARY_SIZE_ESTIMATE;
-#endif
-            }
+        if (fota_progress.update_sequence == 2) {
+            // Second update is network core
+            estimated_size = CONFIG_FOTA_NETCORE_SIZE_ESTIMATE;
+            core_name = "NET CORE";
         } else {
-            // Second image is network core
-            is_netcore = true;
-            if (fota_progress.net_core_size > 0) {
-                estimated_size = fota_progress.net_core_size;
-            } else {
-                estimated_size = CONFIG_FOTA_NETCORE_SIZE_ESTIMATE;
-            }
+            // First update is app core
+            estimated_size = CONFIG_FOTA_PRIMARY_SIZE_ESTIMATE;
+            core_name = "APP CORE";
         }
         
         uint8_t estimated_percent = MIN((fota_progress.bytes_received * 100) / estimated_size, 99);
         
-        LOG_INF("FOTA Progress (%s): %u bytes received (%u chunks) - Estimated %u%% (size: %u)",
-        is_netcore ? "Network Core" : "App Core",
-        fota_progress.bytes_received,
-        fota_progress.chunks_received,
-        estimated_percent,
-        estimated_size);
+        LOG_INF("FOTA Progress (%s): %u bytes - %u%%",
+                core_name,
+                fota_progress.bytes_received,
+                estimated_percent);
         
         fota_progress.last_reported_bytes = fota_progress.bytes_received;
         
@@ -344,25 +285,15 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     ARG_UNUSED(data);
     ARG_UNUSED(data_size);
     
-    LOG_INF("FOTA Image confirmed! Total bytes: %u", fota_progress.bytes_received);
-    
-#if IS_ENABLED(CONFIG_FOTA_DYNAMIC_SIZE_DETECTION)
-    // Save the size for future FOTA operations
-    if (fota_progress.bytes_received > 0) {
-        if (fota_progress.bytes_received < 200000) {
-            // Network core update
-            fota_progress.net_core_size = fota_progress.bytes_received;
-            LOG_INF("Saved network core size: %u bytes", fota_progress.net_core_size);
-        } else {
-            // App core update
-            fota_progress.app_core_size = fota_progress.bytes_received;
-            LOG_INF("Saved application core size: %u bytes", fota_progress.app_core_size);
-        }
-    }
-#endif
-    
-    // Don't mark inactive yet - wait for reset
     fota_progress.status = 3; // confirmed
+    
+    if (fota_progress.update_sequence == 1) {
+        LOG_INF("=== APP CORE UPDATE CONFIRMED (%u bytes) ===", fota_progress.bytes_received);
+        LOG_INF("Waiting for network core update...");
+    } else if (fota_progress.update_sequence == 2) {
+        LOG_INF("=== NETWORK CORE UPDATE CONFIRMED (%u bytes) ===", fota_progress.bytes_received);
+        LOG_INF("=== ALL UPDATES COMPLETE ===");
+    }
     
     // Send FOTA progress message to Bluetooth thread
     generic_message_t msg;
@@ -388,19 +319,12 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     }
     #endif
     
-    // For multi-image updates, only reset after the last image
-    // Network core updates are typically last and smaller
-    if (fota_progress.bytes_received < 200000) {
-        // This was likely the network core (final image)
-        LOG_INF("Network core update confirmed - scheduling system reset in 2 seconds...");
+    // Only reset after network core (second update)
+    if (fota_progress.update_sequence == 2) {
+        LOG_INF("Scheduling system reset in 2 seconds...");
         k_work_schedule(&fota_reset_work, K_SECONDS(2));
-    } else {
-        // This was the app core, network core update will follow
-        LOG_INF("Application core update confirmed - waiting for network core update...");
-        // Clean up for next image but keep sizes and set flag for network core
-        init_fota_progress();
-        fota_progress.is_first_image = false; // Next update is network core
     }
+    // For app core (first update), just wait for network core
     
     return MGMT_CB_OK;
 }
