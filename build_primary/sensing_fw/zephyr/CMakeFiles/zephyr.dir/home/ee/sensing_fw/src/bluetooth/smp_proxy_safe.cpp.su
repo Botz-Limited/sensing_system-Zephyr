@@ -1,7 +1,9 @@
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_internal.h:55:20:void z_cbprintf_wcpy(int*, int*, size_t)	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = unsigned int]	16	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	16	static
+/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:992:19:int k_mutex_unlock(k_mutex*)	0	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy_safe.cpp:156:46:static constexpr void smp_proxy_safe_data_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)::<lambda(k_work*)>::_FUN(k_work*)	16	static
 /home/ee/sensing_fw/src/bluetooth/smp_proxy_safe.cpp:24:9:int SMPBufferManager::startFrame()	24	static
 /home/ee/sensing_fw/src/bluetooth/smp_proxy_safe.cpp:37:9:int SMPBufferManager::appendData(const uint8_t*, size_t, size_t)	40	static
 /home/ee/sensing_fw/src/bluetooth/smp_proxy_safe.cpp:87:9:int SMPBufferManager::completeFrame(uint8_t**, size_t*)	32	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy_safe.cpp:122:10:void SMPBufferManager::reset()	16	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy_safe.cpp:156:46:smp_proxy_safe_data_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)::<lambda(k_work*)>	16	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy_safe.cpp:156:46:static constexpr void smp_proxy_safe_data_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)::<lambda(k_work*)>::_FUN(k_work*)	8	static
 /home/ee/sensing_fw/src/bluetooth/smp_proxy_safe.cpp:146:9:ssize_t smp_proxy_safe_data_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	40	static

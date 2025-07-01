@@ -29,7 +29,9 @@
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
 #include <events/foot_sensor_event.h>
+#if defined(CONFIG_WIFI_MODULE)
 #include <events/wifi_event.h>
+#endif
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -309,7 +311,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                     }
 
                     // Also send to WiFi module if WiFi is active
-#if defined(CONFIG_WIFI_NRF70)
+#if defined(CONFIG_WIFI_MODULE)
                     if (atomic_get(&wifi_active) == 1)
                     {
                         if (k_msgq_put(&wifi_msgq, &msg, K_NO_WAIT) != 0)
@@ -594,6 +596,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
         }
         return false;
     }
+#if defined(CONFIG_WIFI_MODULE)
     if (is_wifi_connected_event(aeh))
     {
         LOG_INF("Foot sensor: WiFi connected - enabling WiFi data transmission");
@@ -606,6 +609,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
         atomic_set(&wifi_active, 0);
         return false;
     }
+#endif
     return false;
 }
 
@@ -615,5 +619,7 @@ APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_start_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_stop_activity_event);
+#if defined(CONFIG_WIFI_MODULE)
 APP_EVENT_SUBSCRIBE(MODULE, wifi_connected_event);
 APP_EVENT_SUBSCRIBE(MODULE, wifi_disconnected_event);
+#endif

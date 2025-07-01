@@ -1,5 +1,4 @@
-/home/ee/ncs/zephyr/subsys/dfu/img_util/flash_img.c:46:12:scramble_mcuboot_trailer	32	static
-/home/ee/ncs/zephyr/include/zephyr/dfu/flash_img.h:94:5:flash_img_buffered_write	24	static
-/home/ee/ncs/zephyr/include/zephyr/dfu/flash_img.h:75:8:flash_img_bytes_written	8	static
-/home/ee/ncs/zephyr/include/zephyr/dfu/flash_img.h:57:5:flash_img_init_id	24	static
-/home/ee/ncs/zephyr/include/zephyr/dfu/flash_img.h:66:5:flash_img_init	8	static
+/home/ee/ncs/zephyr/include/zephyr/dfu/flash_img.h:94:5:flash_img_buffered_write	48	static
+/home/ee/ncs/zephyr/include/zephyr/dfu/flash_img.h:75:8:flash_img_bytes_written	0	static
+/home/ee/ncs/zephyr/include/zephyr/dfu/flash_img.h:57:5:flash_img_init_id	32	static
+/home/ee/ncs/zephyr/include/zephyr/dfu/flash_img.h:66:5:flash_img_init	0	static

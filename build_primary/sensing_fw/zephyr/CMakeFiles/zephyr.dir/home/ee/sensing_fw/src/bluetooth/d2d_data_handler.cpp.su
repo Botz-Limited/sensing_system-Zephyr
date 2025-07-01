@@ -1,10 +1,11 @@
-/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:18:5:int d2d_data_handler_init()	16	static
-/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:24:5:int d2d_data_handler_process_foot_samples(const foot_samples_t*)	24	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_internal.h:55:20:void z_cbprintf_wcpy(int*, int*, size_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:18:5:int d2d_data_handler_init()	0	static
+/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:24:5:int d2d_data_handler_process_foot_samples(const foot_samples_t*)	8	static
 /home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:45:5:int d2d_data_handler_process_bhi360_3d_mapping(const bhi360_3d_mapping_t*)	8	static
 /home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:73:5:int d2d_data_handler_process_bhi360_step_count(const bhi360_step_count_t*)	0	static
 /home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:94:5:int d2d_data_handler_process_bhi360_linear_accel(const bhi360_linear_accel_t*)	8	static
-/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:110:5:int d2d_data_handler_process_file_path(uint8_t, uint8_t, const char*)	80	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:110:5:int d2d_data_handler_process_file_path(uint8_t, uint8_t, const char*)	24	static
 /home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:145:5:int d2d_data_handler_process_log_available(uint8_t, uint8_t)	24	static
 /home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:176:5:int d2d_data_handler_process_status(uint32_t)	0	static
-/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:187:5:int d2d_data_handler_process_charge_status(uint8_t)	24	static
-/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:199:5:int d2d_data_handler_process_activity_step_count(const bhi360_step_count_t*)	584	static
+/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:187:5:int d2d_data_handler_process_charge_status(uint8_t)	8	static
+/home/ee/sensing_fw/src/bluetooth/d2d_data_handler.cpp:199:5:int d2d_data_handler_process_activity_step_count(const bhi360_step_count_t*)	576	static

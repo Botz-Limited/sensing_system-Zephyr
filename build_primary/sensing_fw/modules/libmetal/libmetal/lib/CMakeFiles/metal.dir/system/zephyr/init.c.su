@@ -1,2 +1,2 @@
 /home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/sys.h:132:5:metal_sys_init	8	static
-/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/sys.h:142:6:metal_sys_finish	8	static
+/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/sys.h:142:6:metal_sys_finish	0	static

@@ -44,6 +44,11 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
+  include("/home/ee/sensing_fw/build_primary/sensing_fw/modules/nrf/subsys/nrf_security/cmake_install.cmake")
+endif()
+
+if(NOT CMAKE_INSTALL_LOCAL_ONLY)
+  # Include the install script for the subdirectory.
   include("/home/ee/sensing_fw/build_primary/sensing_fw/modules/nrf/subsys/net/cmake_install.cmake")
 endif()
 

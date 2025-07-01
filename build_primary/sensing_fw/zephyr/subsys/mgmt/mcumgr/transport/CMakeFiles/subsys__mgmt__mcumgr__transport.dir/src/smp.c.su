@@ -1,8 +1,8 @@
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:110:1:smp_process_packet	288	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:131:1:smp_handle_reqs	8	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:267:12:smp_init	16	static
-/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp.h:71:17:smp_packet_alloc	8	static
-/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp.h:78:6:smp_packet_free	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:110:1:smp_process_packet.isra	288	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:131:1:smp_handle_reqs	16	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp.h:71:17:smp_packet_alloc	0	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp.h:78:6:smp_packet_free	0	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:67:7:smp_alloc_rsp	16	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:91:6:smp_free_buf	8	static
 /home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/transport/smp.h:176:5:smp_transport_init	8	static
@@ -11,4 +11,4 @@
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:200:1:smp_rx_req	8	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/transport/src/smp.c:207:18:smp_get_wq	0	static
 /home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/transport/smp.h:187:6:smp_rx_remove_invalid	56	static
-/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/transport/smp.h:194:6:smp_rx_clear	8	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/transport/smp.h:194:6:smp_rx_clear	16	static

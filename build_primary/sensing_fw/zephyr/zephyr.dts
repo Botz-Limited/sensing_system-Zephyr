@@ -40,6 +40,7 @@
 		pwm-led0 = &pwm_led0;
 		watchdog0 = &wdt0;
 		rtc0 = &rtc0;
+		wifi0 = &nrf7002;
 	};
 	soc {
 		#address-cells = < 0x1 >;
@@ -241,10 +242,29 @@
 				rx-delay-supported;
 				rx-delay = < 0x2 >;
 				status = "okay";
-				cs-gpios = < &arduino_header 0x10 0x1 >;
+				cs-gpios = < &gpio1 0xc 0x1 >;
 				pinctrl-0 = < &spi4_default >;
 				pinctrl-1 = < &spi4_sleep >;
 				pinctrl-names = "default", "sleep";
+				nrf7002: nrf7002@0 {
+					compatible = "nordic,nrf7002-spi";
+					reg = < 0x0 >;
+					spi-max-frequency = < 0x1e84800 >;
+					host-irq-gpios = < &gpio1 0x7 0x0 >;
+					iovdd-ctrl-gpios = < &gpio1 0x8 0x0 >;
+					bucken-gpios = < &gpio1 0x9 0x0 >;
+					wifi-max-tx-pwr-2g-dsss = < 0x14 >;
+					wifi-max-tx-pwr-2g-mcs0 = < 0x14 >;
+					wifi-max-tx-pwr-2g-mcs7 = < 0x14 >;
+					wifi-max-tx-pwr-5g-low-mcs0 = < 0x14 >;
+					wifi-max-tx-pwr-5g-low-mcs7 = < 0x14 >;
+					wifi-max-tx-pwr-5g-mid-mcs0 = < 0x14 >;
+					wifi-max-tx-pwr-5g-mid-mcs7 = < 0x14 >;
+					wifi-max-tx-pwr-5g-high-mcs0 = < 0x14 >;
+					wifi-max-tx-pwr-5g-high-mcs7 = < 0x14 >;
+					label = "NRF7002";
+					status = "okay";
+				};
 			};
 			i2c2: i2c@b000 {
 				compatible = "nordic,nrf-twim";
@@ -318,7 +338,7 @@
 				status = "disabled";
 				#io-channel-cells = < 0x1 >;
 				zephyr,pm-device-runtime-auto;
-				phandle = < 0x18 >;
+				phandle = < 0x17 >;
 			};
 			timer0: timer@f000 {
 				compatible = "nordic,nrf-timer";
@@ -337,7 +357,7 @@
 				max-bit-width = < 0x20 >;
 				interrupts = < 0x10 0x1 >;
 				prescaler = < 0x0 >;
-				phandle = < 0x13 >;
+				phandle = < 0x12 >;
 			};
 			timer2: timer@11000 {
 				compatible = "nordic,nrf-timer";
@@ -434,7 +454,7 @@
 				pinctrl-0 = < &pwm0_default >;
 				pinctrl-1 = < &pwm0_sleep >;
 				pinctrl-names = "default", "sleep";
-				phandle = < 0x17 >;
+				phandle = < 0x16 >;
 			};
 			pwm1: pwm@22000 {
 				compatible = "nordic,nrf-pwm";
@@ -479,7 +499,7 @@
 				interrupts = < 0x2a 0x1 >;
 				#mbox-cells = < 0x1 >;
 				status = "okay";
-				phandle = < 0x15 >;
+				phandle = < 0x14 >;
 			};
 			qspi: qspi@2b000 {
 				compatible = "nordic,nrf-qspi";
@@ -512,7 +532,7 @@
 						lfs1_part: partition@0 {
 							label = "storage";
 							reg = < 0x0 0x6000 >;
-							phandle = < 0x19 >;
+							phandle = < 0x18 >;
 						};
 					};
 				};
@@ -626,7 +646,7 @@
 				status = "okay";
 				port = < 0x0 >;
 				gpiote-instance = < &gpiote >;
-				phandle = < 0x16 >;
+				phandle = < 0x15 >;
 			};
 			gpio1: gpio@842800 {
 				compatible = "nordic,nrf-gpio";
@@ -637,7 +657,7 @@
 				status = "okay";
 				port = < 0x1 >;
 				gpiote-instance = < &gpiote >;
-				phandle = < 0xd >;
+				phandle = < 0x8 >;
 			};
 			ieee802154: ieee802154 {
 				compatible = "nordic,nrf-ieee802154";
@@ -656,7 +676,7 @@
 			interrupts = < 0xd 0x5 >;
 			status = "okay";
 			instance = < 0x0 >;
-			phandle = < 0x12 >;
+			phandle = < 0x11 >;
 		};
 		gpiote1: gpiote@4002f000 {
 			compatible = "nordic,nrf-gpiote";
@@ -706,27 +726,27 @@
 			};
 		};
 		pwm0_default: pwm0_default {
-			phandle = < 0xe >;
+			phandle = < 0xd >;
 			group1 {
 				psels = < 0x1600001c >;
 			};
 		};
 		pwm0_sleep: pwm0_sleep {
-			phandle = < 0xf >;
+			phandle = < 0xe >;
 			group1 {
 				psels = < 0x1600001c >;
 				low-power-enable;
 			};
 		};
 		qspi_default: qspi_default {
-			phandle = < 0x10 >;
+			phandle = < 0xf >;
 			group1 {
 				psels = < 0x1d000011 >, < 0x1f00000d >, < 0x2000000e >, < 0x2100000f >, < 0x22000010 >, < 0x1e000012 >;
 				nordic,drive-mode = < 0x3 >;
 			};
 		};
 		qspi_sleep: qspi_sleep {
-			phandle = < 0x11 >;
+			phandle = < 0x10 >;
 			group1 {
 				psels = < 0x1d000011 >, < 0x1f00000d >, < 0x2000000e >, < 0x2100000f >, < 0x22000010 >;
 				low-power-enable;
@@ -757,13 +777,13 @@
 		spi4_default: spi4_default {
 			phandle = < 0x9 >;
 			group1 {
-				psels = < 0x400002f >, < 0x600002e >, < 0x500002d >;
+				psels = < 0x400002f >, < 0x500002d >, < 0x600002e >;
 			};
 		};
 		spi4_sleep: spi4_sleep {
 			phandle = < 0xa >;
 			group1 {
-				psels = < 0x400002f >, < 0x600002e >, < 0x500002d >;
+				psels = < 0x400002f >, < 0x500002d >, < 0x600002e >;
 				low-power-enable;
 			};
 		};
@@ -898,7 +918,6 @@
 		gpio-map-mask = < 0xffffffff 0xffffffc0 >;
 		gpio-map-pass-thru = < 0x0 0x3f >;
 		gpio-map = < 0x0 0x0 &gpio0 0x4 0x0 >, < 0x1 0x0 &gpio0 0x5 0x0 >, < 0x2 0x0 &gpio0 0x6 0x0 >, < 0x3 0x0 &gpio0 0x7 0x0 >, < 0x4 0x0 &gpio0 0x19 0x0 >, < 0x5 0x0 &gpio0 0x1a 0x0 >, < 0x6 0x0 &gpio1 0x0 0x0 >, < 0x7 0x0 &gpio1 0x1 0x0 >, < 0x8 0x0 &gpio1 0x4 0x0 >, < 0x9 0x0 &gpio1 0x5 0x0 >, < 0xa 0x0 &gpio1 0x6 0x0 >, < 0xb 0x0 &gpio1 0x7 0x0 >, < 0xc 0x0 &gpio1 0x8 0x0 >, < 0xd 0x0 &gpio1 0x9 0x0 >, < 0xe 0x0 &gpio1 0xa 0x0 >, < 0xf 0x0 &gpio1 0xb 0x0 >, < 0x10 0x0 &gpio1 0xc 0x0 >, < 0x11 0x0 &gpio1 0xd 0x0 >, < 0x12 0x0 &gpio1 0xe 0x0 >, < 0x13 0x0 &gpio1 0xf 0x0 >, < 0x14 0x0 &gpio1 0x2 0x0 >, < 0x15 0x0 &gpio1 0x3 0x0 >;
-		phandle = < 0x8 >;
 	};
 	pwmleds {
 		compatible = "pwm-leds";
@@ -936,7 +955,7 @@
 		};
 		sram0_shared: memory@20070000 {
 			reg = < 0x20070000 0x10000 >;
-			phandle = < 0x14 >;
+			phandle = < 0x13 >;
 		};
 	};
 	fstab {

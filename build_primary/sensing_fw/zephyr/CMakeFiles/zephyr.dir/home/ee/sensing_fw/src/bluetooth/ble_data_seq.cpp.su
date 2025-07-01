@@ -1,3 +1,4 @@
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_data_seq.cpp:15:6:void ble_seq_init(ble_seq_manager_t*)	16	static
 /home/ee/sensing_fw/src/bluetooth/ble_data_seq.cpp:29:11:seq_num_t ble_seq_next(seq_num_t)	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_data_seq.cpp:38:9:uint8_t ble_seq_gap(seq_num_t, seq_num_t)	0	static

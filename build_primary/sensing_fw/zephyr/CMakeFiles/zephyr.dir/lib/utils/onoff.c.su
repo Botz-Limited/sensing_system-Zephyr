@@ -1,12 +1,7 @@
-/home/ee/ncs/zephyr/include/zephyr/sys/slist.h:408:1:sys_slist_remove	0	static
-/home/ee/ncs/zephyr/include/zephyr/sys/slist.h:450:1:sys_slist_find_and_remove	8	static
-/home/ee/ncs/zephyr/lib/utils/onoff.c:115:13:set_state	0	static
-/home/ee/ncs/zephyr/lib/utils/onoff.c:155:13:notify_monitors	24	static
+/home/ee/ncs/zephyr/include/zephyr/sys/slist.h:450:1:sys_slist_find_and_remove	0	static
 /home/ee/ncs/zephyr/lib/utils/onoff.c:211:12:process_recheck	0	static
-/home/ee/ncs/zephyr/lib/utils/onoff.c:237:13:process_complete	8	static
 /home/ee/ncs/zephyr/lib/utils/onoff.c:122:12:validate_args	8	static
 /home/ee/ncs/zephyr/lib/utils/onoff.c:168:13:notify_one	24	static
-/home/ee/ncs/zephyr/lib/utils/onoff.c:181:13:notify_all	24	static
 /home/ee/ncs/zephyr/lib/utils/onoff.c:298:13:process_event	40	static
 /home/ee/ncs/zephyr/lib/utils/onoff.c:201:13:transition_complete	24	static
 /home/ee/ncs/zephyr/include/zephyr/sys/onoff.h:221:5:onoff_manager_init	16	static

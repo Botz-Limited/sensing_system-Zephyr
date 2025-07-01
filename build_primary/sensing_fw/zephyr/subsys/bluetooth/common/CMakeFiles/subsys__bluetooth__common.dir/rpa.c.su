@@ -1,5 +1,3 @@
-/home/ee/ncs/zephyr/subsys/bluetooth/common/rpa.c:43:12:internal_encrypt_le	8	static
-/home/ee/ncs/zephyr/subsys/bluetooth/common/rpa.c:55:12:ah	24	static
-/home/ee/ncs/zephyr/subsys/bluetooth/common/rpa.c:32:12:internal_rand	8	static
+/home/ee/ncs/zephyr/subsys/bluetooth/common/rpa.c:55:12:ah	32	static
 /home/ee/ncs/zephyr/subsys/bluetooth/common/rpa.c:84:6:bt_rpa_irk_matches	16	static
 /home/ee/ncs/zephyr/subsys/bluetooth/common/rpa.c:101:5:bt_rpa_create	16	static

@@ -1,2 +1,1 @@
-/home/ee/ncs/zephyr/include/zephyr/kernel.h:564:23:k_msleep	8	static
 /home/ee/ncs/zephyr/subsys/shell/modules/kernel_service/sleep.c:12:12:cmd_kernel_sleep	24	static

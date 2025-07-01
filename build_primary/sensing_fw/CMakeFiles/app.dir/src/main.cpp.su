@@ -1,3 +1,2 @@
-/home/ee/ncs/nrf/include/caf/events/module_state_event.h:243:1:module_state_event* new_module_state_event()	8	static
-/home/ee/ncs/nrf/include/caf/events/module_state_event.h:312:20:void module_set_state(module_state)	8	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	0	static
 /home/ee/sensing_fw/src/main.cpp:22:5:int main()	24	static

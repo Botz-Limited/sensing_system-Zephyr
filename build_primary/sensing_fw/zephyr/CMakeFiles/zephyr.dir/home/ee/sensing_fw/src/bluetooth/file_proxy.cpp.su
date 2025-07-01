@@ -1,17 +1,19 @@
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:248:13:void file_proxy_status_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:239:13:void file_proxy_data_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
 /home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:230:16:ssize_t file_proxy_status_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	24	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = int]	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	0	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:248:13:void file_proxy_status_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:248:13:void file_proxy_status_ccc_changed(const bt_gatt_attr*, uint16_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:239:13:void file_proxy_data_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:239:13:void file_proxy_data_ccc_changed(const bt_gatt_attr*, uint16_t)	0	static
 /home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:72:16:ssize_t file_proxy_target_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	64	dynamic,bounded
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:289:12:int forward_to_secondary(uint8_t, const uint8_t*, size_t)	40	static
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1455:19:int bt_gatt_notify(bt_conn*, const bt_gatt_attr*, const void*, uint16_t)	32	static
 /home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:532:5:int file_proxy_init()	16	static
 /home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:562:24:file_proxy_status file_proxy_get_status()	0	static
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:567:5:int file_proxy_notify_status(file_proxy_status)	8	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:567:5:int file_proxy_notify_status(file_proxy_status)	32	static
 /home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:94:16:ssize_t file_proxy_command_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	192	dynamic,bounded
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:506:13:void d2d_file_status_callback(d2d_file_status)	8	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:506:13:void d2d_file_status_callback(d2d_file_status)	0	static
 /home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:487:13:void file_proxy_timeout_handler(k_work*)	16	static
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:545:6:void file_proxy_set_secondary_conn(bt_conn*)	16	static
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:582:5:int file_proxy_notify_data(const uint8_t*, size_t)	8	static
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:498:13:void d2d_file_data_callback(const uint8_t*, size_t)	8	static
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:336:12:int handle_primary_file_operation(uint8_t, const uint8_t*, size_t)	592	static
-/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:463:13:void file_proxy_work_handler(k_work*)	8	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:545:6:void file_proxy_set_secondary_conn(bt_conn*)	24	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:582:5:int file_proxy_notify_data(const uint8_t*, size_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:498:13:void d2d_file_data_callback(const uint8_t*, size_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:336:12:int handle_primary_file_operation(uint8_t, const uint8_t*, size_t)	600	static
+/home/ee/sensing_fw/src/bluetooth/file_proxy.cpp:463:13:void file_proxy_work_handler(k_work*)	40	static

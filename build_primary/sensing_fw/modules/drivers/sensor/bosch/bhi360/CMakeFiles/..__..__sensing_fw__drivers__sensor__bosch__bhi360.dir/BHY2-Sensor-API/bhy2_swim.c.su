@@ -1,4 +1,4 @@
-/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_swim.c:64:8:bhy2_swim_set_config	8	static
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_swim.c:64:8:bhy2_swim_set_config	0	static
 /home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_swim.c:96:8:bhy2_swim_get_config	24	static
 /home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_swim.c:135:8:bhy2_swim_get_version	24	static
 /home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhy2_swim.c:183:8:bhy2_swim_parse_data	0	static

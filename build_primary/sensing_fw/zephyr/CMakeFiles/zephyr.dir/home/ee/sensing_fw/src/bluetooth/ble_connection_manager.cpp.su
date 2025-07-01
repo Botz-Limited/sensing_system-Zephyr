@@ -1,13 +1,16 @@
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	0	static
+/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:975:19:int k_mutex_lock(k_mutex*, k_timeout_t)	0	static
+/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:992:19:int k_mutex_unlock(k_mutex*)	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:11:1:BleConnectionManager::BleConnectionManager()	8	static
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:16:6:void BleConnectionManager::setPhoneConnection(bt_conn*)	64	dynamic,bounded
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:29:17:bt_conn* BleConnectionManager::getPhoneConnection()	16	static
-/home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:36:6:void BleConnectionManager::clearPhoneConnection()	8	static
+/home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:36:6:void BleConnectionManager::clearPhoneConnection()	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:47:6:void BleConnectionManager::setD2DConnection(bt_conn*)	64	dynamic,bounded
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:60:17:bt_conn* BleConnectionManager::getD2DConnection()	16	static
-/home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:67:6:void BleConnectionManager::clearD2DConnection()	8	static
+/home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:67:6:void BleConnectionManager::clearD2DConnection()	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:78:6:void BleConnectionManager::setSecondaryConnection(bt_conn*)	64	dynamic,bounded
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:91:17:bt_conn* BleConnectionManager::getSecondaryConnection()	16	static
-/home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:98:6:void BleConnectionManager::clearSecondaryConnection()	8	static
+/home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:98:6:void BleConnectionManager::clearSecondaryConnection()	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:109:6:bool BleConnectionManager::isConnectionValid(bt_conn*)	40	static
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:40:6:bool BleConnectionManager::hasPhoneConnection()	16	static
 /home/ee/sensing_fw/src/bluetooth/ble_connection_manager.cpp:71:6:bool BleConnectionManager::hasD2DConnection()	16	static

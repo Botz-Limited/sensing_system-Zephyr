@@ -1,10 +1,10 @@
-/home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:220:5:ipc_service_open_instance	16	static
-/home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:239:5:ipc_service_close_instance	16	static
+/home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:220:5:ipc_service_open_instance	8	static
+/home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:239:5:ipc_service_close_instance	8	static
 /home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:261:5:ipc_service_register_endpoint	16	static
 /home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:281:5:ipc_service_deregister_endpoint	16	static
 /home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:301:5:ipc_service_send	16	static
 /home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:319:5:ipc_service_get_tx_buffer_size	16	static
-/home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:368:5:ipc_service_get_tx_buffer	24	static
+/home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:368:5:ipc_service_get_tx_buffer	16	static
 /home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:390:5:ipc_service_drop_tx_buffer	16	static
 /home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:424:5:ipc_service_send_nocopy	16	static
 /home/ee/ncs/zephyr/include/zephyr/ipc/ipc_service.h:449:5:ipc_service_hold_rx_buffer	16	static

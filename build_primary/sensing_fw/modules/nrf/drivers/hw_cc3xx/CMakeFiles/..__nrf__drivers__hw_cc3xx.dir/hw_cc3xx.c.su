@@ -1,2 +1,2 @@
-/home/ee/ncs/nrf/drivers/hw_cc3xx/hw_cc3xx.c:20:12:hw_cc3xx_init_internal	8	static
+/home/ee/ncs/nrf/drivers/hw_cc3xx/hw_cc3xx.c:20:12:hw_cc3xx_init_internal	0	static
 /home/ee/ncs/nrf/drivers/hw_cc3xx/hw_cc3xx.c:39:12:hw_cc3xx_init	8	static

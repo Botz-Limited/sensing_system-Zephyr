@@ -3,7 +3,7 @@
 /home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:160:5:metal_generic_dev_dma_map	16	static
 /home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:96:5:metal_bus_unregister	8	static
 /home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:104:5:metal_bus_find	24	static
-/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:89:5:metal_bus_register	8	static
+/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:89:5:metal_bus_register	16	static
 /home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:130:5:metal_device_open	24	static
 /home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:137:6:metal_device_close	8	static
-/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:121:5:metal_register_generic_device	4	static
+/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/device.h:121:5:metal_register_generic_device	8	static

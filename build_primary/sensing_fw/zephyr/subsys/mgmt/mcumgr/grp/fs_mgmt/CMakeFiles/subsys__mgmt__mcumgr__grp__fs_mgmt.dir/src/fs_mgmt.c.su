@@ -1,11 +1,10 @@
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:914:12:fs_mgmt_translate_error_code	0	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:122:13:fs_mgmt_cleanup	16	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:893:12:fs_mgmt_close_opened_file	8	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:147:12:fs_mgmt_filelen	272	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:569:12:fs_mgmt_file_status	144	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:174:13:fs_mgmt_file_rsp	24	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:569:12:fs_mgmt_file_status	152	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:122:13:fs_mgmt_cleanup	16	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:190:13:fs_mgmt_upload_download_finish_check	8	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:350:12:fs_mgmt_file_upload	240	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:134:13:file_close_work_handler	8	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:204:12:fs_mgmt_file_download	2616	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:991:13:fs_mgmt_register_group	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:893:12:fs_mgmt_close_opened_file	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:134:13:file_close_work_handler	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:204:12:fs_mgmt_file_download	2624	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/fs_mgmt/src/fs_mgmt.c:350:12:fs_mgmt_file_upload	248	static

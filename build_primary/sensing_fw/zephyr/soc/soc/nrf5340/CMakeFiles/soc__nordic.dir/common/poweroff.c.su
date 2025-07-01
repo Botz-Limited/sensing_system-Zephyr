@@ -1,2 +1,1 @@
-/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_regulators.h:421:24:nrf_regulators_system_off	0	static
 /home/ee/ncs/zephyr/include/zephyr/sys/poweroff.h:30:20:z_sys_poweroff	8	static

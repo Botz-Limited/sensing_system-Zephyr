@@ -1,5 +1,0 @@
-/home/ee/ncs/modules/crypto/mbedtls/library/psa_util.c:125:5:psa_generic_status_to_mbedtls	0	static
-/home/ee/ncs/modules/crypto/mbedtls/library/psa_util.c:143:5:psa_status_to_mbedtls	8	static
-/home/ee/ncs/modules/crypto/mbedtls/library/psa_util.c:189:18:mbedtls_ecc_group_to_psa	0	static
-/home/ee/ncs/modules/crypto/mbedtls/library/psa_util.c:262:22:mbedtls_ecc_group_from_psa	0	static
-/home/ee/ncs/modules/crypto/mbedtls/library/psa_util.c:348:5:mbedtls_psa_get_random	8	static

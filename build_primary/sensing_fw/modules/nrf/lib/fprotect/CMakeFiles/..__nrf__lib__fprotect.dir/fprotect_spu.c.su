@@ -1,2 +1,1 @@
-/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_spu.h:952:24:nrf_spu_flashregion_set	16	static
-/home/ee/ncs/nrf/lib/fprotect/fprotect_spu.c:17:5:fprotect_area	24	static
+/home/ee/ncs/nrf/lib/fprotect/fprotect_spu.c:17:5:fprotect_area	16	static

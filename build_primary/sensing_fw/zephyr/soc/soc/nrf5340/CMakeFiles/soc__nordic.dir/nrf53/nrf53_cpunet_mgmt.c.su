@@ -1,9 +1,5 @@
-/home/ee/ncs/modules/hal/nordic/nrfx/mdk/nrf53_erratas.h:6042:13:nrf53_errata_161	0	static
-/home/ee/ncs/zephyr/soc/nordic/nrf53/nrf53_cpunet_mgmt.c:31:13:onoff_stop	8	static
-/home/ee/ncs/zephyr/soc/nordic/nrf53/nrf53_cpunet_mgmt.c:38:12:nrf53_cpunet_mgmt_init	8	static
-/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_reset.h:242:24:nrf_reset_network_force_off	24	static
-/home/ee/ncs/zephyr/soc/nordic/nrf53/nrf53_cpunet_mgmt.c:24:13:onoff_start	16	static
-/home/ee/ncs/zephyr/include/zephyr/sys/notify.h:264:20:sys_notify_init_spinwait	8	static
-/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_spu.h:993:24:nrf_spu_extdomain_set	8	static
+/home/ee/ncs/zephyr/soc/nordic/nrf53/nrf53_cpunet_mgmt.c:31:13:onoff_stop	0	static
+/home/ee/ncs/zephyr/soc/nordic/nrf53/nrf53_cpunet_mgmt.c:38:12:nrf53_cpunet_mgmt_init	0	static
+/home/ee/ncs/zephyr/soc/nordic/nrf53/nrf53_cpunet_mgmt.c:24:13:onoff_start	24	static
 /home/ee/ncs/zephyr/soc/nordic/nrf53/nrf53_cpunet_mgmt.h:29:6:nrf53_cpunet_enable	24	static
 /home/ee/ncs/zephyr/soc/nordic/nrf53/nrf53_cpunet_mgmt.c:72:12:nrf53_cpunet_init	8	static

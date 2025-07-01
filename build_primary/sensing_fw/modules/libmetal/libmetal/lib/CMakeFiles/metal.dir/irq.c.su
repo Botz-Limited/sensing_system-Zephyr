@@ -1,7 +1,6 @@
-/home/ee/ncs/modules/hal/libmetal/libmetal/lib/irq.c:16:12:metal_irq_allocate	8	static
-/home/ee/ncs/modules/hal/libmetal/libmetal/lib/irq.c:78:37:metal_irq_get_controller	0	static
+/home/ee/ncs/modules/hal/libmetal/libmetal/lib/irq.c:78:37:metal_irq_get_controller	12	static
 /home/ee/ncs/modules/hal/libmetal/libmetal/lib/irq.c:98:13:_metal_irq_set_enable	16	static
-/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq_controller.h:107:5:metal_irq_register_controller	8	static
+/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq_controller.h:107:5:metal_irq_register_controller	20	static
 /home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq.h:51:5:metal_irq_register	24	static
-/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq.h:85:6:metal_irq_enable	8	static
-/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq.h:94:6:metal_irq_disable	8	static
+/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq.h:85:6:metal_irq_enable	0	static
+/home/ee/sensing_fw/build_primary/sensing_fw/modules/libmetal/libmetal/lib/include/metal/irq.h:94:6:metal_irq_disable	0	static

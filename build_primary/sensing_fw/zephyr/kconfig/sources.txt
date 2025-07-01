@@ -3674,4 +3674,5 @@
 /home/ee/sensing_fw/src/foot_sensor/Kconfig
 /home/ee/sensing_fw/src/motion_sensor/Kconfig
 /home/ee/sensing_fw/src/packetizer/Kconfig
+/home/ee/sensing_fw/src/wifi/Kconfig
 /opt/toolchains/zephyr-sdk-0.17.0/cmake/zephyr/Kconfig

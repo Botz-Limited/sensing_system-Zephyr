@@ -1,15 +1,17 @@
-/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:284:13:void fota_proxy_status_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
 /home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:275:16:ssize_t fota_proxy_status_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	24	static
-/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:69:16:ssize_t fota_proxy_target_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	64	dynamic,bounded
 /home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:249:16:ssize_t fota_proxy_data_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	16	static
-/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:324:12:int forward_to_secondary(uint8_t, const uint8_t*, size_t)	24	static
-/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:450:13:void fota_proxy_reset_handler(k_work*)	16	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_internal.h:55:20:void z_cbprintf_wcpy(int*, int*, size_t)	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	16	static
+/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:284:13:void fota_proxy_status_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:284:13:void fota_proxy_status_ccc_changed(const bt_gatt_attr*, uint16_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:69:16:ssize_t fota_proxy_target_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	64	dynamic,bounded
 /home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:382:13:void fota_proxy_work_handler(k_work*)	24	static
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1455:19:int bt_gatt_notify(bt_conn*, const bt_gatt_attr*, const void*, uint16_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:450:13:void fota_proxy_reset_handler(k_work*)	24	static
+/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:324:12:int forward_to_secondary(uint8_t, const uint8_t*, size_t)	32	static
 /home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:468:5:int fota_proxy_init()	16	static
 /home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:502:24:fota_proxy_status fota_proxy_get_status()	0	static
-/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:507:5:int fota_proxy_notify_status(fota_proxy_status)	8	static
+/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:507:5:int fota_proxy_notify_status(fota_proxy_status)	32	static
 /home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:91:16:ssize_t fota_proxy_command_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:416:13:void fota_proxy_timeout_handler(k_work*)	24	static
-/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:479:6:void fota_proxy_set_secondary_conn(bt_conn*)	16	static
+/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:416:13:void fota_proxy_timeout_handler(k_work*)	32	static
+/home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:479:6:void fota_proxy_set_secondary_conn(bt_conn*)	24	static
 /home/ee/sensing_fw/src/bluetooth/fota_proxy.cpp:528:5:int fota_proxy_handle_secondary_complete()	24	static

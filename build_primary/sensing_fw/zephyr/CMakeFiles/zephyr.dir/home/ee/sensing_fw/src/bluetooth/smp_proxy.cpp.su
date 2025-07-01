@@ -1,15 +1,15 @@
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:180:13:void smp_proxy_data_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:318:13:void smp_proxy_timeout_handler(k_work*)	16	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:94:16:ssize_t smp_proxy_target_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	64	dynamic,bounded
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1455:19:int bt_gatt_notify(bt_conn*, const bt_gatt_attr*, const void*, uint16_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:255:12:int process_primary_smp(const uint8_t*, size_t)	16	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:290:13:void handle_secondary_response(const uint8_t*, size_t)	24	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:87:13:void d2d_smp_response_cb(const uint8_t*, size_t)	8	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:208:12:int forward_to_secondary(const uint8_t*, size_t)	40	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:128:16:ssize_t smp_proxy_data_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	24	static
 /home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:120:16:ssize_t smp_proxy_target_read(bt_conn*, const bt_gatt_attr*, void*, uint16_t, uint16_t)	24	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_internal.h:55:20:void z_cbprintf_wcpy(int*, int*, size_t)	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	16	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:180:13:void smp_proxy_data_ccc_changed(const bt_gatt_attr*, uint16_t)	16	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:180:13:void smp_proxy_data_ccc_changed(const bt_gatt_attr*, uint16_t)	0	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:318:13:void smp_proxy_timeout_handler(k_work*)	16	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:94:16:ssize_t smp_proxy_target_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	72	dynamic,bounded
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1455:19:int bt_gatt_notify(bt_conn*, const bt_gatt_attr*, const void*, uint16_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:87:13:void d2d_smp_response_cb(const uint8_t*, size_t)	24	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:128:16:ssize_t smp_proxy_data_write(bt_conn*, const bt_gatt_attr*, const void*, uint16_t, uint16_t, uint8_t)	40	static
 /home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:328:5:int smp_proxy_init()	24	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:346:6:void smp_proxy_set_secondary_conn(bt_conn*)	24	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:346:6:void smp_proxy_set_secondary_conn(bt_conn*)	32	static
 /home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:367:23:smp_proxy_target smp_proxy_get_target()	0	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:372:6:bool smp_proxy_is_secondary_ready()	8	static
-/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:378:6:void smp_proxy_clear_phone_conn(bt_conn*)	16	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:372:6:bool smp_proxy_is_secondary_ready()	0	static
+/home/ee/sensing_fw/src/bluetooth/smp_proxy.cpp:378:6:void smp_proxy_clear_phone_conn(bt_conn*)	24	static

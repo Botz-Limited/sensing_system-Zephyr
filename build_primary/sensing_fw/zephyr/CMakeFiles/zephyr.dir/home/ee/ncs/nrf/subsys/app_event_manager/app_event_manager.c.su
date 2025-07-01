@@ -1,11 +1,5 @@
-/home/ee/ncs/zephyr/include/zephyr/sys/slist.h:350:1:sys_slist_merge_slist	4	static
-/home/ee/ncs/zephyr/include/zephyr/sys/atomic.h:127:20:atomic_test_bit	0	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager.c:26:13:log_is_event_displayed	8	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager.c:55:13:log_event	16	static
-/home/ee/ncs/zephyr/include/zephyr/sys/atomic.h:209:20:atomic_set_bit	0	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager.c:102:13:log_event_init	8	static
 /home/ee/ncs/nrf/include/app_event_manager.h:392:7:app_event_manager_alloc	8	static
-/home/ee/ncs/nrf/include/app_event_manager.h:403:6:app_event_manager_free	8	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager.c:140:13:event_processor_fn	24	static
+/home/ee/ncs/nrf/include/app_event_manager.h:403:6:app_event_manager_free	0	static
+/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager.c:140:13:event_processor_fn	32	static
 /home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager_priv.h:434:6:_event_submit	16	static
-/home/ee/ncs/nrf/include/app_event_manager.h:381:5:app_event_manager_init	8	static
+/home/ee/ncs/nrf/include/app_event_manager.h:381:5:app_event_manager_init	24	static

@@ -1,6 +1,4 @@
-/home/ee/ncs/zephyr/subsys/shell/shell_wildcard.c:13:35:command_add	24	static
-/home/ee/ncs/zephyr/subsys/shell/shell_wildcard.c:69:35:commands_expand	56	static
 /home/ee/ncs/zephyr/subsys/shell/shell_wildcard.c:106:6:z_shell_has_wildcard	8	static
 /home/ee/ncs/zephyr/subsys/shell/shell_wildcard.c:119:6:z_shell_wildcard_prepare	8	static
-/home/ee/ncs/zephyr/subsys/shell/shell_wildcard.c:159:28:z_shell_wildcard_process	16	static
+/home/ee/ncs/zephyr/subsys/shell/shell_wildcard.c:159:28:z_shell_wildcard_process	72	static
 /home/ee/ncs/zephyr/subsys/shell/shell_wildcard.c:185:6:z_shell_wildcard_finalize	8	static
