@@ -1,9 +1,0 @@
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:204:12:dfu_target_mcuboot_schedule_one_img	24	static
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:94:6:dfu_target_mcuboot_identify	0	static
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:100:5:dfu_target_mcuboot_set_buf	0	static
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:116:5:dfu_target_mcuboot_init	104	dynamic,bounded
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:159:5:dfu_target_mcuboot_offset_get	8	static
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:171:5:dfu_target_mcuboot_write	8	static
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:178:5:dfu_target_mcuboot_done	24	static
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:220:5:dfu_target_mcuboot_schedule_update	8	static
-/home/ee/ncs/nrf/subsys/dfu/dfu_target/src/dfu_target_mcuboot.c:237:5:dfu_target_mcuboot_reset	8	static

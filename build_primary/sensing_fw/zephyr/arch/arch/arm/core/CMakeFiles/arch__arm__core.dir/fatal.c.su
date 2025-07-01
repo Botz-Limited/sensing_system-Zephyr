@@ -1,4 +1,0 @@
-/home/ee/ncs/zephyr/arch/arm/core/fatal.c:21:13:esf_dump	56	static
-/home/ee/ncs/zephyr/arch/arm/core/fatal.c:69:6:z_arm_fatal_error	24	static
-/home/ee/ncs/zephyr/arch/arm/core/fatal.c:106:6:z_do_kernel_oops	8	static
-/home/ee/ncs/zephyr/arch/arm/core/fatal.c:159:20:arch_syscall_oops	112	static

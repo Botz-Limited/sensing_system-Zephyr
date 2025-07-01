@@ -1,5 +1,0 @@
-/home/ee/ncs/zephyr/kernel/device.c:22:6:z_device_state_init	8	static
-/home/ee/ncs/zephyr/include/zephyr/device.h:745:8:z_device_get_all_static	0	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/device.h:46:13:z_impl_device_is_ready	0	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/device.h:23:30:z_impl_device_get_binding	16	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/device.h:92:30:z_impl_device_get_by_dt_nodelabel	24	static

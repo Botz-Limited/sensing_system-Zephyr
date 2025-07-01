@@ -1,5 +1,0 @@
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/hwinfo.h:23:16:z_impl_hwinfo_get_device_id	0	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/hwinfo.h:47:12:z_impl_hwinfo_get_device_eui64	0	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/hwinfo.h:70:12:z_impl_hwinfo_get_reset_cause	0	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/hwinfo.h:93:12:z_impl_hwinfo_clear_reset_cause	0	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/hwinfo.h:115:12:z_impl_hwinfo_get_supported_reset_cause	0	static

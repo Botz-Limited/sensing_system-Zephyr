@@ -1,2 +1,0 @@
-/home/ee/ncs/zephyr/drivers/entropy/entropy_bt_hci.c:14:12:entropy_bt_init	0	static
-/home/ee/ncs/zephyr/drivers/entropy/entropy_bt_hci.c:20:12:entropy_bt_get_entropy	8	static

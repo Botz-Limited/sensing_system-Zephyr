@@ -1,5 +1,0 @@
-/home/ee/ncs/zephyr/kernel/include/ksched.h:159:20:unpend_thread_no_timeout	8	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1005:12:z_impl_k_condvar_init	0	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1021:12:z_impl_k_condvar_signal	16	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1037:12:z_impl_k_condvar_broadcast	24	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/kernel.h:1053:12:z_impl_k_condvar_wait	40	static

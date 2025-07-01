@@ -1,8 +1,0 @@
-/home/ee/ncs/zephyr/include/zephyr/sys/atomic.h:228:20:atomic_set_bit_to	0	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager_shell.c:84:13:set_event_displaying	64	dynamic
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager_shell.c:137:12:enable_event_displaying	8	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager_shell.c:144:12:disable_event_displaying	8	static
-/home/ee/ncs/zephyr/include/zephyr/sys/atomic.h:127:20:atomic_test_bit	0	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager_shell.c:12:12:show_events	24	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager_shell.c:48:12:show_subscribers	24	static
-/home/ee/ncs/nrf/subsys/app_event_manager/app_event_manager_shell.c:35:12:show_listeners	16	static

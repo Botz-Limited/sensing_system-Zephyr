@@ -1,5 +1,0 @@
-littlefs_storage:
-  placement:
-    before: [tfm_storage, end]
-  region: external_flash
-  size: 0x6e0000
