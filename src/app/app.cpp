@@ -312,7 +312,11 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
     
     if (fota_progress.update_sequence == 1) {
         LOG_INF("=== APP CORE UPDATE CONFIRMED (%u bytes) ===", fota_progress.bytes_received);
-        LOG_INF("
+        LOG_INF("Waiting for network core update...");
+    } else if (fota_progress.update_sequence == 2) {
+        LOG_INF("=== NETWORK CORE UPDATE CONFIRMED (%u bytes) ===", fota_progress.bytes_received);
+        LOG_INF("=== ALL UPDATES COMPLETE ===");
+    }
     
     // Send FOTA progress message to Bluetooth thread
     generic_message_t msg;
