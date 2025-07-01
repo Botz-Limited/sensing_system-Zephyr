@@ -62,7 +62,10 @@ struct fota_progress_state {
     int32_t error_code;
     uint32_t last_reported_bytes;
     uint32_t last_completed_size; // Size of last successful FOTA
-} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    bool is_first_image; // True for first image in multi-image update
+    uint32_t app_core_size; // Learned size of app core
+    uint32_t net_core_size; // Learned size of net core
+} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0, 0, true, 0, 0};
 
 void initializing_entry();
 
@@ -122,12 +125,21 @@ mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_st
     
     LOG_INF("FOTA Started!");
     
-    // Reset progress tracking but keep last_completed_size for learning
-    uint32_t saved_size = fota_progress.last_completed_size;
+    // Reset progress tracking but keep learned sizes
+    uint32_t saved_app_size = fota_progress.app_core_size;
+    uint32_t saved_net_size = fota_progress.net_core_size;
+    bool was_first = fota_progress.is_first_image;
+    
     memset(&fota_progress, 0, sizeof(fota_progress));
-    fota_progress.last_completed_size = saved_size; // Restore for next update
+    
+    // Restore learned sizes
+    fota_progress.app_core_size = saved_app_size;
+    fota_progress.net_core_size = saved_net_size;
     fota_progress.is_active = true;
     fota_progress.status = 1; // in_progress
+    
+    // Toggle first image flag for multi-image updates
+    fota_progress.is_first_image = !was_first;
     
     // Send FOTA progress message to Bluetooth thread
     generic_message_t msg;
@@ -180,22 +192,20 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         uint32_t estimated_size;
         bool is_netcore = false;
         
-#if IS_ENABLED(CONFIG_FOTA_DYNAMIC_SIZE_DETECTION)
-        // Use last successful FOTA size if available
-        if (fota_progress.last_completed_size > 0) {
-            estimated_size = fota_progress.last_completed_size;
-            // Detect if this is likely a netcore update based on size
-            is_netcore = (estimated_size < 200000);
-        } else
-#endif
-        {
-            // Fall back to configured estimates
-            // Try to detect netcore update by early chunk pattern or if we've seen this size before
-            if ((fota_progress.chunks_received > 5 && fota_progress.bytes_received < 10000) ||
-                (fota_progress.last_completed_size > 0 && fota_progress.last_completed_size < 200000)) {
-                // Small size after several chunks or previous small update suggests netcore
+        // Determine which image this is
+        if (!fota_progress.is_first_image) {
+            // Second image is always network core
+            is_netcore = true;
+            if (fota_progress.net_core_size > 0) {
+                estimated_size = fota_progress.net_core_size;
+            } else {
                 estimated_size = CONFIG_FOTA_NETCORE_SIZE_ESTIMATE;
-                is_netcore = true;
+            }
+        } else {
+            // First image is app core
+            is_netcore = false;
+            if (fota_progress.app_core_size > 0) {
+                estimated_size = fota_progress.app_core_size;
             } else {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                 estimated_size = CONFIG_FOTA_PRIMARY_SIZE_ESTIMATE;
@@ -309,14 +319,14 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
 #if IS_ENABLED(CONFIG_FOTA_DYNAMIC_SIZE_DETECTION)
     // Save the size for future FOTA operations
     if (fota_progress.bytes_received > 0) {
-        fota_progress.last_completed_size = fota_progress.bytes_received;
-        LOG_INF("Saved FOTA size for future updates: %u bytes", fota_progress.last_completed_size);
-        
-        // Detect if this was a netcore update
-        if (fota_progress.last_completed_size < 200000) {
-            LOG_INF("This appears to be a network core update (~159KB)");
+        if (fota_progress.bytes_received < 200000) {
+            // Network core update
+            fota_progress.net_core_size = fota_progress.bytes_received;
+            LOG_INF("Saved network core size: %u bytes", fota_progress.net_core_size);
         } else {
-            LOG_INF("This appears to be an application core update (~780KB)");
+            // App core update
+            fota_progress.app_core_size = fota_progress.bytes_received;
+            LOG_INF("Saved application core size: %u bytes", fota_progress.app_core_size);
         }
     }
 #endif
