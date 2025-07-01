@@ -1,1 +1,2 @@
+/home/ee/ncs/zephyr/include/zephyr/drivers/entropy.h:84:19:z_impl_entropy_get_entropy	8	static
 /home/ee/ncs/zephyr/include/zephyr/posix/unistd.h:66:5:getentropy	16	static

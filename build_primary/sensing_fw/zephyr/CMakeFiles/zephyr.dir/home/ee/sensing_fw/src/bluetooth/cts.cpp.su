@@ -1,6 +1,7 @@
-/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_internal.h:55:20:void z_cbprintf_wcpy(int*, int*, size_t)	0	static
-/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	16	static
-/home/ee/sensing_fw/src/bluetooth/cts.cpp:149:5:int init_rtc_time()	96	dynamic,bounded
+/home/ee/ncs/zephyr/include/zephyr/drivers/counter.h:294:24:uint32_t z_impl_counter_get_frequency(const device*)	8	static
+/home/ee/ncs/zephyr/include/zephyr/drivers/counter.h:527:19:int z_impl_counter_set_top_value(const device*, const counter_top_cfg*)	8	static
+/home/ee/sensing_fw/src/bluetooth/cts.cpp:110:13:void populate_cts_value(bt_cts_current_time_val*, const tm*)	0	static
+/home/ee/sensing_fw/src/bluetooth/cts.cpp:149:5:int init_rtc_time()	88	dynamic,bounded
 /home/ee/sensing_fw/src/bluetooth/cts.cpp:199:6:void set_current_time_from_epoch(uint32_t)	24	static
 /home/ee/sensing_fw/src/bluetooth/cts.cpp:224:10:uint32_t get_current_epoch_time()	24	static
 /home/ee/sensing_fw/src/bluetooth/cts.cpp:278:13:const void* get_current_time_char_value_ptr()	0	static

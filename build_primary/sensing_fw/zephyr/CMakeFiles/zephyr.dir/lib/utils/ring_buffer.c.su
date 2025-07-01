@@ -1,8 +1,8 @@
-/home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:283:10:ring_buf_put_claim	20	static
-/home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:309:5:ring_buf_put_finish	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:283:10:ring_buf_put_claim	16	static
+/home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:309:5:ring_buf_put_finish	8	static
 /home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:331:10:ring_buf_put	32	static
-/home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:357:10:ring_buf_get_claim	20	static
-/home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:383:5:ring_buf_get_finish	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:357:10:ring_buf_get_claim	12	static
+/home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:383:5:ring_buf_get_finish	8	static
 /home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:405:10:ring_buf_get	32	static
 /home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:433:10:ring_buf_peek	32	static
 /home/ee/ncs/zephyr/include/zephyr/sys/ring_buffer.h:456:5:ring_buf_item_put	40	static

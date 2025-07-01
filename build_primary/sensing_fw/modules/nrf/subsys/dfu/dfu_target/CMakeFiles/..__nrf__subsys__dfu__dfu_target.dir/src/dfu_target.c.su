@@ -1,8 +1,8 @@
-/home/ee/ncs/nrf/include/dfu/dfu_target.h:82:28:dfu_target_img_type	8	static
-/home/ee/ncs/nrf/include/dfu/dfu_target.h:95:28:dfu_target_smp_img_type_check	8	static
-/home/ee/ncs/nrf/include/dfu/dfu_target.h:120:5:dfu_target_init	8	static
-/home/ee/ncs/nrf/include/dfu/dfu_target.h:129:5:dfu_target_offset_get	0	static
-/home/ee/ncs/nrf/include/dfu/dfu_target.h:141:5:dfu_target_write	0	static
-/home/ee/ncs/nrf/include/dfu/dfu_target.h:153:5:dfu_target_done	8	static
+/home/ee/ncs/nrf/include/dfu/dfu_target.h:82:28:dfu_target_img_type	16	static
+/home/ee/ncs/nrf/include/dfu/dfu_target.h:95:28:dfu_target_smp_img_type_check	16	static
+/home/ee/ncs/nrf/include/dfu/dfu_target.h:120:5:dfu_target_init	16	static
+/home/ee/ncs/nrf/include/dfu/dfu_target.h:129:5:dfu_target_offset_get	8	static
+/home/ee/ncs/nrf/include/dfu/dfu_target.h:141:5:dfu_target_write	8	static
+/home/ee/ncs/nrf/include/dfu/dfu_target.h:153:5:dfu_target_done	16	static
 /home/ee/ncs/nrf/include/dfu/dfu_target.h:162:5:dfu_target_reset	16	static
-/home/ee/ncs/nrf/include/dfu/dfu_target.h:176:5:dfu_target_schedule_update	0	static
+/home/ee/ncs/nrf/include/dfu/dfu_target.h:176:5:dfu_target_schedule_update	8	static

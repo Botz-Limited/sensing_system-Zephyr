@@ -1,3 +1,6 @@
-/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_gpio.h:942:35:nrf_gpio_pin_port_decode	8	static
-/home/ee/ncs/zephyr/drivers/spi/spi_nrfx_common.c:10:5:spi_nrfx_wake_init	48	static
-/home/ee/ncs/zephyr/drivers/spi/spi_nrfx_common.c:39:5:spi_nrfx_wake_request	32	static
+/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_gpio.h:1501:24:nrf_gpio_pin_present_check	0	static
+/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_gpio.h:942:35:nrf_gpio_pin_port_decode	16	static
+/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_gpio.h:979:24:nrf_gpio_cfg	32	static
+/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_gpio.h:1075:24:nrf_gpio_cfg_input	16	static
+/home/ee/ncs/zephyr/drivers/spi/spi_nrfx_common.c:10:5:spi_nrfx_wake_init	40	static
+/home/ee/ncs/zephyr/drivers/spi/spi_nrfx_common.c:39:5:spi_nrfx_wake_request	24	static

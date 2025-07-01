@@ -56,7 +56,8 @@ struct fota_progress_state {
     uint32_t chunks_written;
     uint8_t status; // 0=idle, 1=in_progress, 2=pending, 3=confirmed, 4=error
     int32_t error_code;
-} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0};
+    uint32_t last_reported_bytes;
+} fota_progress = {false, 0, 0, 0, 0, 0, 0, 0, 0};
 
 void initializing_entry();
 
@@ -135,43 +136,34 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
         struct img_mgmt_upload_check *check = (struct img_mgmt_upload_check *)data;
         
         if (check->req) {
-            fota_progress.chunks_received++;
-            fota_progress.bytes_received = check->req->off + check->req->size;
-            
-            // First chunk contains total size
-            if (check->req->off == 0) {
-                fota_progress.total_size = check->req->size;
-                LOG_INF("FOTA Total size: %u bytes", fota_progress.total_size);
-            }
-        }
+        fota_progress.chunks_received++;
+        fota_progress.bytes_received = check->req->off + check->req->size;
         
-        // Calculate progress
-        if (fota_progress.total_size > 0) {
-            uint8_t new_percent = (fota_progress.bytes_received * 100) / fota_progress.total_size;
-            
-            // Only notify when percentage changes
-            if (new_percent != fota_progress.percent_complete) {
-                fota_progress.percent_complete = new_percent;
-                LOG_INF("FOTA Progress: %u%% (%u/%u bytes)", 
-                        fota_progress.percent_complete,
-                        fota_progress.bytes_received,
-                        fota_progress.total_size);
-                
-                // Send FOTA progress message to Bluetooth thread
-                generic_message_t msg;
-                msg.sender = SENDER_NONE;
-                msg.type = MSG_TYPE_FOTA_PROGRESS;
-                msg.data.fota_progress.is_active = fota_progress.is_active;
-                msg.data.fota_progress.status = fota_progress.status;
-                msg.data.fota_progress.percent_complete = fota_progress.percent_complete;
-                msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
-                msg.data.fota_progress.total_size = fota_progress.total_size;
-                msg.data.fota_progress.error_code = fota_progress.error_code;
-                
-                if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
-                    LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
-                }
-            }
+        // Log progress every 10 chunks or every 100KB
+        if ((fota_progress.chunks_received % 10 == 0) || 
+        (fota_progress.bytes_received - fota_progress.last_reported_bytes >= 102400)) {
+        
+        LOG_INF("FOTA Progress: %u bytes received (%u chunks)",
+        fota_progress.bytes_received,
+        fota_progress.chunks_received);
+        
+        fota_progress.last_reported_bytes = fota_progress.bytes_received;
+        
+        // Send FOTA progress message to Bluetooth thread
+        generic_message_t msg;
+        msg.sender = SENDER_NONE;
+        msg.type = MSG_TYPE_FOTA_PROGRESS;
+        msg.data.fota_progress.is_active = fota_progress.is_active;
+        msg.data.fota_progress.status = fota_progress.status;
+        msg.data.fota_progress.percent_complete = 0; // Can't calculate without total size
+        msg.data.fota_progress.bytes_received = fota_progress.bytes_received;
+        msg.data.fota_progress.total_size = 0; // Unknown
+        msg.data.fota_progress.error_code = fota_progress.error_code;
+        
+        if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send FOTA progress to Bluetooth thread");
+        }
+        }
         }
     }
     

@@ -1,5 +1,9 @@
 /home/ee/ncs/modules/hal/nordic/nrfx/mdk/nrf53_erratas.h:339:13:nrf53_errata_4	0	static
-/home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_clock.c:213:13:clock_stop	32	static
+/home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_clock.c:283:26:clock_initial_lfclksrc_get	0	static
+/home/ee/ncs/modules/hal/nordic/nrfx/hal/nrf_clock.h:1131:24:nrf_clock_is_running	8	static
+/home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_power_clock.h:44:22:nrfx_power_clock_irq_init	8	static
+/home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_clock.c:213:13:clock_stop	24	static
+/home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_clock.c:303:13:clock_lfclksrc_tweak	16	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_clock.h:97:12:nrfx_clock_init	0	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_clock.h:100:6:nrfx_clock_enable	8	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_clock.h:103:6:nrfx_clock_disable	8	static
@@ -8,4 +12,4 @@
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_clock.h:121:6:nrfx_clock_start	16	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_clock.h:128:6:nrfx_clock_stop	8	static
 /home/ee/ncs/modules/hal/nordic/nrfx/drivers/include/nrfx_clock.h:158:12:nrfx_clock_divider_set	8	static
-/home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_clock.c:791:6:nrfx_power_clock_irq_handler	24	static
+/home/ee/ncs/modules/hal/nordic/nrfx/drivers/src/nrfx_clock.c:791:6:nrfx_power_clock_irq_handler	8	static

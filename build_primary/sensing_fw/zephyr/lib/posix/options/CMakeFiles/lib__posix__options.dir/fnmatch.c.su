@@ -1,3 +1,3 @@
-/home/ee/ncs/zephyr/lib/posix/options/fnmatch.c:51:19:foldcase	0	static
-/home/ee/ncs/zephyr/lib/posix/options/fnmatch.c:123:12:fnmatchx	56	static
-/home/ee/ncs/zephyr/include/zephyr/posix/fnmatch.h:53:5:fnmatch	0	static
+/home/ee/ncs/zephyr/lib/posix/options/fnmatch.c:63:20:rangematch	20	static
+/home/ee/ncs/zephyr/lib/posix/options/fnmatch.c:123:12:fnmatchx	40	static
+/home/ee/ncs/zephyr/include/zephyr/posix/fnmatch.h:53:5:fnmatch	8	static

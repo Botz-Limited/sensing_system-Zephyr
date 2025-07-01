@@ -1,3 +1,4 @@
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/zephyr_basic/src/basic_mgmt.c:75:12:zephyr_basic_group_translate_error_code	0	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/zephyr_basic/src/basic_mgmt.c:116:13:zephyr_basic_mgmt_init	0	static
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/zephyr_basic/src/basic_mgmt.c:48:12:storage_erase_handler	24	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/zephyr_basic/src/basic_mgmt.c:116:13:zephyr_basic_mgmt_init	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/zephyr_basic/src/basic_mgmt.c:21:12:storage_erase	16	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/grp/zephyr_basic/src/basic_mgmt.c:48:12:storage_erase_handler	8	static

@@ -1,31 +1,31 @@
-/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_internal.h:55:20:void z_cbprintf_wcpy(int*, int*, size_t)	0	static
-/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = int]	16	static
-/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	16	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:780:16:uint8_t device_info_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	72	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1003:16:uint8_t activity_step_count_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:970:16:uint8_t activity_log_path_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:901:16:uint8_t bhi360_log_path_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:868:16:uint8_t foot_log_path_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:934:16:uint8_t activity_log_available_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:744:16:uint8_t bhi360_log_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:708:16:uint8_t foot_log_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:672:16:uint8_t charge_status_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:636:16:uint8_t status_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:598:16:uint8_t bhi360_data3_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:560:16:uint8_t bhi360_data2_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:471:16:uint8_t foot_sensor_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1293:16:uint8_t dis_read_callback(bt_conn*, uint8_t, bt_gatt_read_params*, const void*, uint16_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1052:25:static constexpr void write_ccc_alternative(bt_conn*, uint16_t, uint16_t)::<lambda(bt_conn*, uint8_t, bt_gatt_write_params*)>::_FUN(bt_conn*, uint8_t, bt_gatt_write_params*)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1052:25:write_ccc_alternative(bt_conn*, uint16_t, uint16_t)::<lambda(bt_conn*, uint8_t, bt_gatt_write_params*)>	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1052:25:static constexpr void write_ccc_alternative(bt_conn*, uint16_t, uint16_t)::<lambda(bt_conn*, uint8_t, bt_gatt_write_params*)>::_FUN(bt_conn*, uint8_t, bt_gatt_write_params*)	8	static
 /home/ee/ncs/zephyr/include/zephyr/kernel.h:564:23:int32_t k_msleep(int32_t)	8	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1357:16:uint8_t discover_func(bt_conn*, const bt_gatt_attr*, bt_gatt_discover_params*)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1073:13:void subscribe_to_characteristic(uint16_t, bt_gatt_notify_func_t, int)	104	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:229:13:void device_info_retry_work_handler(k_work*)	0	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:240:13:void individual_subscribe_work_handler(k_work*)	16	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:240:13:void individual_subscribe_work_handler(k_work*)	8	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:438:13:void subscribe_work_handler(k_work*)	104	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:506:16:uint8_t bhi360_data1_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	88	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:823:16:uint8_t fota_progress_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1128:25:static constexpr void subscribe_to_characteristic(uint16_t, bt_gatt_notify_func_t, int)::<lambda(bt_conn*, uint8_t, bt_gatt_subscribe_params*)>::_FUN(bt_conn*, uint8_t, bt_gatt_subscribe_params*)	32	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:780:16:uint8_t device_info_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	232	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1003:16:uint8_t activity_step_count_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:970:16:uint8_t activity_log_path_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	96	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:901:16:uint8_t bhi360_log_path_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	96	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:868:16:uint8_t foot_log_path_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	96	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:934:16:uint8_t activity_log_available_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:744:16:uint8_t bhi360_log_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:708:16:uint8_t foot_log_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:823:16:uint8_t fota_progress_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	96	dynamic,bounded
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:672:16:uint8_t charge_status_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:636:16:uint8_t status_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:598:16:uint8_t bhi360_data3_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	88	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:560:16:uint8_t bhi360_data2_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	64	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:506:16:uint8_t bhi360_data1_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	128	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:471:16:uint8_t foot_sensor_notify_handler(bt_conn*, bt_gatt_subscribe_params*, const void*, uint16_t)	56	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1128:25:subscribe_to_characteristic(uint16_t, bt_gatt_notify_func_t, int)::<lambda(bt_conn*, uint8_t, bt_gatt_subscribe_params*)>	32	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1128:25:static constexpr void subscribe_to_characteristic(uint16_t, bt_gatt_notify_func_t, int)::<lambda(bt_conn*, uint8_t, bt_gatt_subscribe_params*)>::_FUN(bt_conn*, uint8_t, bt_gatt_subscribe_params*)	8	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1041:13:void write_ccc_alternative(bt_conn*, uint16_t, uint16_t)	40	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:263:13:void perform_subscriptions()	80	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:438:13:void subscribe_work_handler(k_work*)	56	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1073:13:void subscribe_to_characteristic(uint16_t, bt_gatt_notify_func_t, int)	80	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:240:13:void individual_subscribe_work_handler(k_work*)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:229:13:void device_info_retry_work_handler(k_work*)	24	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:183:13:void smp_discovery_work_handler(k_work*)	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1357:16:uint8_t discover_func(bt_conn*, const bt_gatt_attr*, bt_gatt_discover_params*)	64	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1293:16:uint8_t dis_read_callback(bt_conn*, uint8_t, bt_gatt_read_params*, const void*, uint16_t)	80	dynamic,bounded
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1629:6:void d2d_rx_client_start_discovery(bt_conn*)	24	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1701:6:void d2d_rx_client_disconnected()	8	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_rx_client.cpp:1701:6:void d2d_rx_client_disconnected()	24	static

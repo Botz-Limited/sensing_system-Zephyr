@@ -23,9 +23,6 @@ APPLICATION_CONFIG_DIR:PATH=/home/ee/sensing_fw
 //Application Source Directory
 APPLICATION_SOURCE_DIR:PATH=/home/ee/sensing_fw
 
-//Mbed TLS folder
-ARM_MBEDTLS_PATH:STRING=/home/ee/ncs/modules/crypto/mbedtls
-
 //Selected board
 BOARD:STRING=nrf5340dk/nrf5340/cpuapp
 
@@ -343,24 +340,6 @@ DTC:FILEPATH=/opt/toolchains/zephyr-sdk-0.17.0/sysroots/x86_64-pokysdk-linux/usr
 // dts2.overlay"
 DTC_OVERLAY_FILE:STRING=/home/ee/sensing_fw/boards/nrf5340dk_nrf5340_cpuapp.overlay
 
-//Use to ensure we add links only once
-EXTERNAL_CRYPTO_CORE_HANDLED_PSA_CRYPTO_CONFIG:BOOL=False
-
-//Use to ensure we add links only once
-EXTERNAL_CRYPTO_CORE_HANDLED_PSA_CRYPTO_LIBRARY_CONFIG:BOOL=False
-
-//Use to ensure we add links only once
-EXTERNAL_CRYPTO_CORE_HANDLED_PSA_INTERFACE:BOOL=False
-
-//Use to ensure we add links only once
-EXTERNAL_CRYPTO_CORE_HANDLED_TFM_API_NS:BOOL=False
-
-//Use to ensure we add links only once
-EXTERNAL_CRYPTO_CORE_HANDLED_TFM_PSA_ROT_PARTITION_CRYPTO:BOOL=False
-
-//Use to ensure we add links only once
-EXTERNAL_CRYPTO_CORE_HANDLED_TFM_SPRT:BOOL=False
-
 //No help, variable specified on the command line.
 EXTRA_KCONFIG_TARGETS:UNINITIALIZED=
 
@@ -384,35 +363,20 @@ IMGTOOL:FILEPATH=/home/ee/ncs/bootloader/mcuboot/scripts/imgtool.py
 
 MACHINE:STRING=arm
 
-//Mbed TLS Config file
-MBEDTLS_CONFIG_FILE:STRING=nrf-config.h
-
-//PSA crypto config file (PSA_WANT)
-MBEDTLS_PSA_CRYPTO_CONFIG_FILE:STRING=nrf-psa-crypto-config.h
-
-//PSA crypto config file (PSA_NEED)
-MBEDTLS_PSA_CRYPTO_USER_CONFIG_FILE:STRING=nrf-psa-crypto-user-config.h
-
 //nanopb generator source
 NANOPB_GENERATOR_SOURCE_DIR:PATH=/home/ee/ncs/modules/lib/nanopb/generator
 
 //Path to a file.
 NANOPB_INCLUDE_DIRS:PATH=/home/ee/ncs/modules/lib/nanopb
 
-//nrfxlib folder
-NRFXLIB_DIR:STRING=/home/ee/ncs/nrfxlib
+//NRFXLIB root directory
+NRFXLIB_DIR:PATH=/home/ee/ncs/nrfxlib
 
 //nrfx Directory
 NRFX_DIR:PATH=/home/ee/ncs/modules/hal/nordic/nrfx
 
 //NCS root directory
 NRF_DIR:PATH=/home/ee/ncs/nrf
-
-//nrf_security root folder
-NRF_SECURITY_ROOT:STRING=/home/ee/ncs/nrf/subsys/nrf_security
-
-//oberon-psa-core folder
-OBERON_PSA_CORE_PATH:STRING=/home/ee/ncs/modules/crypto/oberon-psa-crypto
 
 //Path to a program.
 OPENOCD:FILEPATH=/opt/toolchains/zephyr-sdk-0.17.0/sysroots/x86_64-pokysdk-linux/usr/bin/openocd
@@ -422,15 +386,6 @@ PAHOLE:FILEPATH=PAHOLE-NOTFOUND
 
 //The Google Protocol Buffers Compiler
 PROTOBUF_PROTOC_EXECUTABLE:FILEPATH=/home/ee/ncs/modules/lib/nanopb/generator/protoc
-
-//Path used for generated PSA crypto configuratiosn for the interface
-PSA_CRYPTO_CONFIG_INTERFACE_PATH:STRING=/home/ee/sensing_fw/build_primary/sensing_fw/generated/interface_nrf_security_psa
-
-//Path used for generated PSA crypto for library builds
-PSA_CRYPTO_CONFIG_LIBRARY_PATH:STRING=/home/ee/sensing_fw/build_primary/sensing_fw/generated/library_nrf_security_psa
-
-//Enable building PSA core externally
-PSA_CRYPTO_EXTERNAL_CORE:BOOL=ON
 
 //Path to a program.
 PTY_INTERFACE:FILEPATH=PTY_INTERFACE-NOTFOUND
@@ -719,7 +674,7 @@ CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_NM
 CMAKE_NM-ADVANCED:INTERNAL=1
 //number of local generators
-CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=322
+CMAKE_NUMBER_OF_MAKEFILES:INTERNAL=311
 //ADVANCED property for variable: CMAKE_OBJCOPY
 CMAKE_OBJCOPY-ADVANCED:INTERNAL=1
 //ADVANCED property for variable: CMAKE_OBJDUMP

@@ -1,1 +1,1 @@
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_quaternion.cpp:74:6:void d2d_handle_quaternion_3d(const quaternion_3d_t*)	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_quaternion.cpp:74:6:void d2d_handle_quaternion_3d(const quaternion_3d_t*)	8	static

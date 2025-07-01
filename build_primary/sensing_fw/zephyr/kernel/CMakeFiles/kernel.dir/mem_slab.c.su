@@ -1,5 +1,7 @@
 /home/ee/ncs/zephyr/kernel/mem_slab.c:104:12:create_free_list	0	static
-/home/ee/ncs/zephyr/kernel/mem_slab.c:132:12:init_mem_slab_obj_core_list	16	static
+/home/ee/ncs/zephyr/kernel/mem_slab.c:207:13:slab_ptr_is_good	0	static
+/home/ee/ncs/zephyr/kernel/include/ksched.h:159:20:unpend_thread_no_timeout	8	static
+/home/ee/ncs/zephyr/kernel/mem_slab.c:132:12:init_mem_slab_obj_core_list	8	static
 /home/ee/ncs/zephyr/include/zephyr/kernel.h:5320:5:k_mem_slab_init	8	static
 /home/ee/ncs/zephyr/include/zephyr/kernel.h:5345:5:k_mem_slab_alloc	40	static
 /home/ee/ncs/zephyr/include/zephyr/kernel.h:5357:6:k_mem_slab_free	32	static

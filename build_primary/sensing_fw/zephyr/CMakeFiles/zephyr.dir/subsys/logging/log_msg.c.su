@@ -1,9 +1,11 @@
 /home/ee/ncs/zephyr/include/zephyr/sys/cbprintf.h:528:19:z_cbprintf_cpy	16	static
+/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf.h:572:19:cbprintf_package_copy	40	static
 /home/ee/ncs/zephyr/include/zephyr/logging/log_msg.h:610:6:z_log_msg_finalize	16	static
-/home/ee/ncs/zephyr/subsys/logging/log_msg.c:93:13:z_log_msg_simple_create	32	static
+/home/ee/ncs/zephyr/subsys/logging/log_msg.c:93:13:z_log_msg_simple_create	40	static
 /home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/log_msg.h:23:13:z_impl_z_log_msg_simple_create_0	16	static
 /home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/log_msg.h:49:13:z_impl_z_log_msg_simple_create_1	16	static
 /home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/log_msg.h:76:13:z_impl_z_log_msg_simple_create_2	24	static
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/log_msg.h:104:13:z_impl_z_log_msg_static_create	136	dynamic,bounded
+/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/log_msg.h:104:13:z_impl_z_log_msg_static_create	120	dynamic,bounded
+/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/log_msg.h:107:20:z_log_msg_static_create	8	static
 /home/ee/ncs/zephyr/include/zephyr/logging/log_msg.h:678:6:z_log_msg_runtime_vcreate	64	static
 /home/ee/ncs/zephyr/include/zephyr/logging/log_msg.h:793:9:log_msg_get_source_id	0	static

@@ -1,3 +1,3 @@
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/util/include/mgmt/mcumgr/util/zcbor_bulk.h:102:5:zcbor_map_decode_bulk	56	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/util/include/mgmt/mcumgr/util/zcbor_bulk.h:102:5:zcbor_map_decode_bulk	40	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/util/include/mgmt/mcumgr/util/zcbor_bulk.h:114:6:zcbor_map_decode_bulk_key_found	24	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/util/include/mgmt/mcumgr/util/zcbor_bulk.h:128:6:zcbor_map_decode_bulk_reset	0	static

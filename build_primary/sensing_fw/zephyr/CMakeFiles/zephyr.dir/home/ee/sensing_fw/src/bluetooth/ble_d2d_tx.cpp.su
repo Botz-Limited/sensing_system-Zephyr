@@ -1,12 +1,11 @@
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:2079:19:int bt_gatt_write_without_response(bt_conn*, uint16_t, const void*, uint16_t, bool)	24	static
-/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = int]	0	static
-/home/ee/ncs/zephyr/include/zephyr/sys/cbprintf_cxx.h:317:20:void z_cbprintf_cxx_store_arg(uint8_t*, T) [with T = const char*]	0	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:135:16:uint8_t discover_func(bt_conn*, const bt_gatt_attr*, bt_gatt_discover_params*)	24	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:342:6:void ble_d2d_tx_init()	0	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:263:13:void start_discovery()	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:292:13:void continue_discovery()	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:135:16:uint8_t discover_func(bt_conn*, const bt_gatt_attr*, bt_gatt_discover_params*)	48	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:342:6:void ble_d2d_tx_init()	16	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:353:6:void ble_d2d_tx_set_connection(bt_conn*)	24	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:379:5:int ble_d2d_tx_send_foot_sensor_data(const foot_samples_t*)	16	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:395:5:int ble_d2d_tx_send_fota_complete()	24	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:424:5:int ble_d2d_tx_send_trigger_bhi360_calibration_command(uint8_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:395:5:int ble_d2d_tx_send_fota_complete()	40	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:424:5:int ble_d2d_tx_send_trigger_bhi360_calibration_command(uint8_t)	48	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:451:5:int ble_d2d_tx_send_foot_sensor_log_available(uint8_t)	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:461:5:int ble_d2d_tx_send_foot_sensor_req_id_path(const char*)	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:472:5:int ble_d2d_tx_send_bhi360_log_available(uint8_t)	0	static
@@ -17,12 +16,12 @@
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:529:5:int ble_d2d_tx_send_bhi360_data3(const bhi360_linear_accel_t*)	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:541:5:int ble_d2d_tx_send_status(uint32_t)	0	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:551:5:int ble_d2d_tx_send_charge_status(uint8_t)	0	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:562:5:int ble_d2d_tx_send_set_time_command(uint32_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:590:5:int ble_d2d_tx_send_delete_foot_log_command(uint8_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:617:5:int ble_d2d_tx_send_delete_bhi360_log_command(uint8_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:644:5:int ble_d2d_tx_send_delete_activity_log_command(uint8_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:671:5:int ble_d2d_tx_send_start_activity_command(uint8_t)	32	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:698:5:int ble_d2d_tx_send_stop_activity_command(uint8_t)	32	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:562:5:int ble_d2d_tx_send_set_time_command(uint32_t)	48	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:590:5:int ble_d2d_tx_send_delete_foot_log_command(uint8_t)	48	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:617:5:int ble_d2d_tx_send_delete_bhi360_log_command(uint8_t)	48	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:644:5:int ble_d2d_tx_send_delete_activity_log_command(uint8_t)	48	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:671:5:int ble_d2d_tx_send_start_activity_command(uint8_t)	48	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:698:5:int ble_d2d_tx_send_stop_activity_command(uint8_t)	48	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:725:5:int ble_d2d_tx_send_device_info(const device_info_msg_t*)	16	static
 /home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:740:5:int ble_d2d_tx_send_fota_progress(const fota_progress_msg_t*)	16	static
-/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:756:5:int ble_d2d_tx_request_device_info()	24	static
+/home/ee/sensing_fw/src/bluetooth/ble_d2d_tx.cpp:756:5:int ble_d2d_tx_request_device_info()	40	static

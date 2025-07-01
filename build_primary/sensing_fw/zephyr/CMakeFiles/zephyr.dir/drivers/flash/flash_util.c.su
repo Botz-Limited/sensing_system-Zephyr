@@ -1,3 +1,3 @@
-/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/flash.h:124:12:z_impl_flash_fill	64	static
+/home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/flash.h:124:12:z_impl_flash_fill	80	static
 /home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/flash.h:150:12:z_impl_flash_flatten	24	static
 /home/ee/sensing_fw/build_primary/sensing_fw/zephyr/include/generated/zephyr/syscalls/flash.h:370:12:z_impl_flash_copy	48	static

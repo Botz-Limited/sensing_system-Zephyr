@@ -1,6 +1,7 @@
-/home/ee/ncs/modules/crypto/oberon-psa-crypto/include/psa/crypto_struct.h:407:20:psa_set_key_usage_flags.constprop	0	static
-/home/ee/ncs/zephyr/include/zephyr/sys/byteorder.h:684:20:sys_memcpy_swap.constprop	8	static
-/home/ee/ncs/zephyr/subsys/bluetooth/host/crypto_psa.c:30:5:bt_crypto_init	8	static
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/crypto.h:39:5:bt_rand	8	static
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/crypto.h:53:5:bt_encrypt_le	96	static
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/crypto.h:68:5:bt_encrypt_be	80	static
+/home/ee/ncs/zephyr/include/zephyr/sys/byteorder.h:710:20:sys_mem_swap	4	static
+/home/ee/ncs/modules/crypto/mbedtls/include/psa/crypto_struct.h:383:20:psa_extend_key_usage_flags	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/byteorder.h:684:20:sys_memcpy_swap	8	static
+/home/ee/ncs/zephyr/subsys/bluetooth/host/crypto_psa.c:30:5:bt_crypto_init	16	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/crypto.h:39:5:bt_rand	16	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/crypto.h:53:5:bt_encrypt_le	88	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/crypto.h:68:5:bt_encrypt_be	72	static

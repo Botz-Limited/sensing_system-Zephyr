@@ -1,4 +1,13 @@
-/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:80:13:smp_make_rsp_hdr	20	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:71:16:smp_rsp_op	0	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:80:13:smp_make_rsp_hdr	24	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:94:12:smp_read_hdr	0	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:107:19:smp_write_hdr	0	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:52:13:cbor_nb_reader_init	24	static
 /home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:59:13:cbor_nb_writer_init	24	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:38:12:smp_translate_error_code	8	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:113:12:smp_build_err_rsp	32	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:333:13:smp_on_err	24	static
 /home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp.h:122:6:smp_add_cmd_err	16	static
-/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp.h:107:5:smp_process_request_packet	96	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:159:12:smp_handle_single_payload	40	static
+/home/ee/ncs/zephyr/subsys/mgmt/mcumgr/smp/src/smp.c:274:12:smp_handle_single_req	32	static
+/home/ee/ncs/zephyr/include/zephyr/mgmt/mcumgr/smp/smp.h:107:5:smp_process_request_packet	72	static

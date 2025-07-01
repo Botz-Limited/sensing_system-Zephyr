@@ -1,2 +1,2 @@
-/home/ee/ncs/nrf/drivers/entropy/entropy_cc3xx.c:68:12:entropy_cc3xx_rng_init	8	static
 /home/ee/ncs/nrf/drivers/entropy/entropy_cc3xx.c:21:12:entropy_cc3xx_rng_get_entropy	32	static
+/home/ee/ncs/nrf/drivers/entropy/entropy_cc3xx.c:68:12:entropy_cc3xx_rng_init	8	static

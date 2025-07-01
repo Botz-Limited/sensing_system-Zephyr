@@ -1,10 +1,11 @@
-/home/ee/ncs/modules/crypto/oberon-psa-crypto/include/psa/crypto_struct.h:396:20:psa_extend_key_usage_flags	0	static
-/home/ee/ncs/zephyr/include/zephyr/sys/byteorder.h:684:20:sys_memcpy_swap.constprop	8	static
+/home/ee/ncs/modules/crypto/mbedtls/include/psa/crypto_struct.h:383:20:psa_extend_key_usage_flags	0	static
+/home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:108:13:set_key_attributes	16	static
+/home/ee/ncs/zephyr/include/zephyr/sys/byteorder.h:684:20:sys_memcpy_swap	8	static
 /home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:116:13:generate_pub_key	120	static
 /home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:185:13:generate_dh_key	168	static
 /home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:73:6:bt_pub_key_is_debug	8	static
-/home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:78:6:bt_pub_key_is_valid	120	static
-/home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:251:5:bt_pub_key_gen	8	static
-/home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:295:6:bt_pub_key_hci_disrupted	16	static
+/home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:78:6:bt_pub_key_is_valid	112	static
+/home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:251:5:bt_pub_key_gen	16	static
+/home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:295:6:bt_pub_key_hci_disrupted	8	static
 /home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:310:16:bt_pub_key_get	0	static
 /home/ee/ncs/zephyr/subsys/bluetooth/host/ecc.c:323:5:bt_dh_key_gen	16	static

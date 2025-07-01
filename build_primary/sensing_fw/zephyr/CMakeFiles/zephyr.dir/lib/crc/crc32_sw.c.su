@@ -1,2 +1,2 @@
 /home/ee/ncs/zephyr/include/zephyr/sys/crc.h:249:10:crc32_ieee_update	12	static
-/home/ee/ncs/zephyr/include/zephyr/sys/crc.h:237:10:crc32_ieee	0	static
+/home/ee/ncs/zephyr/include/zephyr/sys/crc.h:237:10:crc32_ieee	8	static

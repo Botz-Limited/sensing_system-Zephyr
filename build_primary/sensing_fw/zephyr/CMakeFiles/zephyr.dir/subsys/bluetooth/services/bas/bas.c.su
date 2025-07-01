@@ -1,6 +1,7 @@
 /home/ee/ncs/zephyr/subsys/bluetooth/services/bas/bas.c:34:13:blvl_ccc_cfg_changed	0	static
 /home/ee/ncs/zephyr/subsys/bluetooth/services/bas/bas.c:95:12:bas_init	0	static
 /home/ee/ncs/zephyr/subsys/bluetooth/services/bas/bas.c:56:16:read_blvl	32	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/gatt.h:1455:19:bt_gatt_notify	32	static
 /home/ee/ncs/zephyr/include/zephyr/bluetooth/services/bas.h:210:9:bt_bas_get_battery_level	0	static
-/home/ee/ncs/zephyr/include/zephyr/bluetooth/services/bas.h:221:5:bt_bas_set_battery_level	40	static
+/home/ee/ncs/zephyr/include/zephyr/bluetooth/services/bas.h:221:5:bt_bas_set_battery_level	16	static
 /home/ee/ncs/zephyr/subsys/bluetooth/services/bas/bas.c:132:28:bt_bas_get_bas_attr	0	static

@@ -1,4 +1,4 @@
-/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3.c:54:8:bhi3_physical_sensor_control_set_config	32	dynamic
+/home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3.c:54:8:bhi3_physical_sensor_control_set_config	40	dynamic
 /home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3.c:95:8:bhi3_physical_sensor_control_get_config	56	dynamic
 /home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3.c:138:8:bhi3_wrist_gesture_detect_parse_data	0	static
 /home/ee/sensing_fw/drivers/sensor/bosch/bhi360/BHY2-Sensor-API/bhi3.c:157:8:bhi3_set_acc_foc	16	static
