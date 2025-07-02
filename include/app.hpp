@@ -154,6 +154,7 @@ static constexpr uint8_t MSG_QUEUE_DEPTH = 40; // Adjust if necessary
 extern struct k_msgq bluetooth_msgq;
 extern struct k_msgq data_msgq;
 extern struct k_msgq motion_sensor_msgq;
+extern struct k_msgq activity_metrics_msgq;
 #if defined(CONFIG_WIFI_MODULE)
 extern struct k_msgq wifi_msgq;
 #endif

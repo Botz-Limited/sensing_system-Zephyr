@@ -1,6 +1,6 @@
 # Bluetooth GATT Specification
 
-**Version:** 2.5  
+**Version:** 2.6  
 **Date:** January 2025  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
@@ -8,6 +8,12 @@
 ---
 
 ## Changelog
+
+### Version 2.6 (January 2025)
+- Added Weight Measurement characteristic (`...ec6`) to Information Service
+- Added Weight Measurement Trigger (`...b68c`) to Control Service
+- Added D2D Weight Measurement (`...68e7`) for secondary device weight data
+- Weight measurement provides total weight from all 16 pressure sensors
 
 ### Version 2.5 (January 2025)
 - Identified UUID conflicts between 3D Orientation Service and Information Service characteristics
@@ -243,6 +249,7 @@ float decode_acceleration(int16_t fixed) {
 | **BHI360 Linear Accel** | `...eb4` | Read, Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
 | **Total Step Count** | `...ec4` | Read, Notify | step_count_only_t | Aggregated both feet |
 | **Activity Step Count** | `...ec5` | Read, Notify | step_count_only_t | Activity-specific steps |
+| **Weight Measurement** | `...ec6` | Read, Notify | uint16_t | Weight in kg × 10 (0.1kg precision) |
 | FOTA Progress | `...eb5` | Read, Notify | fota_progress_t | Update status |
 | **Activity Log Available** | `...ec2` | Read, Notify | uint8_t | Latest log ID |
 | **Activity Log Path** | `...ec3` | Read, Notify | char[] | UTF-8 path |
@@ -306,6 +313,48 @@ typedef struct {
 
 **Note**: The `activity_duration_s` field in legacy structures is deprecated and always set to 0. Time-based metrics should be calculated by the mobile application using its own timers or GPS data.
 
+### Weight Measurement
+
+The weight measurement feature calculates a person's total weight using all 16 pressure sensors (8 per foot). The measurement requires the person to stand still on both feet for accurate results.
+
+#### Usage Flow
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Control Service
+    participant Activity Metrics
+    participant Info Service
+    
+    App->>Control Service: Write 0x01 to Weight Trigger
+    Control Service->>Activity Metrics: MEASURE_WEIGHT command
+    Activity Metrics->>Activity Metrics: Check motion (must be still)
+    Activity Metrics->>Activity Metrics: Collect samples (3 seconds)
+    Activity Metrics->>Activity Metrics: Calculate weight
+    Activity Metrics->>Info Service: Weight result
+    Info Service-->>App: Notify weight (uint16_t)
+```
+
+#### Weight Data Format
+
+- **Type**: `uint16_t`
+- **Unit**: kg × 10 (for 0.1kg precision)
+- **Range**: 0-6553.5 kg
+- **Example**: Value 752 = 75.2 kg
+
+#### Requirements
+
+1. Person must be standing still (motion < 0.5 m/s²)
+2. Both feet must be on the sensors
+3. Measurement takes approximately 3 seconds
+4. System must be calibrated for accurate results
+
+#### Error Conditions
+
+- If person moves during measurement, no notification is sent
+- If weight calculation fails, no notification is sent
+- Mobile app should implement timeout (e.g., 10 seconds)
+
 ### Status Bitfield
 
 ```c
@@ -343,6 +392,7 @@ typedef struct {
 | Delete Secondary Foot Log | `...b688` | Write, Notify | uint8_t | Log ID to delete on secondary |
 | Delete Secondary BHI360 Log | `...b689` | Write, Notify | uint8_t | Log ID to delete on secondary |
 | Delete Secondary Activity Log | `...b68a` | Write, Notify | uint8_t | Log ID to delete on secondary |
+| **Weight Measurement Trigger** | `...b68c` | Write | uint8_t | Write 1 to trigger weight measurement |
 
 ### Connection Parameter Control
 
@@ -639,6 +689,7 @@ typedef struct {
 | D2D Activity Log Available | `...68e4` | Notify | uint8_t | Log ID |
 | D2D Activity Log Path | `...68e5` | Notify | char[] | File path |
 | **D2D Activity Step Count** | `...68e6` | Notify | bhi360_step_count_t | Activity-specific steps |
+| **D2D Weight Measurement** | `...68e7` | Notify | uint16_t | Weight in kg × 10 |
 
 ### 8.3 D2D File Transfer Service
 

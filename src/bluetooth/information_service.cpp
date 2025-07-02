@@ -116,6 +116,10 @@ static bool total_step_count_subscribed = false;
 static bhi360_step_count_fixed_t activity_step_count_value = {0, 0};
 static bool activity_step_count_subscribed = false;
 
+// Weight measurement result
+static uint16_t weight_kg_x10 = 0;  // Weight in kg * 10 (for 0.1kg precision)
+static bool weight_subscribed = false;
+
 // --- Global variables for Current Time Service Notifications ---
 static struct bt_conn *current_time_conn_active = NULL; // Stores the connection object for notifications
 static bool current_time_notifications_enabled = false; // Flag to track CCC state
@@ -145,6 +149,11 @@ extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activ
 static ssize_t jis_activity_step_count_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_activity_step_count_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 extern "C" void jis_activity_step_count_notify(uint32_t activity_steps);
+
+// Weight measurement characteristic
+static ssize_t jis_weight_measurement_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_weight_measurement_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_weight_measurement_notify(float weight_kg);
 
 //Current Time Characteristic
 static ssize_t jis_read_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -280,6 +289,10 @@ static struct bt_uuid_128 total_step_count_uuid =
 // Activity Step Count UUID (steps during current activity)
 static struct bt_uuid_128 activity_step_count_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec5, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// Weight Measurement UUID
+static struct bt_uuid_128 weight_measurement_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec6, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 // Secondary Device Information UUIDs
 static struct bt_uuid_128 secondary_manufacturer_uuid =
@@ -418,6 +431,14 @@ BT_GATT_SERVICE_DEFINE(
         jis_activity_step_count_read, nullptr,
         static_cast<void *>(&activity_step_count_value)),
     BT_GATT_CCC(jis_activity_step_count_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Weight Measurement Characteristic
+    BT_GATT_CHARACTERISTIC(&weight_measurement_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_weight_measurement_read, nullptr,
+        static_cast<void *>(&weight_kg_x10)),
+    BT_GATT_CCC(jis_weight_measurement_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // FOTA Progress Characteristic
     BT_GATT_CHARACTERISTIC(&fota_progress_uuid.uuid,
@@ -1747,4 +1768,55 @@ extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activ
                         sizeof(total_step_count_value));
     }
 }
+
+// --- Weight Measurement Handlers ---
+static void jis_weight_measurement_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_weight_measurement_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    weight_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Weight Measurement CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_weight_measurement_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(weight_kg_x10));
+}
+
+extern "C" void jis_weight_measurement_notify(float weight_kg)
+{
+    // Convert to uint16_t with 0.1kg precision
+    weight_kg_x10 = (uint16_t)(weight_kg * 10);
+    
+    LOG_INF("Weight Measurement: %.1f kg (raw=%u)", weight_kg, weight_kg_x10);
+    
+    if (weight_subscribed) {
+        safe_gatt_notify(&weight_measurement_uuid.uuid,
+                        static_cast<const void *>(&weight_kg_x10), 
+                        sizeof(weight_kg_x10));
+    }
+}
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+// Function to handle weight measurement from secondary device
+extern "C" void jis_secondary_weight_measurement_notify(float weight_kg)
+{
+    LOG_INF("Secondary Weight Measurement: %.1f kg", weight_kg);
+    
+    // For now, just log the secondary weight
+    // In a full implementation, you might want to:
+    // 1. Store the secondary weight separately
+    // 2. Aggregate with primary weight
+    // 3. Send the total weight via jis_weight_measurement_notify
+    
+    // Example aggregation (if both feet measure weight):
+    // static float primary_weight_kg = 0;
+    // static float secondary_weight_kg = 0;
+    // secondary_weight_kg = weight_kg;
+    // float total_weight = primary_weight_kg + secondary_weight_kg;
+    // jis_weight_measurement_notify(total_weight);
+}
+#endif
 

@@ -1441,6 +1441,15 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         jis_activity_step_count_notify(0);  // Notify 0 activity steps
                         LOG_INF("Activity step counts reset to 0");
                     }
+                    else if (strncmp(command_str, "WEIGHT:", 7) == 0) {
+                        // Handle weight measurement result from activity metrics
+                        float weight_kg;
+                        if (sscanf(command_str, "WEIGHT:%f", &weight_kg) == 1) {
+                            LOG_INF("Received weight measurement: %.1f kg", weight_kg);
+                            // Send to information service for BLE notification
+                            jis_weight_measurement_notify(weight_kg);
+                        }
+                    }
 #endif
                     break;
                 }

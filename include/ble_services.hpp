@@ -49,6 +49,9 @@ void jis_fota_progress_notify(const fota_progress_msg_t* progress);
 extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration);
 extern "C" void jis_activity_step_count_notify(uint32_t activity_steps);
 
+// Weight measurement notify function
+extern "C" void jis_weight_measurement_notify(float weight_kg);
+
 // BLE format notification functions (with sequence numbers)
 void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data);
 void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t *data);
@@ -59,6 +62,7 @@ void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t *data);
 void jis_update_secondary_device_info(const char *manufacturer, const char *model, 
                                      const char *serial, const char *hw_rev, const char *fw_rev);
 void jis_clear_secondary_device_info(void);
+void jis_secondary_weight_measurement_notify(float weight_kg);
 #endif
 
 void cs_log_data_notify(uint8_t stu);

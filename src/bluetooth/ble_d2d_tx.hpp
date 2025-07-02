@@ -44,6 +44,9 @@ int ble_d2d_tx_send_device_info(const device_info_msg_t *info);
 // Request device info from secondary (primary only)
 int ble_d2d_tx_request_device_info(void);
 
+// Send weight measurement (secondary -> primary)
+int ble_d2d_tx_send_weight_measurement(float weight_kg);
+
 #ifdef __cplusplus
 }
 #endif

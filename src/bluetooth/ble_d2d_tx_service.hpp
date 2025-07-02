@@ -124,6 +124,13 @@ int d2d_tx_notify_activity_log_path(const char *path);
  */
 int d2d_tx_notify_activity_step_count(const bhi360_step_count_t *data);
 
+/**
+ * @brief Send weight measurement notification to primary device
+ * @param weight_kg Weight in kilograms
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_weight_measurement(float weight_kg);
+
 #ifdef __cplusplus
 }
 #endif

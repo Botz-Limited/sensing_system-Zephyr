@@ -89,12 +89,16 @@ static struct bt_uuid_128 d2d_activity_log_path_uuid =
 static struct bt_uuid_128 d2d_activity_step_count_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e6, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+// Weight measurement UUID
+static struct bt_uuid_128 d2d_weight_measurement_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e7, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection handle
 static struct bt_conn *secondary_conn = NULL;
 
 // Discovery parameters
 static struct bt_gatt_discover_params discover_params;
-static struct bt_gatt_subscribe_params subscribe_params[15] = {}; // One for each characteristic - zero initialized
+static struct bt_gatt_subscribe_params subscribe_params[16] = {}; // One for each characteristic - zero initialized
 
 // Discovered handles
 static uint16_t service_handle = 0;
@@ -113,6 +117,7 @@ static uint16_t bhi360_log_path_handle = 0;
 static uint16_t activity_log_available_handle = 0;
 static uint16_t activity_log_path_handle = 0;
 static uint16_t activity_step_count_handle = 0;
+static uint16_t weight_measurement_handle = 0;
 
 // Discovery state
 enum discover_state {
@@ -152,6 +157,7 @@ static uint8_t bhi360_log_path_notify_handler(struct bt_conn *conn, struct bt_ga
 static uint8_t activity_log_available_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 static uint8_t activity_log_path_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 static uint8_t activity_step_count_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
+static uint8_t weight_measurement_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data, uint16_t length);
 
 // Work items for deferred subscription
 static void subscribe_work_handler(struct k_work *work);
@@ -165,7 +171,7 @@ struct subscribe_work_data {
     int index;
 };
 
-static struct subscribe_work_data subscribe_work_items[15];
+static struct subscribe_work_data subscribe_work_items[16];
 
 // Delayed work for device info retry
 static void device_info_retry_work_handler(struct k_work *work);
@@ -394,7 +400,7 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
-    if (activity_step_count_handle && work_index < 15) {
+    if (activity_step_count_handle && work_index < 16) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = activity_step_count_handle;
         subscribe_work_items[work_index].notify_func = activity_step_count_notify_handler;
@@ -402,8 +408,16 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
+    if (weight_measurement_handle && work_index < 16) {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = weight_measurement_handle;
+        subscribe_work_items[work_index].notify_func = weight_measurement_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+    
     // Try device info subscription as the last one with special handling
-    if (device_info_handle && work_index < 15) {
+    if (device_info_handle && work_index < 16) {
         LOG_INF("Attempting device info subscription (handle %u) as last item", device_info_handle);
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = device_info_handle;
@@ -1037,6 +1051,46 @@ static uint8_t activity_step_count_notify_handler(struct bt_conn *conn,
     return BT_GATT_ITER_CONTINUE;
 }
 
+static uint8_t weight_measurement_notify_handler(struct bt_conn *conn,
+                                               struct bt_gatt_subscribe_params *params,
+                                               const void *data, uint16_t length)
+{
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn) {
+        LOG_WRN("Weight measurement notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0) {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+    
+    if (!data) {
+        LOG_WRN("Weight measurement unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (length != sizeof(uint16_t)) {
+        LOG_WRN("Invalid weight measurement length: %u", length);
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    uint16_t weight_kg_x10 = *(const uint16_t *)data;
+    float weight_kg = weight_kg_x10 / 10.0f;
+    LOG_INF("=== RECEIVED WEIGHT MEASUREMENT FROM SECONDARY ===");
+    LOG_INF("  Weight: %.1f kg (raw=%u)", weight_kg, weight_kg_x10);
+
+    // Forward to information service for aggregation with primary weight
+    // The primary device should aggregate both feet weights
+    extern void jis_secondary_weight_measurement_notify(float weight_kg);
+    jis_secondary_weight_measurement_notify(weight_kg);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
 // Alternative subscription method using write to CCC
 static void write_ccc_alternative(struct bt_conn *conn, uint16_t handle, uint16_t ccc_handle)
 {
@@ -1558,6 +1612,10 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
         } else if (bt_uuid_cmp(chrc->uuid, &d2d_activity_step_count_uuid.uuid) == 0) {
             activity_step_count_handle = chrc->value_handle;
             LOG_INF("Found activity step count characteristic, handle: %u", activity_step_count_handle);
+            characteristics_found++;
+        } else if (bt_uuid_cmp(chrc->uuid, &d2d_weight_measurement_uuid.uuid) == 0) {
+            weight_measurement_handle = chrc->value_handle;
+            LOG_INF("Found weight measurement characteristic, handle: %u", weight_measurement_handle);
             characteristics_found++;
         }
     } else if (discovery_state == DISCOVER_DIS) {

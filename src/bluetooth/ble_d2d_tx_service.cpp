@@ -71,6 +71,10 @@ static struct bt_uuid_128 d2d_activity_log_path_uuid =
 static struct bt_uuid_128 d2d_activity_step_count_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e6, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+// Weight measurement UUID
+static struct bt_uuid_128 d2d_weight_measurement_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e7, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection tracking
 static struct bt_conn *primary_conn = NULL;
 
@@ -90,6 +94,7 @@ static bool bhi360_log_path_notify_enabled = false;
 static bool activity_log_notify_enabled = false;
 static bool activity_log_path_notify_enabled = false;
 static bool activity_step_count_notify_enabled = false;
+static bool weight_measurement_notify_enabled = false;
 static foot_samples_t foot_sensor_char_value = {0};
 
 // Data buffers - using fixed-point versions for BLE transmission
@@ -108,6 +113,7 @@ static char bhi360_log_path[256] = {0};
 static uint8_t activity_log_available = 0;
 static char activity_log_path[256] = {0};
 static bhi360_step_count_fixed_t activity_step_count_fixed = {0, 0};
+static uint16_t weight_kg_x10 = 0;  // Weight in kg * 10 (for 0.1kg precision)
 
 // CCC changed callbacks
 static void foot_sensor_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
@@ -269,6 +275,16 @@ static void activity_step_count_ccc_changed(const struct bt_gatt_attr *attr, uin
     LOG_INF("Activity step count notifications %s", activity_step_count_notify_enabled ? "enabled" : "disabled");
 }
 
+static void weight_measurement_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("weight_measurement_ccc_changed: attr is NULL");
+        return;
+    }
+    weight_measurement_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Weight measurement notifications %s", weight_measurement_notify_enabled ? "enabled" : "disabled");
+}
+
 // Read callbacks (optional - for debugging)
 static ssize_t read_foot_sensor(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                void *buf, uint16_t len, uint16_t offset)
@@ -392,6 +408,13 @@ BT_GATT_SERVICE_DEFINE(d2d_tx_svc,
                           BT_GATT_PERM_NONE,
                           NULL, NULL, NULL),
     BT_GATT_CCC(activity_step_count_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    
+    // Weight measurement (notify)
+    BT_GATT_CHARACTERISTIC(&d2d_weight_measurement_uuid.uuid,
+                          BT_GATT_CHRC_NOTIFY,
+                          BT_GATT_PERM_NONE,
+                          NULL, NULL, NULL),
+    BT_GATT_CCC(weight_measurement_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 );
 #endif // !CONFIG_PRIMARY_DEVICE
 
@@ -781,6 +804,30 @@ int d2d_tx_notify_activity_step_count(const bhi360_step_count_t *data)
     return err;
 }
 
+int d2d_tx_notify_weight_measurement(float weight_kg)
+{
+    LOG_INF("D2D TX: Weight measurement notify called - weight=%.1f kg", weight_kg);
+    
+    if (!primary_conn || !weight_measurement_notify_enabled) {
+        LOG_WRN("D2D TX: Cannot send weight measurement - no connection or notifications disabled");
+        return -ENOTCONN;
+    }
+    
+    // Convert to uint16_t with 0.1kg precision
+    weight_kg_x10 = (uint16_t)(weight_kg * 10);
+    
+    // Weight measurement characteristic is at index 46 (after activity step count + CCC)
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[46];
+    int err = bt_gatt_notify(primary_conn, char_attr, &weight_kg_x10, sizeof(weight_kg_x10));
+    if (err) {
+        LOG_ERR("Failed to send weight measurement notification: %d", err);
+    } else {
+        LOG_INF("D2D weight measurement sent: %.1f kg (raw=%u)", weight_kg, weight_kg_x10);
+    }
+    
+    return err;
+}
+
 void d2d_tx_service_set_connection(struct bt_conn *conn)
 {
     primary_conn = conn;
@@ -803,6 +850,13 @@ void d2d_tx_service_set_connection(struct bt_conn *conn)
         foot_log_notify_enabled = false;
         bhi360_log_notify_enabled = false;
         device_info_notify_enabled = false;
+        fota_progress_notify_enabled = false;
+        foot_log_path_notify_enabled = false;
+        bhi360_log_path_notify_enabled = false;
+        activity_log_notify_enabled = false;
+        activity_log_path_notify_enabled = false;
+        activity_step_count_notify_enabled = false;
+        weight_measurement_notify_enabled = false;
     }
 }
 

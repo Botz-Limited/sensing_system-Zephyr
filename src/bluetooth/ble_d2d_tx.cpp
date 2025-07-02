@@ -786,3 +786,18 @@ int ble_d2d_tx_request_device_info(void) {
     return -EINVAL;
 #endif
 }
+
+int ble_d2d_tx_send_weight_measurement(float weight_kg) {
+    if (!d2d_conn) return -ENOTCONN;
+    
+    LOG_INF("D2D TX: Sending weight measurement: %.1f kg", weight_kg);
+    
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Secondary device: Send via GATT notification
+    return d2d_tx_notify_weight_measurement(weight_kg);
+#else
+    // Primary device shouldn't send weight measurements via D2D
+    LOG_WRN("Primary device shouldn't send weight measurement via D2D");
+    return -EINVAL;
+#endif
+}

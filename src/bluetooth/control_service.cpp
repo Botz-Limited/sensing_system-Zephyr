@@ -151,6 +151,10 @@ static struct bt_uuid_128 delete_secondary_activity_log_command_uuid =
 static struct bt_uuid_128 conn_param_control_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68b, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
+// --- New: UUID for weight measurement command characteristic ---
+static struct bt_uuid_128 measure_weight_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68c, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
 // Forward declarations for start/stop activity handlers
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
@@ -172,6 +176,9 @@ static void cs_delete_secondary_activity_log_ccc_cfg_changed(const struct bt_gat
 // Connection parameter control handlers
 static ssize_t write_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static ssize_t read_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset);
+
+// Weight measurement command handlers
+static ssize_t write_measure_weight_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -266,7 +273,13 @@ BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | B
                            BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
                            read_conn_param_control_vnd, 
                            write_conn_param_control_vnd, 
-                           nullptr)
+                           nullptr),
+
+    // Weight Measurement Command Characteristic
+    BT_GATT_CHARACTERISTIC(&measure_weight_command_uuid.uuid,
+                           BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_WRITE_ENCRYPT,
+                           nullptr, write_measure_weight_command_vnd, nullptr)
 );
 
 /**
@@ -449,6 +462,41 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
     LOG_INF("Submitted start activity events for foot sensor and motion sensor (input=1).");
     } else {
     LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
+    }
+
+    return len;
+}
+
+// --- Weight Measurement Command Handler ---
+static ssize_t write_measure_weight_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
+                                               const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t value = *((const uint8_t *)buf);
+
+    if (value == 1) {
+        // Send message to activity metrics module to trigger weight measurement
+        generic_message_t weight_msg = {};
+        weight_msg.sender = SENDER_BTH;
+        weight_msg.type = MSG_TYPE_COMMAND;
+        strcpy(weight_msg.data.command_str, "MEASURE_WEIGHT");
+        
+        if (k_msgq_put(&activity_metrics_msgq, &weight_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send weight measurement trigger to activity metrics");
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        }
+
+        LOG_INF("Triggered weight measurement (input=1).");
+    } else {
+        LOG_WRN("Measure weight characteristic write ignored (input=%u).", value);
     }
 
     return len;

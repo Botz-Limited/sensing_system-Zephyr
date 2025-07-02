@@ -310,6 +310,14 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                         LOG_WRN("Failed to send foot sensor data to data module");
                     }
 
+                    // Send to activity metrics module
+                    #if IS_ENABLED(CONFIG_ACTIVITY_METRICS_MODULE)
+                    if (k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT) != 0)
+                    {
+                        LOG_WRN("Failed to send foot sensor data to activity metrics module");
+                    }
+                    #endif
+
                     // Also send to WiFi module if WiFi is active
 #if defined(CONFIG_WIFI_MODULE)
                     if (atomic_get(&wifi_active) == 1)

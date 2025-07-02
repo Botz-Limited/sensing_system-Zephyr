@@ -537,6 +537,11 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             msg.type = MSG_TYPE_BHI360_LOG_RECORD;
             msg.data.bhi360_log_record = record;
             k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
+            
+            // Send to activity metrics module
+            #if IS_ENABLED(CONFIG_ACTIVITY_METRICS_MODULE)
+            k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT);
+            #endif
 
             // Also send to WiFi module if WiFi is active
 #if defined(CONFIG_WIFI_MODULE)
@@ -561,6 +566,9 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             qmsg.data.bhi360_3d_mapping.quat_w = latest_quat_w;  // Now including W component
             #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
+            #if IS_ENABLED(CONFIG_ACTIVITY_METRICS_MODULE)
+            k_msgq_put(&activity_metrics_msgq, &qmsg, K_NO_WAIT);
+            #endif
 #else
             // Secondary device: Send to primary via D2D
             ble_d2d_tx_send_bhi360_data1(&qmsg.data.bhi360_3d_mapping);
@@ -588,6 +596,9 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             smsg.data.bhi360_step_count.activity_duration_s = 0;  // Deprecated - always 0
             #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
+            #if IS_ENABLED(CONFIG_ACTIVITY_METRICS_MODULE)
+            k_msgq_put(&activity_metrics_msgq, &smsg, K_NO_WAIT);
+            #endif
 #else
             // Secondary device: Send to primary via D2D
             ble_d2d_tx_send_bhi360_data2(&smsg.data.bhi360_step_count);

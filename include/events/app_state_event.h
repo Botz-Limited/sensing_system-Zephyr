@@ -79,6 +79,7 @@ typedef enum
     SENDER_D2D_SECONDARY, // D2D data from secondary device
     SENDER_MOTION_SENSOR, // Motion sensor module
     SENDER_WIFI, // WiFi module
+    SENDER_ACTIVITY_METRICS, // Activity metrics module
 } sender_type_t;
 #ifdef __cplusplus
 }
