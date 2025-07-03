@@ -20,6 +20,8 @@ int ble_services_init(void);
 void set_device_status(uint32_t new_status);
 void jis_weight_measurement_notify(float weight_kg);
 void jis_set_err_status_notify(err_t error_code);
+void jis_device_status_packed_notify(void);
+void jis_file_notification_packed_notify(uint8_t file_id, uint8_t file_type, uint8_t device_source, const char* file_path);
 void jis_clear_err_status_notify(err_t error_code);
 void jis_foot_sensor_notify(const foot_samples_t *samples_data);
 void jis_charge_status_notify(uint8_t new_charge_status);

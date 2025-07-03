@@ -32,6 +32,10 @@ TEST_DIRS=(
     "foot_sensor"
     "motion_sensor"
     "packetizer"
+    "sensor_data"
+    "realtime_metrics"
+    "analytics"
+    "activity_metrics"
 )
 
 # Function to run tests for a module

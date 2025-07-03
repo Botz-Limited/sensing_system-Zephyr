@@ -66,6 +66,10 @@ typedef enum
     MSG_TYPE_REQUEST_BHI360_CALIBRATION, // Request calibration data from data module
     MSG_TYPE_BHI360_CALIBRATION_DATA, // Calibration data response from data module
     MSG_TYPE_DEVICE_INFO, // Device information for D2D sharing
+    MSG_TYPE_SENSOR_DATA_CONSOLIDATED, // Consolidated sensor data from sensor_data module
+    MSG_TYPE_REALTIME_METRICS, // Real-time metrics from realtime_metrics module
+    MSG_TYPE_ANALYTICS_RESULTS, // Analytics results from analytics module
+    MSG_TYPE_ACTIVITY_METRICS_BLE, // Activity metrics for BLE transmission
 } msg_type_t;
 
 // Define sender types
@@ -80,6 +84,9 @@ typedef enum
     SENDER_MOTION_SENSOR, // Motion sensor module
     SENDER_WIFI, // WiFi module
     SENDER_ACTIVITY_METRICS, // Activity metrics module
+    SENDER_SENSOR_DATA, // Sensor data consolidation module
+    SENDER_REALTIME_METRICS, // Real-time metrics module
+    SENDER_ANALYTICS, // Analytics module
 } sender_type_t;
 #ifdef __cplusplus
 }

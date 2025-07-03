@@ -9,7 +9,7 @@
 #include <zephyr/logging/log.h>
 #include <app.hpp>
 #include "ble_d2d_tx.hpp"
-#include "orientation_3d_service.hpp"
+// Removed: orientation_3d_service.hpp no longer needed
 
 LOG_MODULE_DECLARE(bluetooth, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -77,11 +77,7 @@ void d2d_handle_quaternion_3d(const quaternion_3d_t* quat_data)
         return;
     }
     
-    // Forward to 3D orientation service
-    orientation_3d_update_secondary(quat_data->quat_w, 
-                                   quat_data->quat_x, 
-                                   quat_data->quat_y, 
-                                   quat_data->quat_z);
+    // Removed: No longer forward to 3D orientation service
 }
 
 #endif // CONFIG_PRIMARY_DEVICE

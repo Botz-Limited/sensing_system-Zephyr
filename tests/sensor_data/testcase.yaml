@@ -1,0 +1,7 @@
+tests:
+  sensor_data.unit:
+    platform_allow: native_posix native_posix_64
+    tags: sensor_data unit
+    harness: ztest
+    min_ram: 32
+    min_flash: 64

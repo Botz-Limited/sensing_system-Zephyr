@@ -34,8 +34,7 @@
 #include "../bluetooth/ble_d2d_tx.hpp"
 #endif /* CONFIG_WIFI_NRF70 */
 
-// Include 3D orientation service for high-rate updates
-#include "../bluetooth/orientation_3d_service.hpp"
+// Removed: 3D orientation service no longer needed
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
@@ -399,32 +398,7 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             latest_timestamp = *callback_info->time_stamp * 15625; // Convert to nanoseconds
             motion_update_mask |= QUAT_UPDATED;
             
-            // Send high-rate update for 3D visualization only when NOT logging
-            // When logging is active, quaternion data is sent via the regular logging path
-            if (atomic_get(&logging_active) == 0) {
-                #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                // Primary device: update local orientation service
-                orientation_3d_update_primary(latest_quat_w, latest_quat_x, latest_quat_y, latest_quat_z);
-                #else
-                // Secondary device: send to primary via D2D at high rate
-                // Create a simple quaternion-only message for high-rate transmission
-                static uint32_t quat_counter = 0;
-                if (++quat_counter >= 1) { // Send every quaternion update (50Hz)
-                    quat_counter = 0;
-                    // Use existing D2D infrastructure but with quaternion-focused data
-                    bhi360_3d_mapping_t quat_msg = {
-                        .accel_x = latest_quat_x,
-                        .accel_y = latest_quat_y,
-                        .accel_z = latest_quat_z,
-                        .gyro_x = 0.0f,
-                        .gyro_y = 0.0f,
-                        .gyro_z = 0.0f,
-                        .quat_w = latest_quat_w
-                    };
-                    ble_d2d_tx_send_bhi360_data1(&quat_msg);
-                }
-                #endif
-            }
+            // Removed: No longer send orientation data before logging starts
             
             break;
         }
@@ -538,9 +512,9 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             msg.data.bhi360_log_record = record;
             k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
             
-            // Send to activity metrics module
-            #if IS_ENABLED(CONFIG_ACTIVITY_METRICS_MODULE)
-            k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT);
+            // Send to sensor data module (new multi-thread architecture)
+            #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
+            k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
             #endif
 
             // Also send to WiFi module if WiFi is active
@@ -566,8 +540,8 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             qmsg.data.bhi360_3d_mapping.quat_w = latest_quat_w;  // Now including W component
             #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
-            #if IS_ENABLED(CONFIG_ACTIVITY_METRICS_MODULE)
-            k_msgq_put(&activity_metrics_msgq, &qmsg, K_NO_WAIT);
+            #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
+            k_msgq_put(&sensor_data_msgq, &qmsg, K_NO_WAIT);
             #endif
 #else
             // Secondary device: Send to primary via D2D
@@ -596,8 +570,8 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             smsg.data.bhi360_step_count.activity_duration_s = 0;  // Deprecated - always 0
             #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
-            #if IS_ENABLED(CONFIG_ACTIVITY_METRICS_MODULE)
-            k_msgq_put(&activity_metrics_msgq, &smsg, K_NO_WAIT);
+            #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
+            k_msgq_put(&sensor_data_msgq, &smsg, K_NO_WAIT);
             #endif
 #else
             // Secondary device: Send to primary via D2D

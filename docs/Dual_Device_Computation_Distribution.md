@@ -1,8 +1,21 @@
 # Dual Device Computation Distribution Strategy
 
 **Version:** 1.0  
-**Date:** January 2025  
-**Purpose:** Define optimal distribution of activity metrics calculations between primary and secondary devices to maximize computational efficiency
+**Date:** June 2025  
+**Purpose:** Optimize computational load distribution between primary and secondary devices
+
+---
+
+## Table of Contents
+
+1. [Executive Summary](#executive-summary)
+2. [Metric Classification](#metric-classification)
+3. [Current Architecture Analysis](#current-architecture-analysis)
+4. [Proposed Load Balancing Strategy](#proposed-load-balancing-strategy)
+5. [Implementation Approach](#implementation-approach)
+6. [Communication Protocol](#communication-protocol)
+7. [Dynamic Load Balancing](#dynamic-load-balancing)
+8. [Benefits and Trade-offs](#benefits-and-trade-offs)
 
 ---
 
@@ -10,358 +23,616 @@
 
 With two nRF5340 devices (primary/right and secondary/left), each with identical computational capabilities, we can intelligently distribute the processing load. This document categorizes all metrics from the Activity Session Calculated Data Specification into:
 
-1. **Device-Specific Calculations** - Can be computed locally on each device
-2. **Dual-Device Calculations** - Require data from both devices
-3. **Primary-Only Calculations** - Aggregated metrics computed on primary
+- **Local-only metrics**: Must be calculated on each device for its own foot
+- **Aggregated metrics**: Require data from both feet
+- **Offloadable metrics**: Can be calculated on either device
 
-By distributing calculations optimally, we can:
-- Reduce computational load on each device by ~40%
-- Minimize D2D data transfer
-- Improve real-time performance
-- Enable more complex algorithms
+### Key Findings
 
----
-
-## Table of Contents
-
-1. [System Architecture Overview](#system-architecture-overview)
-2. [Metric Classification](#metric-classification)
-3. [Device-Specific Calculations](#device-specific-calculations)
-4. [Dual-Device Calculations](#dual-device-calculations)
-5. [Computation Distribution Strategy](#computation-distribution-strategy)
-6. [D2D Communication Optimization](#d2d-communication-optimization)
-7. [Implementation Recommendations](#implementation-recommendations)
-
----
-
-## System Architecture Overview
-
-### Current Setup
-```
-┌─────────────────────┐         ┌─────────────────────┐
-│   Primary Device    │   D2D   │  Secondary Device   │
-│   (Right Shoe)      │◄────────►│   (Left Shoe)      │
-├─────────────────────┤         ├─────────────────────┤
-│ • BHI360 IMU        │         │ • BHI360 IMU        │
-│ • 8 Pressure Sensors│         │ • 8 Pressure Sensors│
-│ • nRF5340 (128MHz)  │         │ • nRF5340 (128MHz)  │
-│ • BLE to Phone      │         │ • D2D to Primary    │
-└─────────────────────┘         └─────────────────────┘
-```
-
-### Key Capabilities
-- **Each device has**: Full sensor suite, identical processing power
-- **Primary advantages**: Phone connection, aggregation point
-- **Secondary advantages**: Available CPU for complex calculations
-- **D2D bandwidth**: Limited, should minimize data transfer
+1. **~40% of metrics are local-only** (ground contact, pressure distribution)
+2. **~30% require aggregation** (asymmetry, balance, gait symmetry)
+3. **~30% are offloadable** (efficiency, fatigue, injury risk)
 
 ---
 
 ## Metric Classification
 
-Based on the Activity Session Calculated Data Specification, here's how metrics are classified:
+### 🟢 Local-Only Metrics (Calculate on Each Device)
 
-### Classification Criteria
-- **🟦 Device-Specific**: Uses only local sensor data
-- **🟨 Dual-Device Required**: Needs synchronized data from both feet
-- **🟩 Primary Aggregation**: Combines results from both devices
+These metrics are specific to each foot and must be calculated locally:
 
----
+| Metric | Update Rate | Complexity | Thread |
+|--------|-------------|------------|--------|
+| **Ground Contact Time** | Every step | Low | sensor_data |
+| **Flight Time** | Every step | Low | sensor_data |
+| **Peak Force** | Every step | Low | sensor_data |
+| **Pressure Distribution** | 10Hz | Low | sensor_data |
+| **Center of Pressure** | 10Hz | Medium | sensor_data |
+| **Foot Strike Angle** | Every step | Medium | realtime_metrics |
+| **Pronation Angle** | Every step | Medium | realtime_metrics |
+| **Loading Rate** | Every step | Medium | realtime_metrics |
+| **Push-off Power** | Every step | Medium | realtime_metrics |
+| **CPEI** | Every step | High | analytics |
 
-## Device-Specific Calculations
+### 🟨 Aggregated Metrics (Require Both Feet)
 
-These metrics can be calculated independently on each device using only local sensor data:
+These metrics need data from both devices:
 
-### 🟦 Core Step Metrics (Per Foot)
-| Metric | Local Data Used | Computation Load | Update Rate |
-|--------|-----------------|------------------|-------------|
-| **Ground Contact Time** | Local pressure sensors | Light (<1ms) | Every step |
-| **Flight Time** | Local pressure sensors | Light (<1ms) | Every step |
-| **Peak Force** | Local pressure sensors | Light (<1ms) | Every step |
-| **Loading Rate** | Local pressure (dF/dt) | Medium (1-5ms) | Every step |
-| **Push-off Power** | Local pressure + IMU | Medium (1-5ms) | Every step |
+| Metric | Primary Data | Secondary Data | Complexity | Thread |
+|--------|--------------|----------------|------------|--------|
+| **Step Frequency/Cadence** | R foot timing | L foot timing | Low | realtime_metrics |
+| **Contact Time Asymmetry** | R contact time | L contact time | Low | realtime_metrics |
+| **Flight Time Asymmetry** | R flight time | L flight time | Low | realtime_metrics |
+| **Force Asymmetry** | R peak force | L peak force | Low | realtime_metrics |
+| **Step Length Asymmetry** | R step length | L step length | Medium | analytics |
+| **Pronation Asymmetry** | R pronation | L pronation | Low | realtime_metrics |
+| **Balance L/R** | R force integral | L force integral | Medium | realtime_metrics |
+| **True Flight Time** | R contact state | L contact state | Low | sensor_data |
+| **Double Support Time** | R contact state | L contact state | Low | sensor_data |
+| **Step Width** | R position | L position | High | analytics |
 
-### 🟦 Pressure Distribution (Per Foot)
-| Metric | Local Data Used | Computation Load | Update Rate |
-|--------|-----------------|------------------|-------------|
-| **Heel Pressure %** | 8 local channels | Light (<1ms) | 10Hz |
-| **Midfoot Pressure %** | 8 local channels | Light (<1ms) | 10Hz |
-| **Forefoot Pressure %** | 8 local channels | Light (<1ms) | 10Hz |
-| **Center of Pressure X/Y** | 8 local channels | Medium (1-5ms) | 10Hz |
-| **Pressure Path Length** | CoP history | Medium (1-5ms) | Every step |
-| **CPEI** | CoP excursion | Heavy (5-10ms) | Every step |
+### 🟦 Offloadable Metrics (Can Calculate on Either Device)
 
-### 🟦 Motion Dynamics (IMU-based)
-| Metric | Local Data Used | Computation Load | Update Rate |
-|--------|-----------------|------------------|-------------|
-| **Foot Strike Angle** | Local quaternion | Light (<1ms) | Every step |
-| **Pronation Angle** | Local quaternion + pressure | Medium (1-5ms) | Every step |
-| **Pronation Velocity** | Local gyroscope | Light (<1ms) | Every step |
-| **Impact G-force** | Local accelerometer | Light (<1ms) | Every step |
-| **Local Movement Smoothness** | Local IMU trajectory | Heavy (5-10ms) | Every second |
+These complex metrics could be calculated on the less busy device:
 
-### 🟦 Local Performance Indicators
-| Metric | Local Data Used | Computation Load | Update Rate |
-|--------|-----------------|------------------|-------------|
-| **Local Vertical Oscillation** | Local IMU integration | Heavy (10-20ms) | Every 2 steps |
-| **Local Duty Factor** | Contact/flight ratio | Light (<1ms) | Every 5 seconds |
-| **Local Form Score** | Multiple local metrics | Medium (5-10ms) | Every second |
-| **Local Fatigue Detection** | Local pattern changes | Heavy (10-20ms) | Every 30 seconds |
-
----
-
-## Dual-Device Calculations
-
-These metrics require synchronized data from both devices:
-
-### 🟨 Gait Symmetry Metrics
-| Metric | Data Required | Primary Computes | Secondary Provides | Update Rate |
-|--------|---------------|------------------|-------------------|-------------|
-| **Contact Time Asymmetry** | L/R contact times | ✓ | Contact time | Every 2-4 steps |
-| **Flight Time Asymmetry** | L/R flight times | ✓ | Flight time | Every 2-4 steps |
-| **Force Asymmetry** | L/R peak forces | ✓ | Peak force | Every 2-4 steps |
-| **Step Length Asymmetry** | L/R step timing | ✓ | Step events | Every 2-4 steps |
-| **Pronation Asymmetry** | L/R pronation angles | ✓ | Pronation angle | Every 2-4 steps |
-| **Loading Rate Asymmetry** | L/R loading rates | ✓ | Loading rate | Every 2-4 steps |
-| **Push-off Timing Offset** | L/R push-off times | ✓ | Push-off time | Every 2-4 steps |
-
-### 🟨 Synchronized Performance Metrics
-| Metric | Data Required | Computation Strategy | Update Rate |
-|--------|---------------|---------------------|-------------|
-| **True Flight Time** | Both feet airborne | Primary tracks both contact states | Every step |
-| **Double Support Time** | Both feet on ground | Primary tracks overlap | Every step |
-| **Step Width** | L/R foot positions | Primary estimates from CoP + IMU | Every 2 steps |
-| **Cadence** | Step count from both | Primary aggregates BHI360 counts | Every step |
-| **Stride Length** | Full gait cycle | Primary calculates from timing | Every stride |
-
-### 🟨 Advanced Biomechanical Metrics
-| Metric | Data Required | Computation Strategy | Update Rate |
-|--------|---------------|---------------------|-------------|
-| **Running Efficiency** | Multiple factors from both | **Secondary computes** (CPU available) | Every 5-10 seconds |
-| **Overall Vertical Stiffness** | Both feet dynamics | **Secondary computes** | Every 10 steps |
-| **Bilateral Coordination** | Phase relationships | Primary tracks timing | Every 5 seconds |
+| Metric | Input Data | Complexity | Typical Thread | Can Offload? |
+|--------|------------|------------|----------------|--------------|
+| **Running Efficiency** | Multiple factors from both | High | analytics | ✅ Yes |
+| **Fatigue Index** | Historical comparison | High | analytics | ✅ Yes |
+| **Form Score** | Multiple components | Medium | realtime_metrics | ⚠️ Maybe |
+| **Injury Risk Score** | Composite assessment | High | analytics | ✅ Yes |
+| **Stride Length** | Step timing + model | Medium | analytics | ✅ Yes |
+| **Vertical Oscillation** | IMU integration | High | analytics | ✅ Yes |
+| **Vertical Stiffness** | Spring-mass model | High | analytics | ✅ Yes |
+| **Movement Smoothness** | Signal analysis | High | analytics | ✅ Yes |
+| **Pace Estimation** | Distance/time model | Medium | realtime_metrics | ⚠️ Maybe |
+| **Calories Burned** | Metabolic model | Medium | activity_metrics | ✅ Yes |
 
 ---
 
-## Computation Distribution Strategy
+## Current Architecture Analysis
 
-### Optimal Load Distribution
+### Current State (Both Devices Calculate Everything)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     PRIMARY DEVICE (Right)                    │
-├─────────────────────────────────────────────────────────────┤
-│ Local Calculations:          �� Aggregated Calculations:       │
-│ • Right foot metrics (🟦)    │ • All asymmetry metrics (🟨)   │
-│ • Right pressure distribution│ • Cadence aggregation         │
-│ • Right motion dynamics      │ • True flight/support times   │
-│                              │ • BLE packet preparation      │
-│ CPU Load: ~25%               │ CPU Load: ~15%                │
+┌──────────────────────────────┬───────────────────────────────┐
+│      PRIMARY (Right)         │      SECONDARY (Left)         │
+├──────────────────────────────┼───────────────────────────────┤
+│ • All 4 threads running      │ • All 4 threads running       │
+│ • Calculate all R metrics    │ • Calculate all L metrics     │
+│ • Some aggregate metrics     │ • Send raw data to primary    │
+│ • BLE to phone              │ • D2D to primary              │
+│                              │                               │
+│ CPU Load: ~40%               │ CPU Load: ~35%                │
 └──────────────────────────────┴───────────────────────────────┘
-                                        ▲
-                                        │ D2D
-                                        │ (Compressed metrics)
-                                        ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    SECONDARY DEVICE (Left)                   │
-├─────────────────────────────────────────────────────────────┤
-│ Local Calculations:          │ Complex Calculations:          │
-│ • Left foot metrics (🟦)     │ • Running efficiency (🟨)      │
-│ • Left pressure distribution │ • Injury risk assessment      │
-│ • Left motion dynamics       │ • Fatigue index (both feet)   │
+```
+
+### Issues with Current Approach
+
+1. **Duplicate calculations**: Both devices calculate similar metrics
+2. **Incomplete aggregation**: Some metrics calculated without full data
+3. **Unbalanced load**: Primary has extra BLE overhead
+4. **Wasted capacity**: Secondary has spare CPU cycles
+
+---
+
+## Proposed Load Balancing Strategy
+
+### Strategy 1: Secondary as Analytics Processor (Recommended)
+
+```
+┌──────────────────────────────┬───────────────────────────────┐
+│      PRIMARY (Right)         │      SECONDARY (Left)         │
+├──────────────────────────────┼───────────────────────────────┤
+│ • sensor_data (100Hz)        │ • sensor_data (100Hz)         │
+│ • realtime_metrics (10Hz)    │ • realtime_metrics (10Hz)     │
+│ • activity_metrics (0.5Hz)   │ • analytics (1-5Hz) ENHANCED  │
+│                              │                               │
+│ Focus on:                    │ Focus on:                     │
+│ • Real-time processing       │ • Complex calculations        │
+│ • BLE updates               │ • Efficiency metrics          │
+│ • Session management        │ • Fatigue analysis            │
+│ • Aggregation               │ • Injury risk                 │
 │                              │ • Vertical stiffness          │
-│ CPU Load: ~25%               │ CPU Load: ~20%                │
+│                              │                               │
+│ CPU Load: ~25%               │ CPU Load: ~25%                │
 └──────────────────────────────┴───────────────────────────────┘
 ```
 
-### Task Assignment Rationale
+**Data Flow:**
+```
+Secondary sensor_data ──D2D──► Primary aggregation
+Secondary analytics ◄──D2D──── Primary sensor data
+Secondary results ────D2D───► Primary for BLE/logging
+```
 
-#### Primary Device Focus
-1. **All device-specific calculations** for right foot
-2. **Asymmetry calculations** (has both datasets)
-3. **Real-time aggregation** for BLE
-4. **Time synchronization** master
+### Strategy 2: Dynamic Task Migration
 
-#### Secondary Device Focus
-1. **All device-specific calculations** for left foot
-2. **Complex multi-factor algorithms** (CPU available)
-3. **Heavy computations** that don't need real-time
-4. **Backup calculations** for redundancy
+```c
+typedef struct {
+    uint8_t cpu_load_percent;
+    uint8_t queue_depth;
+    uint16_t processing_time_ms;
+    bool can_accept_work;
+} device_load_t;
+
+// Primary monitors load and delegates work
+void balance_workload(device_load_t *primary_load, 
+                     device_load_t *secondary_load) {
+    // If primary overloaded and secondary available
+    if (primary_load->cpu_load_percent > 60 && 
+        secondary_load->can_accept_work) {
+        // Offload analytics tasks
+        send_analytics_request_to_secondary();
+    }
+}
+```
+
+### Strategy 3: Specialized Processing Roles
+
+```
+┌──────────────────────────────┬───────────────────────────────┐
+│      PRIMARY (Right)         │      SECONDARY (Left)         │
+├──────────────────────────────┼───────────────────────────────┤
+│ Specializes in:              │ Specializes in:               │
+│ • Time-critical metrics      │ • Computationally intensive   │
+│ • Aggregation & symmetry     │ • Pattern recognition         │
+│ • BLE communication          │ • Historical analysis         │
+│ • Session coordination       │ • Predictive algorithms       │
+│                              │                               │
+│ Threads:                     │ Threads:                      │
+│ • sensor_data (100Hz)        │ • sensor_data (100Hz)         │
+│ • realtime_metrics (10Hz)    │ • analytics_heavy (1Hz)       │
+│ • aggregation (5Hz)          │ • pattern_detect (0.5Hz)      │
+│ • session_mgmt (0.5Hz)       │ • ml_inference (0.2Hz)        │
+└──────────────────────────────┴───────────────────────────────┘
+```
 
 ---
 
-## D2D Communication Optimization
+## Implementation Approach
 
-### Data Transfer Requirements
+### Phase 1: Identify Offloadable Work
 
-#### Secondary → Primary (Every 100ms)
 ```c
+// Define work packages that can be offloaded
+typedef enum {
+    WORK_EFFICIENCY_CALC = 0x01,
+    WORK_FATIGUE_ANALYSIS = 0x02,
+    WORK_INJURY_RISK = 0x04,
+    WORK_VERTICAL_STIFFNESS = 0x08,
+    WORK_STRIDE_ANALYSIS = 0x10,
+    WORK_PATTERN_DETECTION = 0x20,
+} offloadable_work_t;
+
 typedef struct {
-    // Essential metrics for asymmetry (24 bytes)
-    uint16_t contact_time_ms;
-    uint16_t flight_time_ms;
-    uint16_t peak_force;
-    uint16_t loading_rate;
-    int8_t pronation_angle;
-    uint8_t strike_pattern;
-    
-    // Aggregated local calculations (12 bytes)
-    uint8_t local_form_score;
-    uint8_t local_fatigue_level;
-    uint16_t cop_path_length;
-    uint8_t pressure_distribution[3];  // Heel/mid/fore percentages
-    
-    // Complex calculation results (8 bytes)
-    uint8_t running_efficiency;
-    uint8_t injury_risk_component;
-    uint16_t vertical_stiffness;
-    uint8_t coordination_score;
-} SecondaryMetricsPacket;  // Total: 44 bytes
+    uint8_t work_type;
+    uint32_t timestamp;
+    union {
+        efficiency_input_t efficiency;
+        fatigue_input_t fatigue;
+        injury_input_t injury;
+    } data;
+} work_request_t;
 ```
 
-#### Primary → Secondary (Every 1000ms)
+### Phase 2: Implement Work Distribution
+
 ```c
-typedef struct {
-    // User profile for calculations (8 bytes)
-    uint16_t user_weight_kg;
-    uint16_t user_height_cm;
-    uint8_t activity_type;
-    uint8_t gps_available;
+// Primary device work distributor
+void distribute_analytics_work(void) {
+    static uint8_t round_robin = 0;
     
-    // Session state (4 bytes)
-    uint32_t session_time_ms;
+    // Check if we have work to distribute
+    if (has_pending_analytics()) {
+        work_request_t request;
+        
+        // Alternate between local and remote processing
+        if (round_robin++ & 1 && secondary_connected()) {
+            // Send to secondary
+            prepare_work_request(&request);
+            d2d_send_work_request(&request);
+        } else {
+            // Process locally
+            queue_local_analytics(&request);
+        }
+    }
+}
+
+// Secondary device work processor
+void process_remote_work(work_request_t *request) {
+    analytics_result_t result = {0};
     
-    // Primary metrics for efficiency calc (8 bytes)
-    uint16_t right_contact_time;
-    uint16_t right_flight_time;
-    uint8_t right_form_score;
-    uint8_t current_pace_min_km;
-} PrimaryContextPacket;  // Total: 20 bytes
+    switch (request->work_type) {
+        case WORK_EFFICIENCY_CALC:
+            result.efficiency = calculate_running_efficiency(
+                &request->data.efficiency
+            );
+            break;
+            
+        case WORK_FATIGUE_ANALYSIS:
+            result.fatigue = analyze_fatigue(
+                &request->data.fatigue
+            );
+            break;
+            
+        // ... other work types
+    }
+    
+    // Send result back to primary
+    d2d_send_work_result(&result);
+}
 ```
 
-### Bandwidth Analysis
-- **Secondary → Primary**: 44 bytes × 10Hz = 440 bytes/sec
-- **Primary → Secondary**: 20 bytes × 1Hz = 20 bytes/sec
-- **Total D2D bandwidth**: ~460 bytes/sec (well within BLE capacity)
+### Phase 3: Enhanced D2D Protocol
+
+```c
+// Extended D2D message types
+typedef enum {
+    D2D_MSG_SENSOR_DATA = 0x01,      // Existing
+    D2D_MSG_WORK_REQUEST = 0x10,     // New
+    D2D_MSG_WORK_RESULT = 0x11,      // New
+    D2D_MSG_LOAD_STATUS = 0x12,      // New
+    D2D_MSG_SYNC_STATE = 0x13,       // New
+} d2d_msg_type_t;
+
+// Load status exchange
+typedef struct {
+    uint8_t msg_type;  // D2D_MSG_LOAD_STATUS
+    uint8_t cpu_load_percent;
+    uint8_t analytics_queue_depth;
+    uint8_t sensor_queue_depth;
+    uint16_t avg_processing_time_ms;
+    uint8_t available_work_types;  // Bitmask
+} d2d_load_status_t;
+
+// Work result message
+typedef struct {
+    uint8_t msg_type;  // D2D_MSG_WORK_RESULT
+    uint8_t work_type;
+    uint32_t request_timestamp;
+    uint16_t processing_time_ms;
+    union {
+        float efficiency_score;
+        uint8_t fatigue_index;
+        uint8_t injury_risk;
+        float vertical_stiffness;
+    } result;
+} d2d_work_result_t;
+```
 
 ---
 
-## Implementation Recommendations
+## Communication Protocol
 
-### 1. Thread Distribution
-
-#### Primary Device Threads
-```c
-// Thread 1: Sensor Collection (100Hz)
-- Read right foot sensors
-- Calculate local metrics
-- Send to processing queue
-
-// Thread 2: Asymmetry & Aggregation (10Hz)
-- Receive secondary metrics via D2D
-- Calculate all asymmetry metrics
-- Aggregate performance indicators
-
-// Thread 3: BLE Communication (1Hz)
-- Prepare real-time packets
-- Handle phone commands
-- Manage GPS updates
-
-// Thread 4: Session Management (0.5Hz)
-- Log aggregated data
-- Manage file system
-- Calculate session statistics
-```
-
-#### Secondary Device Threads
-```c
-// Thread 1: Sensor Collection (100Hz)
-- Read left foot sensors
-- Calculate local metrics
-- Send to processing queue
-
-// Thread 2: Complex Analytics (2-5Hz)
-- Running efficiency calculation
-- Injury risk assessment
-- Fatigue analysis (both feet data)
-- Vertical stiffness computation
-
-// Thread 3: D2D Communication (10Hz)
-- Send metrics to primary
-- Receive context from primary
-- Handle sync commands
-
-// Thread 4: Local Optimization (1Hz)
-- Gait pattern analysis
-- Form improvement suggestions
-- Predictive analytics
-```
-
-### 2. Synchronization Strategy
+### Efficient D2D Work Distribution
 
 ```c
-// Time synchronization packet
+// Minimize D2D traffic with smart batching
 typedef struct {
-    uint32_t primary_timestamp;
-    uint32_t secondary_timestamp;
-    int16_t clock_offset_ms;
-    uint8_t sync_quality;
-} TimeSyncPacket;
+    uint8_t num_requests;
+    work_request_t requests[4];  // Batch up to 4 requests
+} work_batch_t;
 
-// Synchronize every 10 seconds
-// Maintain <1ms accuracy for asymmetry calculations
+// Send only essential data for remote processing
+typedef struct {
+    // Minimal data for efficiency calculation
+    uint16_t cadence_x2;
+    uint8_t duty_factor_pct;
+    uint8_t vertical_osc_mm;
+    int8_t forward_lean_deg;
+} efficiency_input_minimal_t;
+
+// Result compression
+typedef struct {
+    uint8_t efficiency_score;      // 0-100 instead of float
+    uint8_t fatigue_index;         // 0-100
+    uint8_t injury_risk;           // 0-100
+    uint8_t confidence;            // 0-100
+} analytics_result_compressed_t;
 ```
 
-### 3. Failover Handling
-
-If D2D connection is lost:
-- **Primary**: Continues with right-foot-only metrics
-- **Secondary**: Stores calculated metrics locally
-- **Both**: Set "degraded mode" flag in status
-
-### 4. Power Optimization
+### Priority-Based Work Queue
 
 ```c
-// Adaptive computation based on battery
-if (battery_level < 20) {
-    // Primary: Disable non-essential asymmetry calcs
-    // Secondary: Reduce complex analytics frequency
-    // Both: Maintain core safety metrics
+// Work priority for load balancing
+typedef enum {
+    PRIORITY_CRITICAL = 0,    // Never offload
+    PRIORITY_HIGH = 1,        // Offload only if very busy
+    PRIORITY_MEDIUM = 2,      // Normal offload candidate
+    PRIORITY_LOW = 3,         // Always offload if possible
+} work_priority_t;
+
+typedef struct {
+    struct k_work work;
+    work_priority_t priority;
+    bool can_offload;
+    uint32_t deadline_ms;
+    work_request_t request;
+} prioritized_work_t;
+
+// Decision logic
+bool should_offload_work(prioritized_work_t *work, 
+                        device_load_t *local_load,
+                        device_load_t *remote_load) {
+    // Never offload critical work
+    if (work->priority == PRIORITY_CRITICAL) {
+        return false;
+    }
+    
+    // Check deadline
+    uint32_t time_to_deadline = work->deadline_ms - k_uptime_get_32();
+    if (time_to_deadline < 100) {  // Less than 100ms
+        return false;  // Process locally to meet deadline
+    }
+    
+    // Load-based decision
+    int load_difference = local_load->cpu_load_percent - 
+                         remote_load->cpu_load_percent;
+    
+    switch (work->priority) {
+        case PRIORITY_HIGH:
+            return load_difference > 30;  // Only if significantly loaded
+            
+        case PRIORITY_MEDIUM:
+            return load_difference > 10;  // Moderate threshold
+            
+        case PRIORITY_LOW:
+            return remote_load->can_accept_work;  // Always if possible
+    }
+    
+    return false;
 }
 ```
 
 ---
 
-## Benefits of This Distribution
+## Dynamic Load Balancing
 
-### Performance Improvements
-1. **CPU Load Reduction**: ~40% lower on each device vs. single-device processing
-2. **Real-time Performance**: BLE updates never blocked by complex calculations
-3. **Parallel Processing**: True parallel computation of independent metrics
-4. **Scalability**: Easy to add new algorithms to less loaded device
+### Adaptive Work Distribution Algorithm
 
-### System Advantages
-1. **Redundancy**: Critical metrics calculated on both devices
-2. **Flexibility**: Can reassign tasks based on load
-3. **Power Efficiency**: Balanced power consumption
-4. **Maintainability**: Clear separation of concerns
+```c
+typedef struct {
+    // Performance tracking
+    uint32_t local_completed;
+    uint32_t remote_completed;
+    uint32_t total_local_time_ms;
+    uint32_t total_remote_time_ms;
+    
+    // Load balancing state
+    uint8_t offload_percentage;  // 0-100%
+    uint32_t last_adjustment_time;
+    
+    // Thresholds
+    uint8_t target_cpu_load;      // e.g., 30%
+    uint8_t max_cpu_load;         // e.g., 50%
+} load_balancer_t;
 
-### Future Enhancements
-1. **Dynamic Load Balancing**: Shift calculations based on real-time CPU usage
-2. **ML Model Distribution**: Run inference on secondary while primary handles I/O
-3. **Cooperative Processing**: Split single algorithm across both devices
-4. **Edge Computing**: Secondary as edge processor for pattern recognition
+void adaptive_load_balance(load_balancer_t *lb,
+                          device_load_t *local,
+                          device_load_t *remote) {
+    uint32_t now = k_uptime_get_32();
+    
+    // Adjust every 5 seconds
+    if (now - lb->last_adjustment_time < 5000) {
+        return;
+    }
+    
+    // Calculate average processing times
+    uint32_t avg_local_time = lb->local_completed > 0 ?
+        lb->total_local_time_ms / lb->local_completed : 0;
+    uint32_t avg_remote_time = lb->remote_completed > 0 ?
+        lb->total_remote_time_ms / lb->remote_completed : 0;
+    
+    // Adjust offload percentage based on performance
+    if (local->cpu_load_percent > lb->max_cpu_load) {
+        // Increase offloading
+        lb->offload_percentage = MIN(100, lb->offload_percentage + 10);
+    } else if (local->cpu_load_percent < lb->target_cpu_load &&
+               remote->cpu_load_percent > lb->target_cpu_load) {
+        // Decrease offloading
+        lb->offload_percentage = MAX(0, lb->offload_percentage - 10);
+    }
+    
+    // Consider communication overhead
+    if (avg_remote_time > avg_local_time * 2) {
+        // Remote processing too slow (including comm overhead)
+        lb->offload_percentage = MAX(0, lb->offload_percentage - 20);
+    }
+    
+    lb->last_adjustment_time = now;
+    
+    LOG_INF("Load balance adjusted: offload=%u%%, local_cpu=%u%%, remote_cpu=%u%%",
+            lb->offload_percentage, local->cpu_load_percent, 
+            remote->cpu_load_percent);
+}
+```
+
+### Fault Tolerance
+
+```c
+// Handle secondary device unavailability
+typedef struct {
+    bool secondary_available;
+    uint32_t last_heartbeat;
+    uint32_t pending_work_count;
+    work_request_t pending_work[10];
+} secondary_state_t;
+
+void handle_secondary_timeout(secondary_state_t *state) {
+    if (k_uptime_get_32() - state->last_heartbeat > 1000) {
+        LOG_WRN("Secondary device timeout, processing work locally");
+        
+        state->secondary_available = false;
+        
+        // Process all pending work locally
+        for (int i = 0; i < state->pending_work_count; i++) {
+            queue_local_analytics(&state->pending_work[i]);
+        }
+        
+        state->pending_work_count = 0;
+    }
+}
+```
 
 ---
 
-## Summary
+## Benefits and Trade-offs
 
-By intelligently distributing calculations between primary and secondary devices:
+### Benefits of Load Distribution
 
-- **Device-specific calculations** (🟦) run locally on each device
-- **Asymmetry and aggregation** (🟨) computed on primary (has all data)
-- **Complex analytics** (🟨) offloaded to secondary (available CPU)
-- **D2D traffic minimized** to essential metrics only
-- **Both devices utilized** efficiently at ~40-45% CPU each
+1. **Reduced Peak CPU Usage**
+   - Primary: 40% → 25% (15% reduction)
+   - Secondary: 35% → 25% (10% reduction)
 
-This architecture maximizes the computational resources available across both devices while maintaining real-time performance and minimizing power consumption.
+2. **Better Real-time Performance**
+   - Fewer deadline misses
+   - More consistent BLE updates
+   - Smoother user experience
+
+3. **Extended Battery Life**
+   - Lower average CPU usage
+   - Fewer thermal events
+   - More efficient processing
+
+4. **Scalability**
+   - Room for additional features
+   - ML model deployment ready
+   - Future algorithm complexity
+
+### Trade-offs and Challenges
+
+1. **Communication Overhead**
+   - D2D messages for work distribution
+   - Result synchronization
+   - ~5-10ms latency per request
+
+2. **Complexity**
+   - State synchronization
+   - Error handling
+   - Debugging distributed system
+
+3. **Memory Usage**
+   - Work queues on both devices
+   - Result caching
+   - ~4KB additional RAM
+
+### Implementation Complexity vs Benefit
+
+| Strategy | Complexity | Benefit | Recommendation |
+|----------|------------|---------|----------------|
+| **Fixed Role Assignment** | Low | Medium | ✅ Start here |
+| **Round-Robin Distribution** | Medium | Medium | ⚠️ Good second step |
+| **Dynamic Load Balancing** | High | High | 🔄 Future enhancement |
+| **ML-Based Prediction** | Very High | Very High | 🚀 Long-term goal |
+
+---
+
+## Recommended Implementation Plan
+
+### Phase 1: Fixed Role Assignment (Week 1-2)
+1. Assign analytics thread to secondary only
+2. Primary focuses on real-time and aggregation
+3. Measure performance improvement
+
+### Phase 2: Basic Work Distribution (Week 3-4)
+1. Implement work request/result protocol
+2. Add round-robin distribution
+3. Handle timeout/failure cases
+
+### Phase 3: Dynamic Balancing (Week 5-6)
+1. Add load monitoring
+2. Implement adaptive algorithm
+3. Optimize based on real-world data
+
+### Phase 4: Advanced Features (Future)
+1. Predictive load balancing
+2. Work stealing queue
+3. Distributed state management
+
+---
+
+## Example Implementation
+
+### Secondary as Analytics Processor
+
+```c
+// On Secondary Device - Enhanced analytics thread
+void analytics_thread_secondary(void) {
+    // Process local analytics
+    process_local_analytics();
+    
+    // Check for remote work requests
+    work_request_t request;
+    if (d2d_get_work_request(&request)) {
+        analytics_result_t result;
+        
+        uint32_t start = k_uptime_get_32();
+        
+        switch (request.work_type) {
+            case WORK_EFFICIENCY_CALC:
+                // Calculate for both feet combined
+                result.efficiency = calculate_running_efficiency_dual(
+                    request.data.efficiency.left,
+                    request.data.efficiency.right
+                );
+                break;
+                
+            case WORK_FATIGUE_ANALYSIS:
+                // Analyze fatigue patterns
+                result.fatigue = analyze_fatigue_patterns(
+                    request.data.fatigue.history,
+                    request.data.fatigue.current
+                );
+                break;
+        }
+        
+        uint32_t processing_time = k_uptime_get_32() - start;
+        
+        // Send result back
+        d2d_send_analytics_result(&result, processing_time);
+    }
+}
+
+// On Primary Device - Work distributor
+void distribute_analytics_work(void) {
+    // Prepare work request with data from both feet
+    work_request_t request = {
+        .work_type = WORK_EFFICIENCY_CALC,
+        .timestamp = k_uptime_get_32(),
+        .data.efficiency = {
+            .left = get_left_foot_metrics(),
+            .right = get_right_foot_metrics(),
+            .cadence = get_combined_cadence(),
+            .vertical_osc = get_vertical_oscillation()
+        }
+    };
+    
+    // Send to secondary for processing
+    if (secondary_available()) {
+        d2d_queue_work_request(&request);
+    } else {
+        // Fallback to local processing
+        queue_local_analytics(&request);
+    }
+}
+```
+
+---
+
+## Conclusion
+
+Distributing computation between primary and secondary devices offers significant benefits:
+
+1. **Balanced CPU usage** - Both devices at ~25% instead of 35-40%
+2. **Specialized processing** - Each device optimized for specific tasks
+3. **Scalability** - Room for future features and algorithms
+4. **Reliability** - Graceful degradation if one device is busy
+
+The recommended approach is to start with fixed role assignment (secondary as analytics processor) and gradually add dynamic load balancing based on real-world performance data.
+
+Key success factors:
+- Minimize D2D communication overhead
+- Implement robust error handling
+- Monitor and adapt based on actual usage patterns
+- Keep the system debuggable and maintainable

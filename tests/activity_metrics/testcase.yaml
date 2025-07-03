@@ -1,0 +1,7 @@
+tests:
+  activity_metrics.unit:
+    platform_allow: native_posix native_posix_64
+    tags: activity_metrics unit
+    harness: ztest
+    min_ram: 32
+    min_flash: 64

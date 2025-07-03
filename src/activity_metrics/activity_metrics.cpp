@@ -43,8 +43,28 @@ K_THREAD_STACK_DEFINE(activity_metrics_stack_area, activity_metrics_stack_size);
 static struct k_thread activity_metrics_thread_data;
 static k_tid_t activity_metrics_tid;
 
-// Message queue for activity metrics
-K_MSGQ_DEFINE(activity_metrics_msgq, sizeof(generic_message_t), 40, 4);
+// Work queue configuration
+static constexpr int activity_metrics_workq_stack_size = 4096;
+K_THREAD_STACK_DEFINE(activity_metrics_workq_stack, activity_metrics_workq_stack_size);
+static struct k_work_q activity_metrics_work_q;
+
+// Work items for different message types
+static struct k_work process_foot_data_work;
+static struct k_work process_bhi360_data_work;
+static struct k_work process_command_work;
+static struct k_work_delayable periodic_update_work;
+static struct k_work weight_measurement_work;
+
+// Message buffers for different work items
+static foot_samples_t pending_foot_data;
+static bhi360_log_record_t pending_bhi360_data;
+static bhi360_step_count_t pending_step_count;
+static char pending_command[MAX_COMMAND_STRING_LEN];
+static uint8_t pending_foot_id;  // Which foot (0=left, 1=right)
+static msg_type_t pending_bhi360_type;  // Which type of BHI360 message
+
+// Message queue is defined in app.cpp
+extern struct k_msgq activity_metrics_msgq;
 
 // Module state
 static bool module_initialized = false;
@@ -114,6 +134,11 @@ static void process_bhi360_data(const generic_message_t *msg);
 static void calculate_realtime_metrics(void);
 static void send_periodic_record(void);
 static void send_ble_update(void);
+static void process_foot_data_work_handler(struct k_work *work);
+static void process_bhi360_data_work_handler(struct k_work *work);
+static void process_command_work_handler(struct k_work *work);
+static void periodic_update_work_handler(struct k_work *work);
+static void weight_measurement_work_handler(struct k_work *work);
 static float calculate_pace_from_cadence(float cadence);
 static int8_t calculate_balance_score(void);
 static uint8_t calculate_form_score(void);
@@ -140,6 +165,20 @@ static void activity_metrics_init(void)
     memset(&weight_measurement, 0, sizeof(weight_measurement));
     weight_measurement.motion_threshold = 0.5f; // m/s² threshold for standing still
     weight_measurement.stable_samples_required = 30; // 3 seconds at 10Hz
+    
+    // Initialize work queue
+    k_work_queue_init(&activity_metrics_work_q);
+    k_work_queue_start(&activity_metrics_work_q, activity_metrics_workq_stack,
+                       K_THREAD_STACK_SIZEOF(activity_metrics_workq_stack),
+                       activity_metrics_priority - 1, NULL);
+    k_thread_name_set(&activity_metrics_work_q.thread, "activity_metrics_wq");
+    
+    // Initialize work items
+    k_work_init(&process_foot_data_work, process_foot_data_work_handler);
+    k_work_init(&process_bhi360_data_work, process_bhi360_data_work_handler);
+    k_work_init(&process_command_work, process_command_work_handler);
+    k_work_init_delayable(&periodic_update_work, periodic_update_work_handler);
+    k_work_init(&weight_measurement_work, weight_measurement_work_handler);
     
     // Register step event callback
     step_detection_register_callback([](const StepEvent* event) {
@@ -196,7 +235,7 @@ static void activity_metrics_init(void)
     LOG_INF("Activity metrics module initialized");
 }
 
-// Main processing thread
+// Main processing thread - waits for messages and queues appropriate work
 static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
 {
     ARG_UNUSED(arg1);
@@ -206,97 +245,174 @@ static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
     generic_message_t msg;
     
     while (true) {
-        // Wait for messages with timeout for periodic processing
-        int ret = k_msgq_get(&activity_metrics_msgq, &msg, K_MSEC(100));
+        // Wait for messages
+        int ret = k_msgq_get(&activity_metrics_msgq, &msg, K_FOREVER);
         
         if (ret == 0) {
-            // Process message based on type
+            // Queue different work based on message type
             switch (msg.type) {
                 case MSG_TYPE_FOOT_SAMPLES:
+                    // Copy foot data and queue foot processing work
+                    memcpy(&pending_foot_data, &msg.data.foot_samples, sizeof(foot_samples_t));
                     // Determine which foot based on sender
                     if (msg.sender == SENDER_FOOT_SENSOR_THREAD) {
                         #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                        process_foot_sensor_data(&msg.data.foot_samples, 1); // Right foot
+                        pending_foot_id = 1; // Right foot on primary
                         #else
-                        process_foot_sensor_data(&msg.data.foot_samples, 0); // Left foot
+                        pending_foot_id = 0; // Left foot on secondary
                         #endif
                     } else if (msg.sender == SENDER_D2D_SECONDARY) {
-                        // D2D data from secondary device
-                        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                        process_foot_sensor_data(&msg.data.foot_samples, 0); // Left foot from secondary
-                        #endif
+                        pending_foot_id = 0; // Left foot from secondary
                     }
+                    k_work_submit_to_queue(&activity_metrics_work_q, &process_foot_data_work);
                     break;
                     
                 case MSG_TYPE_BHI360_LOG_RECORD:
+                    // Copy full BHI360 data
+                    memcpy(&pending_bhi360_data, &msg.data.bhi360_log_record, sizeof(bhi360_log_record_t));
+                    pending_bhi360_type = msg.type;
+                    k_work_submit_to_queue(&activity_metrics_work_q, &process_bhi360_data_work);
+                    break;
+                    
+                case MSG_TYPE_BHI360_STEP_COUNT:
+                    // Copy step count data
+                    memcpy(&pending_step_count, &msg.data.bhi360_step_count, sizeof(bhi360_step_count_t));
+                    pending_bhi360_type = msg.type;
+                    k_work_submit_to_queue(&activity_metrics_work_q, &process_bhi360_data_work);
+                    break;
+                    
                 case MSG_TYPE_BHI360_3D_MAPPING:
                 case MSG_TYPE_BHI360_LINEAR_ACCEL:
-                case MSG_TYPE_BHI360_STEP_COUNT:
-                    process_bhi360_data(&msg);
+                    // For these, we'll use the same BHI360 work handler
+                    pending_bhi360_type = msg.type;
+                    k_work_submit_to_queue(&activity_metrics_work_q, &process_bhi360_data_work);
                     break;
                     
                 case MSG_TYPE_COMMAND:
-                    if (strcmp(msg.data.command_str, "START_ACTIVITY") == 0) {
-                        // Start new activity session
-                        SessionHeader header = {
-                            .session_id = k_uptime_get_32(),
-                            .start_timestamp = k_uptime_get_32() / 1000,
-                            .activity_type = ACTIVITY_TYPE_RUNNING,
-                            .activity_subtype = RUN_TYPE_EVERYDAY,
-                            .firmware_version = {1, 0, 0},
-                            .user_weight_kg = sensor_data.weight_measurement_valid ? 
-                                             (uint16_t)(sensor_data.calculated_weight_kg * 10) : 700, // Use measured weight or default
-                            .user_height_cm = 175,
-                            .user_age = 30,
-                            .user_gender = 0,
-                            .left_battery_pct = 100,
-                            .right_battery_pct = 100,
-                            .calibration_id = 0,
-                            .gps_mode = GPS_MODE_OFF
-                        };
-                        activity_session_start(&header);
-                        atomic_set(&processing_active, 1);
-                        LOG_INF("Activity session started");
-                    } else if (strcmp(msg.data.command_str, "STOP_ACTIVITY") == 0) {
-                        activity_session_stop();
-                        atomic_set(&processing_active, 0);
-                        LOG_INF("Activity session stopped");
-                    } else if (strcmp(msg.data.command_str, "MEASURE_WEIGHT") == 0) {
-                        start_weight_measurement();
-                        LOG_INF("Weight measurement requested");
-                    }
+                    // Copy command and queue command processing work
+                    strncpy(pending_command, msg.data.command_str, MAX_COMMAND_STRING_LEN - 1);
+                    pending_command[MAX_COMMAND_STRING_LEN - 1] = '\0';
+                    k_work_submit_to_queue(&activity_metrics_work_q, &process_command_work);
                     break;
                     
                 default:
-                    LOG_DBG("Received message type %d from %s", msg.type, get_sender_name(msg.sender));
+                    LOG_DBG("Received unsupported message type %d from %s", 
+                            msg.type, get_sender_name(msg.sender));
                     break;
             }
         }
+    }
+}
+
+// Work handler for processing foot sensor data
+static void process_foot_data_work_handler(struct k_work *work)
+{
+    LOG_DBG("Processing foot sensor data for foot %d", pending_foot_id);
+    process_foot_sensor_data(&pending_foot_data, pending_foot_id);
+}
+
+// Work handler for processing BHI360 data
+static void process_bhi360_data_work_handler(struct k_work *work)
+{
+    LOG_DBG("Processing BHI360 data, type: %d", pending_bhi360_type);
+    
+    // Create a temporary message with the appropriate data
+    generic_message_t temp_msg;
+    temp_msg.type = pending_bhi360_type;
+    
+    switch (pending_bhi360_type) {
+        case MSG_TYPE_BHI360_LOG_RECORD:
+            memcpy(&temp_msg.data.bhi360_log_record, &pending_bhi360_data, sizeof(bhi360_log_record_t));
+            break;
+        case MSG_TYPE_BHI360_STEP_COUNT:
+            memcpy(&temp_msg.data.bhi360_step_count, &pending_step_count, sizeof(bhi360_step_count_t));
+            break;
+        default:
+            // For other types, we'll handle them in process_bhi360_data
+            break;
+    }
+    
+    process_bhi360_data(&temp_msg);
+}
+
+// Work handler for processing commands
+static void process_command_work_handler(struct k_work *work)
+{
+    LOG_DBG("Processing command: %s", pending_command);
+    
+    if (strcmp(pending_command, "START_ACTIVITY") == 0) {
+        // Start new activity session
+        SessionHeader header = {
+            .session_id = k_uptime_get_32(),
+            .start_timestamp = k_uptime_get_32() / 1000,
+            .activity_type = ACTIVITY_TYPE_RUNNING,
+            .activity_subtype = RUN_TYPE_EVERYDAY,
+            .firmware_version = {1, 0, 0},
+            .user_weight_kg = sensor_data.weight_measurement_valid ? 
+                             (uint16_t)(sensor_data.calculated_weight_kg * 10) : 700,
+            .user_height_cm = 175,
+            .user_age = 30,
+            .user_gender = 0,
+            .left_battery_pct = 100,
+            .right_battery_pct = 100,
+            .calibration_id = 0,
+            .gps_mode = GPS_MODE_OFF
+        };
+        activity_session_start(&header);
+        atomic_set(&processing_active, 1);
+        // Start periodic update work
+        k_work_schedule_for_queue(&activity_metrics_work_q, &periodic_update_work, K_MSEC(100));
+        LOG_INF("Activity session started");
+    } else if (strcmp(pending_command, "STOP_ACTIVITY") == 0) {
+        activity_session_stop();
+        atomic_set(&processing_active, 0);
+        // Cancel periodic work
+        k_work_cancel_delayable(&periodic_update_work);
+        LOG_INF("Activity session stopped");
+    } else if (strcmp(pending_command, "MEASURE_WEIGHT") == 0) {
+        // Queue weight measurement work
+        k_work_submit_to_queue(&activity_metrics_work_q, &weight_measurement_work);
+        LOG_INF("Weight measurement requested");
+    } else {
+        LOG_WRN("Unknown command: %s", pending_command);
+    }
+}
+
+// Work handler for periodic updates
+static void periodic_update_work_handler(struct k_work *work)
+{
+    if (atomic_get(&processing_active) == 1) {
+        uint32_t now = k_uptime_get_32();
         
-        // Periodic processing
-        if (atomic_get(&processing_active) == 1) {
-            uint32_t now = k_uptime_get_32();
-            
-            // Calculate real-time metrics
-            calculate_realtime_metrics();
-            
-            // Send periodic record to data module
-            if (now - last_periodic_update >= PERIODIC_UPDATE_INTERVAL_MS) {
-                send_periodic_record();
-                last_periodic_update = now;
-            }
-            
-            // Send BLE update
-            if (now - last_ble_update >= BLE_UPDATE_INTERVAL_MS) {
-                send_ble_update();
-                last_ble_update = now;
-            }
+        // Calculate real-time metrics
+        calculate_realtime_metrics();
+        
+        // Send periodic record to data module
+        if (now - last_periodic_update >= PERIODIC_UPDATE_INTERVAL_MS) {
+            send_periodic_record();
+            last_periodic_update = now;
         }
         
-        // Process weight measurement if in progress
-        if (weight_measurement.measurement_in_progress) {
-            process_weight_measurement();
+        // Send BLE update
+        if (now - last_ble_update >= BLE_UPDATE_INTERVAL_MS) {
+            send_ble_update();
+            last_ble_update = now;
         }
+        
+        // Reschedule for next update
+        k_work_schedule_for_queue(&activity_metrics_work_q, &periodic_update_work, K_MSEC(100));
+    }
+}
+
+// Work handler for weight measurement
+static void weight_measurement_work_handler(struct k_work *work)
+{
+    start_weight_measurement();
+    
+    // Continue processing weight measurement until complete
+    while (weight_measurement.measurement_in_progress) {
+        process_weight_measurement();
+        k_msleep(100); // Check every 100ms
     }
 }
 

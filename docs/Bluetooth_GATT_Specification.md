@@ -1,7 +1,7 @@
 # Bluetooth GATT Specification
 
-**Version:** 2.6  
-**Date:** January 2025  
+**Version:** 2.7  
+**Date:** July 2025  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
 
@@ -9,24 +9,34 @@
 
 ## Changelog
 
-### Version 2.6 (January 2025)
+### Version 2.7 (July 2025)
+- Added Activity Metrics Service (`4fd5b690-...`) for real-time running metrics
+- Moved Total Step Count (`...b696`) and Activity Step Count (`...b697`) to Activity Metrics Service
+- Added Secondary Device Service (`4fd5b6a0-...`) for secondary device information (primary only)
+- Added packed data structures for efficient BLE transmission:
+  - Packed Device Status (`...ec7`) in Information Service
+  - Packed File Notification (`...ec8`) in Information Service
+- Improved file notification system with combined ID and path notifications
+- Updated step count behavior documentation for Activity Metrics Service
+
+### Version 2.6 (June 2025)
 - Added Weight Measurement characteristic (`...ec6`) to Information Service
 - Added Weight Measurement Trigger (`...b68c`) to Control Service
 - Added D2D Weight Measurement (`...68e7`) for secondary device weight data
 - Weight measurement provides total weight from all 16 pressure sensors
 
-### Version 2.5 (January 2025)
+### Version 2.5 (June 2025)
 - Identified UUID conflicts between 3D Orientation Service and Information Service characteristics
 - Documented actual MCUmgr SMP service UUIDs vs. documentation discrepancies
 - Added notes about implementation issues to be fixed in future firmware updates
 
-### Version 2.4 (January 2025)
+### Version 2.4 (June 2025)
 - Modified Information Service to only send aggregated step counts to mobile phones
 - Individual foot step counts (BHI360 Step Count) are now deprecated for phone communication
 - D2D communication between primary and secondary devices remains unchanged
 - Mobile apps should use Total Step Count and Activity Step Count characteristics only
 
-### Version 2.3 (January 2025)
+### Version 2.3 (June 2025)
 - Added D2D Activity Step Count characteristic (`76ad68e6-...`) for secondary device activity steps
 - Fixed activity step count separation between primary and secondary devices
 - Removed unreliable heuristic for detecting activity steps from secondary
@@ -34,17 +44,17 @@
 - Added Activity Step Count characteristic (`...ec5`) for activity-specific step counting
 - Deprecated `activity_duration_s` field in `bhi360_step_count_t` - now always 0
 
-### Version 2.2 (January 2025)
+### Version 2.2 (June 2025)
 - Updated step count characteristics to provide count only (time tracking moved to separate characteristics)
 - Clarified that BHI360 Step Count (`...eb3`) provides global step count
 
-### Version 2.1 (June 2025)
+### Version 2.1 (May 2025)
 - Added Connection Parameter Control characteristic (`...b68b`) to Control Service
 - Added secondary device delete commands (`...b688`, `...b689`, `...b68a`) to Control Service
 - Added detailed documentation for connection profiles (Foreground, Background, Background Idle)
 - Added mobile app integration examples for background execution optimization
 
-### Version 2.0 (June 2025)
+### Version 2.0 (May 2025)
 - Initial comprehensive specification
 
 ---
@@ -57,13 +67,15 @@
 4. [Standard Services](#4-standard-services)
 5. [Information Service](#5-information-service)
 6. [Control Service](#6-control-service)
-7. [Proxy Services](#7-proxy-services)
-8. [Device-to-Device (D2D) Services](#8-device-to-device-d2d-services)
-9. [Data Structures](#9-data-structures)
-10. [Packet Sequencing and Recovery](#10-packet-sequencing-and-recovery)
-11. [Integration Examples](#11-integration-examples)
-12. [Error Handling and Status Communication](#12-error-handling-and-status-communication)
-13. [Common BLE Error Codes](#13-common-ble-error-codes)
+7. [Activity Metrics Service](#7-activity-metrics-service)
+8. [Secondary Device Service](#8-secondary-device-service)
+9. [Proxy Services](#9-proxy-services)
+10. [Device-to-Device (D2D) Services](#10-device-to-device-d2d-services)
+11. [Data Structures](#11-data-structures)
+12. [Packet Sequencing and Recovery](#12-packet-sequencing-and-recovery)
+13. [Integration Examples](#13-integration-examples)
+14. [Error Handling and Status Communication](#14-error-handling-and-status-communication)
+15. [Common BLE Error Codes](#15-common-ble-error-codes)
 
 ---
 
@@ -75,36 +87,27 @@ This device implements a comprehensive set of Bluetooth Low Energy (BLE) GATT se
 - Log file management
 - Firmware updates (FOTA)
 - Device-to-device communication
+- Real-time activity metrics and analytics
 
 ### Key Features
 - **Fixed-point integer format** for optimal bandwidth usage
 - **Encrypted communication** for all services
 - **Dual-device architecture** with primary/secondary roles
 - **40% bandwidth reduction** compared to floating-point format
+- **Real-time activity metrics** for running and sports applications
+- **Packed data structures** for efficient multi-field transmission
 
-```mermaid
-graph TB
-    subgraph "Mobile App"
-        APP[BLE Client]
-    end
-    
-    subgraph "Primary Device"
-        PRIM[GATT Services]
-        CONV[Fixed-Point Converter]
-        D2DC[D2D Central]
-    end
-    
-    subgraph "Secondary Device"
-        D2DP[D2D Peripheral]
-        SENS[Sensor Data]
-    end
-    
-    APP <-->|"BLE"| PRIM
-    PRIM <--> CONV
-    CONV <--> D2DC
-    D2DC <-->|"BLE D2D"| D2DP
-    D2DP <--> SENS
-```
+DrawFlowchart(
+  Syntax(
+    "APP[Mobile Phone<br/>BLE Client] -->|BLE| PRIM[Primary Device<br/>GATT Services]",
+    "PRIM --> CONV[Fixed-Point<br/>Converter]",
+    "CONV --> D2DC[D2D Central]",
+    "D2DC -->|BLE D2D| D2DP[Secondary Device<br/>D2D Peripheral]",
+    "D2DP --> SENS[Sensor Data]"
+  ),
+  "TB",
+  "default"
+)
 
 ---
 
@@ -112,26 +115,20 @@ graph TB
 
 ### Device Roles
 
-```mermaid
-graph LR
-    subgraph "Primary Device (Right)"
-        P1[Phone Services]
-        P2[D2D Central]
-        P3[Proxy Services]
-    end
-    
-    subgraph "Secondary Device (Left)"
-        S1[D2D Peripheral]
-        S2[Sensor Services]
-    end
-    
-    PHONE[Mobile App] <-->|"Direct BLE"| P1
-    P2 <-->|"D2D BLE"| S1
-    P3 -->|"Relay"| P2
-```
+DrawFlowchart(
+  Syntax(
+    "PHONE[Mobile App] -->|Direct BLE| P1[Primary Device<br/>Phone Services]",
+    "P1 --> P3[Proxy Services]",
+    "P3 -->|Relay| P2[D2D Central]",
+    "P2 -->|D2D BLE| S1[Secondary Device<br/>D2D Peripheral]",
+    "S1 --> S2[Sensor Services]"
+  ),
+  "LR",
+  "default"
+)
 
 | Feature | Primary Device | Secondary Device |
-|---------|----------------|------------------|
+|---:|:---:|:---:|
 | Device Name | "SensingGR" | "SensingGL" |
 | BLE Role | Peripheral + Central | Peripheral only |
 | Phone Connection | Yes | No |
@@ -147,7 +144,7 @@ All sensor data uses fixed-point integers to optimize bandwidth and ensure porta
 ### Scaling Factors
 
 | Data Type | Scale Factor | Precision | Range | Example |
-|-----------|--------------|-----------|-------|---------|
+|---:|---:|---:|---:|---:|
 | Quaternion | 10,000 | 0.0001 | ±1.0 | 0.7071 → 7071 |
 | Linear Acceleration | 1,000 | 0.001 m/s² | ±20 m/s² | 9.81 → 9810 |
 | Gyroscope | 10,000 | 0.0001 rad/s | ±2.0 rad/s | 1.5708 → 15708 |
@@ -155,24 +152,15 @@ All sensor data uses fixed-point integers to optimize bandwidth and ensure porta
 
 ### Bandwidth Comparison
 
-```mermaid
-graph LR
-    subgraph "Float Format"
-        F1[28 bytes<br/>3D Mapping]
-        F2[12 bytes<br/>Linear Accel]
-        F3[40 bytes/update<br/>@ 50Hz = 2000 B/s]
-    end
-    
-    subgraph "Fixed-Point Format"
-        X1[15 bytes<br/>3D Mapping]
-        X2[6 bytes<br/>Linear Accel]
-        X3[21 bytes/update<br/>@ 50Hz = 1050 B/s]
-    end
-    
-    F1 -->|"-46%"| X1
-    F2 -->|"-50%"| X2
-    F3 -->|"-48%"| X3
-```
+DrawFlowchart(
+  Syntax(
+    "F1[Float Format<br/>28 bytes<br/>3D Mapping] -->|-46%| X1[Fixed-Point<br/>15 bytes<br/>3D Mapping]",
+    "F2[Float Format<br/>12 bytes<br/>Linear Accel] -->|-50%| X2[Fixed-Point<br/>6 bytes<br/>Linear Accel]",
+    "F3[Float Format<br/>40 bytes/update<br/>@ 50Hz = 2000 B/s] -->|-48%| X3[Fixed-Point<br/>21 bytes/update<br/>@ 50Hz = 1050 B/s]"
+  ),
+  "LR",
+  "default"
+)
 
 ### Conversion Functions
 
@@ -204,7 +192,7 @@ float decode_acceleration(int16_t fixed) {
 **UUID:** `0000180A-0000-1000-8000-00805F9B34FB`
 
 | Characteristic | UUID | Properties | Data Type |
-|----------------|------|------------|-----------|
+|---:|---:|---:|---:|
 | Manufacturer Name | 0x2A29 | Read | String |
 | Model Number | 0x2A24 | Read | String |
 | Serial Number | 0x2A25 | Read | String |
@@ -215,14 +203,14 @@ float decode_acceleration(int16_t fixed) {
 **UUID:** `0000180F-0000-1000-8000-00805F9B34FB`
 
 | Characteristic | UUID | Properties | Data Type | Description |
-|----------------|------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Battery Level | 0x2A19 | Read, Notify | uint8_t | 0-100% |
 
 ### Current Time Service (CTS)
 **UUID:** `00001805-0000-1000-8000-00805F9B34FB`
 
 | Characteristic | UUID | Properties | Data Type |
-|----------------|------|------------|-----------|
+|---:|---:|---:|---:|
 | Current Time | 0x2A2B | Read, Write, Notify | CTS struct |
 
 ---
@@ -235,7 +223,7 @@ float decode_acceleration(int16_t fixed) {
 ### Characteristics
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Current Time | 0x2A2B | Read, Notify | CTS format | Device time |
 | Status | `...eab` | Read, Notify | uint32_t | Status bitfield |
 | Foot Sensor Samples | `...eaf` | Read, Notify | foot_samples_t | 16 ADC channels |
@@ -247,19 +235,19 @@ float decode_acceleration(int16_t fixed) {
 | **BHI360 3D Mapping** | `...eb2` | Read, Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
 | **BHI360 Step Count** | `...eb3` | Read, Notify | step_count_only_t | **DEPRECATED** - Individual foot steps |
 | **BHI360 Linear Accel** | `...eb4` | Read, Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
-| **Total Step Count** | `...ec4` | Read, Notify | step_count_only_t | Aggregated both feet |
-| **Activity Step Count** | `...ec5` | Read, Notify | step_count_only_t | Activity-specific steps |
 | **Weight Measurement** | `...ec6` | Read, Notify | uint16_t | Weight in kg × 10 (0.1kg precision) |
 | FOTA Progress | `...eb5` | Read, Notify | fota_progress_t | Update status |
 | **Activity Log Available** | `...ec2` | Read, Notify | uint8_t | Latest log ID |
 | **Activity Log Path** | `...ec3` | Read, Notify | char[] | UTF-8 path |
+| **Packed Device Status** | `...ec7` | Read, Notify | device_status_packed_t | Combined status fields |
+| **Packed File Notification** | `...ec8` | Read, Notify | file_notification_packed_t | Combined file ID and path |
 
 ### Secondary Device Characteristics (Primary Device Only)
 
 These characteristics are only available on the primary device and relay information from the connected secondary device:
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Secondary Manufacturer | `...eb6` | Read | String | Secondary device manufacturer |
 | Secondary Model | `...eb7` | Read | String | Secondary device model |
 | Secondary Serial | `...eb8` | Read | String | Secondary device serial |
@@ -275,43 +263,45 @@ These characteristics are only available on the primary device and relay informa
 
 **Note:** Secondary device characteristics show "Not Connected" when the secondary device is not connected via D2D.
 
-### Step Count Characteristics
+### Packed Data Structures
 
-The Information Service provides aggregated step count characteristics for mobile applications:
+The Information Service includes packed characteristics that combine multiple related fields for efficient transmission:
 
-| Characteristic | Description | Behavior | Status |
-|----------------|-------------|----------|---------|
-| **BHI360 Step Count** | Individual foot global count | Always counting from boot | **DEPRECATED** - Do not use |
-| **Total Step Count** | Sum of both feet global counts | Always active | **RECOMMENDED** |
-| **Activity Step Count** | Steps during current activity only | 0 when no activity, resets on start | **RECOMMENDED** |
+#### Packed Device Status (`...ec7`)
 
-**Important Note**: As of version 2.4, mobile applications should only use the aggregated step count characteristics (Total Step Count and Activity Step Count). The individual foot step count characteristic (BHI360 Step Count) is deprecated and no longer sends notifications to conserve bandwidth and simplify mobile app implementation.
+Combines all device status information into a single 16-byte structure:
 
-#### Step Count Behavior
-
-1. **Global Counts** (BHI360 Step Count, Total Step Count):
-   - Start at 0 on device boot
-   - Continuously increment throughout device operation
-   - Never reset except on device restart
-   - Continue counting regardless of activity state
-
-2. **Activity Step Count**:
-   - Shows 0 when no activity is active
-   - Resets to 0 when activity starts (via Control Service)
-   - Counts only during active sessions
-   - Freezes at final value when activity stops
-   - Remains at last value until next activity
-
-#### Data Format
-
-All step count characteristics use the same 4-byte format:
 ```c
-typedef struct {
-    uint32_t step_count;  // Step count value
-} __packed step_count_only_t;
+typedef struct __attribute__((packed)) {
+    uint32_t status_bitfield;      // 0-3: Status flags
+    uint8_t  battery_percent;      // 4: Battery percentage (0-100)
+    uint8_t  charge_status;        // 5: Charging status
+    uint8_t  temperature_c;        // 6: Device temperature
+    uint8_t  activity_state;       // 7: Activity state
+    uint32_t uptime_seconds;       // 8-11: Device uptime
+    uint16_t free_storage_mb;      // 12-13: Free storage
+    uint8_t  connected_devices;    // 14: Connected device count
+    uint8_t  reserved;             // 15: Reserved
+} device_status_packed_t;
 ```
 
-**Note**: The `activity_duration_s` field in legacy structures is deprecated and always set to 0. Time-based metrics should be calculated by the mobile application using its own timers or GPS data.
+#### Packed File Notification (`...ec8`)
+
+Combines file availability and path into a single notification:
+
+```c
+typedef struct __attribute__((packed)) {
+    uint8_t  file_id;             // 0: File ID
+    uint8_t  file_type;           // 1: Type (0=foot, 1=BHI360, 2=activity)
+    uint8_t  device_source;       // 2: Source (0=primary, 1=secondary)
+    uint8_t  reserved;            // 3: Reserved
+    char     file_path[60];       // 4-63: File path
+} file_notification_packed_t;
+```
+
+### Step Count Note
+
+**Important**: As of version 2.7, the aggregated step count characteristics (Total Step Count and Activity Step Count) have been moved to the Activity Metrics Service. The BHI360 Step Count characteristic remains in the Information Service for backward compatibility but is deprecated and should not be used by mobile applications.
 
 ### Weight Measurement
 
@@ -319,21 +309,22 @@ The weight measurement feature calculates a person's total weight using all 16 p
 
 #### Usage Flow
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Control Service
-    participant Activity Metrics
-    participant Info Service
-    
-    App->>Control Service: Write 0x01 to Weight Trigger
-    Control Service->>Activity Metrics: MEASURE_WEIGHT command
-    Activity Metrics->>Activity Metrics: Check motion (must be still)
-    Activity Metrics->>Activity Metrics: Collect samples (3 seconds)
-    Activity Metrics->>Activity Metrics: Calculate weight
-    Activity Metrics->>Info Service: Weight result
-    Info Service-->>App: Notify weight (uint16_t)
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Control Service",
+    "participant Activity Metrics",
+    "participant Info Service",
+    "App->>Control Service: Write 0x01 to Weight Trigger",
+    "Control Service->>Activity Metrics: MEASURE_WEIGHT command",
+    "Activity Metrics->>Activity Metrics: Check motion (must be still)",
+    "Activity Metrics->>Activity Metrics: Collect samples (3 seconds)",
+    "Activity Metrics->>Activity Metrics: Calculate weight",
+    "Activity Metrics->>Info Service: Weight result",
+    "Info Service-->>App: Notify weight (uint16_t)"
+  ),
+  "default"
+)
 
 #### Weight Data Format
 
@@ -380,7 +371,7 @@ sequenceDiagram
 ### Characteristics
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Set Time | `...b681` | Write | uint32_t | Epoch time (big-endian) |
 | Delete Foot Log | `...b682` | Write, Notify | uint8_t | Log ID to delete |
 | Delete BHI360 Log | `...b683` | Write, Notify | uint8_t | Log ID to delete |
@@ -394,83 +385,159 @@ sequenceDiagram
 | Delete Secondary Activity Log | `...b68a` | Write, Notify | uint8_t | Log ID to delete on secondary |
 | **Weight Measurement Trigger** | `...b68c` | Write | uint8_t | Write 1 to trigger weight measurement |
 
-### Connection Parameter Control
-
-The Connection Parameter Control characteristic allows mobile applications to optimize BLE connection parameters for different usage scenarios, particularly for background execution on iOS and Android.
-
-#### Connection Profiles
-
-| Profile | Value | Min Interval | Max Interval | Latency | Timeout | Use Case |
-|---------|-------|--------------|--------------|---------|---------|----------|
-| **FOREGROUND** | 0 | 15ms | 30ms | 0 | 4s | Active app, real-time data |
-| **BACKGROUND** | 1 | 50ms | 100ms | 4 | 6s | Background app, balanced |
-| **BACKGROUND_IDLE** | 2 | 200ms | 500ms | 10 | 10s | Idle background, max power saving |
-
-#### Usage Example
-
-```swift
-// iOS - Switch to background mode when app enters background
-func applicationDidEnterBackground() {
-    // Write 0x01 to Connection Parameter Control characteristic
-    let data = Data([0x01]) // BACKGROUND profile
-    peripheral.writeValue(data, for: connParamCharacteristic, type: .withResponse)
-}
-
-func applicationDidBecomeActive() {
-    // Write 0x00 to restore foreground parameters
-    let data = Data([0x00]) // FOREGROUND profile
-    peripheral.writeValue(data, for: connParamCharacteristic, type: .withResponse)
-}
-```
-
-#### Benefits
-
-1. **Extended Background Execution**: Reduces power consumption to stay within iOS/Android background limits
-2. **Adaptive Performance**: Automatically adjusts data rates based on connection profile
-3. **Battery Optimization**: Both phone and device save power during background operation
-4. **Seamless Transitions**: Quick switch between profiles without disconnection
-
-#### Implementation Notes
-
-- The device will request parameter updates from the phone after receiving a profile change
-- The phone may accept, reject, or modify the requested parameters
-- Actual parameters may differ from requested values based on phone capabilities
-- Changes typically take effect within 1-2 seconds
-
-### Secondary Device Commands
-
-The Control Service includes separate characteristics for deleting log files on the secondary device. These commands are only available on the primary device and forward the delete request to the connected secondary device via D2D communication.
-
-**Note**: The regular delete commands (`Delete Foot Log`, `Delete BHI360 Log`, `Delete Activity Log`) only affect the primary device's storage. To delete files on the secondary device, use the corresponding "Delete Secondary" characteristics.
-
 ### Command Flow
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    App->>Primary: Write Command
-    Primary->>Primary: Process locally
-    Primary->>Secondary: Forward via D2D
-    Secondary->>Secondary: Execute command
-    Secondary-->>Primary: Acknowledge
-    Primary-->>App: Notify status
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "participant Secondary",
+    "App->>Primary: Write Command",
+    "Primary->>Primary: Process locally",
+    "Primary->>Secondary: Forward via D2D",
+    "Secondary->>Secondary: Execute command",
+    "Secondary-->>Primary: Acknowledge",
+    "Primary-->>App: Notify status"
+  ),
+  "dark"
+)
+
+---
+
+## 7. Activity Metrics Service
+
+**UUID:** `4fd5b690-9d89-4061-92aa-319ca786baae`  
+**Availability:** Primary device only  
+**Purpose:** Real-time activity metrics for sports and fitness applications
+
+### Characteristics
+
+| Characteristic | UUID Suffix | Properties | Data Type | Description |
+|---:|---:|---:|---:|---:|
+| Real-time Metrics | `...b691` | Read, Notify | realtime_metrics_ble_t | 20 bytes, 1Hz updates |
+| Asymmetry Metrics | `...b692` | Read, Notify | asymmetry_metrics_ble_t | 8 bytes, 1Hz updates |
+| Biomechanics Extended | `...b693` | Read, Notify | biomechanics_extended_ble_t | 12 bytes, on-demand |
+| Session Summary | `...b694` | Read, Notify | session_summary_ble_t | 20 bytes, end of session |
+| GPS Data | `...b695` | Write | gps_data_ble_t | 16 bytes, from phone |
+| **Total Step Count** | `...b696` | Read, Notify | bhi360_step_count_fixed_t | Aggregated both feet |
+| **Activity Step Count** | `...b697` | Read, Notify | bhi360_step_count_fixed_t | Activity-specific steps |
+
+### Real-time Metrics Structure
+
+```c
+typedef struct __attribute__((packed)) {
+    uint16_t cadence_spm;        // 0-1: Steps per minute
+    uint16_t pace_sec_km;        // 2-3: Seconds per kilometer
+    uint32_t distance_m;         // 4-7: Distance in meters
+    uint8_t  form_score;         // 8: Form score 0-100
+    int8_t   balance_lr_pct;     // 9: Balance -50 to +50
+    uint16_t ground_contact_ms;  // 10-11: Average ground contact time
+    uint16_t flight_time_ms;     // 12-13: Average flight time
+    uint8_t  efficiency_score;   // 14: Efficiency 0-100
+    uint8_t  alerts;            // 15: Alert flags
+    uint32_t reserved;          // 16-19: Reserved
+} realtime_metrics_ble_t;
+```
+
+### Asymmetry Metrics Structure
+
+```c
+typedef struct __attribute__((packed)) {
+    uint8_t contact_time_asym;   // 0: Contact time asymmetry %
+    uint8_t flight_time_asym;    // 1: Flight time asymmetry %
+    uint8_t force_asym;          // 2: Force asymmetry %
+    uint8_t pronation_asym;      // 3: Pronation asymmetry %
+    uint8_t strike_left;         // 4: Left strike pattern
+    uint8_t strike_right;        // 5: Right strike pattern
+    uint16_t reserved;           // 6-7: Reserved
+} asymmetry_metrics_ble_t;
+```
+
+### Step Count Behavior
+
+The Activity Metrics Service manages aggregated step counts from both feet:
+
+| Characteristic | Description | Behavior | Update Rate |
+|---:|---:|---:|---:|
+| **Total Step Count** | Sum of both feet global counts | Always active, never resets | On change |
+| **Activity Step Count** | Steps during current activity only | 0 when idle, resets on start | On change |
+
+#### Step Count States
+
+1. **Global Counts** (Total Step Count):
+   - Start at 0 on device boot
+   - Continuously increment throughout device operation
+   - Never reset except on device restart
+   - Continue counting regardless of activity state
+
+2. **Activity Step Count**:
+   - Shows 0 when no activity is active
+   - Resets to 0 when activity starts (via Control Service)
+   - Counts only during active sessions
+   - Freezes at final value when activity stops
+   - Remains at last value until next activity
+
+### GPS Data Input
+
+Mobile applications can provide GPS data to enhance activity metrics:
+
+```c
+typedef struct __attribute__((packed)) {
+    int32_t  latitude_e7;        // 0-3: Latitude * 10^7
+    int32_t  longitude_e7;       // 4-7: Longitude * 10^7
+    uint16_t distance_delta_m;   // 8-9: Distance since last update
+    uint8_t  accuracy_m;         // 10: GPS accuracy in meters
+    int16_t  elevation_change_m; // 11-12: Elevation change
+    uint8_t  gps_mode;          // 13: GPS mode
+    uint16_t reserved;           // 14-15: Reserved
+} gps_data_ble_t;
 ```
 
 ---
 
-## 7. Proxy Services
+## 8. Secondary Device Service
 
-### 7.1 FOTA Proxy Service
+**UUID:** `4fd5b6a0-9d89-4061-92aa-319ca786baae`  
+**Availability:** Primary device only  
+**Purpose:** Consolidated secondary device information and management
+
+### Characteristics
+
+| Characteristic | UUID Suffix | Properties | Data Type | Description |
+|---:|---:|---:|---:|---:|
+| Secondary Manufacturer | `...b6a1` | Read | String | Manufacturer name |
+| Secondary Model | `...b6a2` | Read | String | Model name |
+| Secondary Serial | `...b6a3` | Read | String | Serial number |
+| Secondary HW Rev | `...b6a4` | Read | String | Hardware revision |
+| Secondary FW Rev | `...b6a5` | Read | String | Firmware revision |
+| Secondary FOTA Progress | `...b6a6` | Read, Notify | fota_progress_msg_t | Update status |
+| Secondary Foot Log Available | `...b6a7` | Read, Notify | uint8_t | Log ID |
+| Secondary Foot Log Path | `...b6a8` | Read, Notify | char[] | File path |
+| Secondary BHI360 Log Available | `...b6a9` | Read, Notify | uint8_t | Log ID |
+| Secondary BHI360 Log Path | `...b6aa` | Read, Notify | char[] | File path |
+| Secondary Activity Log Available | `...b6ab` | Read, Notify | uint8_t | Log ID |
+| Secondary Activity Log Path | `...b6ac` | Read, Notify | char[] | File path |
+| Secondary Weight Measurement | `...b6ad` | Read, Notify | uint16_t | Weight kg × 10 |
+
+### Benefits
+
+- **Centralized Access**: All secondary device information in one service
+- **Reduced Complexity**: No need to scan multiple services
+- **Consistent Interface**: Same patterns as primary device characteristics
+- **Efficient Updates**: Single service for all secondary device notifications
+
+---
+
+## 9. Proxy Services
+
+### 9.1 FOTA Proxy Service
 
 **UUID:** `6e400001-b5a3-f393-e0a9-e50e24dcca9e`  
 **Availability:** Primary device only  
 **Purpose:** Firmware updates for secondary device via primary
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Target Selection | `...0002` | Write | uint8_t | 0x00=Primary, 0x01=Secondary, 0xFF=All |
 | Command | `...0003` | Write | uint8_t + data | See command table |
 | Data | `...0004` | Write | byte[] | Firmware chunks |
@@ -479,7 +546,7 @@ sequenceDiagram
 #### FOTA Commands
 
 | Command | Value | Data | Description |
-|---------|-------|------|-------------|
+|---:|---:|---:|---:|
 | Start | 0x01 | 4 bytes size | Begin update |
 | Data | 0x02 | Firmware bytes | Send chunk |
 | End | 0x03 | None | Complete update |
@@ -489,39 +556,36 @@ sequenceDiagram
 
 #### FOTA Flow
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    App->>Primary: Set Target = Secondary
-    App->>Primary: Start + Size
-    Primary->>Secondary: Init FOTA
-    
-    loop Firmware Chunks
-        App->>Primary: Data Chunk
-        Primary->>Secondary: Forward Data
-        Secondary-->>Primary: ACK
-        Primary-->>App: Progress Update
-    end
-    
-    App->>Primary: End Command
-    Primary->>Secondary: Finalize
-    Secondary->>Secondary: Reboot
-    Primary-->>App: Complete
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Primary",
+    "participant Secondary",
+    "App->>Primary: Set Target = Secondary",
+    "App->>Primary: Start + Size",
+    "Primary->>Secondary: Init FOTA",
+    "loop Firmware Chunks",
+    "App->>Primary: Data Chunk",
+    "Primary->>Secondary: Forward Data",
+    "Secondary-->>Primary: ACK",
+    "Primary-->>App: Progress Update",
+    "end",
+    "App->>Primary: End Command",
+    "Primary->>Secondary: Finalize",
+    "Secondary->>Secondary: Reboot",
+    "Primary-->>App: Complete"
+  ),
+  "dark"
+)
 
-### 7.2 3D Orientation Service
+### 9.2 3D Orientation Service
 
 **UUID:** `0c372ec0-27eb-437e-bef4-775aefaf3c97`  
 **Availability:** Primary device only  
 **Purpose:** High-rate 3D orientation data for real-time visualization
 
-**Note:** There is a UUID conflict in the current implementation. The 3D Orientation characteristic UUID (`...2ec1`) conflicts with Secondary Activity Log Path. This should be fixed in a future firmware update by changing the 3D Orientation characteristic to a different UUID (e.g., `...2ec6`).
-
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | 3D Orientation | `...2ec1` | Read, Notify | orientation_3d_packet_t | Combined quaternions |
 
 #### 3D Orientation Packet Structure
@@ -580,50 +644,53 @@ func handle3DOrientation(_ data: Data) {
 }
 ```
 
-### 7.3 SMP Proxy Service
+### 9.3 SMP Proxy Service
 
-**UUID:** `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`  
+**Service UUID:** `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`  
 **Availability:** Primary device only  
 **Purpose:** Unified MCUmgr/SMP access to both primary and secondary devices
 
-| Characteristic | UUID | Properties | Data Type | Description |
-|----------------|------|------------|-----------|-------------|
-| Target Selection | `DA2E7829-FBCE-4E01-AE9E-261174997C48` | Read, Write | uint8_t | 0x00=Primary, 0x01=Secondary |
-| SMP Data | `DA2E7828-FBCE-4E01-AE9E-261174997C48` | Write, Write Without Response, Notify | byte[] | Standard SMP frames |
+This service allows mobile applications to use standard MCUmgr libraries to communicate with both devices through a single interface.
+
+#### Characteristics
+
+| Characteristic | UUID | Properties | Description |
+|---:|---:|---:|---:|
+| Target Select | `DA2E7829-FBCE-4E01-AE9E-261174997C48` | Read, Write | Select target device |
+| SMP Data | `DA2E7828-FBCE-4E01-AE9E-261174997C48` | Write, Write Without Response, Notify | Standard SMP protocol |
+
+#### Target Values
+- `0x00`: Primary device (default)
+- `0x01`: Secondary device
 
 #### Benefits
-- Use standard MCUmgr libraries for both devices
 - No custom protocols needed
 - Same code for FOTA, file access, and all MCUmgr operations
 - Transparent forwarding to secondary device
 
-#### Usage Flow
+#### Usage Example
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Primary
-    participant Secondary
-    
-    Note over App: Using standard MCUmgr
-    App->>Primary: Write Target = 0x01
-    App->>Primary: Standard SMP frame
-    Primary->>Primary: Check target
-    Primary->>Secondary: Forward via D2D
-    Secondary->>Secondary: Process SMP
-    Secondary-->>Primary: SMP Response
-    Primary-->>App: Forward Response
-    Note over App: Looks like direct connection!
+```swift
+// Set target to secondary
+writeCharacteristic(targetUUID, data: Data([0x01]))
+
+// Use standard MCUmgr with proxy characteristic
+let transport = McuMgrBleTransport(peripheral)
+transport.smpCharacteristic = smpDataCharacteristic
+
+// All MCUmgr operations now work with secondary!
+let dfuManager = FirmwareUpgradeManager(transporter: transport)
+dfuManager.start(data: firmware)
 ```
 
-### 7.4 File Proxy Service
+### 9.4 File Proxy Service
 
 **UUID:** `7e500001-b5a3-f393-e0a9-e50e24dcca9e`  
 **Availability:** Primary device only  
-**Purpose:** Access log files on secondary device (legacy - use SMP Proxy instead)
+**Purpose:** Access log files on secondary device
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | Target Device | `...0002` | Write | uint8_t | 0x00=Primary, 0x01=Secondary |
 | File Command | `...0003` | Write | Command struct | See below |
 | File Data | `...0004` | Notify | byte[] | File chunks |
@@ -640,7 +707,7 @@ typedef struct {
 ```
 
 | Command | Value | Description |
-|---------|-------|-------------|
+|---:|---:|---:|
 | List Files | 0x01 | Get file list |
 | Read File | 0x02 | Read by ID |
 | Delete File | 0x03 | Delete by ID |
@@ -649,15 +716,15 @@ typedef struct {
 
 ---
 
-## 8. Device-to-Device (D2D) Services
+## 10. Device-to-Device (D2D) Services
 
-### 8.1 D2D RX Service (Primary Device)
+### 10.1 D2D RX Service (Primary Device)
 
 **UUID:** `e060ca1f-3115-4ad6-9709-8c5ff3bf558b`  
 **Purpose:** Receive commands from phone to relay to secondary
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | D2D Set Time | `...ca1f` | Write | uint32_t | Time relay |
 | D2D Delete Foot Log | `...ca82` | Write | uint8_t | Delete command |
 | D2D Delete BHI360 Log | `...ca83` | Write | uint8_t | Delete command |
@@ -666,13 +733,13 @@ typedef struct {
 | D2D Stop Activity | `...ca85` | Write | uint8_t | Stop command |
 | **D2D Trigger BHI360 Calibration** | `...ca86` | Write | uint8_t | Calibration trigger |
 
-### 8.2 D2D TX Service (Secondary Device)
+### 10.2 D2D TX Service (Secondary Device)
 
 **UUID:** `75ad68d6-200c-437d-98b5-061862076c5f`  
 **Purpose:** Transmit sensor data from secondary to primary
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
-|----------------|-------------|------------|-----------|-------------|
+|---:|---:|---:|---:|---:|
 | D2D Status | `...68d6` | Notify | uint32_t | Status bitfield |
 | D2D Foot Log Available | `...68d7` | Notify | uint8_t | Log ID |
 | D2D Charge Status | `...68d8` | Notify | uint8_t | Battery % |
@@ -681,54 +748,54 @@ typedef struct {
 | D2D BHI360 Log Path | `...68db` | Notify | char[] | File path |
 | D2D Foot Samples | `...68dc` | Notify | foot_samples_t | ADC data |
 | **D2D BHI360 3D Mapping** | `...68dd` | Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
-| **D2D BHI360 Step Count** | `...68de` | Notify | bhi360_step_count_t | Steps |
+| **D2D BHI360 Step Count** | `...68de` | Notify | bhi360_step_count_t | Steps (for aggregation) |
+| **D2D Activity Step Count** | `...68e6` | Notify | bhi360_step_count_t | Activity-specific steps |
 | **D2D BHI360 Linear Accel** | `...68df` | Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
 | D2D Current Time | `...68e0` | Notify | CTS struct | Time sync |
 | D2D Device Info | `...68e1` | Notify | device_info_msg_t | Device information |
 | D2D FOTA Progress | `...68e3` | Notify | fota_progress_t | FOTA update status |
 | D2D Activity Log Available | `...68e4` | Notify | uint8_t | Log ID |
 | D2D Activity Log Path | `...68e5` | Notify | char[] | File path |
-| **D2D Activity Step Count** | `...68e6` | Notify | bhi360_step_count_t | Activity-specific steps |
 | **D2D Weight Measurement** | `...68e7` | Notify | uint16_t | Weight in kg × 10 |
 
-### 8.3 D2D File Transfer Service
+### 10.3 D2D File Transfer Service
 
 **UUID:** `8e600001-b5a3-f393-e0a9-e50e24dcca9e`  
 **Purpose:** File transfer between devices
 
 | Characteristic | UUID Suffix | Properties | Data Type |
-|----------------|-------------|------------|-----------|
+|---:|---:|---:|---:|
 | Command | `...0002` | Write | Command packet |
 | Data | `...0003` | Notify | Data packet |
 | Status | `...0004` | Notify | Status byte |
 
 ### D2D Architecture
 
-```mermaid
-graph TB
-    subgraph "Data Flow"
-        SEC[Secondary Sensors] -->|"Notify"| SECTX[D2D TX Service]
-        SECTX -->|"BLE"| PRIMRX[Primary D2D Client]
-        PRIMRX -->|"Internal"| PRIMINFO[Information Service]
-        PRIMINFO -->|"Notify"| PHONE[Mobile App]
-    end
-    
-    subgraph "Command Flow"
-        PHONE2[Mobile App] -->|"Write"| PRIMCTRL[Control Service]
-        PRIMCTRL -->|"Internal"| PRIMD2D[D2D TX Client]
-        PRIMD2D -->|"BLE Write"| SECRX[D2D RX Service]
-        SECRX -->|"Execute"| SECDEV[Secondary Device]
-    end
-```
+DrawFlowchart(
+  Syntax(
+    // Data Flow
+    "SEC[Secondary Sensors] --> SECTX[D2D TX Service]",
+    "SECTX --> PRIMRX[Primary D2D Client]",
+    "PRIMRX --> PRIMINFO[Information Service]",
+    "PRIMINFO --> PHONE[Mobile App]",
+    // Command Flow
+    "PHONE2[Mobile App] --> PRIMCTRL[Control Service]",
+    "PRIMCTRL --> PRIMD2D[D2D TX Client]",
+    "PRIMD2D --> SECRX[D2D RX Service]",
+    "SECRX --> SECDEV[Secondary Device]"
+  ),
+  "TB",
+  "default"
+)
 
 ---
 
-## 9. Data Structures
+## 11. Data Structures
 
 ### Fixed-Point Structures
 
 ```c
-// BHI360 3D Mapping - 15 bytes (file logging)
+// BHI360 3D Mapping - 15 bytes
 typedef struct {
     int16_t quat_x;        // Quaternion X × 10000
     int16_t quat_y;        // Quaternion Y × 10000
@@ -740,7 +807,7 @@ typedef struct {
     uint8_t quat_accuracy; // Accuracy × 100 (0-300)
 } __packed bhi360_3d_mapping_fixed_t;
 
-// BHI360 Linear Acceleration - 6 bytes (file logging)
+// BHI360 Linear Acceleration - 6 bytes
 typedef struct {
     int16_t x;  // Acceleration X × 1000 (mm/s²)
     int16_t y;  // Acceleration Y × 1000 (mm/s²)
@@ -757,6 +824,12 @@ typedef struct {
     uint32_t step_count;
     uint32_t activity_duration_s;  // DEPRECATED - always 0
 } __packed bhi360_step_count_t;
+
+// Step Count Fixed (BLE format) - 8 bytes
+typedef struct {
+    uint32_t step_count;
+    uint32_t activity_duration_s;  // DEPRECATED - always 0
+} __packed bhi360_step_count_fixed_t;
 
 // Foot Sensor Samples - 16 bytes (file logging)
 typedef struct {
@@ -804,20 +877,56 @@ typedef struct {
     uint32_t bytes_received;
     uint32_t total_size;
     int32_t error_code;
-} __packed fota_progress_t;
+} __packed fota_progress_msg_t;
 ```
 
-### Standard MCUmgr SMP Service
+### Packed Data Structures
+
+```c
+// Packed Device Status - 16 bytes
+typedef struct __attribute__((packed)) {
+    uint32_t status_bitfield;      // 0-3: Status flags
+    uint8_t  battery_percent;      // 4: Battery percentage
+    uint8_t  charge_status;        // 5: Charging status
+    uint8_t  temperature_c;        // 6: Device temperature
+    uint8_t  activity_state;       // 7: Activity state
+    uint32_t uptime_seconds;       // 8-11: Device uptime
+    uint16_t free_storage_mb;      // 12-13: Free storage
+    uint8_t  connected_devices;    // 14: Connected devices
+    uint8_t  reserved;             // 15: Reserved
+} device_status_packed_t;
+
+// Packed File Notification - 64 bytes
+typedef struct __attribute__((packed)) {
+    uint8_t  file_id;             // 0: File ID
+    uint8_t  file_type;           // 1: File type
+    uint8_t  device_source;       // 2: Device source
+    uint8_t  reserved;            // 3: Reserved
+    char     file_path[60];       // 4-63: File path
+} file_notification_packed_t;
+
+// Secondary Device Info Packed - 64 bytes
+typedef struct __attribute__((packed)) {
+    char     manufacturer[16];    // 0-15: Manufacturer
+    char     model[16];          // 16-31: Model
+    char     serial[12];         // 32-43: Serial
+    char     hw_rev[8];          // 44-51: HW revision
+    char     fw_rev[8];          // 52-59: FW revision
+    uint8_t  battery_percent;    // 60: Battery %
+    uint8_t  status;             // 61: Status
+    uint16_t reserved;           // 62-63: Reserved
+} secondary_device_info_packed_t;
+```
+
+### SMP Service
 
 **UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
 **Characteristic:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`  
 **Purpose:** MCUmgr protocol for firmware updates and file access
 
-**Note:** The UUIDs mentioned in some documentation (`14387800-130c-49e7-b877-2881c89cb258`) appear to be from an older version. The current implementation uses the standard MCUmgr SMP service UUID shown above.
-
 ---
 
-## 10. Packet Sequencing and Recovery
+## 12. Packet Sequencing and Recovery
 
 ### Overview
 
@@ -826,7 +935,7 @@ High-rate sensor data includes sequence numbers for packet loss detection and li
 ### Affected Data Types
 
 | Data Type | Update Rate | Sequence Number | Recovery Buffer |
-|-----------|-------------|-----------------|-----------------|
+|---:|---:|---:|---:|
 | Foot Sensor Samples | 20Hz | Yes (8-bit) | 10 packets (~500ms) |
 | BHI360 3D Mapping | 50Hz | Yes (8-bit) | 10 packets (~200ms) |
 | BHI360 Linear Accel | 50Hz | Yes (8-bit) | 10 packets (~200ms) |
@@ -859,19 +968,20 @@ func detectPacketLoss(lastSeq: UInt8, currentSeq: UInt8) -> UInt8 {
 
 When packet loss is detected, the mobile app can request retransmission of recent packets:
 
-```mermaid
-sequenceDiagram
-    participant App
-    participant Device
-    
-    App->>Device: Data packet (seq=10)
-    Note over App: Missing seq 11-14
-    App->>Device: Data packet (seq=15)
-    App->>App: Detect gap
-    App->>Device: Recovery Request<br/>(start=11, end=14)
-    Device->>App: Recovery Response<br/>(4 packets)
-    Device->>App: Retransmit seq 11-14
-```
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Device",
+    "App->>Device: Data packet (seq=10)",
+    "Note over App: Missing seq 11-14",
+    "App->>Device: Data packet (seq=15)",
+    "App->>App: Detect gap",
+    "App->>Device: Recovery Request<br/>(start=11, end=14)",
+    "Device->>App: Recovery Response<br/>(4 packets)",
+    "Device->>App: Retransmit seq 11-14"
+  ),
+  "default"
+)
 
 ### Recovery Limitations
 
@@ -887,11 +997,11 @@ sequenceDiagram
 3. **Statistics**: Track packet loss rate for connection quality monitoring
 4. **Graceful Degradation**: System continues to function with packet loss
 
-For detailed implementation, see [BLE Packet Sequencing and Recovery](BLE_Packet_Sequencing_Recovery.md).
+For detailed implementation, see [BLE Packet Sequencing and Recovery](BLE_Packet_Sequencing_Recovery_Coda.md).
 
 ---
 
-## 11. Integration Examples
+## 13. Integration Examples
 
 ### iOS Swift - BLE Characteristic Handler
 
@@ -1013,7 +1123,7 @@ asyncio.run(update_secondary_device("XX:XX:XX:XX:XX:XX", firmware_data))
 
 ---
 
-## 12. Error Handling and Status Communication
+## 14. Error Handling and Status Communication
 
 ### Status Characteristic Details
 
@@ -1084,7 +1194,7 @@ endchoice
 #### Behavior by Configuration
 
 | Configuration | Foot Sensor Fails | Motion Sensor Fails | Both Fail |
-|--------------|-------------------|---------------------|-----------|
+|---:|---:|---:|---:|
 | **BOTH** (default) | System halts | System halts | System halts |
 | **FOOT** primary | System continues* | System halts | System halts |
 | **MOTION** primary | System halts | System continues* | System halts |
@@ -1165,10 +1275,10 @@ fun parseDeviceStatus(statusValue: Int): List<String> {
    - Temporary file system errors
    - Queue full (usually transient)
 
-## 13. Common BLE Error Codes
+## 15. Common BLE Error Codes
 
 | Error | Code | Description | Solution |
-|-------|------|-------------|----------|
+|---:|---:|---:|---:|
 | ENOTCONN | -128 | Not connected | Ensure connection established |
 | ENOMEM | -12 | Out of memory | Reduce notification rate |
 | EINVAL | -22 | Invalid parameter | Check data format |
@@ -1177,23 +1287,21 @@ fun parseDeviceStatus(statusValue: Int): List<String> {
 
 ### Troubleshooting Guide
 
-```mermaid
-graph TD
-    A[Connection Issues?] -->|Yes| B[Check Bonding]
-    A -->|No| C[Data Issues?]
-    
-    B --> D[Clear bonds and re-pair]
-    
-    C -->|Yes| E[Check Format]
-    C -->|No| F[Performance Issues?]
-    
-    E --> G[Verify fixed-point scaling]
-    
-    F -->|Yes| H[Optimize Parameters]
-    F -->|No| I[Check Logs]
-    
-    H --> J[Reduce notification rate<br/>Increase connection interval]
-```
+DrawFlowchart(
+  Syntax(
+    "A[Connection Issues?] -->|Yes| B[Check Bonding]",
+    "A -->|No| C[Data Issues?]",
+    "B --> D[Clear bonds and re-pair]",
+    "C -->|Yes| E[Check Format]",
+    "C -->|No| F[Performance Issues?]",
+    "E --> G[Verify fixed-point scaling]",
+    "F -->|Yes| H[Optimize Parameters]",
+    "F -->|No| I[Check Logs]",
+    "H --> J[Reduce notification rate<br/>Increase connection interval]"
+  ),
+  "TD",
+  "default"
+)
 
 ### Security Considerations
 
@@ -1254,7 +1362,7 @@ For Primary Device:
     
 For Secondary Device:
     - D2D Transmission (Rate limited to 20-50Hz)
-    ↓
+    ���
 BLE Transmission (Rate limited: 20-50Hz)
     ↓
 Mobile App (Receives at BLE rate)
@@ -1270,10 +1378,10 @@ Mobile App (Receives at BLE rate)
 ### Optimization Options
 
 | Configuration | BHI360 Rate | BLE Rate | Power Impact |
-|--------------|-------------|----------|--------------|
-| Standard     | 50Hz        | 20Hz     | Baseline     |
-| High Rate    | 100Hz       | 50Hz     | +15-20%      |
-| Maximum      | 200Hz       | 50Hz     | +30-40%      |
+|---:|---:|---:|---:|
+| Standard | 50Hz | 20Hz | Baseline |
+| High Rate | 100Hz | 50Hz | +15-20% |
+| Maximum | 200Hz | 50Hz | +30-40% |
 
 ### Recommendations for 3D Orientation Service
 

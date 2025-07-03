@@ -101,6 +101,11 @@ static void fota_reset_handler(struct k_work *work)
 K_MSGQ_DEFINE(bluetooth_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(motion_sensor_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(sensor_data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(sensor_data_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);  // Legacy name for realtime_metrics input
+K_MSGQ_DEFINE(realtime_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(analytics_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(activity_metrics_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 
 // Add other slab definitions here as needed
 
@@ -510,6 +515,14 @@ const char *get_sender_name(sender_type_t sender)
             return "Motion Sensor";
         case SENDER_WIFI:
             return "WiFi";
+        case SENDER_ACTIVITY_METRICS:
+            return "Activity Metrics";
+        case SENDER_SENSOR_DATA:
+            return "Sensor Data";
+        case SENDER_REALTIME_METRICS:
+            return "Realtime Metrics";
+        case SENDER_ANALYTICS:
+            return "Analytics";
         case SENDER_NONE:
             return "None/Unknown";
         default:

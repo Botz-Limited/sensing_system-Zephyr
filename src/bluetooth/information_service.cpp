@@ -35,12 +35,21 @@
 #include <status_codes.h>
 #include "ccc_callback_fix.hpp"
 #include "ble_seq_manager.hpp"
+#include "ble_packed_structs.h"
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 static uint32_t device_status_bitfield = 0;
 static uint32_t previous_device_status_bitfield = 0; // Store the previous value
 static bool init_status_bt_update = false;        // A flag to force the first update
+
+// Packed device status for efficient BLE transmission
+static device_status_packed_t device_status_packed = {0};
+static bool device_status_packed_subscribed = false;
+
+// Packed file notification for efficient BLE transmission
+static file_notification_packed_t file_notification_packed = {0};
+static bool file_notification_packed_subscribed = false;
 
 static uint8_t charge_status = 0;
 static foot_samples_t foot_sensor_char_value = {0};
@@ -108,13 +117,7 @@ static char secondary_hw_rev[16] = "Not Connected";
 static char secondary_fw_rev[16] = "Not Connected";
 #endif
 
-// Total step count (aggregated from both feet)
-static bhi360_step_count_fixed_t total_step_count_value = {0, 0};
-static bool total_step_count_subscribed = false;
-
-// Activity step count (steps during current activity)
-static bhi360_step_count_fixed_t activity_step_count_value = {0, 0};
-static bool activity_step_count_subscribed = false;
+// Step counts moved to Activity Metrics Service
 
 // Weight measurement result
 static uint16_t weight_kg_x10 = 0;  // Weight in kg * 10 (for 0.1kg precision)
@@ -140,20 +143,22 @@ static ssize_t jis_bhi360_data3_read(struct bt_conn* conn, const struct bt_gatt_
 static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t* data);
 
-// Total step count characteristic
-static ssize_t jis_total_step_count_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static void jis_total_step_count_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration);
-
-// Activity step count characteristic
-static ssize_t jis_activity_step_count_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static void jis_activity_step_count_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-extern "C" void jis_activity_step_count_notify(uint32_t activity_steps);
+// Step count characteristics moved to Activity Metrics Service
 
 // Weight measurement characteristic
 static ssize_t jis_weight_measurement_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_weight_measurement_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 extern "C" void jis_weight_measurement_notify(float weight_kg);
+
+// Packed device status characteristic
+static ssize_t jis_device_status_packed_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_device_status_packed_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_device_status_packed_notify(void);
+
+// Packed file notification characteristic
+static ssize_t jis_file_notification_packed_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_file_notification_packed_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_file_notification_packed_notify(uint8_t file_id, uint8_t file_type, uint8_t device_source, const char* file_path);
 
 //Current Time Characteristic
 static ssize_t jis_read_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -282,17 +287,19 @@ static struct bt_uuid_128 activity_log_available_uuid =
 static struct bt_uuid_128 activity_log_path_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec3, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
-// Total Step Count UUID (aggregated from both feet)
-static struct bt_uuid_128 total_step_count_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec4, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
-
-// Activity Step Count UUID (steps during current activity)
-static struct bt_uuid_128 activity_step_count_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec5, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+// Step count UUIDs moved to Activity Metrics Service
 
 // Weight Measurement UUID
 static struct bt_uuid_128 weight_measurement_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec6, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// Packed Device Status UUID (new)
+static struct bt_uuid_128 device_status_packed_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec7, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// Packed File Notification UUID (new)
+static struct bt_uuid_128 file_notification_packed_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec8, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 // Secondary Device Information UUIDs
 static struct bt_uuid_128 secondary_manufacturer_uuid =
@@ -416,21 +423,7 @@ BT_GATT_SERVICE_DEFINE(
         static_cast<void *>(&bhi360_data3_value_fixed)),
     BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
-    // Total Step Count Characteristic (aggregated from both feet)
-    BT_GATT_CHARACTERISTIC(&total_step_count_uuid.uuid,
-        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
-        jis_total_step_count_read, nullptr,
-        static_cast<void *>(&total_step_count_value)),
-    BT_GATT_CCC(jis_total_step_count_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
-
-    // Activity Step Count Characteristic (steps during current activity)
-    BT_GATT_CHARACTERISTIC(&activity_step_count_uuid.uuid,
-        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
-        jis_activity_step_count_read, nullptr,
-        static_cast<void *>(&activity_step_count_value)),
-    BT_GATT_CCC(jis_activity_step_count_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    // Step count characteristics moved to Activity Metrics Service
 
     // Weight Measurement Characteristic
     BT_GATT_CHARACTERISTIC(&weight_measurement_uuid.uuid,
@@ -439,6 +432,22 @@ BT_GATT_SERVICE_DEFINE(
         jis_weight_measurement_read, nullptr,
         static_cast<void *>(&weight_kg_x10)),
     BT_GATT_CCC(jis_weight_measurement_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Packed Device Status Characteristic (new - combines multiple status fields)
+    BT_GATT_CHARACTERISTIC(&device_status_packed_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_device_status_packed_read, nullptr,
+        static_cast<void *>(&device_status_packed)),
+    BT_GATT_CCC(jis_device_status_packed_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Packed File Notification Characteristic (new - combines file ID and path)
+    BT_GATT_CHARACTERISTIC(&file_notification_packed_uuid.uuid,
+        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+        BT_GATT_PERM_READ_ENCRYPT,
+        jis_file_notification_packed_read, nullptr,
+        static_cast<void *>(&file_notification_packed)),
+    BT_GATT_CCC(jis_file_notification_packed_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // FOTA Progress Characteristic
     BT_GATT_CHARACTERISTIC(&fota_progress_uuid.uuid,
@@ -587,41 +596,16 @@ extern "C" void set_device_status(uint32_t new_status)
                 LOG_WRN("Status GATT attribute not found, skipping notification");
             }
         }
+        
+        // Also update packed device status
+        jis_device_status_packed_notify();
+        
         previous_device_status_bitfield = device_status_bitfield;
         init_status_bt_update = true;
     }
 }
 
-// --- Activity Step Count Handlers ---
-static void jis_activity_step_count_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
-{
-    if (!attr) {
-        LOG_ERR("jis_activity_step_count_ccc_cfg_changed: attr is NULL");
-        return;
-    }
-    activity_step_count_subscribed = value == BT_GATT_CCC_NOTIFY;
-    LOG_DBG("Activity Step Count CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
-}
-
-static ssize_t jis_activity_step_count_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
-{
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_step_count_fixed_t));
-}
-
-extern "C" void jis_activity_step_count_notify(uint32_t activity_steps)
-{
-    // Update the activity step count value
-    activity_step_count_value.step_count = activity_steps;
-    activity_step_count_value.activity_duration_s = 0;  // Deprecated - always 0
-    
-    LOG_DBG("Activity Step Count: steps=%u", activity_steps);
-    
-    if (activity_step_count_subscribed) {
-        safe_gatt_notify(&activity_step_count_uuid.uuid,
-                        static_cast<const void *>(&activity_step_count_value), 
-                        sizeof(activity_step_count_value));
-    }
-}
+// Step count handlers moved to Activity Metrics Service
 
 /**
  * @brief Sets error status bits based on err_t error codes
@@ -1030,6 +1014,9 @@ void jis_foot_sensor_log_available_notify(uint8_t log_id)
                            sizeof(foot_sensor_log_available));
         }
     }
+    
+    // Also send packed notification (will be combined with path notification)
+    // Note: Path will be sent separately via jis_foot_sensor_req_id_path_notify
 }
 
 /**
@@ -1091,6 +1078,13 @@ void jis_foot_sensor_req_id_path_notify(const char *file_path) // Renamed from c
                         static_cast<void *>(&foot_sensor_req_id_path),
                         sizeof(foot_sensor_req_id_path));
     }
+    
+    // Also send packed notification with both ID and path
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    jis_file_notification_packed_notify(foot_sensor_log_available, 0, 0, file_path); // type=0 for foot sensor, source=0 for primary
+    #else
+    jis_file_notification_packed_notify(foot_sensor_log_available, 0, 1, file_path); // type=0 for foot sensor, source=1 for secondary
+    #endif
 }
 
 /**
@@ -1211,6 +1205,13 @@ void jis_bhi360_req_id_path_notify(const char *file_path)
                         static_cast<void *>(&bhi360_req_id_path), 
                         sizeof(bhi360_req_id_path));
     }
+    
+    // Also send packed notification with both ID and path
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    jis_file_notification_packed_notify(bhi360_log_available, 1, 0, file_path); // type=1 for BHI360, source=0 for primary
+    #else
+    jis_file_notification_packed_notify(bhi360_log_available, 1, 1, file_path); // type=1 for BHI360, source=1 for secondary
+    #endif
 }
 
 /**
@@ -1474,6 +1475,13 @@ extern "C" void jis_activity_log_path_notify(const char *path)
                         static_cast<const void *>(&activity_log_path), 
                         strlen(activity_log_path) + 1);
     }
+    
+    // Also send packed notification with both ID and path
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    jis_file_notification_packed_notify(activity_log_available, 2, 0, path); // type=2 for activity, source=0 for primary
+    #else
+    jis_file_notification_packed_notify(activity_log_available, 2, 1, path); // type=2 for activity, source=1 for secondary
+    #endif
 }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -1617,6 +1625,9 @@ void jis_secondary_foot_log_path_notify(const char *path)
                         static_cast<const void *>(&secondary_foot_log_path), 
                         strlen(secondary_foot_log_path) + 1);
     }
+    
+    // Also send packed notification for secondary foot sensor file
+    jis_file_notification_packed_notify(secondary_foot_log_available, 0, 1, path); // type=0 for foot, source=1 for secondary
 }
 
 // Secondary BHI360 Log Available handlers
@@ -1676,6 +1687,9 @@ void jis_secondary_bhi360_log_path_notify(const char *path)
                         static_cast<const void *>(&secondary_bhi360_log_path), 
                         strlen(secondary_bhi360_log_path) + 1);
     }
+    
+    // Also send packed notification for secondary BHI360 file
+    jis_file_notification_packed_notify(secondary_bhi360_log_available, 1, 1, path); // type=1 for BHI360, source=1 for secondary
 }
 
 // Secondary Activity Log Available handlers
@@ -1735,39 +1749,13 @@ void jis_secondary_activity_log_path_notify(const char *path)
                         static_cast<const void *>(&secondary_activity_log_path), 
                         strlen(secondary_activity_log_path) + 1);
     }
+    
+    // Also send packed notification for secondary activity file
+    jis_file_notification_packed_notify(secondary_activity_log_available, 2, 1, path); // type=2 for activity, source=1 for secondary
 }
 #endif
 
-// --- Total Step Count Handlers ---
-static void jis_total_step_count_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
-{
-    if (!attr) {
-        LOG_ERR("jis_total_step_count_ccc_cfg_changed: attr is NULL");
-        return;
-    }
-    total_step_count_subscribed = value == BT_GATT_CCC_NOTIFY;
-    LOG_DBG("Total Step Count CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
-}
-
-static ssize_t jis_total_step_count_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
-{
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_step_count_fixed_t));
-}
-
-extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration)
-{
-    // Update the total step count value
-    total_step_count_value.step_count = total_steps;
-    total_step_count_value.activity_duration_s = 0;  // Deprecated - always 0
-    
-    LOG_DBG("Total Step Count: steps=%u", total_steps);
-    
-    if (total_step_count_subscribed) {
-        safe_gatt_notify(&total_step_count_uuid.uuid,
-                        static_cast<const void *>(&total_step_count_value), 
-                        sizeof(total_step_count_value));
-    }
-}
+// Total step count handlers moved to Activity Metrics Service
 
 // --- Weight Measurement Handlers ---
 static void jis_weight_measurement_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
@@ -1819,4 +1807,81 @@ extern "C" void jis_secondary_weight_measurement_notify(float weight_kg)
     // jis_weight_measurement_notify(total_weight);
 }
 #endif
+
+// --- Packed Device Status Handlers ---
+static void jis_device_status_packed_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_device_status_packed_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    device_status_packed_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Packed Device Status CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_device_status_packed_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    // Update packed structure before reading
+    jis_device_status_packed_notify();
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(device_status_packed_t));
+}
+
+extern "C" void jis_device_status_packed_notify(void)
+{
+    // Update the packed structure with current values
+    device_status_packed.status_bitfield = device_status_bitfield;
+    device_status_packed.battery_percent = 0; // TODO: Get from battery module
+    device_status_packed.charge_status = charge_status;
+    device_status_packed.temperature_c = 25; // TODO: Get from temperature sensor
+    device_status_packed.activity_state = (device_status_bitfield & STATUS_LOGGING_ACTIVE) ? 1 : 0;
+    device_status_packed.uptime_seconds = k_uptime_get_32() / 1000;
+    device_status_packed.free_storage_mb = 0; // TODO: Get from filesystem
+    device_status_packed.connected_devices = 0; // TODO: Count connected devices
+    
+    if (device_status_packed_subscribed) {
+        safe_gatt_notify(&device_status_packed_uuid.uuid,
+                        static_cast<const void *>(&device_status_packed), 
+                        sizeof(device_status_packed));
+    }
+}
+
+// --- Packed File Notification Handlers ---
+static void jis_file_notification_packed_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_file_notification_packed_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    file_notification_packed_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Packed File Notification CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+static ssize_t jis_file_notification_packed_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(file_notification_packed_t));
+}
+
+extern "C" void jis_file_notification_packed_notify(uint8_t file_id, uint8_t file_type, uint8_t device_source, const char* file_path)
+{
+    // Update the packed structure
+    file_notification_packed.file_id = file_id;
+    file_notification_packed.file_type = file_type;
+    file_notification_packed.device_source = device_source;
+    file_notification_packed.reserved = 0;
+    
+    // Copy file path
+    memset(file_notification_packed.file_path, 0, sizeof(file_notification_packed.file_path));
+    if (file_path) {
+        strncpy(file_notification_packed.file_path, file_path, sizeof(file_notification_packed.file_path) - 1);
+    }
+    
+    LOG_INF("Packed File Notification: id=%u, type=%u, source=%u, path=%s",
+            file_id, file_type, device_source, file_path ? file_path : "");
+    
+    if (file_notification_packed_subscribed) {
+        safe_gatt_notify(&file_notification_packed_uuid.uuid,
+                        static_cast<const void *>(&file_notification_packed), 
+                        sizeof(file_notification_packed));
+    }
+}
 

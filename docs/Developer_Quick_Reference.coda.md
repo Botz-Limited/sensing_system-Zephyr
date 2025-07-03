@@ -1,7 +1,7 @@
 # Developer Quick Reference
 
-**Version:** 1.1  
-**Date:** June 2025  
+**Version:** 1.2  
+**Date:** July 2025  
 **Scope:** Quick reference guide for developers working with the sensing firmware  
 **Purpose:** Essential commands, UUIDs, debug tips, and common patterns for rapid development
 
@@ -76,6 +76,20 @@ west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 - SMP Data: `DA2E7828-FBCE-4E01-AE9E-261174997C48`
 - **Usage**: Set target (0x00=Primary, 0x01=Secondary), then use standard MCUmgr
 
+### Activity Metrics Service (Primary Only)
+- Service: `4fd5b690-9d89-4061-92aa-319ca786baae`
+- Real-time Metrics: `4fd5b691-9d89-4061-92aa-319ca786baae`
+- Asymmetry Metrics: `4fd5b692-9d89-4061-92aa-319ca786baae`
+- Biomechanics Extended: `4fd5b693-9d89-4061-92aa-319ca786baae`
+- Session Summary: `4fd5b694-9d89-4061-92aa-319ca786baae`
+- GPS Data (Write): `4fd5b695-9d89-4061-92aa-319ca786baae`
+- Total Step Count: `4fd5b696-9d89-4061-92aa-319ca786baae`
+- Activity Step Count: `4fd5b697-9d89-4061-92aa-319ca786baae`
+
+### Secondary Device Service (Primary Only)
+- Service: `4fd5b6a0-9d89-4061-92aa-319ca786baae`
+- All secondary device info, logs, and measurements in one service
+
 ## 4. Command Values
 
 ### FOTA Proxy Commands
@@ -122,8 +136,13 @@ MSG_TYPE_SAVE_BHI360_CALIBRATION     // Save calibration to storage
 MSG_TYPE_FOOT_SAMPLES         // Foot sensor data
 MSG_TYPE_BHI360_3D_MAPPING    // BHI360 quaternion + gyro
 MSG_TYPE_BHI360_LINEAR_ACCEL  // Linear acceleration
-MSG_TYPE_BHI360_STEP_COUNT    // Step counter data
+MSG_TYPE_BHI360_STEP_COUNT    // Step counter data (DEPRECATED - use Activity Metrics Service)
 MSG_TYPE_BHI360_LOG_RECORD    // Complete BHI360 record for logging
+MSG_TYPE_ACTIVITY_STEP_COUNT  // Activity step count data
+MSG_TYPE_SENSOR_DATA_CONSOLIDATED  // From sensor_data module
+MSG_TYPE_REALTIME_METRICS         // From realtime_metrics module
+MSG_TYPE_ANALYTICS_RESULTS        // From analytics module
+MSG_TYPE_ACTIVITY_METRICS_BLE     // For BLE transmission
 ```
 
 ### Control Messages

@@ -19,6 +19,7 @@ list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_d2d_smp_client.cpp)
 list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_seq_manager.cpp)
 list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_recovery_handler.cpp)
 list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/ble_conn_params.cpp)
+list(REMOVE_ITEM app_sources ${CMAKE_CURRENT_SOURCE_DIR}/activity_metrics_service.cpp)
 # Don't remove bluetooth_debug.cpp - it's needed for all builds
 
 zephyr_library_compile_options(${SYS_COMPILE_FLAGS})
@@ -32,6 +33,7 @@ zephyr_library_sources_ifdef(CONFIG_PRIMARY_DEVICE
     ble_d2d_smp_client.cpp  # NEW: D2D SMP client for secondary communication
     information_service.cpp
     control_service.cpp
+    activity_metrics_service.cpp  # NEW: Real-time activity metrics service
     orientation_3d_service.cpp  # High-rate 3D orientation service
     d2d_data_handler.cpp  # Handles D2D data from secondary
     ble_d2d_rx.cpp  # Primary receives data/status from secondary

@@ -155,6 +155,7 @@ extern struct k_msgq bluetooth_msgq;
 extern struct k_msgq data_msgq;
 extern struct k_msgq motion_sensor_msgq;
 extern struct k_msgq activity_metrics_msgq;
+extern struct k_msgq sensor_data_msgq;  // New multi-thread architecture queue
 #if defined(CONFIG_WIFI_MODULE)
 extern struct k_msgq wifi_msgq;
 #endif

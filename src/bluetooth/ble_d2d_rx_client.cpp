@@ -1081,7 +1081,7 @@ static uint8_t weight_measurement_notify_handler(struct bt_conn *conn,
     uint16_t weight_kg_x10 = *(const uint16_t *)data;
     float weight_kg = weight_kg_x10 / 10.0f;
     LOG_INF("=== RECEIVED WEIGHT MEASUREMENT FROM SECONDARY ===");
-    LOG_INF("  Weight: %.1f kg (raw=%u)", weight_kg, weight_kg_x10);
+    LOG_INF("  Weight: %.1f kg (raw=%u)", (double)weight_kg, weight_kg_x10);
 
     // Forward to information service for aggregation with primary weight
     // The primary device should aggregate both feet weights

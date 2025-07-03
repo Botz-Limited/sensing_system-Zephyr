@@ -68,10 +68,12 @@
 #include "smp_proxy.hpp"
 #endif
 #include "ble_conn_params.hpp"
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "activity_metrics_service.h"
+#endif
 
 // External function declarations
-extern "C" void jis_activity_step_count_notify(uint32_t activity_steps);
-extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration);
+// Step count functions moved to Activity Metrics Service
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
@@ -831,6 +833,11 @@ static void connected(struct bt_conn *conn, uint8_t err)
         LOG_INF("Connected");
         ble_status_connected = 1;
         
+        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Update Activity Metrics Service with connection (primary only)
+        ams_set_connection(conn);
+#endif
+        
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Check if this is a reconnection and start recovery if needed
         BleSequenceManager::getInstance().onReconnect();
@@ -936,6 +943,11 @@ static bool bonds_present()
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
     LOG_INF("Disconnected (reason 0x%02x)", reason);
+    
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Clear Activity Metrics Service connection (primary only)
+    ams_set_connection(NULL);
+#endif
     
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Mark disconnection for potential recovery
@@ -1342,7 +1354,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         LOG_INF("Activity Step Count - Primary=%u, Secondary=%u, Total=%u", 
                                 primary_activity_steps, secondary_activity_steps, total_activity_steps);
                         
-                        jis_activity_step_count_notify(total_activity_steps);
+                        ams_update_activity_step_count(total_activity_steps);
                         break;
                     }
                     
@@ -1367,7 +1379,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     LOG_DBG("Global step aggregation: Primary=%u, Secondary=%u, Total=%u", 
                             primary_step_count, secondary_step_count, total_steps);
                     
-                    jis_total_step_count_notify(total_steps, 0);  // Duration always 0
+                    ams_update_total_step_count(total_steps);
 #else
                     LOG_INF("Secondary device sending step count: %u", step_data->step_count);
                     // Secondary device: Send to primary via D2D
@@ -1390,7 +1402,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         LOG_INF("Secondary Activity Step Count Update - Secondary=%u, Total=%u", 
                                 secondary_activity_steps, total_activity_steps);
                         
-                        jis_activity_step_count_notify(total_activity_steps);
+                        ams_update_activity_step_count(total_activity_steps);
                     }
 #endif
                     break;
@@ -1438,14 +1450,14 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         // Reset activity step counts
                         primary_activity_steps = 0;
                         secondary_activity_steps = 0;
-                        jis_activity_step_count_notify(0);  // Notify 0 activity steps
+                        ams_update_activity_step_count(0);  // Notify 0 activity steps
                         LOG_INF("Activity step counts reset to 0");
                     }
                     else if (strncmp(command_str, "WEIGHT:", 7) == 0) {
                         // Handle weight measurement result from activity metrics
                         float weight_kg;
                         if (sscanf(command_str, "WEIGHT:%f", &weight_kg) == 1) {
-                            LOG_INF("Received weight measurement: %.1f kg", weight_kg);
+                            LOG_INF("Received weight measurement: %.1f kg", (double)weight_kg);
                             // Send to information service for BLE notification
                             jis_weight_measurement_notify(weight_kg);
                         }
@@ -1735,6 +1747,29 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     break;
                 }
 
+                
+                case MSG_TYPE_ACTIVITY_METRICS_BLE: {
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Handle activity metrics update from realtime_metrics module (primary only)
+                    if (msg.sender == SENDER_REALTIME_METRICS) {
+                        // Extract metrics data from message
+                        // Note: We need to properly define how metrics are passed in the message
+                        // For now, we'll cast the data assuming it fits
+                        realtime_metrics_t metrics;
+                        memcpy(&metrics, &msg.data, sizeof(metrics));
+                        
+                        // Update the Activity Metrics Service
+                        ams_update_realtime_metrics(&metrics);
+                        
+                        LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d",
+                                metrics.cadence_spm, metrics.pace_sec_km, metrics.form_score);
+                    }
+#else
+                    // Secondary device doesn't have Activity Metrics Service
+                    LOG_DBG("Ignoring activity metrics update on secondary device");
+#endif
+                    break;
+                }
                 
                 case MSG_TYPE_DEVICE_INFO: {
                     // Handle device information

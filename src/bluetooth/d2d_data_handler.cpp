@@ -7,7 +7,7 @@
 #include <zephyr/logging/log.h>
 #include <ble_services.hpp>
 #include <app.hpp>
-#include "orientation_3d_service.hpp"
+// Removed: orientation_3d_service.hpp no longer needed
 
 LOG_MODULE_REGISTER(d2d_data_handler, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -50,17 +50,7 @@ int d2d_data_handler_process_bhi360_3d_mapping(const bhi360_3d_mapping_t *data)
     
     LOG_DBG("Processing BHI360 3D mapping from secondary device");
     
-    if (data->gyro_x == 0.0f && data->gyro_y == 0.0f && data->gyro_z == 0.0f) {
-        // This is quaternion-only data for 3D visualization
-        // Forward to 3D orientation service (secondary is left shoe)
-        orientation_3d_update_secondary(data->quat_w, 
-                                       data->accel_x,  // Actually quat_x
-                                       data->accel_y,  // Actually quat_y
-                                       data->accel_z); // Actually quat_z
-        LOG_DBG("Updated 3D orientation from secondary: w=%.3f, x=%.3f, y=%.3f, z=%.3f",
-                (double)data->quat_w, (double)data->accel_x, 
-                (double)data->accel_y, (double)data->accel_z);
-    }
+    // Removed: No longer forward quaternion data for 3D visualization before logging starts
     
     // Always forward to Information Service for phone notification
     // The jis_bhi360_data1_notify function will add sequence numbers

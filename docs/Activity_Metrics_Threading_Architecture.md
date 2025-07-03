@@ -1,7 +1,7 @@
 # Activity Metrics Threading Architecture
 
 **Version:** 1.0  
-**Date:** January 2025  
+**Date:** June 2025  
 **Purpose:** Define the optimal threading architecture for implementing the Activity Session Calculated Data system on nRF5340
 
 ---

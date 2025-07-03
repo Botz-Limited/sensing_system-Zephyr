@@ -14,6 +14,10 @@ external/
 *~
 .DS_Store
 
+# Clang files
+.clang*
+*.clang
+
 # Hidden directories
 .*/
 .devcontainer/

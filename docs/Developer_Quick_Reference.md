@@ -1,7 +1,7 @@
 # Developer Quick Reference
 
-**Version:** 1.0  
-**Date:** June 2025  
+**Version:** 1.2  
+**Date:** July 2025  
 **Scope:** Quick reference guide for developers working with the sensing firmware  
 **Purpose:** Essential commands, UUIDs, debug tips, and common patterns for rapid development
 
@@ -27,72 +27,12 @@
 
 ### Primary Device (Right Foot)
 ```bash
-# Using the build script (recommended)
-./tools/build_primary.sh
-
-# Manual command
-west build --build-dir build_primary \
-    --board nrf5340dk/nrf5340/cpuapp \
-    --sysbuild \
-    -- -DCONFIG_PRIMARY_DEVICE=y \
-       -Dipc_radio_EXTRA_CONF_FILE=sysbuild/ipc_radio/prj_primary.conf
+west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=y
 ```
-
-**Primary Device Characteristics:**
-- Advertises as "SensingGR"
-- Accepts connections from phones
-- Accepts connections from secondary device
-- Network core: BT_PERIPHERAL=y, BT_CENTRAL=n
 
 ### Secondary Device (Left Foot)
 ```bash
-# Using the build script (recommended)
-./tools/build_secondary.sh
-
-# Manual command
-west build --build-dir build_secondary \
-    --board nrf5340dk/nrf5340/cpuapp \
-    --sysbuild \
-    -- -DCONFIG_PRIMARY_DEVICE=n \
-       -Dipc_radio_EXTRA_CONF_FILE=sysbuild/ipc_radio/prj_secondary.conf
-```
-
-**Secondary Device Characteristics:**
-- Advertises as "SensingGL"
-- Connects to primary device
-- Network core: BT_CENTRAL=y (for connecting to primary)
-
-### Flash Commands
-
-#### Flash Primary Device
-```bash
-# Using the flash script (handles recovery if needed)
-./tools/flash_primary.sh
-
-# Manual commands
-nrfjprog --program build_primary/merged_CPUNET.hex --verify --chiperase --reset
-sleep 2
-nrfjprog --program build_primary/merged.hex --verify --chiperase --reset
-```
-
-#### Flash Secondary Device
-```bash
-# Using the flash script
-./tools/flash_secondary.sh
-
-# Manual commands
-nrfjprog --program build_secondary/merged_CPUNET.hex --verify --chiperase --reset
-sleep 2
-nrfjprog --program build_secondary/merged.hex --verify --chiperase --reset
-```
-
-#### Recovery Mode (if access protection is enabled)
-```bash
-# Recover network core
-nrfjprog --recover -f NRF53 --coprocessor CP_NETWORK
-
-# Recover application core
-nrfjprog --recover -f NRF53 --coprocessor CP_APPLICATION
+west build -b <board> -- -DCONFIG_PRIMARY_DEVICE=n
 ```
 
 ## 2. Key Files
@@ -117,61 +57,42 @@ nrfjprog --recover -f NRF53 --coprocessor CP_APPLICATION
 - Set Time: `e160ca1f-3115-4ad6-9709-8c5ff3bf558b`
 - Delete Foot Log: `e160ca82-3115-4ad6-9709-8c5ff3bf558b`
 - Delete BHI360 Log: `e160ca83-3115-4ad6-9709-8c5ff3bf558b`
-- Delete Activity Log: `e160ca86-3115-4ad6-9709-8c5ff3bf558b`
+- Delete Activity Log: `e160ca87-3115-4ad6-9709-8c5ff3bf558b`
 - Start Activity: `e160ca84-3115-4ad6-9709-8c5ff3bf558b`
 - Stop Activity: `e160ca85-3115-4ad6-9709-8c5ff3bf558b`
-- **Trigger BHI360 Calibration**: `e160ca87-3115-4ad6-9709-8c5ff3bf558b`
-- FOTA Status: `e160ca88-3115-4ad6-9709-8c5ff3bf558b`
+- **Trigger BHI360 Calibration**: `e160ca86-3115-4ad6-9709-8c5ff3bf558b`
+- FOTA Status: `e160ca87-3115-4ad6-9709-8c5ff3bf558b`
 
-### SMP Proxy Service (Primary Only) - **RECOMMENDED**
-- Service: `14387800-130c-49e7-b877-2881c89cb258`
-- Characteristic: `14387802-130c-49e7-b877-2881c89cb258`
-- Properties: Write Without Response, Notify
-- **Usage**: Standard MCUmgr/SMP protocol with target in header
-- **Target**: Bit 3 of flags (0=Primary, 1=Secondary)
+### FOTA Proxy Service (Primary Only) - Legacy
+- Service: `6e400001-b5a3-f393-e0a9-e50e24dcca9e`
+- Target: `6e400002-b5a3-f393-e0a9-e50e24dcca9e`
+- Command: `6e400003-b5a3-f393-e0a9-e50e24dcca9e`
+- Data: `6e400004-b5a3-f393-e0a9-e50e24dcca9e`
+- Status: `6e400005-b5a3-f393-e0a9-e50e24dcca9e`
 
-### Legacy Services (Still Available)
-#### FOTA Proxy Service
-- Service: `14387800-130c-49e7-b877-2881c89cb258`
-- Characteristic: `14387801-130c-49e7-b877-2881c89cb258`
+### SMP Proxy Service (Primary Only) - Recommended
+- Service: `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`
+- Target: `DA2E7829-FBCE-4E01-AE9E-261174997C48`
+- SMP Data: `DA2E7828-FBCE-4E01-AE9E-261174997C48`
+- **Usage**: Set target (0x00=Primary, 0x01=Secondary), then use standard MCUmgr
 
-#### File Proxy Service  
-- Service: `14387810-130c-49e7-b877-2881c89cb258`
-- Characteristic: `14387811-130c-49e7-b877-2881c89cb258`
+### Activity Metrics Service (Primary Only)
+- Service: `4fd5b690-9d89-4061-92aa-319ca786baae`
+- Real-time Metrics: `4fd5b691-9d89-4061-92aa-319ca786baae`
+- Asymmetry Metrics: `4fd5b692-9d89-4061-92aa-319ca786baae`
+- Biomechanics Extended: `4fd5b693-9d89-4061-92aa-319ca786baae`
+- Session Summary: `4fd5b694-9d89-4061-92aa-319ca786baae`
+- GPS Data (Write): `4fd5b695-9d89-4061-92aa-319ca786baae`
+- Total Step Count: `4fd5b696-9d89-4061-92aa-319ca786baae`
+- Activity Step Count: `4fd5b697-9d89-4061-92aa-319ca786baae`
+
+### Secondary Device Service (Primary Only)
+- Service: `4fd5b6a0-9d89-4061-92aa-319ca786baae`
+- All secondary device info, logs, and measurements in one service
 
 ## 4. Command Values
 
-### SMP Protocol (Recommended)
-```c
-// SMP Header Structure (8 bytes)
-struct smp_header {
-    uint8_t  op;       // 0=read, 1=read_rsp, 2=write, 3=write_rsp
-    uint8_t  flags;    // Bit 3: target (0=primary, 1=secondary)
-    uint16_t len;      // Payload length
-    uint16_t group;    // Command group
-    uint8_t  seq;      // Sequence number
-    uint8_t  id;       // Command ID
-};
-
-// Common Groups
-0x0000 - OS Management (reset, echo, taskstat)
-0x0001 - Image Management (list, upload, test, confirm)
-0x0008 - File System (upload, download, stat, hash)
-0x0009 - Shell Management
-0x000A - Statistics
-
-// Key Commands
-IMG_UPLOAD   = 0x01  // Upload firmware image
-IMG_LIST     = 0x00  // List images
-IMG_TEST     = 0x02  // Test image (mark for next boot)
-IMG_CONFIRM  = 0x03  // Confirm image (make permanent)
-FS_DOWNLOAD  = 0x00  // Download file
-FS_UPLOAD    = 0x01  // Upload file
-OS_RESET     = 0x05  // Reset device
-OS_ECHO      = 0x00  // Echo test
-```
-
-### Legacy FOTA Proxy Commands
+### FOTA Proxy Commands
 ```c
 0x01 - START (+ 4 bytes size)
 0x02 - DATA (+ firmware bytes)
@@ -182,7 +103,7 @@ OS_ECHO      = 0x00  // Echo test
 0x07 - SECONDARY_COMPLETE
 ```
 
-### Legacy FOTA Status
+### FOTA Proxy Status
 ```c
 0x00 - IDLE
 0x01 - IN_PROGRESS
@@ -191,6 +112,13 @@ OS_ECHO      = 0x00  // Echo test
 0x04 - NO_TARGET
 0x05 - WAITING_SECONDARY
 0x06 - BOTH_COMPLETE
+```
+
+### FOTA Target
+```c
+0x00 - PRIMARY
+0x01 - SECONDARY
+0xFF - ALL
 ```
 
 ## 5. Message Types
@@ -208,9 +136,13 @@ MSG_TYPE_SAVE_BHI360_CALIBRATION     // Save calibration to storage
 MSG_TYPE_FOOT_SAMPLES         // Foot sensor data
 MSG_TYPE_BHI360_3D_MAPPING    // BHI360 quaternion + gyro
 MSG_TYPE_BHI360_LINEAR_ACCEL  // Linear acceleration
-MSG_TYPE_BHI360_STEP_COUNT    // Step counter data
+MSG_TYPE_BHI360_STEP_COUNT    // Step counter data (DEPRECATED - use Activity Metrics Service)
 MSG_TYPE_BHI360_LOG_RECORD    // Complete BHI360 record for logging
 MSG_TYPE_ACTIVITY_STEP_COUNT  // Activity step count data
+MSG_TYPE_SENSOR_DATA_CONSOLIDATED  // From sensor_data module
+MSG_TYPE_REALTIME_METRICS         // From realtime_metrics module
+MSG_TYPE_ANALYTICS_RESULTS        // From analytics module
+MSG_TYPE_ACTIVITY_METRICS_BLE     // For BLE transmission
 ```
 
 ### Control Messages
@@ -221,7 +153,7 @@ MSG_TYPE_DELETE_BHI360_LOG    // Delete BHI360 log
 MSG_TYPE_DELETE_ACTIVITY_LOG  // Delete activity log
 MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE  // New log file notification
 MSG_TYPE_NEW_BHI360_LOG_FILE       // New log file notification
-MSG_TYPE_NEW_ACTIVITY_LOG_FILE      // New log file notification
+MSG_TYPE_NEW_ACTIVITY_LOG_FILE      // New activity log file notification
 ```
 
 ## 6. Debug Commands
@@ -254,48 +186,20 @@ MSG_TYPE_NEW_ACTIVITY_LOG_FILE      // New log file notification
 
 ## 7. Common Issues
 
-### 1. SMP Proxy Not Working
-- Verify using correct service/characteristic UUIDs
-- Check target bit in flags (bit 3)
-- Ensure D2D connection established for secondary
-- Use mcumgr CLI to test: `mcumgr --conntype ble image list`
-
-### 2. Commands Not Reaching Secondary
+### 1. Commands Not Reaching Secondary
 - Check D2D connection established
 - Verify service discovery completed
 - Look for "D2D service discovery complete!"
-- For SMP: verify target bit = 1 in flags
 
-### 3. FOTA Fails on Secondary
-- Reduce chunk size to 256 bytes
+### 2. FOTA Fails on Secondary
 - Ensure D2D connection stable
 - Check SMP client configured on primary
 - Verify secondary not resetting early
-- Add delays between operations
 
-### 4. Build Errors
+### 3. Build Errors
 - Check CONFIG_PRIMARY_DEVICE setting
 - Verify all includes present
 - Clean build directory
-- Use `rm -rf build_primary` or `rm -rf build_secondary` before rebuild
-
-### 5. Quick Build & Flash Workflow
-```bash
-# For Primary Device (Right Foot)
-./tools/build_primary.sh && ./tools/flash_primary.sh
-
-# For Secondary Device (Left Foot)
-./tools/build_secondary.sh && ./tools/flash_secondary.sh
-```
-
-### 6. Identifying Connected Device
-```bash
-# Check which device is connected
-nrfjprog --ids
-
-# Read device info (if programmed)
-nrfjprog --memrd 0x00FF8000 --n 32
-```
 
 ## 8. Testing Checklist
 
@@ -310,15 +214,7 @@ nrfjprog --memrd 0x00FF8000 --n 32
 - [ ] Delete commands work on both
 - [ ] Activity commands start/stop both
 
-### FOTA Updates (SMP Proxy)
-- [ ] Primary device FOTA via SMP (target bit = 0)
-- [ ] Secondary device FOTA via SMP (target bit = 1)
-- [ ] File download from primary
-- [ ] File download from secondary
-- [ ] Echo test works for both targets
-- [ ] Standard MCUmgr tools work
-
-### Legacy FOTA Updates
+### FOTA Updates
 - [ ] Single device updates work
 - [ ] Dual device update synchronizes
 - [ ] Timeout works if secondary fails
@@ -331,26 +227,16 @@ nrfjprog --memrd 0x00FF8000 --n 32
 ```swift
 // Update secondary device using standard MCUmgr
 func updateSecondaryDevice(firmware: Data) {
-    // Use standard MCUmgr with SMP proxy characteristic
+    // 1. Set target to secondary
+    writeCharacteristic(smpProxyTargetUUID, value: Data([0x01]))
+    
+    // 2. Use standard MCUmgr with proxy data characteristic
     let transport = McuMgrBleTransport(peripheral)
-    transport.smpCharacteristic = "14387802-130c-49e7-b877-2881c89cb258"
+    transport.smpCharacteristic = smpProxyDataCharacteristic
     
-    // Set target in SMP header (bit 3 of flags)
-    transport.targetDevice = .secondary  // Sets flag bit 3 = 1
-    
-    // Standard MCUmgr operations work transparently!
+    // 3. Standard MCUmgr operations work transparently!
     let dfuManager = FirmwareUpgradeManager(transporter: transport)
     dfuManager.start(data: firmware)
-}
-
-// File operations work the same way
-func downloadFileFromSecondary(path: String) async throws -> Data {
-    let transport = McuMgrBleTransport(peripheral)
-    transport.smpCharacteristic = "14387802-130c-49e7-b877-2881c89cb258"
-    transport.targetDevice = .secondary
-    
-    let fileManager = FileSystemManager(transporter: transport)
-    return try await fileManager.download(path)
 }
 ```
 
@@ -387,17 +273,10 @@ static ssize_t d2d_new_command_write(...) {
 
 ## 10. Performance Tips
 
-### SMP Proxy Optimization
-1. **Chunk Sizes**: 512 bytes for primary, 256 for secondary
-2. **Connection Interval**: Request 15ms for FOTA operations
-3. **MTU**: Negotiate maximum (247 bytes typical)
-4. **Parallel Operations**: Avoid simultaneous primary/secondary ops
-
-### General Tips
 1. Use write-without-response for speed
 2. Batch multiple commands when possible
 3. Monitor connection parameters
-4. Keep payloads small (<20 bytes) for control commands
+4. Keep payloads small (<20 bytes)
 
 ## 11. Security Notes
 
