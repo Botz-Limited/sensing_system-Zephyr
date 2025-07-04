@@ -16,7 +16,8 @@ enum d2d_tx_cmd_type {
     D2D_TX_CMD_START_ACTIVITY,
     D2D_TX_CMD_STOP_ACTIVITY,
     D2D_TX_CMD_TRIGGER_CALIBRATION,
-    D2D_TX_CMD_REQUEST_DEVICE_INFO
+    D2D_TX_CMD_REQUEST_DEVICE_INFO,
+    D2D_TX_CMD_MEASURE_WEIGHT
 };
 
 // Command structure for the queue
@@ -39,6 +40,9 @@ void ble_d2d_tx_process_queued_commands(void);
 
 // Check if D2D TX is ready
 bool ble_d2d_tx_is_ready(void);
+
+// Queue measure weight command
+int ble_d2d_tx_queue_measure_weight_command(uint8_t value);
 
 #ifdef __cplusplus
 }

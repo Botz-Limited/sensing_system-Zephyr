@@ -47,6 +47,9 @@ int ble_d2d_tx_request_device_info(void);
 // Send weight measurement (secondary -> primary)
 int ble_d2d_tx_send_weight_measurement(float weight_kg);
 
+// Send measure weight command (primary -> secondary)
+int ble_d2d_tx_send_measure_weight_command(uint8_t value);
+
 #ifdef __cplusplus
 }
 #endif

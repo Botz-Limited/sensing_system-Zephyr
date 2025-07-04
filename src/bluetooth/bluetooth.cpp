@@ -1794,6 +1794,26 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     break;
                 }
 
+                case MSG_TYPE_WEIGHT_MEASUREMENT: {
+                    // Handle weight measurement
+                    weight_measurement_msg_t *weight_data = &msg.data.weight_measurement;
+                    LOG_INF("Received WEIGHT MEASUREMENT from %s: %.1f kg", 
+                            get_sender_name(msg.sender), weight_data->weight_kg);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Primary device: Forward to phone via BLE
+                    jis_weight_measurement_notify(weight_data->weight_kg);
+#else
+                    // Secondary device: Send to primary via D2D
+                    int err = ble_d2d_tx_send_weight_measurement(weight_data->weight_kg);
+                    if (err) {
+                        LOG_ERR("Failed to send weight measurement via D2D: %d", err);
+                    } else {
+                        LOG_INF("Weight measurement sent to primary via D2D");
+                    }
+#endif
+                    break;
+                }
+
                 default:
                     LOG_WRN("Unknown message type received (%d) from %s", msg.type, get_sender_name(msg.sender));
                     break;

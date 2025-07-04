@@ -102,6 +102,23 @@ typedef struct {
     uint8_t profile_data[512];  // Max calibration profile size
 } bhi360_calibration_data_t;
 
+// Weight calibration data structure
+typedef struct {
+    float scale_factor;     // kg per ADC unit
+    float nonlinear_a;      // Nonlinear coefficient A
+    float nonlinear_b;      // Nonlinear coefficient B  
+    float nonlinear_c;      // Nonlinear coefficient C
+    float temp_coeff;       // Temperature coefficient (%/°C)
+    float temp_ref;         // Reference temperature (°C)
+    bool is_calibrated;     // Flag to indicate if calibration is valid
+    uint32_t timestamp;     // When calibration was performed
+} weight_calibration_data_t;
+
+// Weight calibration step data (for calibration procedure)
+typedef struct {
+    float known_weight_kg;  // User's actual weight for calibration
+} weight_calibration_step_t;
+
 // Activity step count data for activity file
 typedef struct {
     uint16_t left_step_count;   // Left foot step count
@@ -116,6 +133,12 @@ typedef struct {
     char hw_rev[16];
     char fw_rev[16];
 } device_info_msg_t;
+
+// Weight measurement result
+typedef struct {
+    float weight_kg;
+    uint32_t timestamp;
+} weight_measurement_msg_t;
 
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
@@ -142,6 +165,9 @@ typedef struct
         bhi360_calibration_data_t bhi360_calibration;
         activity_step_count_t activity_step_count;
         device_info_msg_t device_info;
+        weight_calibration_data_t weight_calibration;
+        weight_calibration_step_t weight_calibration_step;
+        weight_measurement_msg_t weight_measurement;
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

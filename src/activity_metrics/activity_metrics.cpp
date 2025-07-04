@@ -124,7 +124,27 @@ static struct {
     float motion_threshold;
     uint32_t stable_samples_required;
     uint32_t stable_samples_count;
+    bool debug_mode;  // Show raw ADC values for calibration
 } weight_measurement;
+
+// Weight calibration variables - can be updated at runtime
+static struct {
+    float zero_offset;      // ADC reading with no load
+    float scale_factor;     // Newtons per ADC unit
+    float nonlinear_a;      // Nonlinear coefficient A
+    float nonlinear_b;      // Nonlinear coefficient B
+    float nonlinear_c;      // Nonlinear coefficient C
+    float temp_coeff;       // Temperature coefficient (%/°C)
+    float temp_ref;         // Reference temperature (°C)
+} weight_cal = {
+    .zero_offset = 1024.0f,    // Typical 12-bit ADC baseline
+    .scale_factor = 0.0168f,   // ~100N max per sensor (16 sensors total)
+    .nonlinear_a = 1.0f,       // Linear model by default
+    .nonlinear_b = 0.0f,
+    .nonlinear_c = 0.0f,
+    .temp_coeff = 0.0f,
+    .temp_ref = 25.0f
+};
 
 // Forward declarations
 static void activity_metrics_init(void);
@@ -213,7 +233,7 @@ static void activity_metrics_init(void)
         }
         
         LOG_DBG("Step event: foot=%d, contact=%.1fms, flight=%.1fms, strike=%d",
-                event->foot, event->contact_time_ms, event->flight_time_ms, event->strike_pattern);
+                event->foot, (double)event->contact_time_ms, (double)event->flight_time_ms, event->strike_pattern);
     });
     
     // Create the processing thread
@@ -307,6 +327,7 @@ static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
 // Work handler for processing foot sensor data
 static void process_foot_data_work_handler(struct k_work *work)
 {
+    ARG_UNUSED(work);
     LOG_DBG("Processing foot sensor data for foot %d", pending_foot_id);
     process_foot_sensor_data(&pending_foot_data, pending_foot_id);
 }
@@ -314,6 +335,7 @@ static void process_foot_data_work_handler(struct k_work *work)
 // Work handler for processing BHI360 data
 static void process_bhi360_data_work_handler(struct k_work *work)
 {
+    ARG_UNUSED(work);
     LOG_DBG("Processing BHI360 data, type: %d", pending_bhi360_type);
     
     // Create a temporary message with the appropriate data
@@ -348,15 +370,16 @@ static void process_command_work_handler(struct k_work *work)
             .activity_type = ACTIVITY_TYPE_RUNNING,
             .activity_subtype = RUN_TYPE_EVERYDAY,
             .firmware_version = {1, 0, 0},
-            .user_weight_kg = sensor_data.weight_measurement_valid ? 
-                             (uint16_t)(sensor_data.calculated_weight_kg * 10) : 700,
+            .user_weight_kg = (uint16_t)(sensor_data.weight_measurement_valid ? 
+                             (sensor_data.calculated_weight_kg * 10) : 700),
             .user_height_cm = 175,
             .user_age = 30,
             .user_gender = 0,
             .left_battery_pct = 100,
             .right_battery_pct = 100,
             .calibration_id = 0,
-            .gps_mode = GPS_MODE_OFF
+            .gps_mode = GPS_MODE_OFF,
+            .reserved = {0}
         };
         activity_session_start(&header);
         atomic_set(&processing_active, 1);
@@ -373,6 +396,47 @@ static void process_command_work_handler(struct k_work *work)
         // Queue weight measurement work
         k_work_submit_to_queue(&activity_metrics_work_q, &weight_measurement_work);
         LOG_INF("Weight measurement requested");
+    } else if (strncmp(pending_command, "CALIBRATE_WEIGHT:", 17) == 0) {
+        // Handle weight calibration command
+        // Format: "CALIBRATE_WEIGHT:ZERO:1024.0" or "CALIBRATE_WEIGHT:SCALE:0.0168"
+        char param[32];
+        float value;
+        if (sscanf(pending_command + 17, "%31[^:]:%f", param, &value) == 2) {
+            if (strcmp(param, "ZERO") == 0) {
+                weight_cal.zero_offset = value;
+                LOG_INF("Weight calibration: zero_offset set to %.2f", (double)value);
+            } else if (strcmp(param, "SCALE") == 0) {
+                weight_cal.scale_factor = value;
+                LOG_INF("Weight calibration: scale_factor set to %.6f", (double)value);
+            } else if (strcmp(param, "NONLINEAR_A") == 0) {
+                weight_cal.nonlinear_a = value;
+                LOG_INF("Weight calibration: nonlinear_a set to %.6f", (double)value);
+            } else if (strcmp(param, "NONLINEAR_B") == 0) {
+                weight_cal.nonlinear_b = value;
+                LOG_INF("Weight calibration: nonlinear_b set to %.6f", (double)value);
+            } else if (strcmp(param, "NONLINEAR_C") == 0) {
+                weight_cal.nonlinear_c = value;
+                LOG_INF("Weight calibration: nonlinear_c set to %.6f", (double)value);
+            } else {
+                LOG_WRN("Unknown calibration parameter: %s", param);
+            }
+        } else {
+            LOG_WRN("Invalid calibration command format: %s", pending_command);
+        }
+    } else if (strcmp(pending_command, "GET_WEIGHT_CAL") == 0) {
+        // Report current calibration values
+        LOG_INF("Weight calibration values:");
+        LOG_INF("  zero_offset: %.2f", (double)weight_cal.zero_offset);
+        LOG_INF("  scale_factor: %.6f", (double)weight_cal.scale_factor);
+        LOG_INF("  nonlinear_a: %.6f", (double)weight_cal.nonlinear_a);
+        LOG_INF("  nonlinear_b: %.6f", (double)weight_cal.nonlinear_b);
+        LOG_INF("  nonlinear_c: %.6f", (double)weight_cal.nonlinear_c);
+    } else if (strcmp(pending_command, "WEIGHT_DEBUG_ON") == 0) {
+        weight_measurement.debug_mode = true;
+        LOG_INF("Weight measurement debug mode enabled");
+    } else if (strcmp(pending_command, "WEIGHT_DEBUG_OFF") == 0) {
+        weight_measurement.debug_mode = false;
+        LOG_INF("Weight measurement debug mode disabled");
     } else {
         LOG_WRN("Unknown command: %s", pending_command);
     }
@@ -500,7 +564,7 @@ static void calculate_realtime_metrics(void)
             session_state.baseline_form_score = calculate_form_score();
             session_state.baseline_established = true;
             LOG_INF("Baseline established: contact=%.1fms, form=%d", 
-                    session_state.baseline_contact_time, 
+                    (double)session_state.baseline_contact_time, 
                     session_state.baseline_form_score);
         }
     }
@@ -511,7 +575,7 @@ static void send_periodic_record(void)
 {
     // For now, just log the metrics
     LOG_DBG("Periodic update: cadence=%.1f, contact=%.1fms, flight=%.1fms",
-            sensor_data.current_cadence, sensor_data.avg_contact_time, sensor_data.avg_flight_time);
+            (double)sensor_data.current_cadence, (double)sensor_data.avg_contact_time, (double)sensor_data.avg_flight_time);
     
     // TODO: Create proper message structure for activity records
     // This would send to data module for logging
@@ -833,6 +897,11 @@ static void process_weight_measurement(void)
             total_pressure += sensor_data.right_pressure[i];
         }
         
+        // Debug output for calibration
+        if (weight_measurement.debug_mode) {
+            LOG_INF("CALIBRATION DEBUG: Total ADC = %.2f", (double)total_pressure);
+        }
+        
         // Add to buffer
         if (weight_measurement.buffer_count < 20) {
             weight_measurement.pressure_sum_buffer[weight_measurement.buffer_count++] = total_pressure;
@@ -861,13 +930,23 @@ static void process_weight_measurement(void)
                 LOG_INF("Weight measurement complete: %.1f kg", (double)weight_kg);
                 
                 // Send weight to BLE
-                // TODO: Add message type for weight measurement result
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                // Primary device: Send to phone via BLE
                 generic_message_t weight_msg = {};
                 weight_msg.sender = SENDER_ACTIVITY_METRICS;
                 weight_msg.type = MSG_TYPE_COMMAND;
                 snprintf(weight_msg.data.command_str, sizeof(weight_msg.data.command_str), 
                          "WEIGHT:%.1f", weight_kg);
                 k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
+#else
+                // Secondary device: Send to primary via D2D
+                generic_message_t weight_msg = {};
+                weight_msg.sender = SENDER_ACTIVITY_METRICS;
+                weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+                weight_msg.data.weight_measurement.weight_kg = weight_kg;
+                weight_msg.data.weight_measurement.timestamp = k_uptime_get_32();
+                k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
+#endif
                 
                 weight_measurement.measurement_in_progress = false;
             } else {
@@ -877,19 +956,10 @@ static void process_weight_measurement(void)
     }
 }
 
-// Weight calibration macros - REPLACE THESE AFTER CALIBRATION
-#define WEIGHT_CAL_ZERO_OFFSET      0.0f    // ADC reading with no load
-#define WEIGHT_CAL_SCALE_FACTOR     0.1f    // Newtons per ADC unit
-#define WEIGHT_CAL_NONLINEAR_A      1.0f    // Nonlinear coefficient A
-#define WEIGHT_CAL_NONLINEAR_B      0.0f    // Nonlinear coefficient B
-#define WEIGHT_CAL_NONLINEAR_C      0.0f    // Nonlinear coefficient C
-#define WEIGHT_CAL_TEMP_COEFF       0.0f    // Temperature coefficient (%/°C)
-#define WEIGHT_CAL_TEMP_REF         25.0f   // Reference temperature (°C)
-
 // Calibration procedure:
-// 1. ZERO CALIBRATION: Read ADC with no load, set WEIGHT_CAL_ZERO_OFFSET
-// 2. LINEAR CALIBRATION: Apply known weights and calculate WEIGHT_CAL_SCALE_FACTOR
-//    WEIGHT_CAL_SCALE_FACTOR = (Force_in_Newtons) / (ADC_reading - WEIGHT_CAL_ZERO_OFFSET)
+// 1. ZERO CALIBRATION: Read ADC with no load, set weight_cal.zero_offset
+// 2. LINEAR CALIBRATION: Apply known weights and calculate weight_cal.scale_factor
+//    weight_cal.scale_factor = (Force_in_Newtons) / (ADC_reading - weight_cal.zero_offset)
 // 3. NONLINEAR CALIBRATION (optional): For FSR sensors, fit polynomial
 //    Force = A * ADC² + B * ADC + C
 // 4. TEMPERATURE CALIBRATION (optional): Measure drift with temperature
@@ -906,25 +976,25 @@ static float calculate_weight_from_pressure(void)
     avg_pressure /= valid_samples;
     
     // Apply zero offset calibration
-    float calibrated_adc = avg_pressure - WEIGHT_CAL_ZERO_OFFSET;
+    float calibrated_adc = avg_pressure - weight_cal.zero_offset;
     
     // Convert to force using calibration
     float total_force_n = 0;
     
     // Check if using linear or nonlinear calibration
-    if (WEIGHT_CAL_NONLINEAR_A != 1.0f || WEIGHT_CAL_NONLINEAR_B != 0.0f || WEIGHT_CAL_NONLINEAR_C != 0.0f) {
+    if (weight_cal.nonlinear_a != 1.0f || weight_cal.nonlinear_b != 0.0f || weight_cal.nonlinear_c != 0.0f) {
         // Use nonlinear calibration (polynomial)
-        total_force_n = WEIGHT_CAL_NONLINEAR_A * calibrated_adc * calibrated_adc +
-                       WEIGHT_CAL_NONLINEAR_B * calibrated_adc +
-                       WEIGHT_CAL_NONLINEAR_C;
+        total_force_n = weight_cal.nonlinear_a * calibrated_adc * calibrated_adc +
+                       weight_cal.nonlinear_b * calibrated_adc +
+                       weight_cal.nonlinear_c;
     } else {
         // Use simple linear calibration
-        total_force_n = calibrated_adc * WEIGHT_CAL_SCALE_FACTOR;
+        total_force_n = calibrated_adc * weight_cal.scale_factor;
     }
     
     // Apply temperature compensation if available
     // Note: This would require a temperature sensor reading
-    // float temp_correction = 1.0f + (current_temp - WEIGHT_CAL_TEMP_REF) * WEIGHT_CAL_TEMP_COEFF / 100.0f;
+    // float temp_correction = 1.0f + (current_temp - weight_cal.temp_ref) * weight_cal.temp_coeff / 100.0f;
     // total_force_n *= temp_correction;
     
     // Convert force to mass (F = mg, where g = 9.81 m/s²)

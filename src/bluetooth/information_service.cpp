@@ -155,11 +155,6 @@ static ssize_t jis_device_status_packed_read(struct bt_conn* conn, const struct 
 static void jis_device_status_packed_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 extern "C" void jis_device_status_packed_notify(void);
 
-// Packed file notification characteristic
-static ssize_t jis_file_notification_packed_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static void jis_file_notification_packed_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-extern "C" void jis_file_notification_packed_notify(uint8_t file_id, uint8_t file_type, uint8_t device_source, const char* file_path);
-
 //Current Time Characteristic
 static ssize_t jis_read_current_time(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_current_time_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
@@ -297,9 +292,6 @@ static struct bt_uuid_128 weight_measurement_uuid =
 static struct bt_uuid_128 device_status_packed_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec7, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
-// Packed File Notification UUID (new)
-static struct bt_uuid_128 file_notification_packed_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec8, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 // Secondary Device Information UUIDs
 static struct bt_uuid_128 secondary_manufacturer_uuid =
@@ -440,14 +432,6 @@ BT_GATT_SERVICE_DEFINE(
         jis_device_status_packed_read, nullptr,
         static_cast<void *>(&device_status_packed)),
     BT_GATT_CCC(jis_device_status_packed_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
-
-    // Packed File Notification Characteristic (new - combines file ID and path)
-    BT_GATT_CHARACTERISTIC(&file_notification_packed_uuid.uuid,
-        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
-        jis_file_notification_packed_read, nullptr,
-        static_cast<void *>(&file_notification_packed)),
-    BT_GATT_CCC(jis_file_notification_packed_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
     // FOTA Progress Characteristic
     BT_GATT_CHARACTERISTIC(&fota_progress_uuid.uuid,
@@ -1079,12 +1063,6 @@ void jis_foot_sensor_req_id_path_notify(const char *file_path) // Renamed from c
                         sizeof(foot_sensor_req_id_path));
     }
     
-    // Also send packed notification with both ID and path
-    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    jis_file_notification_packed_notify(foot_sensor_log_available, 0, 0, file_path); // type=0 for foot sensor, source=0 for primary
-    #else
-    jis_file_notification_packed_notify(foot_sensor_log_available, 0, 1, file_path); // type=0 for foot sensor, source=1 for secondary
-    #endif
 }
 
 /**
@@ -1206,12 +1184,6 @@ void jis_bhi360_req_id_path_notify(const char *file_path)
                         sizeof(bhi360_req_id_path));
     }
     
-    // Also send packed notification with both ID and path
-    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    jis_file_notification_packed_notify(bhi360_log_available, 1, 0, file_path); // type=1 for BHI360, source=0 for primary
-    #else
-    jis_file_notification_packed_notify(bhi360_log_available, 1, 1, file_path); // type=1 for BHI360, source=1 for secondary
-    #endif
 }
 
 /**
@@ -1476,12 +1448,6 @@ extern "C" void jis_activity_log_path_notify(const char *path)
                         strlen(activity_log_path) + 1);
     }
     
-    // Also send packed notification with both ID and path
-    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    jis_file_notification_packed_notify(activity_log_available, 2, 0, path); // type=2 for activity, source=0 for primary
-    #else
-    jis_file_notification_packed_notify(activity_log_available, 2, 1, path); // type=2 for activity, source=1 for secondary
-    #endif
 }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -1626,8 +1592,6 @@ void jis_secondary_foot_log_path_notify(const char *path)
                         strlen(secondary_foot_log_path) + 1);
     }
     
-    // Also send packed notification for secondary foot sensor file
-    jis_file_notification_packed_notify(secondary_foot_log_available, 0, 1, path); // type=0 for foot, source=1 for secondary
 }
 
 // Secondary BHI360 Log Available handlers
@@ -1688,8 +1652,6 @@ void jis_secondary_bhi360_log_path_notify(const char *path)
                         strlen(secondary_bhi360_log_path) + 1);
     }
     
-    // Also send packed notification for secondary BHI360 file
-    jis_file_notification_packed_notify(secondary_bhi360_log_available, 1, 1, path); // type=1 for BHI360, source=1 for secondary
 }
 
 // Secondary Activity Log Available handlers
@@ -1750,8 +1712,6 @@ void jis_secondary_activity_log_path_notify(const char *path)
                         strlen(secondary_activity_log_path) + 1);
     }
     
-    // Also send packed notification for secondary activity file
-    jis_file_notification_packed_notify(secondary_activity_log_available, 2, 1, path); // type=2 for activity, source=1 for secondary
 }
 #endif
 
@@ -1842,46 +1802,6 @@ extern "C" void jis_device_status_packed_notify(void)
         safe_gatt_notify(&device_status_packed_uuid.uuid,
                         static_cast<const void *>(&device_status_packed), 
                         sizeof(device_status_packed));
-    }
-}
-
-// --- Packed File Notification Handlers ---
-static void jis_file_notification_packed_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
-{
-    if (!attr) {
-        LOG_ERR("jis_file_notification_packed_ccc_cfg_changed: attr is NULL");
-        return;
-    }
-    file_notification_packed_subscribed = value == BT_GATT_CCC_NOTIFY;
-    LOG_DBG("Packed File Notification CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
-}
-
-static ssize_t jis_file_notification_packed_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset)
-{
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(file_notification_packed_t));
-}
-
-extern "C" void jis_file_notification_packed_notify(uint8_t file_id, uint8_t file_type, uint8_t device_source, const char* file_path)
-{
-    // Update the packed structure
-    file_notification_packed.file_id = file_id;
-    file_notification_packed.file_type = file_type;
-    file_notification_packed.device_source = device_source;
-    file_notification_packed.reserved = 0;
-    
-    // Copy file path
-    memset(file_notification_packed.file_path, 0, sizeof(file_notification_packed.file_path));
-    if (file_path) {
-        strncpy(file_notification_packed.file_path, file_path, sizeof(file_notification_packed.file_path) - 1);
-    }
-    
-    LOG_INF("Packed File Notification: id=%u, type=%u, source=%u, path=%s",
-            file_id, file_type, device_source, file_path ? file_path : "");
-    
-    if (file_notification_packed_subscribed) {
-        safe_gatt_notify(&file_notification_packed_uuid.uuid,
-                        static_cast<const void *>(&file_notification_packed), 
-                        sizeof(file_notification_packed));
     }
 }
 

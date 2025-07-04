@@ -1,13 +1,23 @@
 # Bluetooth GATT Specification
 
-**Version:** 2.7  
-**Date:** July 2025  
+**Version:** 2.8  
+**Date:** December 2024  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
 
 ---
 
 ## Changelog
+
+### Version 2.8 (December 2024)
+- Added Connection Parameter Control characteristic (`...b68b`) to Control Service for background execution support
+- Documented 3D Orientation Service (`0c372ec0-...`) with full specification
+- Added missing D2D RX characteristics: FOTA Status (`...ca86`) and Request Device Info (`...ca89`)
+- Added D2D File Transfer Service complete specification
+- Documented MCUmgr SMP availability on secondary devices
+- Added Background Execution Support section with connection profiles
+- Clarified packed vs. individual data structure usage
+- Added Implementation Status section documenting TODOs and limitations
 
 ### Version 2.7 (July 2025)
 - Added Activity Metrics Service (`4fd5b690-...`) for real-time running metrics
@@ -67,15 +77,17 @@
 4. [Standard Services](#4-standard-services)
 5. [Information Service](#5-information-service)
 6. [Control Service](#6-control-service)
-7. [Activity Metrics Service](#7-activity-metrics-service)
-8. [Secondary Device Service](#8-secondary-device-service)
-9. [Proxy Services](#9-proxy-services)
-10. [Device-to-Device (D2D) Services](#10-device-to-device-d2d-services)
-11. [Data Structures](#11-data-structures)
-12. [Packet Sequencing and Recovery](#12-packet-sequencing-and-recovery)
-13. [Integration Examples](#13-integration-examples)
-14. [Error Handling and Status Communication](#14-error-handling-and-status-communication)
-15. [Common BLE Error Codes](#15-common-ble-error-codes)
+7. [Background Execution Support](#7-background-execution-support)
+8. [Activity Metrics Service](#8-activity-metrics-service)
+9. [Secondary Device Service](#9-secondary-device-service)
+10. [Proxy Services](#10-proxy-services)
+11. [Device-to-Device (D2D) Services](#11-device-to-device-d2d-services)
+12. [Data Structures](#12-data-structures)
+13. [Packet Sequencing and Recovery](#13-packet-sequencing-and-recovery)
+14. [Integration Examples](#14-integration-examples)
+15. [Error Handling and Status Communication](#15-error-handling-and-status-communication)
+16. [Common BLE Error Codes](#16-common-ble-error-codes)
+17. [Implementation Status](#17-implementation-status)
 
 ---
 
@@ -404,7 +416,100 @@ DrawSequenceDiagram(
 
 ---
 
-## 7. Activity Metrics Service
+## 7. Background Execution Support
+
+The Connection Parameter Control characteristic enables dynamic optimization for different mobile app execution states, allowing significant power savings during background operation.
+
+### 7.1 Connection Parameter Profiles
+
+| Profile | Value | Interval | Latency | Timeout | Use Case |
+|---:|---:|---:|---:|---:|---:|
+| **FOREGROUND** | 0 | 15-30ms | 0 | 4s | Active app, real-time viewing |
+| **BACKGROUND** | 1 | 50-100ms | 4 | 6s | App backgrounded, active session |
+| **BACKGROUND_IDLE** | 2 | 200-500ms | 10 | 10s | App backgrounded, idle monitoring |
+
+### 7.2 Profile Behavior
+
+DrawFlowchart(
+  Syntax(
+    "APP[Mobile App] -->|Write Profile| CTRL[Control Service]",
+    "CTRL --> CONN[BLE Stack]",
+    "CONN --> PARAMS[Update Parameters]",
+    "PARAMS --> SENSORS[Adjust Sensor Rates]",
+    "SENSORS --> AGG[Enable Aggregation]",
+    "AGG --> PWR[Optimize Power]"
+  ),
+  "LR",
+  "default"
+)
+
+### 7.3 Data Rate Adaptation
+
+| Profile | Foot Sensor | Motion Sensor | Aggregation | Power Saving |
+|---:|---:|---:|---:|---:|
+| FOREGROUND | 15ms | 30ms | Disabled | Baseline |
+| BACKGROUND | 50ms | 100ms | 3 samples | ~40% |
+| BACKGROUND_IDLE | 200ms | 500ms | 5 samples | ~70% |
+
+### 7.4 Integration Example
+
+```swift
+// iOS - Request background profile when app enters background
+func applicationDidEnterBackground() {
+    // Write 1 (BACKGROUND profile) to Connection Parameter Control
+    peripheral.writeValue(Data([0x01]), 
+                         for: connParamCharacteristic, 
+                         type: .withResponse)
+}
+
+func applicationWillEnterForeground() {
+    // Write 0 (FOREGROUND profile) when returning
+    peripheral.writeValue(Data([0x00]), 
+                         for: connParamCharacteristic, 
+                         type: .withResponse)
+}
+```
+
+```kotlin
+// Android - Background service with connection management
+class SensingBackgroundService : Service() {
+    override fun onCreate() {
+        super.onCreate()
+        
+        // Request background profile when service starts
+        bluetoothGatt?.let { gatt ->
+            val service = gatt.getService(CONTROL_SERVICE_UUID)
+            val characteristic = service?.getCharacteristic(CONN_PARAM_UUID)
+            
+            characteristic?.value = byteArrayOf(0x01) // BACKGROUND profile
+            gatt.writeCharacteristic(characteristic)
+        }
+    }
+    
+    private fun optimizeForBackground() {
+        // Adjust connection parameters
+        requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER)
+        
+        // Disable non-essential notifications
+        setCharacteristicNotification(orientation3DChar, false)
+        
+        // Keep only activity metrics
+        setCharacteristicNotification(activityMetricsChar, true)
+    }
+}
+```
+
+### 7.5 Best Practices
+
+1. **Profile Switching**: Switch to BACKGROUND profile immediately when app enters background
+2. **Notification Management**: Disable high-rate characteristics (3D Orientation, raw sensor data)
+3. **Data Aggregation**: Enable aggregation for reduced BLE overhead
+4. **Recovery**: Switch back to FOREGROUND when app becomes active
+5. **Timeout Handling**: Implement reconnection logic for background disconnections
+
+---
+
+## 8. Activity Metrics Service
 
 **UUID:** `4fd5b690-9d89-4061-92aa-319ca786baae`  
 **Availability:** Primary device only  
@@ -495,7 +600,7 @@ typedef struct __attribute__((packed)) {
 
 ---
 
-## 8. Secondary Device Service
+## 9. Secondary Device Service
 
 **UUID:** `4fd5b6a0-9d89-4061-92aa-319ca786baae`  
 **Availability:** Primary device only  
@@ -528,9 +633,9 @@ typedef struct __attribute__((packed)) {
 
 ---
 
-## 9. Proxy Services
+## 10. Proxy Services
 
-### 9.1 FOTA Proxy Service
+### 10.1 FOTA Proxy Service
 
 **UUID:** `6e400001-b5a3-f393-e0a9-e50e24dcca9e`  
 **Availability:** Primary device only  
@@ -578,7 +683,7 @@ DrawSequenceDiagram(
   "dark"
 )
 
-### 9.2 3D Orientation Service
+### 10.2 3D Orientation Service
 
 **UUID:** `0c372ec0-27eb-437e-bef4-775aefaf3c97`  
 **Availability:** Primary device only  
@@ -644,7 +749,7 @@ func handle3DOrientation(_ data: Data) {
 }
 ```
 
-### 9.3 SMP Proxy Service
+### 10.3 SMP Proxy Service
 
 **Service UUID:** `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`  
 **Availability:** Primary device only  
@@ -683,7 +788,7 @@ let dfuManager = FirmwareUpgradeManager(transporter: transport)
 dfuManager.start(data: firmware)
 ```
 
-### 9.4 File Proxy Service
+### 10.4 File Proxy Service
 
 **UUID:** `7e500001-b5a3-f393-e0a9-e50e24dcca9e`  
 **Availability:** Primary device only  
@@ -716,9 +821,9 @@ typedef struct {
 
 ---
 
-## 10. Device-to-Device (D2D) Services
+## 11. Device-to-Device (D2D) Services
 
-### 10.1 D2D RX Service (Primary Device)
+### 11.1 D2D RX Service (Primary Device)
 
 **UUID:** `e060ca1f-3115-4ad6-9709-8c5ff3bf558b`  
 **Purpose:** Receive commands from phone to relay to secondary
@@ -728,12 +833,14 @@ typedef struct {
 | D2D Set Time | `...ca1f` | Write | uint32_t | Time relay |
 | D2D Delete Foot Log | `...ca82` | Write | uint8_t | Delete command |
 | D2D Delete BHI360 Log | `...ca83` | Write | uint8_t | Delete command |
-| D2D Delete Activity Log | `...ca87` | Write | uint8_t | Delete command |
+| D2D Delete Activity Log | `...ca88` | Write | uint8_t | Delete command |
 | D2D Start Activity | `...ca84` | Write | uint8_t | Start command |
 | D2D Stop Activity | `...ca85` | Write | uint8_t | Stop command |
-| **D2D Trigger BHI360 Calibration** | `...ca86` | Write | uint8_t | Calibration trigger |
+| **D2D FOTA Status** | `...ca86` | Write | uint8_t | FOTA status update |
+| **D2D Trigger Calibration** | `...ca87` | Write | uint8_t | Calibration trigger |
+| **D2D Request Device Info** | `...ca89` | Write | uint8_t | Request device information |
 
-### 10.2 D2D TX Service (Secondary Device)
+### 11.2 D2D TX Service (Secondary Device)
 
 **UUID:** `75ad68d6-200c-437d-98b5-061862076c5f`  
 **Purpose:** Transmit sensor data from secondary to primary
@@ -758,7 +865,7 @@ typedef struct {
 | D2D Activity Log Path | `...68e5` | Notify | char[] | File path |
 | **D2D Weight Measurement** | `...68e7` | Notify | uint16_t | Weight in kg × 10 |
 
-### 10.3 D2D File Transfer Service
+### 11.3 D2D File Transfer Service
 
 **UUID:** `8e600001-b5a3-f393-e0a9-e50e24dcca9e`  
 **Purpose:** File transfer between devices
@@ -768,6 +875,20 @@ typedef struct {
 | Command | `...0002` | Write | Command packet |
 | Data | `...0003` | Notify | Data packet |
 | Status | `...0004` | Notify | Status byte |
+
+### 11.4 Secondary Device Direct Access
+
+Secondary devices expose standard MCUmgr SMP service for direct FOTA and file access when connected:
+
+**Service UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
+**Characteristic UUID:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`  
+
+This allows:
+- Direct firmware updates to secondary device
+- File system access on secondary device
+- Configuration management
+
+**Note:** Most mobile apps should use the proxy services on the primary device instead of direct connection to secondary.
 
 ### D2D Architecture
 
@@ -790,7 +911,7 @@ DrawFlowchart(
 
 ---
 
-## 11. Data Structures
+## 12. Data Structures
 
 ### Fixed-Point Structures
 
@@ -926,7 +1047,7 @@ typedef struct __attribute__((packed)) {
 
 ---
 
-## 12. Packet Sequencing and Recovery
+## 13. Packet Sequencing and Recovery
 
 ### Overview
 
@@ -1001,7 +1122,7 @@ For detailed implementation, see [BLE Packet Sequencing and Recovery](BLE_Packet
 
 ---
 
-## 13. Integration Examples
+## 14. Integration Examples
 
 ### iOS Swift - BLE Characteristic Handler
 
@@ -1121,9 +1242,70 @@ async def update_secondary_device(address: str, firmware: bytes):
 asyncio.run(update_secondary_device("XX:XX:XX:XX:XX:XX", firmware_data))
 ```
 
+### Background Execution Example
+
+```swift
+// iOS - Complete background execution flow
+class BackgroundBLEManager {
+    func configureForBackground() {
+        // 1. Request background connection profile
+        writeConnectionProfile(.background)
+        
+        // 2. Reduce notification rates
+        disableHighRateNotifications()
+        
+        // 3. Enable only essential characteristics
+        enableCharacteristic(totalStepCountUUID)
+        enableCharacteristic(activityMetricsUUID)
+        disableCharacteristic(orientationServiceUUID)
+        
+        // 4. Start background task
+        backgroundTask = UIApplication.shared.beginBackgroundTask {
+            self.handleBackgroundExpiration()
+        }
+    }
+    
+    func writeConnectionProfile(_ profile: ConnectionProfile) {
+        let value = Data([profile.rawValue])
+        peripheral.writeValue(value, 
+                            for: connParamControlCharacteristic,
+                            type: .withResponse)
+    }
+}
+```
+
+```kotlin
+// Android - Background service with connection management
+class SensingBackgroundService : Service() {
+    override fun onCreate() {
+        super.onCreate()
+        
+        // Request background profile when service starts
+        bluetoothGatt?.let { gatt ->
+            val service = gatt.getService(CONTROL_SERVICE_UUID)
+            val characteristic = service?.getCharacteristic(CONN_PARAM_UUID)
+            
+            characteristic?.value = byteArrayOf(0x01) // BACKGROUND profile
+            gatt.writeCharacteristic(characteristic)
+        }
+    }
+    
+    private fun optimizeForBackground() {
+        // Adjust connection parameters
+        requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_LOW_POWER)
+        
+        // Disable non-essential notifications
+        setCharacteristicNotification(orientation3DChar, false)
+        
+        // Keep only activity metrics
+        setCharacteristicNotification(activityMetricsChar, true)
+    }
+}
+```
+
 ---
 
-## 14. Error Handling and Status Communication
+## 15. Error Handling and Status Communication
 
 ### Status Characteristic Details
 
@@ -1275,7 +1457,7 @@ fun parseDeviceStatus(statusValue: Int): List<String> {
    - Temporary file system errors
    - Queue full (usually transient)
 
-## 15. Common BLE Error Codes
+## 16. Common BLE Error Codes
 
 | Error | Code | Description | Solution |
 |---:|---:|---:|---:|
@@ -1390,6 +1572,63 @@ Mobile App (Receives at BLE rate)
 3. **For Development**: Make rates configurable via Kconfig
 
 The BHI360 performs sensor fusion at high internal rates regardless of output rate, ensuring smooth quaternion data even at lower transmission rates.
+
+---
+
+## 17. Implementation Status
+
+### 17.1 Fully Implemented ✅
+- All Information Service characteristics
+- All Control Service characteristics including Connection Parameter Control
+- Activity Metrics Service with step count aggregation
+- D2D TX/RX services with all characteristics
+- 3D Orientation Service
+- FOTA, File, and SMP proxy services
+- Packet sequencing for high-rate data
+- Secondary Device Service
+- Weight measurement functionality
+- Background execution support framework
+
+### 17.2 Partially Implemented ⚠️
+- **GPS data processing**: Receives data but processing TODO
+- **Sensor interval control**: Logs TODO message, doesn't change actual rates
+- **D2D File Transfer Service**: Basic implementation, needs enhancement
+- **Data aggregation**: Framework exists but not fully utilized
+
+### 17.3 Planned Features 📋
+- Enhanced data aggregation for background mode
+- Automatic profile detection based on connection parameters
+- Extended biomechanics calculations
+- Advanced packet recovery mechanisms
+- Sensor rate control integration
+
+### 17.4 Known Limitations
+
+1. **Sensor Rate Control**: The `foot_sensor_set_sample_interval()` and `motion_sensor_set_sample_interval()` functions are not yet connected to actual sensor configuration
+   ```c
+   // TODO: Replace these with actual sensor control functions when available
+   static void foot_sensor_set_sample_interval(uint32_t interval_ms) {
+       LOG_INF("TODO: Set foot sensor interval to %d ms", interval_ms);
+   }
+   ```
+
+2. **GPS Processing**: GPS data from mobile app is received but not yet used in calculations
+   ```c
+   // TODO: Send to activity_metrics module for processing
+   // For now, just log the data
+   ```
+
+3. **Background Aggregation**: Data aggregation for background mode is designed but not fully implemented
+
+4. **Connection Parameter Timing**: Actual sensor rate changes may lag behind connection parameter updates
+
+### 17.5 Testing Recommendations
+
+1. **Connection Parameter Switching**: Test transitions between all three profiles
+2. **Background Mode Duration**: Verify 2+ hour sessions in background mode
+3. **Data Integrity**: Ensure no data loss during profile transitions
+4. **Power Consumption**: Measure actual power savings in each profile
+5. **Cross-Platform**: Test on both iOS and Android background modes
 
 ---
 

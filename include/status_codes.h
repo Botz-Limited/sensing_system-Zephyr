@@ -16,7 +16,7 @@
 #define STATUS_CHARGING        (1 << 6)  // Device is charging
 #define STATUS_FOTA_ACTIVE     (1 << 7)  // FOTA update in progress
 
-// Error-specific bits (8-31) - mapped from err_t values
+// Error-specific bits (8-22) - mapped from err_t values
 #define STATUS_BATTERY_FAULT          (1 << 8)   // Battery fault detected
 #define STATUS_BLUETOOTH_ERROR        (1 << 9)   // Bluetooth error
 #define STATUS_HARDWARE_ERROR         (1 << 10)  // Hardware error
@@ -32,6 +32,10 @@
 #define STATUS_FILE_SYSTEM_NO_FILES   (1 << 20)  // No files in filesystem
 #define STATUS_FILE_SYSTEM_FULL       (1 << 21)  // Storage full
 #define STATUS_FLASH_FAILURE          (1 << 22)  // Flash memory failure
+
+// Additional status bits (23-31)
+#define STATUS_WEIGHT_NOT_CALIBRATED  (1 << 23)  // Weight sensor not calibrated
+#define STATUS_WEIGHT_CALIBRATING     (1 << 24)  // Weight calibration in progress
 
 // Mask for all error bits
 #define STATUS_ALL_ERRORS_MASK        (0x7FFF00)  // Bits 8-22

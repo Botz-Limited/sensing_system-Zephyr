@@ -790,7 +790,7 @@ int ble_d2d_tx_request_device_info(void) {
 int ble_d2d_tx_send_weight_measurement(float weight_kg) {
     if (!d2d_conn) return -ENOTCONN;
     
-    LOG_INF("D2D TX: Sending weight measurement: %.1f kg", weight_kg);
+    LOG_INF("D2D TX: Sending weight measurement: %.1f kg", (double)weight_kg);
     
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary device: Send via GATT notification
@@ -798,6 +798,45 @@ int ble_d2d_tx_send_weight_measurement(float weight_kg) {
 #else
     // Primary device shouldn't send weight measurements via D2D
     LOG_WRN("Primary device shouldn't send weight measurement via D2D");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_measure_weight_command(uint8_t value) {
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn) {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+    
+    if (!d2d_handles.discovery_complete) {
+        LOG_WRN("D2D TX: Service discovery not complete, queueing measure weight command");
+        return ble_d2d_tx_queue_measure_weight_command(value);
+    }
+    
+    LOG_INF("D2D TX: Forwarding measure weight command - value: %u", value);
+    
+    // For now, we'll use the trigger calibration handle as a placeholder
+    // In a real implementation, you'd need a dedicated characteristic for weight measurement
+    if (d2d_handles.trigger_calibration_handle == 0) {
+        LOG_WRN("D2D TX: No suitable handle found for measure weight command");
+        return -EINVAL;
+    }
+    
+    int err = bt_gatt_write_without_response(d2d_conn, 
+                                            d2d_handles.trigger_calibration_handle,
+                                            &value, 
+                                            sizeof(value), 
+                                            false);
+    if (err) {
+        LOG_ERR("D2D TX: Failed to send measure weight command (err %d)", err);
+        return err;
+    }
+    
+    return 0;
+#else
+    // Secondary device doesn't send measure weight commands
+    LOG_WRN("Secondary device shouldn't send measure weight commands");
     return -EINVAL;
 #endif
 }

@@ -70,6 +70,11 @@ typedef enum
     MSG_TYPE_REALTIME_METRICS, // Real-time metrics from realtime_metrics module
     MSG_TYPE_ANALYTICS_RESULTS, // Analytics results from analytics module
     MSG_TYPE_ACTIVITY_METRICS_BLE, // Activity metrics for BLE transmission
+    MSG_TYPE_SAVE_WEIGHT_CALIBRATION, // Save weight calibration data to storage
+    MSG_TYPE_REQUEST_WEIGHT_CALIBRATION, // Request weight calibration from storage
+    MSG_TYPE_WEIGHT_CALIBRATION_DATA, // Weight calibration data response
+    MSG_TYPE_START_WEIGHT_CALIBRATION, // Start weight calibration procedure
+    MSG_TYPE_WEIGHT_MEASUREMENT, // Weight measurement result
 } msg_type_t;
 
 // Define sender types

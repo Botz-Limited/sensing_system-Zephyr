@@ -307,6 +307,43 @@ typedef struct __attribute__((packed)) {
 
 The weight measurement feature calculates a person's total weight using all 16 pressure sensors (8 per foot). The measurement requires the person to stand still on both feet for accurate results.
 
+#### Weight Calibration Process
+
+The weight sensor must be calibrated before accurate measurements can be taken. The calibration uses the user's known weight to calculate the scale factor.
+
+**Simple One-Point Calibration:**
+1. User puts on the shoes and stands still
+2. Write 5 bytes to Weight Calibration characteristic (`...b68d`):
+   - Byte 0: Command = `0x01` (start calibration)
+   - Bytes 1-4: User's weight as float (e.g., 70.5 kg)
+3. System sends notification: `WEIGHT_CAL_START:70.5` 
+4. User stands still for 3 seconds while system collects samples
+5. System sends notification: `WEIGHT_CAL_COMPLETE:0.001234` (scale factor)
+   - Or `WEIGHT_CAL_ERROR:LOW_READING` if ADC reading is too low
+
+**Example BLE Write:**
+```
+// To calibrate for a 70.5kg user:
+uint8_t data[5];
+data[0] = 0x01;  // Start calibration command
+float weight = 70.5f;
+memcpy(&data[1], &weight, 4);  // Copy float as bytes
+// Write these 5 bytes to characteristic
+```
+
+**Calibration Data Storage:**
+- Calibration data is stored in LittleFS at `/lfs1/calibration/weight_calib.bin`
+- Data persists across power cycles
+- Calibration is automatically loaded on startup
+- Device status includes `STATUS_WEIGHT_NOT_CALIBRATED` bit if not calibrated
+
+**Notes:**
+- ADC performs internal zero calibration, so no manual zero offset is needed
+- Scale factor = user_weight / average_ADC_reading
+- User must stand still during calibration (motion is detected and rejected)
+- Calibration can be performed at any time to improve accuracy
+- Valid weight range: 20-300 kg
+
 #### Usage Flow
 
 DrawSequenceDiagram(
@@ -384,6 +421,7 @@ DrawSequenceDiagram(
 | Delete Secondary BHI360 Log | `...b689` | Write, Notify | uint8_t | Log ID to delete on secondary |
 | Delete Secondary Activity Log | `...b68a` | Write, Notify | uint8_t | Log ID to delete on secondary |
 | **Weight Measurement Trigger** | `...b68c` | Write | uint8_t | Write 1 to trigger weight measurement |
+| **Weight Calibration** | `...b68d` | Write | 5 bytes | [0]=cmd(1), [1-4]=weight(float) |
 
 ### Command Flow
 

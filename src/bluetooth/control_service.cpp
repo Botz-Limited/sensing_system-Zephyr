@@ -494,6 +494,13 @@ static ssize_t write_measure_weight_command_vnd(struct bt_conn *conn, const stru
             return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
         }
 
+        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_measure_weight_command,
+                            D2D_TX_CMD_MEASURE_WEIGHT, value,
+                            "measure weight command");
+        #endif
+
         LOG_INF("Triggered weight measurement (input=1).");
     } else {
         LOG_WRN("Measure weight characteristic write ignored (input=%u).", value);
