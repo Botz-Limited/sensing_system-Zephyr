@@ -76,6 +76,10 @@ static struct bt_uuid_128 d2d_rx_delete_activity_log_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca88, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 static struct bt_uuid_128 d2d_rx_request_device_info_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_weight_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8a, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_measure_weight_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
 // Discovered characteristic handles
 struct d2d_discovered_handles {
@@ -88,6 +92,8 @@ struct d2d_discovered_handles {
     uint16_t fota_status_handle;
     uint16_t trigger_calibration_handle;
     uint16_t request_device_info_handle;
+    uint16_t weight_calibration_handle;
+    uint16_t measure_weight_handle;
     bool discovery_complete;
 };
 
@@ -126,6 +132,8 @@ enum discover_state {
     DISCOVER_FOTA_STATUS_CHAR,
     DISCOVER_TRIGGER_CALIBRATION_CHAR,
     DISCOVER_REQUEST_DEVICE_INFO_CHAR,
+    DISCOVER_WEIGHT_CALIBRATION_CHAR,
+    DISCOVER_MEASURE_WEIGHT_CHAR,
     DISCOVER_COMPLETE
 };
 
@@ -222,41 +230,16 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
         break;
 
     case DISCOVER_REQUEST_DEVICE_INFO_CHAR:
-        if (bt_uuid_cmp(params->uuid, &d2d_rx_request_device_info_uuid.uuid) == 0) {
-            d2d_handles.request_device_info_handle = bt_gatt_attr_value_handle(attr);
-            LOG_INF("Found request device info characteristic, handle: %u", d2d_handles.request_device_info_handle);
-            discovery_state = DISCOVER_COMPLETE;
-            d2d_handles.discovery_complete = true;
-            LOG_INF("D2D service discovery complete!");
-            
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-            // Process any queued commands
-            ble_d2d_tx_process_queued_commands();
-#endif
-            
-            // Request device info immediately after discovery
-            if (d2d_handles.request_device_info_handle != 0) {
-                k_sleep(K_MSEC(50)); // Small delay to ensure secondary is ready
-                uint8_t value = 1;
-                int err = bt_gatt_write_without_response(d2d_conn, 
-                                                        d2d_handles.request_device_info_handle,
-                                                        &value, 
-                                                        sizeof(value), 
-                                                        false);
-                if (err) {
-                    LOG_ERR("Failed to request device info: %d", err);
-                } else {
-                    LOG_INF("Requested device info from secondary (after D2D TX discovery)");
-                }
-            }
-        }
+        discover_params.uuid = &d2d_rx_request_device_info_uuid.uuid;
+        break;
+    case DISCOVER_WEIGHT_CALIBRATION_CHAR:
+        discover_params.uuid = &d2d_rx_weight_calibration_uuid.uuid;
+        break;
+    case DISCOVER_MEASURE_WEIGHT_CHAR:
+        discover_params.uuid = &d2d_rx_measure_weight_uuid.uuid;
         break;
 
-    default:
-        break;
-    }
-
-    return BT_GATT_ITER_CONTINUE;
+}
 }
 
 // Start the discovery process
@@ -289,11 +272,12 @@ static void start_discovery(void)
 }
 
 // Continue discovery for next characteristic
+// Continue discovery for next characteristic
 static void continue_discovery(void)
 {
     int err;
     
-    if (!d2d_conn) {
+    if (!d2d_conn){
         return;
     }
 
@@ -325,6 +309,12 @@ static void continue_discovery(void)
     case DISCOVER_REQUEST_DEVICE_INFO_CHAR:
         discover_params.uuid = &d2d_rx_request_device_info_uuid.uuid;
         break;
+    case DISCOVER_WEIGHT_CALIBRATION_CHAR:
+        discover_params.uuid = &d2d_rx_weight_calibration_uuid.uuid;
+        break;
+    case DISCOVER_MEASURE_WEIGHT_CHAR:
+        discover_params.uuid = &d2d_rx_measure_weight_uuid.uuid;
+        break;
     default:
         LOG_INF("Discovery sequence complete");
         return;
@@ -338,7 +328,6 @@ static void continue_discovery(void)
         LOG_ERR("Continue discover failed (err %d)", err);
     }
 }
-
 void ble_d2d_tx_init(void) {
     LOG_INF("D2D TX initialized");
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -837,6 +826,49 @@ int ble_d2d_tx_send_measure_weight_command(uint8_t value) {
 #else
     // Secondary device doesn't send measure weight commands
     LOG_WRN("Secondary device shouldn't send measure weight commands");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_weight_calibration_command(const weight_calibration_data_t *cal_data) {
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn){
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+    
+    if (!cal_data){
+        LOG_ERR("D2D TX: Invalid calibration data pointer");
+        return -EINVAL;
+    }
+    
+    if (!d2d_handles.discovery_complete){
+        LOG_WRN("D2D TX: Service discovery not complete, cannot send weight calibration");
+        return -EINVAL;
+    }
+    
+    if (d2d_handles.weight_calibration_handle == 0) {
+        LOG_WRN("D2D TX: Weight calibration handle not found");
+        return -EINVAL;
+    }
+    
+    LOG_INF("D2D TX: Sending weight calibration - scale: %.3f, offset: %.3f", 
+            (double)cal_data->scale_factor, (double)cal_data->nonlinear_a);
+    
+    int err = bt_gatt_write_without_response(d2d_conn, 
+                                            d2d_handles.weight_calibration_handle,
+                                            cal_data, 
+                                            sizeof(weight_calibration_data_t), 
+                                            false);
+    if (err) {
+        LOG_ERR("D2D TX: Failed to send weight calibration command (err %d)", err);
+        return err;
+    }
+    
+    return 0;
+#else
+    // Secondary device doesn't send weight calibration commands
+    LOG_WRN("Secondary device shouldn't send weight calibration commands");
     return -EINVAL;
 #endif
 }

@@ -155,6 +155,10 @@ static struct bt_uuid_128 conn_param_control_uuid =
 static struct bt_uuid_128 measure_weight_command_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68c, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
+// --- New: UUID for weight calibration characteristic ---
+static struct bt_uuid_128 weight_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68d, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
 // Forward declarations for start/stop activity handlers
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
@@ -179,6 +183,9 @@ static ssize_t read_conn_param_control_vnd(struct bt_conn *conn, const struct bt
 
 // Weight measurement command handlers
 static ssize_t write_measure_weight_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+
+// Weight calibration handlers
+static ssize_t write_weight_calibration_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -493,13 +500,6 @@ static ssize_t write_measure_weight_command_vnd(struct bt_conn *conn, const stru
             LOG_ERR("Failed to send weight measurement trigger to activity metrics");
             return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
         }
-
-        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        // Forward the command to secondary device
-        FORWARD_D2D_COMMAND(ble_d2d_tx_send_measure_weight_command,
-                            D2D_TX_CMD_MEASURE_WEIGHT, value,
-                            "measure weight command");
-        #endif
 
         LOG_INF("Triggered weight measurement (input=1).");
     } else {

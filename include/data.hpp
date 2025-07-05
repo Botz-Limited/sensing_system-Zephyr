@@ -50,4 +50,8 @@ err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data,
 err_t store_bhi360_calibration_data(uint8_t sensor_type, const uint8_t *profile_data, 
                                     size_t profile_size);
 
+// Weight calibration API functions
+err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data);
+err_t load_weight_calibration_data(void);
+
 #endif // APP_INCLUDE_DATA_HEADER_

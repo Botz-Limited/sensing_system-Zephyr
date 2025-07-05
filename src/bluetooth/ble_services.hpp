@@ -19,6 +19,8 @@ int ble_services_init(void);
 // Information service functions
 void set_device_status(uint32_t new_status);
 void jis_weight_measurement_notify(float weight_kg);
+void jis_handle_weight_calibration_data(const weight_calibration_data_t* cal_data);
+void jis_weight_measurement_init(void);
 void jis_set_err_status_notify(err_t error_code);
 void jis_device_status_packed_notify(void);
 void jis_clear_err_status_notify(err_t error_code);
@@ -41,6 +43,7 @@ void jis_update_secondary_device_info(const char *manufacturer, const char *mode
                                      const char *serial, const char *hw_rev, const char *fw_rev);
 void jis_clear_secondary_device_info(void);
 void jis_secondary_fota_progress_notify(const fota_progress_msg_t* progress);
+void jis_secondary_weight_measurement_notify(float weight_kg);
 
 // Secondary file management notifications
 void jis_secondary_foot_log_available_notify(uint8_t log_id);

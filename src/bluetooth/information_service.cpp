@@ -36,6 +36,7 @@
 #include "ccc_callback_fix.hpp"
 #include "ble_seq_manager.hpp"
 #include "ble_packed_structs.h"
+#include "ble_d2d_tx.hpp"
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -123,6 +124,14 @@ static char secondary_fw_rev[16] = "Not Connected";
 static uint16_t weight_kg_x10 = 0;  // Weight in kg * 10 (for 0.1kg precision)
 static bool weight_subscribed = false;
 
+// Weight calibration data
+static float weight_calibration_offset = 0.0f;
+static float weight_calibration_scale = 1.0f;
+static bool weight_calibration_loaded = false;
+
+// Weight request tracking
+static bool weight_requested_by_phone = false;
+
 // --- Global variables for Current Time Service Notifications ---
 static struct bt_conn *current_time_conn_active = NULL; // Stores the connection object for notifications
 static bool current_time_notifications_enabled = false; // Flag to track CCC state
@@ -149,6 +158,15 @@ extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t* dat
 static ssize_t jis_weight_measurement_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_weight_measurement_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 extern "C" void jis_weight_measurement_notify(float weight_kg);
+
+// Weight calibration characteristics
+static ssize_t jis_weight_calibration_write(struct bt_conn* conn, const struct bt_gatt_attr* attr, const void* buf, uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t jis_weight_request_write(struct bt_conn* conn, const struct bt_gatt_attr* attr, const void* buf, uint16_t len, uint16_t offset, uint8_t flags);
+
+// Weight calibration helper functions
+static void load_weight_calibration(void);
+static float apply_weight_calibration(float raw_weight);
+static void save_weight_calibration(void);
 
 // Packed device status characteristic
 static ssize_t jis_device_status_packed_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -288,6 +306,12 @@ static struct bt_uuid_128 activity_log_path_uuid =
 static struct bt_uuid_128 weight_measurement_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec6, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
+// Weight Calibration UUIDs
+static struct bt_uuid_128 weight_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec8, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+static struct bt_uuid_128 weight_request_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec9, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
 // Packed Device Status UUID (new)
 static struct bt_uuid_128 device_status_packed_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec7, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
@@ -424,6 +448,18 @@ BT_GATT_SERVICE_DEFINE(
         jis_weight_measurement_read, nullptr,
         static_cast<void *>(&weight_kg_x10)),
     BT_GATT_CCC(jis_weight_measurement_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // Weight Calibration Characteristic
+    BT_GATT_CHARACTERISTIC(&weight_calibration_uuid.uuid,
+        BT_GATT_CHRC_WRITE,
+        BT_GATT_PERM_WRITE_ENCRYPT,
+        nullptr, jis_weight_calibration_write, nullptr),
+
+    // Weight Request Characteristic
+    BT_GATT_CHARACTERISTIC(&weight_request_uuid.uuid,
+        BT_GATT_CHRC_WRITE,
+        BT_GATT_PERM_WRITE_ENCRYPT,
+        nullptr, jis_weight_request_write, nullptr),
 
     // Packed Device Status Characteristic (new - combines multiple status fields)
     BT_GATT_CHARACTERISTIC(&device_status_packed_uuid.uuid,
@@ -1735,10 +1771,17 @@ static ssize_t jis_weight_measurement_read(struct bt_conn *conn, const struct bt
 
 extern "C" void jis_weight_measurement_notify(float weight_kg)
 {
-    // Convert to uint16_t with 0.1kg precision
-    weight_kg_x10 = (uint16_t)(weight_kg * 10);
+    // Ensure calibration is loaded
+    load_weight_calibration();
     
-    LOG_INF("Weight Measurement: %.1f kg (raw=%u)", weight_kg, weight_kg_x10);
+    // Apply calibration
+    float calibrated_weight = apply_weight_calibration(weight_kg);
+    
+    // Convert to uint16_t with 0.1kg precision
+    weight_kg_x10 = (uint16_t)(calibrated_weight * 10);
+    
+    LOG_INF("Weight Measurement: raw=%.1f kg, calibrated=%.1f kg (raw=%u)", 
+           weight_kg, calibrated_weight, weight_kg_x10);
     
     if (weight_subscribed) {
         safe_gatt_notify(&weight_measurement_uuid.uuid,
@@ -1747,26 +1790,226 @@ extern "C" void jis_weight_measurement_notify(float weight_kg)
     }
 }
 
+// Weight calibration structure for data persistence
+struct weight_calibration_data {
+    float offset;
+    float scale;
+    uint32_t checksum;
+};
+
+// Load weight calibration from data module
+static void load_weight_calibration(void)
+{
+    if (weight_calibration_loaded) {
+        return;
+    }
+
+    // Create message to request calibration data from data module
+    generic_message_t msg = {};
+    msg.sender = SENDER_BTH;
+    msg.type = MSG_TYPE_REQUEST_WEIGHT_CALIBRATION;
+    
+    // Send message to data module
+    if (k_msgq_put(&data_msgq, &msg, K_MSEC(100)) == 0) {
+        LOG_DBG("Weight calibration request sent to data module");
+    } else {
+        LOG_ERR("Failed to send weight calibration request");
+        // Use defaults
+        weight_calibration_offset = 0.0f;
+        weight_calibration_scale = 1.0f;
+    }
+    
+    weight_calibration_loaded = true;
+}
+
+// Save weight calibration to data module
+static void save_weight_calibration(void)
+{
+    // Create message to save calibration data to data module
+    generic_message_t msg = {};
+    msg.sender = SENDER_BTH;
+    msg.type = MSG_TYPE_SAVE_WEIGHT_CALIBRATION;
+    msg.data.weight_calibration.scale_factor = weight_calibration_scale;
+    msg.data.weight_calibration.nonlinear_a = weight_calibration_offset;
+    msg.data.weight_calibration.is_calibrated = true;
+    msg.data.weight_calibration.timestamp = k_uptime_get_32();
+    
+    // Send message to data module
+    if (k_msgq_put(&data_msgq, &msg, K_NO_WAIT) == 0) {
+        LOG_INF("Weight calibration save request sent to data module");
+    } else {
+        LOG_ERR("Failed to send weight calibration save request");
+    }
+}
+
+// Apply calibration to raw weight value
+static float apply_weight_calibration(float raw_weight)
+{
+    return (raw_weight + weight_calibration_offset) * weight_calibration_scale;
+}
+
+// Weight calibration write handler
+static ssize_t jis_weight_calibration_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
+                                          const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    if (offset != 0) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+    }
+    
+    if (len != sizeof(weight_calibration_data)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    
+    const weight_calibration_data* cal_data = static_cast<const weight_calibration_data*>(buf);
+    
+    // Verify checksum
+    // Simple checksum calculation (sum of bytes)
+    uint32_t calculated_checksum = 0;
+    const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(&cal_data->offset);
+    for (size_t i = 0; i < sizeof(float) * 2; i++) {
+        calculated_checksum += data_ptr[i];
+    }
+    if (cal_data->checksum != calculated_checksum) {
+        LOG_ERR("Weight calibration checksum verification failed");
+        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    }
+    
+    // Validate calibration values
+    if (cal_data->scale <= 0.0f || cal_data->scale > 10.0f) {
+        LOG_ERR("Invalid weight calibration scale: %.3f", cal_data->scale);
+        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    }
+    
+    if (cal_data->offset < -100.0f || cal_data->offset > 100.0f) {
+        LOG_ERR("Invalid weight calibration offset: %.3f", cal_data->offset);
+        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    }
+    
+    // Update calibration values
+    weight_calibration_offset = cal_data->offset;
+    weight_calibration_scale = cal_data->scale;
+    
+    LOG_INF("Weight calibration updated: offset=%.3f, scale=%.3f", 
+           weight_calibration_offset, weight_calibration_scale);
+    
+    // Save to data module
+    save_weight_calibration();
+    
+    // Cascade calibration to secondary device if connected
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Send calibration update message to secondary device handler
+    generic_message_t sec_msg = {};
+    sec_msg.sender = SENDER_BTH;
+    sec_msg.type = MSG_TYPE_SAVE_WEIGHT_CALIBRATION;
+    sec_msg.data.weight_calibration.scale_factor = weight_calibration_scale;
+    sec_msg.data.weight_calibration.nonlinear_a = weight_calibration_offset;
+    sec_msg.data.weight_calibration.is_calibrated = true;
+    sec_msg.data.weight_calibration.timestamp = k_uptime_get_32();
+    
+    // Send calibration to secondary device via D2D communication
+    if (ble_d2d_tx_send_weight_calibration_command(&sec_msg.data.weight_calibration) == 0) {
+        LOG_INF("Weight calibration cascaded to secondary device");
+    } else {
+        LOG_ERR("Failed to cascade weight calibration to secondary device");
+    }
+#endif
+    
+    return len;
+}
+
+// Weight request write handler
+static ssize_t jis_weight_request_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                      const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    if (offset != 0) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+    }
+    
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    
+    uint8_t request_value = *static_cast<const uint8_t*>(buf);
+    weight_requested_by_phone = (request_value != 0);
+    
+    LOG_INF("Weight measurement requested by phone: %d", weight_requested_by_phone);
+    
+    if (weight_requested_by_phone) {
+        // Ensure calibration is loaded
+        load_weight_calibration();
+        
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Request weight measurement from secondary device
+        // Send weight measurement request to secondary device via D2D communication
+        if (ble_d2d_tx_send_measure_weight_command(1) == 0) {
+            LOG_INF("Weight measurement request sent to secondary device");
+        } else {
+            LOG_ERR("Failed to send weight measurement request to secondary device");
+        }
+#endif
+        
+        // Also trigger local weight measurement
+        generic_message_t local_msg = {};
+        local_msg.sender = SENDER_BTH;
+        local_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+        
+        if (k_msgq_put(&activity_metrics_msgq, &local_msg, K_NO_WAIT) == 0) {
+            LOG_INF("Weight measurement request sent to activity metrics");
+        } else {
+            LOG_ERR("Failed to send weight measurement request to activity metrics");
+        }
+    }
+    
+    return len;
+}
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 // Function to handle weight measurement from secondary device
 extern "C" void jis_secondary_weight_measurement_notify(float weight_kg)
 {
-    LOG_INF("Secondary Weight Measurement: %.1f kg", weight_kg);
+    LOG_INF("Received weight from secondary device: %.1f kg", weight_kg);
     
-    // For now, just log the secondary weight
-    // In a full implementation, you might want to:
-    // 1. Store the secondary weight separately
-    // 2. Aggregate with primary weight
-    // 3. Send the total weight via jis_weight_measurement_notify
-    
-    // Example aggregation (if both feet measure weight):
-    // static float primary_weight_kg = 0;
-    // static float secondary_weight_kg = 0;
-    // secondary_weight_kg = weight_kg;
-    // float total_weight = primary_weight_kg + secondary_weight_kg;
-    // jis_weight_measurement_notify(total_weight);
+    // Only process if weight was requested by phone
+    if (weight_requested_by_phone) {
+        // Apply primary device calibration and notify
+        jis_weight_measurement_notify(weight_kg);
+        
+        // Reset request flag
+        weight_requested_by_phone = false;
+    } else {
+        LOG_DBG("Weight received but not requested by phone, ignoring");
+    }
 }
 #endif
+
+// Function to handle weight calibration data from data module
+extern "C" void jis_handle_weight_calibration_data(const weight_calibration_data_t* cal_data)
+{
+    if (cal_data && cal_data->is_calibrated) {
+        weight_calibration_scale = cal_data->scale_factor;
+        weight_calibration_offset = cal_data->nonlinear_a;  // Using nonlinear_a as offset
+        
+        LOG_INF("Weight calibration loaded: offset=%.3f, scale=%.3f", 
+               weight_calibration_offset, weight_calibration_scale);
+    } else {
+        LOG_INF("No weight calibration found, using defaults");
+        weight_calibration_offset = 0.0f;
+        weight_calibration_scale = 1.0f;
+    }
+    
+    weight_calibration_loaded = true;
+}
+
+// Initialize weight measurement system
+extern "C" void jis_weight_measurement_init(void)
+{
+    LOG_INF("Initializing weight measurement system");
+    
+    // Load calibration data
+    load_weight_calibration();
+    
+    LOG_INF("Weight measurement system initialized");
+}
 
 // --- Packed Device Status Handlers ---
 static void jis_device_status_packed_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)

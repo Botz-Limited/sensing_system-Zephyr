@@ -997,6 +997,34 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     break;
                 }
 
+                case MSG_TYPE_SAVE_WEIGHT_CALIBRATION: {
+                    LOG_INF("Received SAVE WEIGHT CALIBRATION command");
+                    if (!filesystem_available) {
+                        LOG_WRN("Cannot save weight calibration - filesystem not available");
+                    } else {
+                        err_t save_status = save_weight_calibration_data(&msg.data.weight_calibration);
+                        if (save_status != err_t::NO_ERROR) {
+                            LOG_ERR("Failed to save weight calibration data: %d", (int)save_status);
+                        } else {
+                            LOG_INF("Successfully saved weight calibration data");
+                        }
+                    }
+                    break;
+                }
+
+                case MSG_TYPE_REQUEST_WEIGHT_CALIBRATION: {
+                    LOG_INF("Received REQUEST WEIGHT CALIBRATION from %s", get_sender_name(msg.sender));
+                    if (!filesystem_available) {
+                        LOG_WRN("Cannot load weight calibration - filesystem not available");
+                    } else {
+                        err_t load_status = load_weight_calibration_data();
+                        if (load_status != err_t::NO_ERROR && load_status != err_t::FILE_SYSTEM_NO_FILES) {
+                            LOG_ERR("Failed to load weight calibration data: %d", (int)load_status);
+                        }
+                    }
+                    break;
+                }
+
                 default:
                     LOG_WRN("Unknown message type received: %d", msg.type);
                     break;
@@ -3058,6 +3086,149 @@ err_t store_bhi360_calibration_data(uint8_t sensor_type, const uint8_t *profile_
 
     // Use the existing save function
     return save_bhi360_calibration_data(&calib_data);
+}
+
+// Weight calibration file paths
+constexpr char weight_calib_file_path[] = "/lfs1/calibration/weight_calib.bin";
+
+/**
+ * @brief Save weight calibration data to filesystem
+ * 
+ * @param calib_data Pointer to weight calibration data structure
+ * @return err_t NO_ERROR on success, error code on failure
+ */
+err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data)
+{
+    if (!filesystem_available) {
+        LOG_ERR("Filesystem not available for weight calibration save");
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    if (!calib_data) {
+        LOG_ERR("Invalid weight calibration data pointer");
+        return err_t::DATA_ERROR;
+    }
+
+    k_mutex_lock(&calibration_file_mutex, K_FOREVER);
+
+    // Create calibration directory if it doesn't exist
+    int ret_mkdir = fs_mkdir(calibration_dir_path);
+    if (ret_mkdir != 0 && ret_mkdir != -EEXIST) {
+        LOG_ERR("Failed to create calibration directory: %d", ret_mkdir);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Open file for writing
+    struct fs_file_t file;
+    fs_file_t_init(&file);
+    
+    int ret = fs_open(&file, weight_calib_file_path, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
+    if (ret != 0) {
+        LOG_ERR("Failed to open weight calibration file for writing: %d", ret);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Write calibration data
+    ssize_t bytes_written = fs_write(&file, calib_data, sizeof(weight_calibration_data_t));
+    if (bytes_written != sizeof(weight_calibration_data_t)) {
+        LOG_ERR("Failed to write weight calibration data: %zd", bytes_written);
+        fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Sync to ensure data is written
+    ret = fs_sync(&file);
+    if (ret != 0) {
+        LOG_ERR("Failed to sync weight calibration file: %d", ret);
+        fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    fs_close(&file);
+    k_mutex_unlock(&calibration_file_mutex);
+
+    LOG_INF("Weight calibration data saved successfully");
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Load weight calibration data from filesystem and send to bluetooth module
+ * 
+ * @return err_t NO_ERROR on success, error code on failure
+ */
+err_t load_weight_calibration_data(void)
+{
+    if (!filesystem_available) {
+        LOG_ERR("Filesystem not available for weight calibration load");
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    k_mutex_lock(&calibration_file_mutex, K_FOREVER);
+
+    // Open file for reading
+    struct fs_file_t file;
+    fs_file_t_init(&file);
+    
+    int ret = fs_open(&file, weight_calib_file_path, FS_O_READ);
+    if (ret != 0) {
+        if (ret == -ENOENT) {
+            LOG_INF("Weight calibration file not found, using defaults");
+            k_mutex_unlock(&calibration_file_mutex);
+            
+            // Send default calibration data to bluetooth module
+            weight_calibration_data_t default_calib = {};
+            default_calib.scale_factor = 1.0f;
+            default_calib.nonlinear_a = 0.0f;
+            default_calib.is_calibrated = false;
+            default_calib.timestamp = 0;
+            
+            generic_message_t calib_msg = {};
+            calib_msg.sender = SENDER_DATA;
+            calib_msg.type = MSG_TYPE_WEIGHT_CALIBRATION_DATA;
+            calib_msg.data.weight_calibration = default_calib;
+            
+            if (k_msgq_put(&bluetooth_msgq, &calib_msg, K_NO_WAIT) != 0) {
+                LOG_ERR("Failed to send default weight calibration to bluetooth module");
+                return err_t::DATA_ERROR;
+            }
+            
+            return err_t::FILE_SYSTEM_NO_FILES;
+        }
+        LOG_ERR("Failed to open weight calibration file for reading: %d", ret);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    // Read calibration data
+    weight_calibration_data_t calib_data = {};
+    ssize_t bytes_read = fs_read(&file, &calib_data, sizeof(weight_calibration_data_t));
+    if (bytes_read != sizeof(weight_calibration_data_t)) {
+        LOG_ERR("Failed to read weight calibration data: %zd", bytes_read);
+        fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
+        return err_t::FILE_SYSTEM_ERROR;
+    }
+
+    fs_close(&file);
+    k_mutex_unlock(&calibration_file_mutex);
+
+    // Send calibration data to bluetooth module
+    generic_message_t calib_msg = {};
+    calib_msg.sender = SENDER_DATA;
+    calib_msg.type = MSG_TYPE_WEIGHT_CALIBRATION_DATA;
+    calib_msg.data.weight_calibration = calib_data;
+    
+    if (k_msgq_put(&bluetooth_msgq, &calib_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send weight calibration to bluetooth module");
+        return err_t::DATA_ERROR;
+    }
+
+    LOG_INF("Weight calibration data loaded and sent to bluetooth module");
+    return err_t::NO_ERROR;
 }
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);

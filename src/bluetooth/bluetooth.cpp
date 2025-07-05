@@ -1237,6 +1237,9 @@ err_t bt_module_init(void)
         LOG_WRN("No Bluetooth identity address available");
     }
 
+    // Initialize weight measurement system
+    jis_weight_measurement_init();
+    
     // Forward declaration to ensure it's available
     extern err_t bt_start_advertising(int err);
     if (bt_start_advertising(0) == err_t::NO_ERROR)
@@ -1810,6 +1813,20 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     } else {
                         LOG_INF("Weight measurement sent to primary via D2D");
                     }
+#endif
+                    break;
+                }
+
+                case MSG_TYPE_WEIGHT_CALIBRATION_DATA: {
+                    // Handle weight calibration data from data module
+                    weight_calibration_data_t *cal_data = &msg.data.weight_calibration;
+                    LOG_INF("Received WEIGHT CALIBRATION DATA from %s", get_sender_name(msg.sender));
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Primary device: Send to information service
+                    jis_handle_weight_calibration_data(cal_data);
+#else
+                    // Secondary device: This shouldn't happen normally
+                    LOG_WRN("Secondary device received weight calibration data - unexpected");
 #endif
                     break;
                 }

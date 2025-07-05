@@ -10,6 +10,9 @@
 
 LOG_MODULE_REGISTER(ble_d2d_rx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
+static ssize_t d2d_weight_calibration_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t d2d_measure_weight_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+
 /*
  * D2D RX Module - Used by both Primary and Secondary devices
  * - Primary: Receives sensor data from secondary
@@ -41,6 +44,12 @@ static struct bt_uuid_128 d2d_delete_activity_log_command_uuid =
 // Request device info command UUID
 static struct bt_uuid_128 d2d_request_device_info_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
+// Weight calibration and measurement UUIDs
+static struct bt_uuid_128 d2d_weight_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8a, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_measure_weight_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
 // Helper function to swap endianness if needed
 static uint32_t swap_to_little_endian(uint32_t value)
@@ -336,9 +345,83 @@ BT_GATT_SERVICE_DEFINE(d2d_rx_service,
     BT_GATT_CHARACTERISTIC(&d2d_trigger_bhi360_calibration_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_trigger_bhi360_calibration_write, NULL),
     BT_GATT_CHARACTERISTIC(&d2d_fota_status_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_fota_status_write, NULL),
     BT_GATT_CHARACTERISTIC(&d2d_delete_activity_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_activity_log_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_request_device_info_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_request_device_info_write, NULL)
+    BT_GATT_CHARACTERISTIC(&d2d_request_device_info_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_request_device_info_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_weight_calibration_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_weight_calibration_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_measure_weight_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_measure_weight_write, NULL),
 );
 
 void ble_d2d_rx_init(void) {
     // Nothing needed if using BT_GATT_SERVICE_DEFINE
+}
+
+// Weight calibration and measurement UUIDs
+
+// Weight calibration write handler - receives calibration data from primary device
+static ssize_t d2d_weight_calibration_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                           const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    if (len != sizeof(weight_calibration_data_t)) {
+        LOG_ERR("D2D RX: Invalid weight calibration data length: %u", len);
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    const weight_calibration_data_t *cal_data = static_cast<const weight_calibration_data_t*>(buf);
+    
+    LOG_INF("D2D RX: Received weight calibration - scale: %.3f, offset: %.3f", 
+           (double)cal_data->scale_factor, (double)cal_data->nonlinear_a);
+
+    // Send calibration data to data module for storage
+    generic_message_t calib_msg = {};
+    calib_msg.sender = SENDER_BTH;
+    calib_msg.type = MSG_TYPE_SAVE_WEIGHT_CALIBRATION;
+    calib_msg.data.weight_calibration = *cal_data;
+    
+    if (k_msgq_put(&data_msgq, &calib_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("D2D RX: Failed to send weight calibration to data module");
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
+
+    LOG_INF("D2D RX: Weight calibration data forwarded to data module");
+    return len;
+}
+
+// Measure weight write handler - receives weight measurement request from primary device
+static ssize_t d2d_measure_weight_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                       const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t value = *static_cast<const uint8_t*>(buf);
+    
+    if (value == 1) {
+        LOG_INF("D2D RX: Received weight measurement request from primary device");
+        
+        // Send weight measurement request to activity metrics module
+        generic_message_t weight_msg = {};
+        weight_msg.sender = SENDER_BTH;
+        weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+        
+        if (k_msgq_put(&activity_metrics_msgq, &weight_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("D2D RX: Failed to send weight measurement request to activity metrics");
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        }
+        
+        LOG_INF("D2D RX: Weight measurement request forwarded to activity metrics");
+    } else {
+        LOG_WRN("D2D RX: Measure weight command ignored (value=%u)", value);
+    }
+
+    return len;
 }
