@@ -99,7 +99,7 @@ typedef struct {
 typedef struct {
     uint8_t sensor_type;  // 0=accel, 1=gyro, 2=mag
     uint16_t profile_size;
-    uint8_t profile_data[512];  // Max calibration profile size
+    uint8_t *profile_data;  // Pointer to calibration data (dynamically allocated)
 } bhi360_calibration_data_t;
 
 // Weight calibration data structure
@@ -111,7 +111,6 @@ typedef struct {
     float temp_coeff;       // Temperature coefficient (%/°C)
     float temp_ref;         // Reference temperature (°C)
     bool is_calibrated;     // Flag to indicate if calibration is valid
-    uint32_t timestamp;     // When calibration was performed
 } weight_calibration_data_t;
 
 // Weight calibration step data (for calibration procedure)
@@ -174,7 +173,7 @@ typedef struct
 // Define the message queue parameters based on the new generic_message_t size
 // Ensure CONFIG_MSG_Q_MAX_SIZE_BYTES in Kconfig is at least sizeof(generic_message_t)
 #define MSG_QUEUE_MESSAGE_SIZE sizeof(generic_message_t)
-static constexpr uint8_t MSG_QUEUE_DEPTH = 40; // Adjust if necessary
+static constexpr uint8_t MSG_QUEUE_DEPTH = 20; // Reduced to save RAM - was causing 252KB usage
 
 // --- MESSAGE QUEUE DECLARATION (unchanged) ---
 extern struct k_msgq bluetooth_msgq;

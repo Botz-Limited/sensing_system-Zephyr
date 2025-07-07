@@ -10,8 +10,6 @@
 
 LOG_MODULE_REGISTER(ble_d2d_rx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
-static ssize_t d2d_weight_calibration_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
-static ssize_t d2d_measure_weight_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 
 /*
  * D2D RX Module - Used by both Primary and Secondary devices
@@ -45,11 +43,14 @@ static struct bt_uuid_128 d2d_delete_activity_log_command_uuid =
 static struct bt_uuid_128 d2d_request_device_info_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
-// Weight calibration and measurement UUIDs
-static struct bt_uuid_128 d2d_weight_calibration_uuid =
+// Weight measurement trigger command UUID
+static struct bt_uuid_128 d2d_weight_measurement_trigger_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8a, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
-static struct bt_uuid_128 d2d_measure_weight_uuid =
+
+// Weight calibration command UUID
+static struct bt_uuid_128 d2d_weight_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
 
 // Helper function to swap endianness if needed
 static uint32_t swap_to_little_endian(uint32_t value)
@@ -210,7 +211,8 @@ static ssize_t d2d_stop_activity_write(struct bt_conn *conn, const struct bt_gat
     return len;
 }
 
-// Trigger BHI360 Calibration Handler - mirrors control_service.cpp implementation
+// Trigger Calibration Handler - handles both BHI360 and weight calibration triggers
+// This characteristic is shared for both calibration types as they use the same trigger mechanism
 static ssize_t d2d_trigger_bhi360_calibration_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                                     const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
@@ -219,26 +221,82 @@ static ssize_t d2d_trigger_bhi360_calibration_write(struct bt_conn *conn, const 
     ARG_UNUSED(offset);
     ARG_UNUSED(flags);
     
-    if (len != sizeof(uint8_t)) {
-        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-    }
-    
-    uint8_t value = *((const uint8_t *)buf);
-    
-    if (value == 1) {
-        // Send message to motion sensor to trigger calibration
-        generic_message_t calib_msg = {};
-        calib_msg.sender = SENDER_BTH;
-        calib_msg.type = MSG_TYPE_TRIGGER_BHI360_CALIBRATION;
+    // Check if this is a simple trigger (1 byte) or weight calibration data
+    if (len == sizeof(uint8_t)) {
+        // Legacy mode - simple trigger
+        uint8_t value = *((const uint8_t *)buf);
         
-        if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to send calibration trigger to motion sensor");
+        if (value == 1) {
+            // Value 1: Trigger calibration (both BHI360 and weight)
+            // Send message to motion sensor to trigger BHI360 calibration
+            generic_message_t calib_msg = {};
+            calib_msg.sender = SENDER_BTH;
+            calib_msg.type = MSG_TYPE_TRIGGER_BHI360_CALIBRATION;
+            
+            if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0) {
+                LOG_ERR("Failed to send BHI360 calibration trigger to motion sensor");
+                return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+            }
+            
+            LOG_INF("D2D RX: Trigger BHI360 Calibration Command - sent to motion sensor");
+            
+            // Also send weight calibration trigger to activity metrics (without known weight)
+            generic_message_t weight_calib_msg = {};
+            weight_calib_msg.sender = SENDER_BTH;
+            weight_calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
+            
+            if (k_msgq_put(&activity_metrics_msgq, &weight_calib_msg, K_NO_WAIT) != 0) {
+                LOG_ERR("Failed to send weight calibration trigger to activity metrics");
+                // Don't return error as BHI360 calibration was already sent
+            } else {
+                LOG_INF("D2D RX: Weight Calibration Command - sent to activity metrics");
+            }
+        } else if (value == 2) {
+            // Value 2: Trigger weight measurement only
+            generic_message_t weight_msg = {};
+            weight_msg.sender = SENDER_BTH;
+            weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+            
+            if (k_msgq_put(&activity_metrics_msgq, &weight_msg, K_NO_WAIT) != 0) {
+                LOG_ERR("Failed to send weight measurement trigger to activity metrics");
+                return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+            } else {
+                LOG_INF("D2D RX: Weight Measurement Command - sent to activity metrics");
+            }
+        } else {
+            LOG_WRN("D2D RX: Calibration trigger command ignored (value=%u)", value);
+        }
+    } else if (len == sizeof(weight_calibration_step_t)) {
+        // New format - weight calibration with known weight
+        weight_calibration_step_t *calib_data = (weight_calibration_step_t *)buf;
+        LOG_INF("D2D RX: Weight calibration trigger with known weight: %.1f kg", 
+                (double)calib_data->known_weight_kg);
+        
+        // Send weight calibration with known weight to activity metrics
+        generic_message_t weight_calib_msg = {};
+        weight_calib_msg.sender = SENDER_BTH;
+        weight_calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
+        memcpy(&weight_calib_msg.data.weight_calibration_step, calib_data, sizeof(weight_calibration_step_t));
+        
+        if (k_msgq_put(&activity_metrics_msgq, &weight_calib_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send weight calibration data to activity metrics");
             return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        } else {
+            LOG_INF("D2D RX: Weight Calibration with known weight sent to activity metrics");
         }
         
-        LOG_INF("D2D RX: Trigger BHI360 Calibration Command - sent to motion sensor");
+        // Also trigger BHI360 calibration
+        generic_message_t bhi_calib_msg = {};
+        bhi_calib_msg.sender = SENDER_BTH;
+        bhi_calib_msg.type = MSG_TYPE_TRIGGER_BHI360_CALIBRATION;
+        
+        if (k_msgq_put(&motion_sensor_msgq, &bhi_calib_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send BHI360 calibration trigger to motion sensor");
+            // Don't return error as weight calibration was already sent
+        }
     } else {
-        LOG_WRN("D2D RX: Trigger BHI360 calibration command ignored (value=%u)", value);
+        LOG_ERR("D2D RX: Invalid calibration trigger length: %u", len);
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
     
     return len;
@@ -335,28 +393,43 @@ static ssize_t d2d_request_device_info_write(struct bt_conn *conn, const struct 
     return len;
 }
 
-BT_GATT_SERVICE_DEFINE(d2d_rx_service,
-    BT_GATT_PRIMARY_SERVICE(&d2d_rx_service_uuid),
-    BT_GATT_CHARACTERISTIC(&d2d_set_time_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_set_time_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_foot_log_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_delete_bhi360_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_bhi360_log_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_start_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_start_activity_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_stop_activity_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_trigger_bhi360_calibration_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_trigger_bhi360_calibration_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_fota_status_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_fota_status_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_delete_activity_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_activity_log_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_request_device_info_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_request_device_info_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_weight_calibration_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_weight_calibration_write, NULL),
-    BT_GATT_CHARACTERISTIC(&d2d_measure_weight_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_measure_weight_write, NULL),
-);
-
-void ble_d2d_rx_init(void) {
-    // Nothing needed if using BT_GATT_SERVICE_DEFINE
+// Write handler for weight measurement trigger command
+static ssize_t d2d_weight_measurement_trigger_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                    const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+    
+    if (len != sizeof(uint8_t)) {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+    
+    uint8_t value = *((const uint8_t *)buf);
+    LOG_INF("D2D RX: Weight measurement trigger command value=%u", value);
+    
+    if (value == 2) {
+        // Value 2: Trigger weight measurement only
+        generic_message_t weight_msg = {};
+        weight_msg.sender = SENDER_BTH;
+        weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+        
+        if (k_msgq_put(&activity_metrics_msgq, &weight_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send weight measurement trigger to activity metrics");
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        } else {
+            LOG_INF("D2D RX: Weight Measurement Command - sent to activity metrics");
+        }
+    } else {
+        LOG_WRN("D2D RX: Weight measurement trigger command ignored (value=%u)", value);
+    }
+    
+    return len;
 }
 
-// Weight calibration and measurement UUIDs
-
-// Weight calibration write handler - receives calibration data from primary device
+// Write handler for weight calibration command
+// This is a dedicated handler for weight calibration to match the D2D TX client expectations
 static ssize_t d2d_weight_calibration_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
                                            const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
@@ -364,64 +437,69 @@ static ssize_t d2d_weight_calibration_write(struct bt_conn *conn, const struct b
     ARG_UNUSED(attr);
     ARG_UNUSED(offset);
     ARG_UNUSED(flags);
-
-    if (len != sizeof(weight_calibration_data_t)) {
-        LOG_ERR("D2D RX: Invalid weight calibration data length: %u", len);
-        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-    }
-
-    const weight_calibration_data_t *cal_data = static_cast<const weight_calibration_data_t*>(buf);
     
-    LOG_INF("D2D RX: Received weight calibration - scale: %.3f, offset: %.3f", 
-           (double)cal_data->scale_factor, (double)cal_data->nonlinear_a);
-
-    // Send calibration data to data module for storage
-    generic_message_t calib_msg = {};
-    calib_msg.sender = SENDER_BTH;
-    calib_msg.type = MSG_TYPE_SAVE_WEIGHT_CALIBRATION;
-    calib_msg.data.weight_calibration = *cal_data;
-    
-    if (k_msgq_put(&data_msgq, &calib_msg, K_NO_WAIT) != 0) {
-        LOG_ERR("D2D RX: Failed to send weight calibration to data module");
-        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-    }
-
-    LOG_INF("D2D RX: Weight calibration data forwarded to data module");
-    return len;
-}
-
-// Measure weight write handler - receives weight measurement request from primary device
-static ssize_t d2d_measure_weight_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                                       const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
-{
-    ARG_UNUSED(conn);
-    ARG_UNUSED(attr);
-    ARG_UNUSED(offset);
-    ARG_UNUSED(flags);
-
-    if (len != sizeof(uint8_t)) {
-        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-    }
-
-    uint8_t value = *static_cast<const uint8_t*>(buf);
-    
-    if (value == 1) {
-        LOG_INF("D2D RX: Received weight measurement request from primary device");
+    // This handler supports both simple trigger and calibration with known weight
+    if (len == sizeof(uint8_t)) {
+        // Simple trigger mode
+        uint8_t value = *((const uint8_t *)buf);
         
-        // Send weight measurement request to activity metrics module
-        generic_message_t weight_msg = {};
-        weight_msg.sender = SENDER_BTH;
-        weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+        if (value == 1) {
+            // Trigger weight calibration without known weight
+            generic_message_t weight_calib_msg = {};
+            weight_calib_msg.sender = SENDER_BTH;
+            weight_calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
+            
+            if (k_msgq_put(&activity_metrics_msgq, &weight_calib_msg, K_NO_WAIT) != 0) {
+                LOG_ERR("Failed to send weight calibration trigger to activity metrics");
+                return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+            }
+            
+            LOG_INF("D2D RX: Weight Calibration Command - sent to activity metrics");
+        } else {
+            LOG_WRN("D2D RX: Weight calibration command ignored (value=%u)", value);
+        }
+    } else if (len == sizeof(weight_calibration_step_t)) {
+        // Calibration with known weight
+        weight_calibration_step_t *calib_data = (weight_calibration_step_t *)buf;
+        LOG_INF("D2D RX: Weight calibration with known weight: %.1f kg", 
+                (double)calib_data->known_weight_kg);
         
-        if (k_msgq_put(&activity_metrics_msgq, &weight_msg, K_NO_WAIT) != 0) {
-            LOG_ERR("D2D RX: Failed to send weight measurement request to activity metrics");
+        // Send weight calibration with known weight to activity metrics
+        generic_message_t weight_calib_msg = {};
+        weight_calib_msg.sender = SENDER_BTH;
+        weight_calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
+        memcpy(&weight_calib_msg.data.weight_calibration_step, calib_data, sizeof(weight_calibration_step_t));
+        
+        if (k_msgq_put(&activity_metrics_msgq, &weight_calib_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send weight calibration data to activity metrics");
             return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
         }
         
-        LOG_INF("D2D RX: Weight measurement request forwarded to activity metrics");
+        LOG_INF("D2D RX: Weight Calibration with known weight sent to activity metrics");
     } else {
-        LOG_WRN("D2D RX: Measure weight command ignored (value=%u)", value);
+        LOG_ERR("D2D RX: Invalid weight calibration length: %u", len);
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
-
+    
     return len;
 }
+
+BT_GATT_SERVICE_DEFINE(d2d_rx_service,
+    BT_GATT_PRIMARY_SERVICE(&d2d_rx_service_uuid),
+    BT_GATT_CHARACTERISTIC(&d2d_set_time_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_set_time_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_foot_log_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_delete_bhi360_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_bhi360_log_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_delete_activity_log_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_delete_activity_log_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_start_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_start_activity_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_stop_activity_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_fota_status_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_fota_status_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_trigger_bhi360_calibration_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_trigger_bhi360_calibration_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_request_device_info_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_request_device_info_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_weight_measurement_trigger_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_weight_measurement_trigger_write, NULL),
+    BT_GATT_CHARACTERISTIC(&d2d_weight_calibration_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, NULL, d2d_weight_calibration_write, NULL)
+);
+
+void ble_d2d_rx_init(void) {
+    // Nothing needed if using BT_GATT_SERVICE_DEFINE
+}
+

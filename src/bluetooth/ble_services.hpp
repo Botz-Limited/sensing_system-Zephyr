@@ -19,8 +19,6 @@ int ble_services_init(void);
 // Information service functions
 void set_device_status(uint32_t new_status);
 void jis_weight_measurement_notify(float weight_kg);
-void jis_handle_weight_calibration_data(const weight_calibration_data_t* cal_data);
-void jis_weight_measurement_init(void);
 void jis_set_err_status_notify(err_t error_code);
 void jis_device_status_packed_notify(void);
 void jis_clear_err_status_notify(err_t error_code);

@@ -151,8 +151,9 @@ static struct bt_uuid_128 delete_secondary_activity_log_command_uuid =
 static struct bt_uuid_128 conn_param_control_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68b, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
-// --- New: UUID for weight measurement command characteristic ---
-static struct bt_uuid_128 measure_weight_command_uuid =
+
+// --- New: UUID for weight measurement trigger characteristic ---
+static struct bt_uuid_128 weight_measurement_trigger_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68c, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for weight calibration characteristic ---
@@ -181,11 +182,13 @@ static void cs_delete_secondary_activity_log_ccc_cfg_changed(const struct bt_gat
 static ssize_t write_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static ssize_t read_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset);
 
-// Weight measurement command handlers
-static ssize_t write_measure_weight_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+
+// Weight measurement handlers
+static ssize_t write_weight_measurement_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 
 // Weight calibration handlers
-static ssize_t write_weight_calibration_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t write_weight_calibration_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_weight_calibration_trigger_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -282,11 +285,18 @@ BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | B
                            write_conn_param_control_vnd, 
                            nullptr),
 
-    // Weight Measurement Command Characteristic
-    BT_GATT_CHARACTERISTIC(&measure_weight_command_uuid.uuid,
+    // Weight Measurement Trigger Characteristic
+    BT_GATT_CHARACTERISTIC(&weight_measurement_trigger_uuid.uuid,
                            BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_WRITE_ENCRYPT,
-                           nullptr, write_measure_weight_command_vnd, nullptr)
+                           nullptr, write_weight_measurement_trigger_vnd, nullptr),
+
+    // Weight Calibration Trigger Characteristic
+    BT_GATT_CHARACTERISTIC(&weight_calibration_uuid.uuid,
+                           BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
+                           BT_GATT_PERM_WRITE_ENCRYPT,
+                           nullptr, write_weight_calibration_trigger_vnd, nullptr),
+    BT_GATT_CCC(cs_weight_calibration_trigger_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
 );
 
 /**
@@ -474,9 +484,9 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
     return len;
 }
 
-// --- Weight Measurement Command Handler ---
-static ssize_t write_measure_weight_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
-                                               const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+// --- Weight Measurement Trigger Handler ---
+static ssize_t write_weight_measurement_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                   const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
     ARG_UNUSED(conn);
     ARG_UNUSED(attr);
@@ -488,26 +498,121 @@ static ssize_t write_measure_weight_command_vnd(struct bt_conn *conn, const stru
     }
 
     uint8_t value = *((const uint8_t *)buf);
+    LOG_INF("Weight measurement trigger characteristic write: %u", value);
 
     if (value == 1) {
-        // Send message to activity metrics module to trigger weight measurement
-        generic_message_t weight_msg = {};
-        weight_msg.sender = SENDER_BTH;
-        weight_msg.type = MSG_TYPE_COMMAND;
-        strcpy(weight_msg.data.command_str, "MEASURE_WEIGHT");
+        // Send weight measurement trigger to activity metrics
+        generic_message_t msg = {};
+        msg.sender = SENDER_BTH;
+        msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
         
-        if (k_msgq_put(&activity_metrics_msgq, &weight_msg, K_NO_WAIT) != 0) {
+        if (k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT) != 0) {
             LOG_ERR("Failed to send weight measurement trigger to activity metrics");
             return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
         }
 
         LOG_INF("Triggered weight measurement (input=1).");
+        
+        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the weight measurement trigger to secondary device
+        int err = ble_d2d_tx_send_weight_measurement_trigger_command(value);
+        if (err) {
+            LOG_ERR("Failed to forward weight measurement trigger to secondary: %d", err);
+        } else {
+            LOG_INF("Successfully forwarded weight measurement trigger to secondary");
+        }
+        #endif
     } else {
-        LOG_WRN("Measure weight characteristic write ignored (input=%u).", value);
+        LOG_WRN("Weight measurement trigger characteristic write ignored (input=%u).", value);
     }
 
     return len;
 }
+
+// --- Weight Calibration Trigger Handler ---
+static bool weight_calibration_trigger_subscribed = false;
+
+static ssize_t write_weight_calibration_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, 
+                                                   const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
+
+    // Check if this is a simple trigger (1 byte) or calibration data (4 bytes for float)
+    if (len == 1) {
+        // Legacy support: single byte trigger for measurement without known weight
+        uint8_t value = *((const uint8_t *)buf);
+        LOG_INF("Weight calibration trigger characteristic write (legacy): %u", value);
+
+        if (value == 1) {
+            // Send weight calibration trigger without known weight
+            generic_message_t calib_msg = {};
+            calib_msg.sender = SENDER_BTH;
+            calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
+            
+            if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0) {
+                LOG_ERR("Failed to send weight calibration trigger to activity metrics");
+                return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+            }
+
+            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            // Forward the command to secondary device
+            FORWARD_D2D_COMMAND(ble_d2d_tx_send_weight_calibration_trigger_command,
+                                D2D_TX_CMD_WEIGHT_CALIBRATION_TRIGGER, value,
+                                "weight calibration trigger command");
+            #endif
+        }
+    } else if (len == sizeof(weight_calibration_step_t)) {
+        // New format: calibration with known weight
+        weight_calibration_step_t *calib_data = (weight_calibration_step_t *)buf;
+        LOG_INF("Weight calibration trigger with known weight: %.1f kg", (double)calib_data->known_weight_kg);
+
+        // Validate weight range
+        if (calib_data->known_weight_kg < 20.0f || calib_data->known_weight_kg > 300.0f) {
+            LOG_ERR("Invalid weight for calibration: %.1f kg", (double)calib_data->known_weight_kg);
+            return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+        }
+
+        // Send calibration data to activity metrics
+        generic_message_t calib_msg = {};
+        calib_msg.sender = SENDER_BTH;
+        calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
+        memcpy(&calib_msg.data.weight_calibration_step, calib_data, sizeof(weight_calibration_step_t));
+        
+        if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send weight calibration data to activity metrics");
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        }
+
+        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward calibration data to secondary device
+        int err = ble_d2d_tx_send_weight_calibration_with_weight(calib_data);
+        if (err) {
+            LOG_ERR("Failed to forward weight calibration with weight to secondary: %d", err);
+        } else {
+            LOG_INF("Successfully forwarded weight calibration with weight to secondary");
+        }
+        #endif
+    } else {
+        LOG_ERR("Weight calibration trigger characteristic write: invalid length %u", len);
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    return len;
+}
+
+static void cs_weight_calibration_trigger_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("cs_weight_calibration_trigger_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    weight_calibration_trigger_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Weight Calibration Trigger CCC changed: %u", value);
+}
+
 
 // --- Connection Parameter Control Handlers ---
 

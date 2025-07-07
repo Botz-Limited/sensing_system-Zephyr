@@ -120,6 +120,33 @@ static size_t bhi360_write_buffer_pos = 0;
 static uint8_t activity_write_buffer[FLASH_PAGE_SIZE];
 static size_t activity_write_buffer_pos = 0;
 
+// --- Write Coalescing Configuration ---
+// Minimal batch sizes to save RAM while still providing benefit
+constexpr size_t FOOT_SENSOR_BATCH_SIZE = 3;   // Further reduced to save RAM
+constexpr size_t BHI360_BATCH_SIZE = 3;        // Further reduced to save RAM
+constexpr size_t ACTIVITY_BATCH_SIZE = 2;      // Further reduced to save RAM
+
+// Instead of storing full protobuf messages, we'll encode directly to a buffer
+// This saves significant RAM as we don't need to store the full message structures
+// Using exactly one page size to minimize RAM usage while maintaining alignment
+static uint8_t foot_sensor_batch_buffer[FLASH_PAGE_SIZE];  // 256 bytes
+static size_t foot_sensor_batch_bytes = 0;
+static size_t foot_sensor_batch_count = 0;
+
+static uint8_t bhi360_batch_buffer[FLASH_PAGE_SIZE];  // 256 bytes
+static size_t bhi360_batch_bytes = 0;
+static size_t bhi360_batch_count = 0;
+
+static uint8_t activity_batch_buffer[FLASH_PAGE_SIZE];  // 256 bytes
+static size_t activity_batch_bytes = 0;
+static size_t activity_batch_count = 0;
+
+// Timing for periodic flush
+static uint32_t last_foot_sensor_flush_time = 0;
+static uint32_t last_bhi360_flush_time = 0;
+static uint32_t last_activity_flush_time = 0;
+constexpr uint32_t MAX_BATCH_AGE_MS = 1000;  // Force flush if data is older than 1 second
+
 // --- Thread safety ---
 K_MUTEX_DEFINE(foot_sensor_file_mutex);
 K_MUTEX_DEFINE(bhi360_file_mutex);
@@ -152,6 +179,135 @@ static void flush_activity_buffer() {
         fs_write(&activity_log_file, activity_write_buffer, activity_write_buffer_pos);
         fs_sync(&activity_log_file);
         activity_write_buffer_pos = 0;
+    }
+}
+
+// --- Batch Writing Functions ---
+static err_t flush_foot_sensor_batch() {
+    if (foot_sensor_batch_bytes == 0) {
+        return err_t::NO_ERROR;
+    }
+    
+    // Write the batched data through the page-aligned buffer system
+    size_t bytes_written = 0;
+    while (bytes_written < foot_sensor_batch_bytes) {
+        size_t remaining = foot_sensor_batch_bytes - bytes_written;
+        size_t space_in_buffer = FLASH_PAGE_SIZE - foot_sensor_write_buffer_pos;
+        size_t to_copy = (remaining < space_in_buffer) ? remaining : space_in_buffer;
+        
+        // Copy to write buffer
+        memcpy(&foot_sensor_write_buffer[foot_sensor_write_buffer_pos], 
+               &foot_sensor_batch_buffer[bytes_written], 
+               to_copy);
+        foot_sensor_write_buffer_pos += to_copy;
+        bytes_written += to_copy;
+        
+        // Flush write buffer if full
+        if (foot_sensor_write_buffer_pos >= FLASH_PAGE_SIZE) {
+            flush_foot_sensor_buffer();
+        }
+    }
+    
+    // Reset batch
+    foot_sensor_batch_bytes = 0;
+    foot_sensor_batch_count = 0;
+    last_foot_sensor_flush_time = k_uptime_get_32();
+    
+    LOG_DBG("Flushed foot sensor batch: %u samples", foot_sensor_batch_count);
+    
+    return err_t::NO_ERROR;
+}
+
+static err_t flush_bhi360_batch() {
+    if (bhi360_batch_bytes == 0) {
+        return err_t::NO_ERROR;
+    }
+    
+    // Write the batched data through the page-aligned buffer system
+    size_t bytes_written = 0;
+    while (bytes_written < bhi360_batch_bytes) {
+        size_t remaining = bhi360_batch_bytes - bytes_written;
+        size_t space_in_buffer = FLASH_PAGE_SIZE - bhi360_write_buffer_pos;
+        size_t to_copy = (remaining < space_in_buffer) ? remaining : space_in_buffer;
+        
+        // Copy to write buffer
+        memcpy(&bhi360_write_buffer[bhi360_write_buffer_pos], 
+               &bhi360_batch_buffer[bytes_written], 
+               to_copy);
+        bhi360_write_buffer_pos += to_copy;
+        bytes_written += to_copy;
+        
+        // Flush write buffer if full
+        if (bhi360_write_buffer_pos >= FLASH_PAGE_SIZE) {
+            flush_bhi360_buffer();
+        }
+    }
+    
+    // Reset batch
+    bhi360_batch_bytes = 0;
+    bhi360_batch_count = 0;
+    last_bhi360_flush_time = k_uptime_get_32();
+    
+    LOG_DBG("Flushed BHI360 batch: %u samples", bhi360_batch_count);
+    
+    return err_t::NO_ERROR;
+}
+
+static err_t flush_activity_batch() {
+    if (activity_batch_bytes == 0) {
+        return err_t::NO_ERROR;
+    }
+    
+    // Write the batched data through the page-aligned buffer system
+    size_t bytes_written = 0;
+    while (bytes_written < activity_batch_bytes) {
+        size_t remaining = activity_batch_bytes - bytes_written;
+        size_t space_in_buffer = FLASH_PAGE_SIZE - activity_write_buffer_pos;
+        size_t to_copy = (remaining < space_in_buffer) ? remaining : space_in_buffer;
+        
+        // Copy to write buffer
+        memcpy(&activity_write_buffer[activity_write_buffer_pos], 
+               &activity_batch_buffer[bytes_written], 
+               to_copy);
+        activity_write_buffer_pos += to_copy;
+        bytes_written += to_copy;
+        
+        // Flush write buffer if full
+        if (activity_write_buffer_pos >= FLASH_PAGE_SIZE) {
+            flush_activity_buffer();
+        }
+    }
+    
+    // Reset batch
+    activity_batch_bytes = 0;
+    activity_batch_count = 0;
+    last_activity_flush_time = k_uptime_get_32();
+    
+    LOG_DBG("Flushed activity batch: %u samples", activity_batch_count);
+    
+    return err_t::NO_ERROR;
+}
+
+// Check if any batch needs to be flushed due to age
+static void check_batch_timeouts() {
+    uint32_t current_time = k_uptime_get_32();
+    
+    // Check foot sensor batch age
+    if (foot_sensor_batch_count > 0 && 
+        (current_time - last_foot_sensor_flush_time) > MAX_BATCH_AGE_MS) {
+        flush_foot_sensor_batch();
+    }
+    
+    // Check BHI360 batch age
+    if (bhi360_batch_count > 0 && 
+        (current_time - last_bhi360_flush_time) > MAX_BATCH_AGE_MS) {
+        flush_bhi360_batch();
+    }
+    
+    // Check activity batch age
+    if (activity_batch_count > 0 && 
+        (current_time - last_activity_flush_time) > MAX_BATCH_AGE_MS) {
+        flush_activity_batch();
     }
 }
 
@@ -542,6 +698,11 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 }
             }
         }
+        
+        // Check for batch timeouts periodically
+        if (filesystem_available) {
+            check_batch_timeouts();
+        }
 
         if (ret == 0)
         {
@@ -552,10 +713,10 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_FOOT_SAMPLES: {
                 const foot_samples_t *foot_data = &msg.data.foot_samples;
                 
-                // Data module only handles logging, not real-time transmission
-                // The foot sensor module should send data to the bluetooth module directly
-                    
-                    // Only attempt logging if filesystem is available and logging is active
+                // Only log data from our own foot sensor, not from D2D
+                // D2D data (from secondary device) should only be forwarded to phone via BLE
+                if (msg.sender == SENDER_FOOT_SENSOR_THREAD) {
+                    // This is our own foot sensor data - log it
                     if (filesystem_available && atomic_get(&logging_foot_active) == 1)
                     {
                         // Create FootSensorLogMessage
@@ -583,17 +744,45 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         foot_sensor_last_timestamp_ms = current_time_ms;
                         foot_log_msg.payload.foot_sensor.delta_ms = delta_ms;
 
-                        err_t write_status = write_foot_sensor_protobuf_data(&foot_log_msg);
-                        if (write_status != err_t::NO_ERROR)
-                        {
-                            LOG_ERR("Failed to write foot sensor data to file: %d", (int)write_status);
+                        // Encode directly to batch buffer
+                        uint8_t temp_buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
+                        pb_ostream_t stream = pb_ostream_from_buffer(temp_buffer, sizeof(temp_buffer));
+                        bool encode_status = pb_encode(&stream, sensor_data_messages_FootSensorLogMessage_fields, &foot_log_msg);
+                        
+                        if (encode_status && (foot_sensor_batch_bytes + stream.bytes_written <= sizeof(foot_sensor_batch_buffer))) {
+                            // Add to batch buffer
+                            memcpy(&foot_sensor_batch_buffer[foot_sensor_batch_bytes], temp_buffer, stream.bytes_written);
+                            foot_sensor_batch_bytes += stream.bytes_written;
+                            foot_sensor_batch_count++;
+                            
+                            // Flush batch if full or buffer is getting full
+                            if (foot_sensor_batch_count >= FOOT_SENSOR_BATCH_SIZE ||
+                                foot_sensor_batch_bytes > (sizeof(foot_sensor_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE)) {
+                                err_t write_status = flush_foot_sensor_batch();
+                                if (write_status != err_t::NO_ERROR) {
+                                    LOG_ERR("Failed to flush foot sensor batch: %d", (int)write_status);
+                                }
+                            }
+                        } else {
+                            // Buffer full or encode error - flush and retry
+                            flush_foot_sensor_batch();
+                            if (!encode_status) {
+                                LOG_ERR("Failed to encode foot sensor data: %s", stream.errmsg);
+                            }
                         }
                     }
                     else if (!filesystem_available && atomic_get(&logging_foot_active) == 1)
                     {
                         LOG_DBG("Foot sensor logging requested but filesystem not available");
                     }
-                    break;
+                } else if (msg.sender == SENDER_D2D_SECONDARY) {
+                    // This is foot sensor data from secondary device via D2D
+                    // Don't log it - it's only for real-time BLE transmission
+                    LOG_DBG("Received foot sensor data from secondary device via D2D - not logging");
+                } else {
+                    LOG_WRN("Received foot sensor data from unexpected sender: %s", get_sender_name(msg.sender));
+                }
+                break;
                 }
 
                 case MSG_TYPE_BHI360_LOG_RECORD: {
@@ -642,10 +831,31 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         bhi360_last_timestamp_ms = current_time_ms;
                         bhi360_log_msg.payload.bhi360_log_record.delta_ms = delta_ms;
 
-                        err_t write_status = write_bhi360_protobuf_data(&bhi360_log_msg);
-                        if (write_status != err_t::NO_ERROR)
-                        {
-                            LOG_ERR("Failed to write BHI360 log record to file: %d", (int)write_status);
+                        // Encode directly to batch buffer
+                        uint8_t temp_buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
+                        pb_ostream_t stream = pb_ostream_from_buffer(temp_buffer, sizeof(temp_buffer));
+                        bool encode_status = pb_encode(&stream, sensor_data_messages_BHI360LogMessage_fields, &bhi360_log_msg);
+                        
+                        if (encode_status && (bhi360_batch_bytes + stream.bytes_written <= sizeof(bhi360_batch_buffer))) {
+                            // Add to batch buffer
+                            memcpy(&bhi360_batch_buffer[bhi360_batch_bytes], temp_buffer, stream.bytes_written);
+                            bhi360_batch_bytes += stream.bytes_written;
+                            bhi360_batch_count++;
+                            
+                            // Flush batch if full or buffer is getting full
+                            if (bhi360_batch_count >= BHI360_BATCH_SIZE ||
+                                bhi360_batch_bytes > (sizeof(bhi360_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE)) {
+                                err_t write_status = flush_bhi360_batch();
+                                if (write_status != err_t::NO_ERROR) {
+                                    LOG_ERR("Failed to flush BHI360 batch: %d", (int)write_status);
+                                }
+                            }
+                        } else {
+                            // Buffer full or encode error - flush and retry
+                            flush_bhi360_batch();
+                            if (!encode_status) {
+                                LOG_ERR("Failed to encode BHI360 data: %s", stream.errmsg);
+                            }
                         }
                         // No BLE notification for BHI360 data yet.
                     }
@@ -715,10 +925,31 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         activity_last_timestamp_ms = current_time_ms;
                         activity_log_msg.payload.activity_data.delta_ms = delta_ms;
 
-                        err_t write_status = write_activity_protobuf_data(&activity_log_msg);
-                        if (write_status != err_t::NO_ERROR)
-                        {
-                            LOG_ERR("Failed to write activity data to file: %d", (int)write_status);
+                        // Encode directly to batch buffer
+                        uint8_t temp_buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
+                        pb_ostream_t stream = pb_ostream_from_buffer(temp_buffer, sizeof(temp_buffer));
+                        bool encode_status = pb_encode(&stream, sensor_data_messages_ActivityLogMessage_fields, &activity_log_msg);
+                        
+                        if (encode_status && (activity_batch_bytes + stream.bytes_written <= sizeof(activity_batch_buffer))) {
+                            // Add to batch buffer
+                            memcpy(&activity_batch_buffer[activity_batch_bytes], temp_buffer, stream.bytes_written);
+                            activity_batch_bytes += stream.bytes_written;
+                            activity_batch_count++;
+                            
+                            // Flush batch if full or buffer is getting full
+                            if (activity_batch_count >= ACTIVITY_BATCH_SIZE ||
+                                activity_batch_bytes > (sizeof(activity_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE)) {
+                                err_t write_status = flush_activity_batch();
+                                if (write_status != err_t::NO_ERROR) {
+                                    LOG_ERR("Failed to flush activity batch: %d", (int)write_status);
+                                }
+                            }
+                        } else {
+                            // Buffer full or encode error - flush and retry
+                            flush_activity_batch();
+                            if (!encode_status) {
+                                LOG_ERR("Failed to encode activity data: %s", stream.errmsg);
+                            }
                         }
                     }
                     else if (!filesystem_available && atomic_get(&logging_activity_active) == 1)
@@ -755,6 +986,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         LOG_INF("Command: Stopping foot sensor logging.");
                         atomic_set(&logging_foot_active, 0);
                         if (filesystem_available) {
+                            // Log batching statistics
+                            LOG_INF("Foot sensor batching stats: %u samples in batch", foot_sensor_batch_count);
                             err_t foot_status = end_foot_sensor_logging();
                             if (foot_status != err_t::NO_ERROR)
                             {
@@ -1587,6 +1820,8 @@ err_t end_foot_sensor_logging()
             overall_status = err_foot_write;
         }
 
+        // Flush any remaining batched data
+        flush_foot_sensor_batch();
         // Flush any remaining buffered data
         flush_foot_sensor_buffer();
 
@@ -1799,6 +2034,8 @@ err_t end_bhi360_logging()
             overall_status = err_bhi360_write;
         }
 
+        // Flush any remaining batched data
+        flush_bhi360_batch();
         // Flush any remaining buffered data
         flush_bhi360_buffer();
 
@@ -3184,16 +3421,15 @@ err_t load_weight_calibration_data(void)
             default_calib.scale_factor = 1.0f;
             default_calib.nonlinear_a = 0.0f;
             default_calib.is_calibrated = false;
-            default_calib.timestamp = 0;
             
             generic_message_t calib_msg = {};
             calib_msg.sender = SENDER_DATA;
             calib_msg.type = MSG_TYPE_WEIGHT_CALIBRATION_DATA;
             calib_msg.data.weight_calibration = default_calib;
             
-            if (k_msgq_put(&bluetooth_msgq, &calib_msg, K_NO_WAIT) != 0) {
-                LOG_ERR("Failed to send default weight calibration to bluetooth module");
-                return err_t::DATA_ERROR;
+            if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to send default weight calibration to activity metrics module");
+            return err_t::DATA_ERROR;
             }
             
             return err_t::FILE_SYSTEM_NO_FILES;
@@ -3222,12 +3458,12 @@ err_t load_weight_calibration_data(void)
     calib_msg.type = MSG_TYPE_WEIGHT_CALIBRATION_DATA;
     calib_msg.data.weight_calibration = calib_data;
     
-    if (k_msgq_put(&bluetooth_msgq, &calib_msg, K_NO_WAIT) != 0) {
-        LOG_ERR("Failed to send weight calibration to bluetooth module");
+    if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send weight calibration to activity metrics module");
         return err_t::DATA_ERROR;
     }
 
-    LOG_INF("Weight calibration data loaded and sent to bluetooth module");
+    LOG_INF("Weight calibration data loaded and sent to activity metrics module");
     return err_t::NO_ERROR;
 }
 

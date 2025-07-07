@@ -54,6 +54,7 @@ static struct k_work process_bhi360_data_work;
 static struct k_work process_command_work;
 static struct k_work_delayable periodic_update_work;
 static struct k_work weight_measurement_work;
+static struct k_work weight_calibration_work;
 
 // Message buffers for different work items
 static foot_samples_t pending_foot_data;
@@ -118,6 +119,7 @@ static struct {
 // Weight measurement state
 static struct {
     bool measurement_in_progress;
+    bool calibration_mode;  // True when doing calibration, false for normal measurement
     uint32_t measurement_start_time;
     float pressure_sum_buffer[20];  // Buffer for averaging
     int buffer_count;
@@ -125,11 +127,11 @@ static struct {
     uint32_t stable_samples_required;
     uint32_t stable_samples_count;
     bool debug_mode;  // Show raw ADC values for calibration
+    float known_weight_kg;  // Known weight for calibration (0 if not provided)
 } weight_measurement;
 
 // Weight calibration variables - can be updated at runtime
 static struct {
-    float zero_offset;      // ADC reading with no load
     float scale_factor;     // Newtons per ADC unit
     float nonlinear_a;      // Nonlinear coefficient A
     float nonlinear_b;      // Nonlinear coefficient B
@@ -137,7 +139,6 @@ static struct {
     float temp_coeff;       // Temperature coefficient (%/°C)
     float temp_ref;         // Reference temperature (°C)
 } weight_cal = {
-    .zero_offset = 1024.0f,    // Typical 12-bit ADC baseline
     .scale_factor = 0.0168f,   // ~100N max per sensor (16 sensors total)
     .nonlinear_a = 1.0f,       // Linear model by default
     .nonlinear_b = 0.0f,
@@ -159,6 +160,7 @@ static void process_bhi360_data_work_handler(struct k_work *work);
 static void process_command_work_handler(struct k_work *work);
 static void periodic_update_work_handler(struct k_work *work);
 static void weight_measurement_work_handler(struct k_work *work);
+static void weight_calibration_work_handler(struct k_work *work);
 static float calculate_pace_from_cadence(float cadence);
 static int8_t calculate_balance_score(void);
 static uint8_t calculate_form_score(void);
@@ -167,7 +169,9 @@ static uint8_t calculate_fatigue_level(void);
 static void start_weight_measurement(void);
 static void process_weight_measurement(void);
 static float calculate_weight_from_pressure(void);
+static float apply_weight_calibration(float raw_weight_kg);
 static bool is_person_standing_still(void);
+static void perform_weight_calibration(void);
 
 // Initialize the activity metrics module
 static void activity_metrics_init(void)
@@ -199,6 +203,7 @@ static void activity_metrics_init(void)
     k_work_init(&process_command_work, process_command_work_handler);
     k_work_init_delayable(&periodic_update_work, periodic_update_work_handler);
     k_work_init(&weight_measurement_work, weight_measurement_work_handler);
+    k_work_init(&weight_calibration_work, weight_calibration_work_handler);
     
     // Register step event callback
     step_detection_register_callback([](const StepEvent* event) {
@@ -233,10 +238,20 @@ static void activity_metrics_init(void)
         }
         
         LOG_DBG("Step event: foot=%d, contact=%.1fms, flight=%.1fms, strike=%d",
-                event->foot, (double)event->contact_time_ms, (double)event->flight_time_ms, event->strike_pattern);
-    });
-    
-    // Create the processing thread
+        event->foot, (double)event->contact_time_ms, (double)event->flight_time_ms, event->strike_pattern);
+        });
+        
+        // Request weight calibration data from data module
+        LOG_INF("Activity Metrics: Requesting weight calibration data from data module");
+        generic_message_t request_msg = {};
+        request_msg.sender = SENDER_ACTIVITY_METRICS;
+        request_msg.type = MSG_TYPE_REQUEST_WEIGHT_CALIBRATION;
+        
+        if (k_msgq_put(&data_msgq, &request_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to request weight calibration data from data module");
+        }
+        
+        // Create the processing thread
     activity_metrics_tid = k_thread_create(
         &activity_metrics_thread_data,
         activity_metrics_stack_area,
@@ -313,6 +328,56 @@ static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                     strncpy(pending_command, msg.data.command_str, MAX_COMMAND_STRING_LEN - 1);
                     pending_command[MAX_COMMAND_STRING_LEN - 1] = '\0';
                     k_work_submit_to_queue(&activity_metrics_work_q, &process_command_work);
+                    break;
+
+                case MSG_TYPE_SAVE_WEIGHT_CALIBRATION:
+                    // Update weight calibration from D2D or data module
+                    weight_cal.scale_factor = msg.data.weight_calibration.scale_factor;
+                    weight_cal.nonlinear_a = msg.data.weight_calibration.nonlinear_a;
+                    weight_cal.nonlinear_b = msg.data.weight_calibration.nonlinear_b;
+                    weight_cal.nonlinear_c = msg.data.weight_calibration.nonlinear_c;
+                    weight_cal.temp_coeff = msg.data.weight_calibration.temp_coeff;
+                    weight_cal.temp_ref = msg.data.weight_calibration.temp_ref;
+                    LOG_INF("Weight calibration updated: scale=%.6f, offset=%.6f", 
+                           (double)weight_cal.scale_factor, (double)weight_cal.nonlinear_a);
+                    break;
+
+                case MSG_TYPE_WEIGHT_MEASUREMENT:
+                    // Trigger weight measurement
+                    LOG_INF("Weight measurement requested");
+                    k_work_submit_to_queue(&activity_metrics_work_q, &weight_measurement_work);
+                    break;
+                    
+                case MSG_TYPE_START_WEIGHT_CALIBRATION:
+                    // Check if we have known weight data
+                    if (msg.data.weight_calibration_step.known_weight_kg > 0) {
+                        // Store the known weight for calibration
+                        weight_measurement.known_weight_kg = msg.data.weight_calibration_step.known_weight_kg;
+                        LOG_INF("Weight calibration requested with known weight: %.1f kg", 
+                                (double)weight_measurement.known_weight_kg);
+                    } else {
+                        // Legacy mode - no known weight provided
+                        weight_measurement.known_weight_kg = 0;
+                        LOG_INF("Weight calibration procedure requested (no known weight)");
+                    }
+                    k_work_submit_to_queue(&activity_metrics_work_q, &weight_calibration_work);
+                    break;
+                    
+                case MSG_TYPE_WEIGHT_CALIBRATION_DATA:
+                    // Update weight calibration from data module
+                    LOG_INF("Received weight calibration data from data module");
+                    weight_cal.scale_factor = msg.data.weight_calibration.scale_factor;
+                    weight_cal.nonlinear_a = msg.data.weight_calibration.nonlinear_a;
+                    weight_cal.nonlinear_b = msg.data.weight_calibration.nonlinear_b;
+                    weight_cal.nonlinear_c = msg.data.weight_calibration.nonlinear_c;
+                    weight_cal.temp_coeff = msg.data.weight_calibration.temp_coeff;
+                    weight_cal.temp_ref = msg.data.weight_calibration.temp_ref;
+                    if (msg.data.weight_calibration.is_calibrated) {
+                        LOG_INF("Weight calibration loaded: scale=%.6f", 
+                                (double)weight_cal.scale_factor);
+                    } else {
+                        LOG_INF("Using default weight calibration values");
+                    }
                     break;
                     
                 default:
@@ -393,19 +458,17 @@ static void process_command_work_handler(struct k_work *work)
         k_work_cancel_delayable(&periodic_update_work);
         LOG_INF("Activity session stopped");
     } else if (strcmp(pending_command, "MEASURE_WEIGHT") == 0) {
-        // Queue weight measurement work
+        // Normal weight measurement (not calibration)
+        weight_measurement.calibration_mode = false;
         k_work_submit_to_queue(&activity_metrics_work_q, &weight_measurement_work);
         LOG_INF("Weight measurement requested");
     } else if (strncmp(pending_command, "CALIBRATE_WEIGHT:", 17) == 0) {
         // Handle weight calibration command
-        // Format: "CALIBRATE_WEIGHT:ZERO:1024.0" or "CALIBRATE_WEIGHT:SCALE:0.0168"
+        // Format: "CALIBRATE_WEIGHT:SCALE:0.0168"
         char param[32];
         float value;
         if (sscanf(pending_command + 17, "%31[^:]:%f", param, &value) == 2) {
-            if (strcmp(param, "ZERO") == 0) {
-                weight_cal.zero_offset = value;
-                LOG_INF("Weight calibration: zero_offset set to %.2f", (double)value);
-            } else if (strcmp(param, "SCALE") == 0) {
+            if (strcmp(param, "SCALE") == 0) {
                 weight_cal.scale_factor = value;
                 LOG_INF("Weight calibration: scale_factor set to %.6f", (double)value);
             } else if (strcmp(param, "NONLINEAR_A") == 0) {
@@ -426,7 +489,6 @@ static void process_command_work_handler(struct k_work *work)
     } else if (strcmp(pending_command, "GET_WEIGHT_CAL") == 0) {
         // Report current calibration values
         LOG_INF("Weight calibration values:");
-        LOG_INF("  zero_offset: %.2f", (double)weight_cal.zero_offset);
         LOG_INF("  scale_factor: %.6f", (double)weight_cal.scale_factor);
         LOG_INF("  nonlinear_a: %.6f", (double)weight_cal.nonlinear_a);
         LOG_INF("  nonlinear_b: %.6f", (double)weight_cal.nonlinear_b);
@@ -437,7 +499,7 @@ static void process_command_work_handler(struct k_work *work)
     } else if (strcmp(pending_command, "WEIGHT_DEBUG_OFF") == 0) {
         weight_measurement.debug_mode = false;
         LOG_INF("Weight measurement debug mode disabled");
-    } else {
+        } else {
         LOG_WRN("Unknown command: %s", pending_command);
     }
 }
@@ -476,6 +538,96 @@ static void weight_measurement_work_handler(struct k_work *work)
     // Continue processing weight measurement until complete
     while (weight_measurement.measurement_in_progress) {
         process_weight_measurement();
+        k_msleep(100); // Check every 100ms
+    }
+}
+
+// Work handler for weight calibration
+static void weight_calibration_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    
+    LOG_INF("Starting weight calibration procedure");
+    LOG_INF("Please stand still on both feet for calibration");
+    
+    // Set up calibration state
+    weight_measurement.measurement_in_progress = true;
+    weight_measurement.calibration_mode = true;
+    weight_measurement.measurement_start_time = k_uptime_get_32();
+    weight_measurement.buffer_count = 0;
+    weight_measurement.stable_samples_count = 0;
+    weight_measurement.debug_mode = true; // Enable debug for calibration
+    memset(weight_measurement.pressure_sum_buffer, 0, sizeof(weight_measurement.pressure_sum_buffer));
+    
+    // Continue processing until calibration is complete
+    while (weight_measurement.measurement_in_progress) {
+        uint32_t now = k_uptime_get_32();
+        
+        // Check for timeout (10 seconds)
+        if (now - weight_measurement.measurement_start_time > 10000) {
+            LOG_WRN("Weight calibration timeout - could not get stable reading");
+            weight_measurement.measurement_in_progress = false;
+            weight_measurement.calibration_mode = false;
+            weight_measurement.debug_mode = false;
+            break;
+        }
+        
+        // Check if person is standing still
+        if (!is_person_standing_still()) {
+            weight_measurement.stable_samples_count = 0;
+            LOG_DBG("Motion detected - resetting stable sample count");
+            k_msleep(100);
+            continue;
+        }
+        
+        // Calculate total pressure from both feet
+        float total_pressure = 0;
+        bool data_valid = true;
+        
+        // Check if we have recent data from both feet
+        if (now - sensor_data.last_left_pressure_update > 200 ||
+            now - sensor_data.last_right_pressure_update > 200) {
+            data_valid = false;
+        }
+        
+        if (data_valid) {
+            // Sum all pressure values from both feet
+            for (int i = 0; i < 8; i++) {
+                total_pressure += sensor_data.left_pressure[i];
+                total_pressure += sensor_data.right_pressure[i];
+            }
+            
+            // Debug output for calibration
+            if (weight_measurement.debug_mode) {
+                LOG_INF("CALIBRATION DEBUG: Total ADC = %.2f", (double)total_pressure);
+            }
+            
+            // Add to buffer
+            if (weight_measurement.buffer_count < 20) {
+                weight_measurement.pressure_sum_buffer[weight_measurement.buffer_count++] = total_pressure;
+            } else {
+                // Shift buffer and add new value
+                for (int i = 0; i < 19; i++) {
+                    weight_measurement.pressure_sum_buffer[i] = weight_measurement.pressure_sum_buffer[i + 1];
+                }
+                weight_measurement.pressure_sum_buffer[19] = total_pressure;
+            }
+            
+            weight_measurement.stable_samples_count++;
+            
+            // Check if we have enough stable samples
+            if (weight_measurement.stable_samples_count >= weight_measurement.stable_samples_required &&
+                weight_measurement.buffer_count >= 10) {
+                
+                // Perform calibration
+                perform_weight_calibration();
+                weight_measurement.measurement_in_progress = false;
+                weight_measurement.calibration_mode = false;
+                weight_measurement.debug_mode = false;
+                break;
+            }
+        }
+        
         k_msleep(100); // Check every 100ms
     }
 }
@@ -851,6 +1003,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
 static void start_weight_measurement(void)
 {
     weight_measurement.measurement_in_progress = true;
+    weight_measurement.calibration_mode = false; // Ensure this is normal measurement
     weight_measurement.measurement_start_time = k_uptime_get_32();
     weight_measurement.buffer_count = 0;
     weight_measurement.stable_samples_count = 0;
@@ -919,50 +1072,41 @@ static void process_weight_measurement(void)
         if (weight_measurement.stable_samples_count >= weight_measurement.stable_samples_required &&
             weight_measurement.buffer_count >= 10) {
             
-            // Calculate weight
-            float weight_kg = calculate_weight_from_pressure();
+            // Normal measurement mode: Calculate weight
+            float raw_weight_kg = calculate_weight_from_pressure();
             
-            if (weight_kg > 20.0f && weight_kg < 300.0f) { // Sanity check
-                sensor_data.calculated_weight_kg = weight_kg;
-                sensor_data.last_weight_measurement_time = now;
-                sensor_data.weight_measurement_valid = true;
-                
-                LOG_INF("Weight measurement complete: %.1f kg", (double)weight_kg);
-                
-                // Send weight to BLE
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                // Primary device: Send to phone via BLE
-                generic_message_t weight_msg = {};
-                weight_msg.sender = SENDER_ACTIVITY_METRICS;
-                weight_msg.type = MSG_TYPE_COMMAND;
-                snprintf(weight_msg.data.command_str, sizeof(weight_msg.data.command_str), 
-                         "WEIGHT:%.1f", weight_kg);
-                k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
-#else
-                // Secondary device: Send to primary via D2D
-                generic_message_t weight_msg = {};
-                weight_msg.sender = SENDER_ACTIVITY_METRICS;
-                weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
-                weight_msg.data.weight_measurement.weight_kg = weight_kg;
-                weight_msg.data.weight_measurement.timestamp = k_uptime_get_32();
-                k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
-#endif
+            if (raw_weight_kg > 20.0f && raw_weight_kg < 300.0f) { // Sanity check
+            // Apply calibration to get final weight
+            float calibrated_weight_kg = apply_weight_calibration(raw_weight_kg);
+            
+            sensor_data.calculated_weight_kg = calibrated_weight_kg;
+            sensor_data.last_weight_measurement_time = now;
+            sensor_data.weight_measurement_valid = true;
+            
+            LOG_INF("Weight measurement complete: raw=%.1f kg, calibrated=%.1f kg", 
+            (double)raw_weight_kg, (double)calibrated_weight_kg);
+            
+            // Send calibrated weight to bluetooth module
+            generic_message_t weight_msg = {};
+            weight_msg.sender = SENDER_ACTIVITY_METRICS;
+            weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+            weight_msg.data.weight_measurement.weight_kg = calibrated_weight_kg;
+            k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
                 
                 weight_measurement.measurement_in_progress = false;
             } else {
-                LOG_WRN("Invalid weight calculation: %.1f kg", (double)weight_kg);
+                LOG_WRN("Invalid weight calculation: %.1f kg", (double)raw_weight_kg);
             }
         }
     }
 }
 
-// Calibration procedure:
-// 1. ZERO CALIBRATION: Read ADC with no load, set weight_cal.zero_offset
-// 2. LINEAR CALIBRATION: Apply known weights and calculate weight_cal.scale_factor
-//    weight_cal.scale_factor = (Force_in_Newtons) / (ADC_reading - weight_cal.zero_offset)
-// 3. NONLINEAR CALIBRATION (optional): For FSR sensors, fit polynomial
+// Calibration procedure (foot sensor data is already zero calibrated):
+// 1. LINEAR CALIBRATION: Apply known weights and calculate weight_cal.scale_factor
+//    weight_cal.scale_factor = (Force_in_Newtons) / ADC_reading
+// 2. NONLINEAR CALIBRATION (optional): For FSR sensors, fit polynomial
 //    Force = A * ADC² + B * ADC + C
-// 4. TEMPERATURE CALIBRATION (optional): Measure drift with temperature
+// 3. TEMPERATURE CALIBRATION (optional): Measure drift with temperature
 
 static float calculate_weight_from_pressure(void)
 {
@@ -975,8 +1119,8 @@ static float calculate_weight_from_pressure(void)
     }
     avg_pressure /= valid_samples;
     
-    // Apply zero offset calibration
-    float calibrated_adc = avg_pressure - weight_cal.zero_offset;
+    // Foot sensor data is already zero calibrated, so use directly
+    float calibrated_adc = avg_pressure;
     
     // Convert to force using calibration
     float total_force_n = 0;
@@ -1006,6 +1150,28 @@ static float calculate_weight_from_pressure(void)
     return weight_kg;
 }
 
+// Apply weight calibration to raw weight measurement
+static float apply_weight_calibration(float raw_weight_kg)
+{
+    // The raw_weight_kg is already the final weight calculated from ADC values
+    // using the calibration scale factor. No need to apply it again.
+    // This function is kept for future enhancements like temperature compensation
+    
+    float calibrated_weight = raw_weight_kg;
+    
+    // Apply temperature compensation if available
+    // Note: This would require a temperature sensor reading
+    // float current_temp = get_temperature(); // TODO: Implement temperature reading
+    // float temp_correction = 1.0f + (current_temp - weight_cal.temp_ref) * weight_cal.temp_coeff / 100.0f;
+    // calibrated_weight *= temp_correction;
+    
+    // Apply sanity limits
+    if (calibrated_weight < 0.0f) calibrated_weight = 0.0f;
+    if (calibrated_weight > 500.0f) calibrated_weight = 500.0f; // Max reasonable weight
+    
+    return calibrated_weight;
+}
+
 static bool is_person_standing_still(void)
 {
     // Check linear acceleration magnitude
@@ -1023,6 +1189,78 @@ static bool is_person_standing_still(void)
                  (gyro_magnitude < 0.1f); // 0.1 rad/s threshold for rotation
     
     return still;
+}
+
+static void perform_weight_calibration(void)
+{
+    // Average the buffered pressure readings
+    float avg_pressure = 0;
+    int valid_samples = MIN(weight_measurement.buffer_count, 20);
+    
+    for (int i = 0; i < valid_samples; i++) {
+        avg_pressure += weight_measurement.pressure_sum_buffer[i];
+    }
+    avg_pressure /= valid_samples;
+    
+    LOG_INF("Weight calibration complete!");
+    LOG_INF("Average pressure reading: %.2f ADC units", (double)avg_pressure);
+    
+    // Check if we have a known weight from the mobile app
+    float actual_weight_kg;
+    if (weight_measurement.known_weight_kg > 0) {
+        actual_weight_kg = weight_measurement.known_weight_kg;
+        LOG_INF("Using provided weight: %.1f kg", (double)actual_weight_kg);
+    } else {
+        // Legacy mode - no weight provided, use default or prompt user
+        LOG_INF("No weight provided. To complete calibration:");
+        LOG_INF("1. Note your actual weight in kg (from a calibrated scale)");
+        LOG_INF("2. Calculate scale factor: scale = (weight_kg * 9.81) / %.2f", (double)avg_pressure);
+        LOG_INF("3. Send calibration command: CALIBRATE_WEIGHT:SCALE:<calculated_value>");
+        
+        // For demonstration, use a default weight
+        actual_weight_kg = 70.0f;
+        LOG_INF("Using default weight for demo: %.1f kg", (double)actual_weight_kg);
+    }
+    
+    float force_n = actual_weight_kg * 9.81f;  // Convert to Newtons
+    // Foot sensor data is already zero calibrated
+    float calibrated_adc = avg_pressure;
+    
+    if (calibrated_adc > 0) {
+        float new_scale_factor = force_n / calibrated_adc;
+        
+        LOG_INF("Calibration calculation:");
+        LOG_INF("  Weight: %.1f kg", (double)actual_weight_kg);
+        LOG_INF("  Force: %.1f N", (double)force_n);
+        LOG_INF("  Average ADC: %.2f", (double)calibrated_adc);
+        LOG_INF("  New scale factor: %.6f N/ADC", (double)new_scale_factor);
+        LOG_INF("  Previous scale factor: %.6f N/ADC", (double)weight_cal.scale_factor);
+        
+        // Update the scale factor
+        weight_cal.scale_factor = new_scale_factor;
+        LOG_INF("Weight calibration updated! Test with a weight measurement.");
+        
+        // Save calibration to storage
+        generic_message_t save_msg = {};
+        save_msg.sender = SENDER_ACTIVITY_METRICS;
+        save_msg.type = MSG_TYPE_SAVE_WEIGHT_CALIBRATION;
+        save_msg.data.weight_calibration.scale_factor = weight_cal.scale_factor;
+        save_msg.data.weight_calibration.nonlinear_a = weight_cal.nonlinear_a;
+        save_msg.data.weight_calibration.nonlinear_b = weight_cal.nonlinear_b;
+        save_msg.data.weight_calibration.nonlinear_c = weight_cal.nonlinear_c;
+        save_msg.data.weight_calibration.temp_coeff = weight_cal.temp_coeff;
+        save_msg.data.weight_calibration.temp_ref = weight_cal.temp_ref;
+        save_msg.data.weight_calibration.is_calibrated = true;
+        k_msgq_put(&data_msgq, &save_msg, K_NO_WAIT);
+        
+        // Send calibration complete notification to BLE
+        // TODO: Add notification to mobile app
+        
+    } else {
+        LOG_ERR("Invalid calibration: ADC reading (%.2f) is not positive", 
+                (double)avg_pressure);
+        LOG_ERR("Please ensure person is standing on both feet during calibration");
+    }
 }
 
 

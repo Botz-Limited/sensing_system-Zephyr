@@ -634,6 +634,18 @@ K_TIMER_DEFINE(ble_timer, ble_timer_expiry_function, NULL);
 
 K_WORK_DEFINE(ble_handler, ble_timer_handler_function);
 
+// Weight measurement timeout work
+static void weight_measurement_timeout_work_handler(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(weight_measurement_timeout_work, weight_measurement_timeout_work_handler);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+// Weight measurement state variables (file scope for access by timeout handler)
+static float primary_weight_kg = 0;
+static float secondary_weight_kg = 0;
+static bool waiting_for_secondary = false;
+static int64_t weight_request_time = 0;
+#endif
+
 /* Advertising data */
 static const struct bt_data ad[] = {
     BT_DATA_BYTES(BT_DATA_FLAGS, (BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR)),
@@ -1237,9 +1249,6 @@ err_t bt_module_init(void)
         LOG_WRN("No Bluetooth identity address available");
     }
 
-    // Initialize weight measurement system
-    jis_weight_measurement_init();
-    
     // Forward declaration to ensure it's available
     extern err_t bt_start_advertising(int err);
     if (bt_start_advertising(0) == err_t::NO_ERROR)
@@ -1801,10 +1810,66 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // Handle weight measurement
                     weight_measurement_msg_t *weight_data = &msg.data.weight_measurement;
                     LOG_INF("Received WEIGHT MEASUREMENT from %s: %.1f kg", 
-                            get_sender_name(msg.sender), weight_data->weight_kg);
+                            get_sender_name(msg.sender), (double)weight_data->weight_kg);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                    // Primary device: Forward to phone via BLE
-                    jis_weight_measurement_notify(weight_data->weight_kg);
+                    // Primary device: Aggregate weights from both devices
+                    if (msg.sender == SENDER_ACTIVITY_METRICS) {
+                        // This is our own weight measurement
+                        primary_weight_kg = weight_data->weight_kg;
+                        weight_request_time = k_uptime_get();
+                        
+                        // Cancel any pending timeout
+                        k_work_cancel_delayable(&weight_measurement_timeout_work);
+                        
+                        // Check if secondary device is connected
+                        if (d2d_conn != nullptr) {
+                            // Request weight from secondary device
+                            LOG_INF("Primary weight measured: %.1f kg, requesting secondary weight", 
+                                    (double)primary_weight_kg);
+                            
+                            // Send weight measurement trigger to secondary (value 2)
+                            int err = ble_d2d_tx_send_weight_measurement_trigger_command(2);
+                            if (err == 0) {
+                                waiting_for_secondary = true;
+                                // Schedule timeout work (5 seconds)
+                                k_work_schedule(&weight_measurement_timeout_work, K_SECONDS(5));
+                            } else {
+                                LOG_WRN("Failed to request weight from secondary: %d, using primary only", err);
+                                // No secondary available, just send primary weight
+                                jis_weight_measurement_notify(primary_weight_kg);
+                                primary_weight_kg = 0;
+                            }
+                        } else {
+                            // No secondary connected, just send primary weight
+                            LOG_INF("No secondary connected, sending primary weight only: %.1f kg", 
+                                    (double)primary_weight_kg);
+                            jis_weight_measurement_notify(primary_weight_kg);
+                            primary_weight_kg = 0;
+                        }
+                    } else if (msg.sender == SENDER_D2D_SECONDARY) {
+                        // This is weight from secondary device
+                        secondary_weight_kg = weight_data->weight_kg;
+                        
+                        if (waiting_for_secondary) {
+                            // Cancel timeout work
+                            k_work_cancel_delayable(&weight_measurement_timeout_work);
+                            
+                            // Calculate total weight
+                            float total_weight_kg = primary_weight_kg + secondary_weight_kg;
+                            LOG_INF("Weight aggregation: Primary=%.1f kg + Secondary=%.1f kg = Total=%.1f kg",
+                                    (double)primary_weight_kg, (double)secondary_weight_kg, (double)total_weight_kg);
+                            
+                            // Send aggregated weight to phone
+                            jis_weight_measurement_notify(total_weight_kg);
+                            
+                            // Reset state
+                            waiting_for_secondary = false;
+                            primary_weight_kg = 0;
+                            secondary_weight_kg = 0;
+                        } else {
+                            LOG_WRN("Received unexpected secondary weight measurement, ignoring");
+                        }
+                    }
 #else
                     // Secondary device: Send to primary via D2D
                     int err = ble_d2d_tx_send_weight_measurement(weight_data->weight_kg);
@@ -1813,20 +1878,6 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     } else {
                         LOG_INF("Weight measurement sent to primary via D2D");
                     }
-#endif
-                    break;
-                }
-
-                case MSG_TYPE_WEIGHT_CALIBRATION_DATA: {
-                    // Handle weight calibration data from data module
-                    weight_calibration_data_t *cal_data = &msg.data.weight_calibration;
-                    LOG_INF("Received WEIGHT CALIBRATION DATA from %s", get_sender_name(msg.sender));
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                    // Primary device: Send to information service
-                    jis_handle_weight_calibration_data(cal_data);
-#else
-                    // Secondary device: This shouldn't happen normally
-                    LOG_WRN("Secondary device received weight calibration data - unexpected");
 #endif
                     break;
                 }
@@ -2011,6 +2062,29 @@ static void ble_timer_handler_function(struct k_work *work)
         }
     }
 }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+/**
+ * @brief Handler for weight measurement timeout
+ *
+ * This function is called when we timeout waiting for secondary device weight measurement
+ */
+static void weight_measurement_timeout_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    
+    if (waiting_for_secondary) {
+        LOG_WRN("Timeout waiting for secondary weight, using primary only: %.1f kg", 
+                (double)primary_weight_kg);
+        jis_weight_measurement_notify(primary_weight_kg);
+        
+        // Reset state
+        waiting_for_secondary = false;
+        primary_weight_kg = 0;
+        secondary_weight_kg = 0;
+    }
+}
+#endif
 
 /**
  * @brief Resets Bluetooth bonding information.

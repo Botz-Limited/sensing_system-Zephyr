@@ -35,7 +35,7 @@ int ble_d2d_tx_queue_command(enum d2d_tx_cmd_type type, const void *data)
     case D2D_TX_CMD_STOP_ACTIVITY:
     case D2D_TX_CMD_TRIGGER_CALIBRATION:
     case D2D_TX_CMD_REQUEST_DEVICE_INFO:
-    case D2D_TX_CMD_MEASURE_WEIGHT:
+    case D2D_TX_CMD_WEIGHT_CALIBRATION_TRIGGER:
         cmd.data.byte_value = *(const uint8_t *)data;
         break;
     default:
@@ -105,9 +105,9 @@ void ble_d2d_tx_process_queued_commands(void)
             err = ble_d2d_tx_request_device_info();
             break;
             
-        case D2D_TX_CMD_MEASURE_WEIGHT:
-            LOG_INF("Executing queued measure weight command: %u", cmd.data.byte_value);
-            err = ble_d2d_tx_send_measure_weight_command(cmd.data.byte_value);
+        case D2D_TX_CMD_WEIGHT_CALIBRATION_TRIGGER:
+            LOG_INF("Executing queued weight calibration trigger command: %u", cmd.data.byte_value);
+            err = ble_d2d_tx_send_weight_calibration_trigger_command(cmd.data.byte_value);
             break;
             
         default:
@@ -132,7 +132,7 @@ bool ble_d2d_tx_is_ready(void)
     return d2d_tx_ready;
 }
 
-int ble_d2d_tx_queue_measure_weight_command(uint8_t value)
+int ble_d2d_tx_queue_weight_calibration_trigger_command(uint8_t value)
 {
-    return ble_d2d_tx_queue_command(D2D_TX_CMD_MEASURE_WEIGHT, &value);
+    return ble_d2d_tx_queue_command(D2D_TX_CMD_WEIGHT_CALIBRATION_TRIGGER, &value);
 }

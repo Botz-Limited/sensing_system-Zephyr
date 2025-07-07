@@ -47,11 +47,17 @@ int ble_d2d_tx_request_device_info(void);
 // Send weight measurement (secondary -> primary)
 int ble_d2d_tx_send_weight_measurement(float weight_kg);
 
-// Send measure weight command (primary -> secondary)
-int ble_d2d_tx_send_measure_weight_command(uint8_t value);
-
 // Send weight calibration command (primary -> secondary)
 int ble_d2d_tx_send_weight_calibration_command(const weight_calibration_data_t *cal_data);
+
+// Send weight calibration trigger command (primary -> secondary)
+int ble_d2d_tx_send_weight_calibration_trigger_command(uint8_t value);
+
+// Send weight calibration with known weight (primary -> secondary)
+int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step_t *calib_data);
+
+// Send weight measurement trigger command (primary -> secondary)
+int ble_d2d_tx_send_weight_measurement_trigger_command(uint8_t value);
 
 #ifdef __cplusplus
 }

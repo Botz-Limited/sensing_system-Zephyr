@@ -31,14 +31,15 @@ LOG_MODULE_REGISTER(d2d_rx_client, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 
 // Timing constants for discovery and subscription process
-static constexpr uint32_t DISCOVERY_INITIAL_DELAY_MS = 10;      // Delay before starting discovery
-static constexpr uint32_t SUBSCRIPTION_INITIAL_DELAY_MS = 20;   // Delay before starting subscriptions
-static constexpr uint32_t SUBSCRIPTION_BETWEEN_DELAY_MS = 2;    // Minimal delay between each subscription
-static constexpr uint32_t SUBSCRIPTION_FINAL_DELAY_MS = 10;     // Delay after all subscriptions
-static constexpr uint32_t CONNECTION_STABILIZE_DELAY_MS = 15;   // Delay for connection stabilization
-static constexpr uint32_t RETRY_DELAY_MS = 10;                  // Delay before retrying operations
-static constexpr uint32_t RACE_CONDITION_DELAY_MS = 5;          // Delay to avoid race conditions
-static constexpr uint32_t RETRY_WAIT_MS = 100;                  // Longer wait before retry on errors
+static constexpr uint8_t DISCOVERY_INITIAL_DELAY_MS = 10;      // Delay before starting discovery
+static constexpr uint8_t SUBSCRIPTION_INITIAL_DELAY_MS = 20;   // Delay before starting subscriptions
+static constexpr uint8_t SUBSCRIPTION_BETWEEN_DELAY_MS = 2;    // Minimal delay between each subscription
+static constexpr uint8_t SUBSCRIPTION_FINAL_DELAY_MS = 10;     // Delay after all subscriptions
+static constexpr uint8_t CONNECTION_STABILIZE_DELAY_MS = 15;   // Delay for connection stabilization
+static constexpr uint8_t RETRY_DELAY_MS = 10;                  // Delay before retrying operations
+static constexpr uint8_t RACE_CONDITION_DELAY_MS = 5;          // Delay to avoid race conditions
+static constexpr uint8_t RETRY_WAIT_MS = 100;                  // Longer wait before retry on errors
+static constexpr uint8_t WORK_INDEX_MX = 16;                  // Longer wait before retry on errors
 
 // Service UUID: 75ad68d6-200c-437d-98b5-061862076c5f (must match secondary's TX service)
 static struct bt_uuid_128 d2d_tx_service_uuid =
@@ -182,6 +183,10 @@ static int device_info_retry_count = 0;
 static void smp_discovery_work_handler(struct k_work *work);
 K_WORK_DELAYABLE_DEFINE(smp_discovery_work, smp_discovery_work_handler);
 
+// Delayed work for device info request
+static void device_info_request_work_handler(struct k_work *work);
+K_WORK_DELAYABLE_DEFINE(device_info_request_work, device_info_request_work_handler);
+
 // Track subscription progress
 static atomic_t subscriptions_pending = ATOMIC_INIT(0);
 static atomic_t subscriptions_completed = ATOMIC_INIT(0);
@@ -240,7 +245,26 @@ static void device_info_retry_work_handler(struct k_work *work)
     }
     
     LOG_INF("Retrying device info subscription (attempt %d)", device_info_retry_count + 1);
-    subscribe_to_characteristic(device_info_handle, device_info_notify_handler, 8);
+    subscribe_to_characteristic(device_info_handle, device_info_notify_handler, 15);
+}
+
+static void device_info_request_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    if (!secondary_conn) {
+        LOG_WRN("No secondary connection for device info request");
+        return;
+    }
+    
+    LOG_INF("Requesting device info from secondary (deferred from callback)");
+    int err = ble_d2d_tx_request_device_info();
+    if (err == -EINVAL) {
+        LOG_INF("D2D TX discovery not complete yet, will request device info later");
+    } else if (err) {
+        LOG_WRN("Failed to request device info: %d", err);
+    } else {
+        LOG_INF("Device info request sent successfully");
+    }
 }
 
 static void individual_subscribe_work_handler(struct k_work *work)
@@ -257,7 +281,7 @@ static void individual_subscribe_work_handler(struct k_work *work)
     LOG_INF("Individual subscription work for handle %u, index %d", data->handle, data->index);
     
     // Special handling for device info subscription
-    if (data->handle == device_info_handle && data->index == 8) {
+    if (data->handle == device_info_handle && data->index == 15) {
         // Add a small extra delay before device info subscription
         k_msleep(5);
     }
@@ -289,6 +313,7 @@ static void perform_subscriptions(void)
             foot_log_handle, bhi360_log_handle, device_info_handle, fota_progress_handle);
     LOG_INF("         foot_path:%u, bhi_path:%u, act_log:%u, act_path:%u",
             foot_log_path_handle, bhi360_log_path_handle, activity_log_available_handle, activity_log_path_handle);
+    LOG_INF("         act_step:%u, weight:%u", activity_step_count_handle, weight_measurement_handle);
     
     // Clear all subscribe params before starting
     memset(subscribe_params, 0, sizeof(subscribe_params));
@@ -301,56 +326,56 @@ static void perform_subscriptions(void)
     int work_index = 0;
     
     // Initialize all work items first
-    if (foot_sensor_handle && work_index < 14) {
+    if (foot_sensor_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = foot_sensor_handle;
         subscribe_work_items[work_index].notify_func = foot_sensor_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
-    if (bhi360_data1_handle && work_index < 14) {
+    if (bhi360_data1_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_data1_handle;
         subscribe_work_items[work_index].notify_func = bhi360_data1_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
-    if (bhi360_data2_handle && work_index < 14) {
+    if (bhi360_data2_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_data2_handle;
         subscribe_work_items[work_index].notify_func = bhi360_data2_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
-    if (bhi360_data3_handle && work_index < 14) {
+    if (bhi360_data3_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_data3_handle;
         subscribe_work_items[work_index].notify_func = bhi360_data3_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
-    if (status_handle && work_index < 14) {
+    if (status_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = status_handle;
         subscribe_work_items[work_index].notify_func = status_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
-    if (charge_status_handle && work_index < 14) {
+    if (charge_status_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = charge_status_handle;
         subscribe_work_items[work_index].notify_func = charge_status_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
-    if (foot_log_handle && work_index < 14) {
+    if (foot_log_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = foot_log_handle;
         subscribe_work_items[work_index].notify_func = foot_log_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
-    if (bhi360_log_handle && work_index < 14) {
+    if (bhi360_log_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_log_handle;
         subscribe_work_items[work_index].notify_func = bhi360_log_notify_handler;
@@ -359,7 +384,7 @@ static void perform_subscriptions(void)
     }
     
     // Add FOTA progress subscription
-    if (fota_progress_handle && work_index < 14) {
+    if (fota_progress_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = fota_progress_handle;
         subscribe_work_items[work_index].notify_func = fota_progress_notify_handler;
@@ -368,7 +393,7 @@ static void perform_subscriptions(void)
     }
     
     // Add path subscriptions
-    if (foot_log_path_handle && work_index < 14) {
+    if (foot_log_path_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = foot_log_path_handle;
         subscribe_work_items[work_index].notify_func = foot_log_path_notify_handler;
@@ -376,7 +401,7 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
-    if (bhi360_log_path_handle && work_index < 14) {
+    if (bhi360_log_path_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = bhi360_log_path_handle;
         subscribe_work_items[work_index].notify_func = bhi360_log_path_notify_handler;
@@ -384,7 +409,7 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
-    if (activity_log_available_handle && work_index < 14) {
+    if (activity_log_available_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = activity_log_available_handle;
         subscribe_work_items[work_index].notify_func = activity_log_available_notify_handler;
@@ -392,7 +417,7 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
-    if (activity_log_path_handle && work_index < 15) {
+    if (activity_log_path_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = activity_log_path_handle;
         subscribe_work_items[work_index].notify_func = activity_log_path_notify_handler;
@@ -400,7 +425,7 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
-    if (activity_step_count_handle && work_index < 16) {
+    if (activity_step_count_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = activity_step_count_handle;
         subscribe_work_items[work_index].notify_func = activity_step_count_notify_handler;
@@ -408,7 +433,7 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
-    if (weight_measurement_handle && work_index < 16) {
+    if (weight_measurement_handle && work_index < WORK_INDEX_MX) {
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = weight_measurement_handle;
         subscribe_work_items[work_index].notify_func = weight_measurement_notify_handler;
@@ -416,8 +441,10 @@ static void perform_subscriptions(void)
         work_index++;
     }
     
+
+    
     // Try device info subscription as the last one with special handling
-    if (device_info_handle && work_index < 16) {
+    if (device_info_handle && work_index < WORK_INDEX_MX) {
         LOG_INF("Attempting device info subscription (handle %u) as last item", device_info_handle);
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = device_info_handle;
@@ -1052,8 +1079,8 @@ static uint8_t activity_step_count_notify_handler(struct bt_conn *conn,
 }
 
 static uint8_t weight_measurement_notify_handler(struct bt_conn *conn,
-                                               struct bt_gatt_subscribe_params *params,
-                                               const void *data, uint16_t length)
+                                                struct bt_gatt_subscribe_params *params,
+                                                const void *data, uint16_t length)
 {
     // Check if we still have a valid secondary connection
     if (!secondary_conn || conn != secondary_conn) {
@@ -1074,22 +1101,32 @@ static uint8_t weight_measurement_notify_handler(struct bt_conn *conn,
     }
 
     if (length != sizeof(uint16_t)) {
-        LOG_WRN("Invalid weight measurement length: %u", length);
+        LOG_WRN("Invalid weight measurement length: %u (expected %u)", length, sizeof(uint16_t));
         return BT_GATT_ITER_CONTINUE;
     }
 
-    uint16_t weight_kg_x10 = *(const uint16_t *)data;
-    float weight_kg = weight_kg_x10 / 10.0f;
+    const uint16_t *weight_x10 = (const uint16_t *)data;
+    float weight_kg = (float)(*weight_x10) / 10.0f;
+    
     LOG_INF("=== RECEIVED WEIGHT MEASUREMENT FROM SECONDARY ===");
-    LOG_INF("  Weight: %.1f kg (raw=%u)", (double)weight_kg, weight_kg_x10);
+    LOG_INF("  Weight: %.1f kg (raw=%u)", (double)weight_kg, *weight_x10);
 
-    // Forward to information service for aggregation with primary weight
-    // The primary device should aggregate both feet weights
-    extern void jis_secondary_weight_measurement_notify(float weight_kg);
-    jis_secondary_weight_measurement_notify(weight_kg);
+    // Send weight measurement to bluetooth module for aggregation
+    generic_message_t weight_msg = {};
+    weight_msg.sender = SENDER_D2D_SECONDARY;
+    weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+    weight_msg.data.weight_measurement.weight_kg = weight_kg;
+    
+    if (k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT) == 0) {
+        LOG_INF("Sent secondary weight to bluetooth module for aggregation");
+    } else {
+        LOG_ERR("Failed to send secondary weight to bluetooth module");
+    }
 
     return BT_GATT_ITER_CONTINUE;
 }
+
+
 
 // Alternative subscription method using write to CCC
 static void write_ccc_alternative(struct bt_conn *conn, uint16_t handle, uint16_t ccc_handle)
@@ -1210,16 +1247,11 @@ static void subscribe_to_characteristic(uint16_t handle, bt_gatt_notify_func_t n
             if (completed == pending && pending > 0) {
                 LOG_INF("All D2D RX subscriptions complete");
                 
-                // Request device info from secondary
+                // Request device info from secondary - defer to work queue to avoid calling from callback
                 // Note: This might fail if D2D TX discovery hasn't completed yet
                 // In that case, we'll request it after TX discovery completes
-                LOG_INF("Requesting device info from secondary");
-                int err = ble_d2d_tx_request_device_info();
-                if (err == -EINVAL) {
-                    LOG_INF("D2D TX discovery not complete yet, will request device info later");
-                } else if (err) {
-                    LOG_WRN("Failed to request device info: %d", err);
-                }
+                LOG_INF("Deferring device info request to work queue");
+                k_work_schedule(&device_info_request_work, K_MSEC(50));
                 
                 // Schedule SMP discovery with a small delay to avoid stack issues
                 LOG_INF("Scheduling SMP discovery");
