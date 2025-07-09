@@ -93,14 +93,12 @@ typedef struct {
     float overall_score;            // Combined score 0-100
 } form_score_t;
 
-// Alert flags
-typedef enum {
-    ALERT_HIGH_ASYMMETRY    = (1 << 0),
-    ALERT_POOR_FORM        = (1 << 1),
-    ALERT_HIGH_IMPACT      = (1 << 2),
-    ALERT_FATIGUE_DETECTED = (1 << 3),
-    ALERT_OVERPRONATION    = (1 << 4),
-} realtime_alert_flags_t;
+// Alert flags for real-time metrics (bit flags)
+#define RT_ALERT_HIGH_ASYMMETRY    (1 << 0)
+#define RT_ALERT_POOR_FORM         (1 << 1)
+#define RT_ALERT_HIGH_IMPACT       (1 << 2)
+#define RT_ALERT_FATIGUE_DETECTED  (1 << 3)
+#define RT_ALERT_OVERPRONATION     (1 << 4)
 
 // Function prototypes for metrics calculation
 void cadence_tracker_init(cadence_tracker_t *tracker);

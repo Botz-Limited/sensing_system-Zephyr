@@ -48,24 +48,70 @@ static constexpr int activity_metrics_workq_stack_size = 4096;
 K_THREAD_STACK_DEFINE(activity_metrics_workq_stack, activity_metrics_workq_stack_size);
 static struct k_work_q activity_metrics_work_q;
 
-// Work items for different message types
-static struct k_work process_foot_data_work;
-static struct k_work process_bhi360_data_work;
-static struct k_work process_command_work;
-static struct k_work_delayable periodic_update_work;
-static struct k_work weight_measurement_work;
-static struct k_work weight_calibration_work;
+/**
+ * THREAD-SAFE WORK ITEM PATTERN
+ * 
+ * Problem: The original code used global variables (pending_foot_data, pending_command, etc.)
+ * to pass data from the message thread to work handlers. This created race conditions where
+ * new messages could overwrite the data before the work handler processed it.
+ * 
+ * Solution: Each work item now contains its own copy of the data. We use double buffering
+ * to allow one work item to be processed while another is being prepared.
+ * 
+ * How it works:
+ * 1. Message arrives in activity_metrics_thread_fn
+ * 2. Get next buffer index using atomic_inc() & 1 (alternates between 0 and 1)
+ * 3. Copy message data into the work item's embedded data structure
+ * 4. Submit the work item to the work queue
+ * 5. Work handler uses CONTAINER_OF to get the work item and access its data
+ * 
+ * This ensures each work handler gets the exact data that was intended for it,
+ * even if multiple messages arrive in quick succession.
+ */
 
-// Message buffers for different work items
-static foot_samples_t pending_foot_data;
-static bhi360_log_record_t pending_bhi360_data;
-static bhi360_step_count_t pending_step_count;
-static char pending_command[MAX_COMMAND_STRING_LEN];
-static uint8_t pending_foot_id;  // Which foot (0=left, 1=right)
-static msg_type_t pending_bhi360_type;  // Which type of BHI360 message
+// Work item structures that include data to avoid race conditions
+struct foot_data_work {
+    struct k_work work;        // Zephyr work item (must be first member)
+    foot_samples_t data;       // Foot pressure sensor data
+    uint8_t foot_id;          // Which foot: 0=left, 1=right
+};
 
-// Message queue is defined in app.cpp
-extern struct k_msgq activity_metrics_msgq;
+struct bhi360_data_work {
+    struct k_work work;        // Zephyr work item (must be first member)
+    union {
+        bhi360_log_record_t log_record;   // Full BHI360 sensor data
+        bhi360_step_count_t step_count;   // Just step count update
+    } data;
+    msg_type_t type;          // Message type to distinguish union member
+};
+
+struct command_work {
+    struct k_work work;        // Zephyr work item (must be first member)
+    char command[MAX_COMMAND_STRING_LEN];  // Command string
+};
+// Static work item arrays for double buffering
+// Double buffering allows one item to be processed while another is being prepared
+static struct foot_data_work foot_work_items[2];      // Two buffers for foot data
+static struct bhi360_data_work bhi360_work_items[2];  // Two buffers for BHI360 data
+static struct command_work command_work_items[2];     // Two buffers for commands
+
+// These work items don't need double buffering as they're triggered differently
+static struct k_work_delayable periodic_update_work;   // Periodic 1Hz updates
+static struct k_work weight_measurement_work;          // Weight measurement process
+static struct k_work weight_calibration_work;          // Weight calibration process
+
+// Atomic indices for selecting which buffer to use (0 or 1)
+// atomic_inc() returns previous value, so (atomic_inc() & 1) alternates between 0 and 1
+static atomic_t foot_work_idx = ATOMIC_INIT(0);
+static atomic_t bhi360_work_idx = ATOMIC_INIT(0);
+static atomic_t command_work_idx = ATOMIC_INIT(0);
+
+// Message queues are defined in app.cpp
+extern struct k_msgq activity_metrics_msgq;  // Input queue for this module
+extern struct k_msgq sensor_data_msgq;       // Output to sensor_data module
+extern struct k_msgq realtime_queue;         // Output to realtime_metrics module
+extern struct k_msgq bluetooth_msgq;         // Output to bluetooth module
+extern struct k_msgq data_msgq;              // Output to data module
 
 // Module state
 static bool module_initialized = false;
@@ -197,10 +243,12 @@ static void activity_metrics_init(void)
                        activity_metrics_priority - 1, NULL);
     k_thread_name_set(&activity_metrics_work_q.thread, "activity_metrics_wq");
     
-    // Initialize work items
-    k_work_init(&process_foot_data_work, process_foot_data_work_handler);
-    k_work_init(&process_bhi360_data_work, process_bhi360_data_work_handler);
-    k_work_init(&process_command_work, process_command_work_handler);
+    // Initialize work items with double buffering
+    for (int i = 0; i < 2; i++) {
+        k_work_init(&foot_work_items[i].work, process_foot_data_work_handler);
+        k_work_init(&bhi360_work_items[i].work, process_bhi360_data_work_handler);
+        k_work_init(&command_work_items[i].work, process_command_work_handler);
+    }
     k_work_init_delayable(&periodic_update_work, periodic_update_work_handler);
     k_work_init(&weight_measurement_work, weight_measurement_work_handler);
     k_work_init(&weight_calibration_work, weight_calibration_work_handler);
@@ -286,49 +334,95 @@ static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
         if (ret == 0) {
             // Queue different work based on message type
             switch (msg.type) {
-                case MSG_TYPE_FOOT_SAMPLES:
-                    // Copy foot data and queue foot processing work
-                    memcpy(&pending_foot_data, &msg.data.foot_samples, sizeof(foot_samples_t));
-                    // Determine which foot based on sender
+                case MSG_TYPE_FOOT_SAMPLES: {
+                    /**
+                     * FOOT SENSOR DATA HANDLING
+                     * 
+                     * Double buffering pattern:
+                     * 1. atomic_inc(&foot_work_idx) increments the index atomically
+                     * 2. & 1 ensures we alternate between 0 and 1
+                     * 3. This allows concurrent processing without data corruption
+                     * 
+                     * Example sequence:
+                     * - Message 1: idx = 0, uses foot_work_items[0]
+                     * - Message 2: idx = 1, uses foot_work_items[1]
+                     * - Message 3: idx = 0, reuses foot_work_items[0] (safe if handler finished)
+                     */
+                    int idx = atomic_inc(&foot_work_idx) & 1;
+                    struct foot_data_work *work_item = &foot_work_items[idx];
+                    
+                    // Copy foot pressure data into work item's buffer
+                    memcpy(&work_item->data, &msg.data.foot_samples, sizeof(foot_samples_t));
+                    
+                    // Determine which foot based on message sender
+                    // This is needed because the primary device handles right foot locally
+                    // and receives left foot data from secondary via D2D
                     if (msg.sender == SENDER_FOOT_SENSOR_THREAD) {
                         #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                        pending_foot_id = 1; // Right foot on primary
+                        work_item->foot_id = 1; // Primary device's local sensor = right foot
                         #else
-                        pending_foot_id = 0; // Left foot on secondary
+                        work_item->foot_id = 0; // Secondary device's local sensor = left foot
                         #endif
                     } else if (msg.sender == SENDER_D2D_SECONDARY) {
-                        pending_foot_id = 0; // Left foot from secondary
+                        work_item->foot_id = 0; // Data from secondary is always left foot
                     }
-                    k_work_submit_to_queue(&activity_metrics_work_q, &process_foot_data_work);
-                    break;
                     
-                case MSG_TYPE_BHI360_LOG_RECORD:
-                    // Copy full BHI360 data
-                    memcpy(&pending_bhi360_data, &msg.data.bhi360_log_record, sizeof(bhi360_log_record_t));
-                    pending_bhi360_type = msg.type;
-                    k_work_submit_to_queue(&activity_metrics_work_q, &process_bhi360_data_work);
+                    // Submit work item - the handler will process this specific data copy
+                    k_work_submit_to_queue(&activity_metrics_work_q, &work_item->work);
                     break;
+                }
                     
-                case MSG_TYPE_BHI360_STEP_COUNT:
-                    // Copy step count data
-                    memcpy(&pending_step_count, &msg.data.bhi360_step_count, sizeof(bhi360_step_count_t));
-                    pending_bhi360_type = msg.type;
-                    k_work_submit_to_queue(&activity_metrics_work_q, &process_bhi360_data_work);
+                case MSG_TYPE_BHI360_LOG_RECORD: {
+                    // Get next work item index
+                    int idx = atomic_inc(&bhi360_work_idx) & 1;
+                    struct bhi360_data_work *work_item = &bhi360_work_items[idx];
+                    
+                    // Copy data to work item
+                    memcpy(&work_item->data.log_record, &msg.data.bhi360_log_record, sizeof(bhi360_log_record_t));
+                    work_item->type = msg.type;
+                    
+                    k_work_submit_to_queue(&activity_metrics_work_q, &work_item->work);
                     break;
+                }
+                    
+                case MSG_TYPE_BHI360_STEP_COUNT: {
+                    // Get next work item index
+                    int idx = atomic_inc(&bhi360_work_idx) & 1;
+                    struct bhi360_data_work *work_item = &bhi360_work_items[idx];
+                    
+                    // Copy data to work item
+                    memcpy(&work_item->data.step_count, &msg.data.bhi360_step_count, sizeof(bhi360_step_count_t));
+                    work_item->type = msg.type;
+                    
+                    k_work_submit_to_queue(&activity_metrics_work_q, &work_item->work);
+                    break;
+                }
                     
                 case MSG_TYPE_BHI360_3D_MAPPING:
-                case MSG_TYPE_BHI360_LINEAR_ACCEL:
-                    // For these, we'll use the same BHI360 work handler
-                    pending_bhi360_type = msg.type;
-                    k_work_submit_to_queue(&activity_metrics_work_q, &process_bhi360_data_work);
-                    break;
+                case MSG_TYPE_BHI360_LINEAR_ACCEL: {
+                    // Get next work item index
+                    int idx = atomic_inc(&bhi360_work_idx) & 1;
+                    struct bhi360_data_work *work_item = &bhi360_work_items[idx];
                     
-                case MSG_TYPE_COMMAND:
-                    // Copy command and queue command processing work
-                    strncpy(pending_command, msg.data.command_str, MAX_COMMAND_STRING_LEN - 1);
-                    pending_command[MAX_COMMAND_STRING_LEN - 1] = '\0';
-                    k_work_submit_to_queue(&activity_metrics_work_q, &process_command_work);
+                    // For these types, we just need the type
+                    work_item->type = msg.type;
+                    
+                    k_work_submit_to_queue(&activity_metrics_work_q, &work_item->work);
                     break;
+                }
+                    
+                case MSG_TYPE_COMMAND: {
+                    // Get next work item index
+                    int idx = atomic_inc(&command_work_idx) & 1;
+                    struct command_work *work_item = &command_work_items[idx];
+                    
+                    // Copy command to work item
+                    strncpy(work_item->command, msg.data.command_str, MAX_COMMAND_STRING_LEN - 1);
+                    work_item->command[MAX_COMMAND_STRING_LEN - 1] = '\0';
+                    
+                    k_work_submit_to_queue(&activity_metrics_work_q, &work_item->work);
+                    break;
+                }
 
                 case MSG_TYPE_SAVE_WEIGHT_CALIBRATION:
                     // Update weight calibration from D2D or data module
@@ -346,6 +440,17 @@ static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                     // Trigger weight measurement
                     LOG_INF("Weight measurement requested");
                     k_work_submit_to_queue(&activity_metrics_work_q, &weight_measurement_work);
+                    break;
+                    
+                case MSG_TYPE_GPS_UPDATE:
+                    // Process GPS update
+                    LOG_INF("GPS update received");
+                    if (session_state.session_active) {
+                        // Process GPS data for stride calibration
+                        activity_session_process_gps_update(&msg.data.gps_update);
+                    } else {
+                        LOG_WRN("GPS update received but no active session");
+                    }
                     break;
                     
                 case MSG_TYPE_START_WEIGHT_CALIBRATION:
@@ -389,30 +494,50 @@ static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
     }
 }
 
-// Work handler for processing foot sensor data
+/**
+ * WORK HANDLER: Process foot sensor data
+ * 
+ * This handler is called by the work queue thread when foot sensor data is ready.
+ * It uses the CONTAINER_OF macro to get the full work item structure from the k_work pointer.
+ * 
+ * CONTAINER_OF works because:
+ * - The k_work structure is the first member of foot_data_work
+ * - Given a pointer to k_work, we can calculate the address of the containing structure
+ * - This gives us access to the data that was copied when the work was submitted
+ * 
+ * Thread safety: Each work item has its own data copy, so no race conditions
+ */
 static void process_foot_data_work_handler(struct k_work *work)
 {
-    ARG_UNUSED(work);
-    LOG_DBG("Processing foot sensor data for foot %d", pending_foot_id);
-    process_foot_sensor_data(&pending_foot_data, pending_foot_id);
+    // Get the containing work item structure from the k_work pointer
+    // This is safe because k_work is the first member of foot_data_work
+    struct foot_data_work *work_item = CONTAINER_OF(work, struct foot_data_work, work);
+    
+    LOG_DBG("Processing foot sensor data for foot %d", work_item->foot_id);
+    
+    // Process the foot data that was copied into this work item
+    // work_item->data contains the exact data that was in the message
+    process_foot_sensor_data(&work_item->data, work_item->foot_id);
 }
 
 // Work handler for processing BHI360 data
 static void process_bhi360_data_work_handler(struct k_work *work)
 {
-    ARG_UNUSED(work);
-    LOG_DBG("Processing BHI360 data, type: %d", pending_bhi360_type);
+    // Get the containing work item structure
+    struct bhi360_data_work *work_item = CONTAINER_OF(work, struct bhi360_data_work, work);
+    
+    LOG_DBG("Processing BHI360 data, type: %d", work_item->type);
     
     // Create a temporary message with the appropriate data
     generic_message_t temp_msg;
-    temp_msg.type = pending_bhi360_type;
+    temp_msg.type = work_item->type;
     
-    switch (pending_bhi360_type) {
+    switch (work_item->type) {
         case MSG_TYPE_BHI360_LOG_RECORD:
-            memcpy(&temp_msg.data.bhi360_log_record, &pending_bhi360_data, sizeof(bhi360_log_record_t));
+            memcpy(&temp_msg.data.bhi360_log_record, &work_item->data.log_record, sizeof(bhi360_log_record_t));
             break;
         case MSG_TYPE_BHI360_STEP_COUNT:
-            memcpy(&temp_msg.data.bhi360_step_count, &pending_step_count, sizeof(bhi360_step_count_t));
+            memcpy(&temp_msg.data.bhi360_step_count, &work_item->data.step_count, sizeof(bhi360_step_count_t));
             break;
         default:
             // For other types, we'll handle them in process_bhi360_data
@@ -425,9 +550,12 @@ static void process_bhi360_data_work_handler(struct k_work *work)
 // Work handler for processing commands
 static void process_command_work_handler(struct k_work *work)
 {
-    LOG_DBG("Processing command: %s", pending_command);
+    // Get the containing work item structure
+    struct command_work *work_item = CONTAINER_OF(work, struct command_work, work);
     
-    if (strcmp(pending_command, "START_ACTIVITY") == 0) {
+    LOG_DBG("Processing command: %s", work_item->command);
+    
+    if (strcmp(work_item->command, "START_ACTIVITY") == 0) {
         // Start new activity session
         SessionHeader header = {
             .session_id = k_uptime_get_32(),
@@ -451,23 +579,53 @@ static void process_command_work_handler(struct k_work *work)
         // Start periodic update work
         k_work_schedule_for_queue(&activity_metrics_work_q, &periodic_update_work, K_MSEC(100));
         LOG_INF("Activity session started");
-    } else if (strcmp(pending_command, "STOP_ACTIVITY") == 0) {
+        
+        // Send start commands to other modules
+        generic_message_t start_msg = {};
+        start_msg.sender = SENDER_ACTIVITY_METRICS;
+        start_msg.type = MSG_TYPE_COMMAND;
+        
+        // Start sensor data processing
+        strcpy(start_msg.data.command_str, "START_SENSOR_PROCESSING");
+        k_msgq_put(&sensor_data_msgq, &start_msg, K_NO_WAIT);
+        
+        // Start realtime metrics processing
+        strcpy(start_msg.data.command_str, "START_REALTIME_PROCESSING");
+        k_msgq_put(&realtime_queue, &start_msg, K_NO_WAIT);
+        
+        LOG_INF("Sent start commands to sensor_data and realtime_metrics modules");
+    } else if (strcmp(work_item->command, "STOP_ACTIVITY") == 0) {
         activity_session_stop();
         atomic_set(&processing_active, 0);
         // Cancel periodic work
         k_work_cancel_delayable(&periodic_update_work);
         LOG_INF("Activity session stopped");
-    } else if (strcmp(pending_command, "MEASURE_WEIGHT") == 0) {
+        
+        // Send stop commands to other modules
+        generic_message_t stop_msg = {};
+        stop_msg.sender = SENDER_ACTIVITY_METRICS;
+        stop_msg.type = MSG_TYPE_COMMAND;
+        
+        // Stop sensor data processing
+        strcpy(stop_msg.data.command_str, "STOP_SENSOR_PROCESSING");
+        k_msgq_put(&sensor_data_msgq, &stop_msg, K_NO_WAIT);
+        
+        // Stop realtime metrics processing
+        strcpy(stop_msg.data.command_str, "STOP_REALTIME_PROCESSING");
+        k_msgq_put(&realtime_queue, &stop_msg, K_NO_WAIT);
+        
+        LOG_INF("Sent stop commands to sensor_data and realtime_metrics modules");
+    } else if (strcmp(work_item->command, "MEASURE_WEIGHT") == 0) {
         // Normal weight measurement (not calibration)
         weight_measurement.calibration_mode = false;
         k_work_submit_to_queue(&activity_metrics_work_q, &weight_measurement_work);
         LOG_INF("Weight measurement requested");
-    } else if (strncmp(pending_command, "CALIBRATE_WEIGHT:", 17) == 0) {
+    } else if (strncmp(work_item->command, "CALIBRATE_WEIGHT:", 17) == 0) {
         // Handle weight calibration command
         // Format: "CALIBRATE_WEIGHT:SCALE:0.0168"
         char param[32];
         float value;
-        if (sscanf(pending_command + 17, "%31[^:]:%f", param, &value) == 2) {
+        if (sscanf(work_item->command + 17, "%31[^:]:%f", param, &value) == 2) {
             if (strcmp(param, "SCALE") == 0) {
                 weight_cal.scale_factor = value;
                 LOG_INF("Weight calibration: scale_factor set to %.6f", (double)value);
@@ -484,23 +642,23 @@ static void process_command_work_handler(struct k_work *work)
                 LOG_WRN("Unknown calibration parameter: %s", param);
             }
         } else {
-            LOG_WRN("Invalid calibration command format: %s", pending_command);
+            LOG_WRN("Invalid calibration command format: %s", work_item->command);
         }
-    } else if (strcmp(pending_command, "GET_WEIGHT_CAL") == 0) {
+    } else if (strcmp(work_item->command, "GET_WEIGHT_CAL") == 0) {
         // Report current calibration values
         LOG_INF("Weight calibration values:");
         LOG_INF("  scale_factor: %.6f", (double)weight_cal.scale_factor);
         LOG_INF("  nonlinear_a: %.6f", (double)weight_cal.nonlinear_a);
         LOG_INF("  nonlinear_b: %.6f", (double)weight_cal.nonlinear_b);
         LOG_INF("  nonlinear_c: %.6f", (double)weight_cal.nonlinear_c);
-    } else if (strcmp(pending_command, "WEIGHT_DEBUG_ON") == 0) {
+    } else if (strcmp(work_item->command, "WEIGHT_DEBUG_ON") == 0) {
         weight_measurement.debug_mode = true;
         LOG_INF("Weight measurement debug mode enabled");
-    } else if (strcmp(pending_command, "WEIGHT_DEBUG_OFF") == 0) {
+    } else if (strcmp(work_item->command, "WEIGHT_DEBUG_OFF") == 0) {
         weight_measurement.debug_mode = false;
         LOG_INF("Weight measurement debug mode disabled");
-        } else {
-        LOG_WRN("Unknown command: %s", pending_command);
+    } else {
+        LOG_WRN("Unknown command: %s", work_item->command);
     }
 }
 
@@ -949,6 +1107,168 @@ void activity_session_stop(void)
             duration_ms/1000, total_steps, distance_m);
     
     // TODO: Send session summary to data module
+}
+
+// Calculate pace without GPS (sensor-only)
+static uint16_t calculate_pace_no_gps(uint32_t steps, uint32_t time_ms)
+{
+    if (steps == 0 || time_ms == 0) {
+        return 0;
+    }
+    
+    // Estimate stride length based on height (simplified)
+    float stride_length_m = 0.7f; // Default 0.7m
+    
+    // Calculate distance
+    float distance_m = steps * stride_length_m;
+    
+    // Calculate pace in seconds per km
+    if (distance_m > 0) {
+        float pace_sec_km = (time_ms / 1000.0f) / (distance_m / 1000.0f);
+        return (uint16_t)pace_sec_km;
+    }
+    
+    return 0;
+}
+
+// Calculate pace with GPS correction
+static uint16_t calculate_pace_with_gps(uint32_t gps_distance_m, uint32_t time_ms)
+{
+    if (gps_distance_m == 0 || time_ms == 0) {
+        return 0;
+    }
+    
+    // Direct calculation from GPS distance
+    float pace_sec_km = (time_ms / 1000.0f) / (gps_distance_m / 1000.0f);
+    return (uint16_t)pace_sec_km;
+}
+
+// Main pace calculation that selects appropriate method
+static uint16_t calculate_current_pace(void)
+{
+    uint32_t current_time = k_uptime_get_32();
+    uint32_t time_diff = current_time - session_state.session_start_time;
+    
+    // Check if we have recent GPS data (within last 30 seconds)
+    if (session_state.last_gps_update_time > 0 &&
+        (current_time - session_state.last_gps_update_time) < 30000) {
+        // Use GPS-based pace
+        uint32_t gps_distance_m = session_state.total_distance_cm / 100;
+        return calculate_pace_with_gps(gps_distance_m, time_diff);
+    } else {
+        // Fall back to sensor-based pace
+        uint32_t total_steps = session_state.total_steps_left + session_state.total_steps_right;
+        return calculate_pace_no_gps(total_steps, time_diff);
+    }
+}
+
+void activity_session_process_gps_update(const GPSUpdateCommand* gps_data)
+{
+    if (!gps_data || !session_state.session_active) {
+        return;
+    }
+    
+    uint32_t now = k_uptime_get_32();
+    
+    LOG_INF("GPS update: lat=%d, lon=%d, speed=%u cm/s, dist=%u m, acc=%u m",
+            gps_data->latitude_e7, gps_data->longitude_e7, 
+            gps_data->speed_cms, gps_data->distance_m, gps_data->accuracy_m);
+    
+    // Check GPS accuracy - ignore if too poor
+    if (gps_data->accuracy_m > 20) {
+        LOG_WRN("GPS accuracy too poor (%u m), ignoring update", gps_data->accuracy_m);
+        return;
+    }
+    
+    // If this is the first GPS update, just store the time
+    if (session_state.last_gps_update_time == 0) {
+        session_state.last_gps_update_time = now;
+        LOG_INF("First GPS update received, initializing GPS tracking");
+        return;
+    }
+    
+    // Calculate time since last GPS update
+    uint32_t time_diff_ms = now - session_state.last_gps_update_time;
+    if (time_diff_ms < 5000) { // Less than 5 seconds
+        LOG_WRN("GPS updates too frequent, ignoring");
+        return;
+    }
+    
+    // Use GPS distance to calibrate stride length
+    if (gps_data->distance_m > 0) {
+        // Calculate sensor-based distance since last GPS update
+        uint32_t sensor_distance_cm = session_state.total_distance_cm - 
+                                     session_state.distance_at_last_gps;
+        float sensor_distance_m = sensor_distance_cm / 100.0f;
+        
+        // Calculate correction factor
+        if (sensor_distance_m > 10.0f) { // Only calibrate if we've moved at least 10m
+            float correction = (float)gps_data->distance_m / sensor_distance_m;
+            
+            // Limit correction to reasonable bounds (±20%)
+            if (correction > 0.8f && correction < 1.2f) {
+                // Apply exponential smoothing to correction factor
+                session_state.stride_correction_factor = 
+                    0.9f * session_state.stride_correction_factor + 0.1f * correction;
+                
+                LOG_INF("Stride calibration: GPS=%um, sensor=%.1fm, correction=%.3f",
+                        gps_data->distance_m, (double)sensor_distance_m, 
+                        (double)session_state.stride_correction_factor);
+            } else {
+                LOG_WRN("GPS correction out of bounds: %.2f", (double)correction);
+            }
+        }
+        
+        // Update total distance with GPS-corrected value
+        session_state.total_distance_cm = session_state.distance_at_last_gps + 
+                                         (gps_data->distance_m * 100);
+    }
+    
+    // Store current values for next update
+    session_state.last_gps_update_time = now;
+    session_state.distance_at_last_gps = session_state.total_distance_cm;
+    
+    // Update elevation if provided
+    if (gps_data->elevation_change_m != 0) {
+        session_state.total_elevation_gain_cm += gps_data->elevation_change_m * 100;
+        LOG_DBG("Elevation change: %dm, total gain: %dcm", 
+                gps_data->elevation_change_m, session_state.total_elevation_gain_cm);
+    }
+}
+
+// Calculate distance without GPS (sensor-only)
+static uint32_t calculate_distance_no_gps(uint32_t steps)
+{
+    // Simple stride length estimation based on height
+    // This should be calibrated per user
+    float stride_length_m = 0.7f; // Default 0.7m
+    return (uint32_t)(steps * stride_length_m * 100.0f); // Return in cm
+}
+
+// Calculate distance with GPS correction
+static uint32_t calculate_distance_with_gps(uint32_t sensor_steps)
+{
+    // Apply GPS correction factor if available
+    float stride_length_m = 0.7f; // Base stride length
+    float corrected_stride = stride_length_m * session_state.stride_correction_factor;
+    return (uint32_t)(sensor_steps * corrected_stride * 100.0f); // Return in cm
+}
+
+// Main distance calculation that selects appropriate method
+static uint32_t calculate_total_distance(void)
+{
+    uint32_t total_steps = session_state.total_steps_left + session_state.total_steps_right;
+    
+    // Check if GPS correction is available and valid
+    if (session_state.stride_correction_factor > 0.8f && 
+        session_state.stride_correction_factor < 1.2f &&
+        session_state.last_gps_update_time > 0) {
+        // Use GPS-corrected calculation
+        return calculate_distance_with_gps(total_steps);
+    } else {
+        // Fall back to sensor-only calculation
+        return calculate_distance_no_gps(total_steps);
+    }
 }
 
 // Module event handler

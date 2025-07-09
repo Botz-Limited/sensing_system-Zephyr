@@ -152,13 +152,13 @@ static struct bt_uuid_128 conn_param_control_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68b, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 
-// --- New: UUID for weight measurement trigger characteristic ---
-static struct bt_uuid_128 weight_measurement_trigger_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68c, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
-
 // --- New: UUID for weight calibration characteristic ---
 static struct bt_uuid_128 weight_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68d, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
+// --- New: UUID for GPS update characteristic ---
+static struct bt_uuid_128 gps_update_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68e, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // Forward declarations for start/stop activity handlers
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
@@ -183,12 +183,12 @@ static ssize_t write_conn_param_control_vnd(struct bt_conn *conn, const struct b
 static ssize_t read_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len, uint16_t offset);
 
 
-// Weight measurement handlers
-static ssize_t write_weight_measurement_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
-
 // Weight calibration handlers
 static ssize_t write_weight_calibration_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 static void cs_weight_calibration_trigger_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+
+// GPS update handlers
+static ssize_t write_gps_update_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -285,18 +285,18 @@ BT_GATT_CHARACTERISTIC(&delete_foot_log_command_uuid.uuid, BT_GATT_CHRC_READ | B
                            write_conn_param_control_vnd, 
                            nullptr),
 
-    // Weight Measurement Trigger Characteristic
-    BT_GATT_CHARACTERISTIC(&weight_measurement_trigger_uuid.uuid,
-                           BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE_ENCRYPT,
-                           nullptr, write_weight_measurement_trigger_vnd, nullptr),
-
     // Weight Calibration Trigger Characteristic
     BT_GATT_CHARACTERISTIC(&weight_calibration_uuid.uuid,
                            BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
                            BT_GATT_PERM_WRITE_ENCRYPT,
                            nullptr, write_weight_calibration_trigger_vnd, nullptr),
-    BT_GATT_CCC(cs_weight_calibration_trigger_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+    BT_GATT_CCC(cs_weight_calibration_trigger_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+
+    // GPS Update Characteristic
+    BT_GATT_CHARACTERISTIC(&gps_update_uuid.uuid,
+                           BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_WRITE_ENCRYPT,
+                           nullptr, write_gps_update_vnd, nullptr)
 );
 
 /**
@@ -484,47 +484,49 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
     return len;
 }
 
-// --- Weight Measurement Trigger Handler ---
-static ssize_t write_weight_measurement_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
-                                                   const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+// --- GPS Update Handler ---
+static ssize_t write_gps_update_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                   const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
 {
     ARG_UNUSED(conn);
     ARG_UNUSED(attr);
     ARG_UNUSED(offset);
     ARG_UNUSED(flags);
 
-    if (len != sizeof(uint8_t)) {
+    // Check if we received the correct size for GPSUpdateCommand
+    if (len != sizeof(GPSUpdateCommand)) {
+        LOG_ERR("GPS update characteristic write: invalid length %u (expected %u)", 
+                len, sizeof(GPSUpdateCommand));
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
 
-    uint8_t value = *((const uint8_t *)buf);
-    LOG_INF("Weight measurement trigger characteristic write: %u", value);
+    GPSUpdateCommand gps_data;
+    memcpy(&gps_data, buf, sizeof(GPSUpdateCommand));
 
-    if (value == 1) {
-        // Send weight measurement trigger to activity metrics
-        generic_message_t msg = {};
-        msg.sender = SENDER_BTH;
-        msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
-        
-        if (k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to send weight measurement trigger to activity metrics");
-            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-        }
+    LOG_INF("GPS update received: lat=%d, lon=%d, speed=%u cm/s, dist=%u m, acc=%u m",
+            gps_data.latitude_e7, gps_data.longitude_e7, 
+            gps_data.speed_cms, gps_data.distance_m, gps_data.accuracy_m);
 
-        LOG_INF("Triggered weight measurement (input=1).");
-        
-        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        // Forward the weight measurement trigger to secondary device
-        int err = ble_d2d_tx_send_weight_measurement_trigger_command(value);
-        if (err) {
-            LOG_ERR("Failed to forward weight measurement trigger to secondary: %d", err);
-        } else {
-            LOG_INF("Successfully forwarded weight measurement trigger to secondary");
-        }
-        #endif
-    } else {
-        LOG_WRN("Weight measurement trigger characteristic write ignored (input=%u).", value);
+    // Send GPS update to activity metrics module
+    generic_message_t gps_msg = {};
+    gps_msg.sender = SENDER_BTH;
+    gps_msg.type = MSG_TYPE_GPS_UPDATE;
+    memcpy(&gps_msg.data.gps_update, &gps_data, sizeof(GPSUpdateCommand));
+    
+    if (k_msgq_put(&activity_metrics_msgq, &gps_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send GPS update to activity metrics");
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
     }
+
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the GPS update to secondary device
+    int err = ble_d2d_tx_send_gps_update(&gps_data);
+    if (err) {
+        LOG_ERR("Failed to forward GPS update to secondary: %d", err);
+    } else {
+        LOG_DBG("Successfully forwarded GPS update to secondary");
+    }
+    #endif
 
     return len;
 }

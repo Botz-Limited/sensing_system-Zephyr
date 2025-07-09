@@ -47,6 +47,7 @@ static struct k_work_delayable ble_update_work;
 static char pending_command[MAX_COMMAND_STRING_LEN];
 static sensor_data_consolidated_t latest_sensor_data;
 static bool new_sensor_data_available;
+K_MUTEX_DEFINE(sensor_data_mutex);
 
 // Message queues are defined in app.cpp
 extern struct k_msgq sensor_data_queue;  // Input from sensor_data
@@ -171,9 +172,12 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
             // Queue different work based on message type
             switch (msg.type) {
                 case MSG_TYPE_SENSOR_DATA_CONSOLIDATED:
-                    // Copy sensor data (in real implementation, this would be passed differently)
-                    // For now, we'll need to enhance the message structure
+                    // Copy sensor data with mutex protection
+                    k_mutex_lock(&sensor_data_mutex, K_FOREVER);
+                    memcpy(&latest_sensor_data, &msg.data.sensor_consolidated, sizeof(sensor_data_consolidated_t));
                     new_sensor_data_available = true;
+                    k_mutex_unlock(&sensor_data_mutex);
+                    
                     metrics_state.current_time_ms = k_uptime_get_32();
                     k_work_submit_to_queue(&realtime_metrics_work_q, &process_consolidated_data_work);
                     break;
@@ -245,9 +249,13 @@ static void ble_update_work_handler(struct k_work *work)
 // Calculate real-time metrics
 static void calculate_realtime_metrics(void)
 {
-    // Note: In real implementation, we'd get this from the message
-    // For now, using simulated data to show the algorithm
-    sensor_data_consolidated_t *data = &latest_sensor_data;
+    // Copy sensor data with mutex protection
+    sensor_data_consolidated_t local_data;
+    k_mutex_lock(&sensor_data_mutex, K_FOREVER);
+    memcpy(&local_data, &latest_sensor_data, sizeof(sensor_data_consolidated_t));
+    k_mutex_unlock(&sensor_data_mutex);
+    
+    sensor_data_consolidated_t *data = &local_data;
     
     // Update cadence tracker
     cadence_tracker_update(&metrics_state.cadence_tracker, 
@@ -260,6 +268,10 @@ static void calculate_realtime_metrics(void)
     pace_estimator_update(&metrics_state.pace_estimator,
                          current_cadence,
                          data->delta_time_ms);
+    
+    // Check if GPS correction is available (from activity_metrics)
+    // This would need to be passed via message queue in real implementation
+    // For now, we'll use the sensor-only version
     
     // Track contact times for averaging
     if (data->left_contact_duration_ms > 0) {
@@ -298,7 +310,6 @@ static void calculate_realtime_metrics(void)
         uint16_t avg_right_force = metrics_state.right_force_sum / metrics_state.force_count;
         balance = calculate_balance_percentage(avg_left_force, avg_right_force);
     }
-    
     // Calculate variability for consistency score
     float variability = 0;
     if (metrics_state.contact_count >= 5) {
@@ -356,13 +367,13 @@ static void calculate_realtime_metrics(void)
     // Check for alerts
     metrics_state.current_metrics.alerts = 0;
     if (metrics_state.current_metrics.contact_time_asymmetry > 15) {
-        metrics_state.current_metrics.alerts |= ALERT_HIGH_ASYMMETRY;
+        metrics_state.current_metrics.alerts |= RT_ALERT_HIGH_ASYMMETRY;
     }
     if (metrics_state.current_metrics.form_score < 60) {
-        metrics_state.current_metrics.alerts |= ALERT_POOR_FORM;
+        metrics_state.current_metrics.alerts |= RT_ALERT_POOR_FORM;
     }
     if (abs(avg_pronation) > 15) {
-        metrics_state.current_metrics.alerts |= ALERT_OVERPRONATION;
+        metrics_state.current_metrics.alerts |= RT_ALERT_OVERPRONATION;
     }
     
     // Log periodically
@@ -422,15 +433,15 @@ static void send_ble_update(void)
     // Log alerts if any
     if (metrics_state.current_metrics.alerts != 0) {
         LOG_WRN("Alerts active: 0x%02x", metrics_state.current_metrics.alerts);
-        if (metrics_state.current_metrics.alerts & ALERT_HIGH_ASYMMETRY) {
+        if (metrics_state.current_metrics.alerts & RT_ALERT_HIGH_ASYMMETRY) {
             LOG_WRN("High asymmetry detected: %d%%", 
                     metrics_state.current_metrics.contact_time_asymmetry);
         }
-        if (metrics_state.current_metrics.alerts & ALERT_POOR_FORM) {
+        if (metrics_state.current_metrics.alerts & RT_ALERT_POOR_FORM) {
             LOG_WRN("Poor running form: score %d%%", 
                     metrics_state.current_metrics.form_score);
         }
-        if (metrics_state.current_metrics.alerts & ALERT_OVERPRONATION) {
+        if (metrics_state.current_metrics.alerts & RT_ALERT_OVERPRONATION) {
             LOG_WRN("Overpronation detected: %d degrees", 
                     metrics_state.current_metrics.avg_pronation_deg);
         }

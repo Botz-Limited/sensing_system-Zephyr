@@ -93,39 +93,42 @@ The system SHALL consist of:
 - FUNC-016: The system SHALL track session duration
 - FUNC-017: The system SHALL generate session summaries
 - FUNC-018: The system SHALL support multiple activity types
+- FUNC-019: The system SHALL accept GPS updates from mobile applications
+- FUNC-020: The system SHALL use GPS data to enhance distance/pace accuracy
+- FUNC-021: The system SHALL operate correctly without GPS data
 
 ### 3.3 Communication
 
 #### 3.3.1 Bluetooth Services
-- FUNC-019: The system SHALL implement BLE GATT services
-- FUNC-020: The system SHALL encrypt all BLE communications
-- FUNC-021: The system SHALL support bonding with mobile devices
-- FUNC-022: The system SHALL advertise as "SensingGR" (primary) or "SensingGL" (secondary)
+- FUNC-022: The system SHALL implement BLE GATT services
+- FUNC-023: The system SHALL encrypt all BLE communications
+- FUNC-024: The system SHALL support bonding with mobile devices
+- FUNC-025: The system SHALL advertise as "SensingGR" (primary) or "SensingGL" (secondary)
 
 #### 3.3.2 Device-to-Device
-- FUNC-023: Primary device SHALL connect to secondary device
-- FUNC-024: Primary device SHALL aggregate data from both devices
-- FUNC-025: Primary device SHALL synchronize time between devices
-- FUNC-026: D2D connection SHALL auto-reconnect if lost
+- FUNC-026: Primary device SHALL connect to secondary device
+- FUNC-027: Primary device SHALL aggregate data from both devices
+- FUNC-028: Primary device SHALL synchronize time between devices
+- FUNC-029: D2D connection SHALL auto-reconnect if lost
 
 ### 3.4 Data Storage
 
 #### 3.4.1 Logging
-- FUNC-027: The system SHALL log sensor data to flash storage
-- FUNC-028: The system SHALL create separate files for each session
-- FUNC-029: The system SHALL use protobuf format for logs
-- FUNC-030: The system SHALL support file retrieval via BLE
+- FUNC-030: The system SHALL log sensor data to flash storage
+- FUNC-031: The system SHALL create separate files for each session
+- FUNC-032: The system SHALL use protobuf format for logs
+- FUNC-033: The system SHALL support file retrieval via BLE
 
 #### 3.4.2 Configuration
-- FUNC-031: The system SHALL store device configuration
-- FUNC-032: The system SHALL store calibration data
-- FUNC-033: The system SHALL persist settings across reboots
+- FUNC-034: The system SHALL store device configuration
+- FUNC-035: The system SHALL store calibration data
+- FUNC-036: The system SHALL persist settings across reboots
 
 ### 3.5 Firmware Updates
-- FUNC-034: The system SHALL support over-the-air firmware updates
-- FUNC-035: The system SHALL verify firmware integrity
-- FUNC-036: The system SHALL support rollback on failed updates
-- FUNC-037: Both devices SHALL update synchronously
+- FUNC-037: The system SHALL support over-the-air firmware updates
+- FUNC-038: The system SHALL verify firmware integrity
+- FUNC-039: The system SHALL support rollback on failed updates
+- FUNC-040: Both devices SHALL update synchronously
 
 ---
 
@@ -148,6 +151,9 @@ The system SHALL consist of:
 - PERF-010: Cadence accuracy SHALL be ±2 SPM
 - PERF-011: Contact time accuracy SHALL be ±5ms
 - PERF-012: Pressure measurement accuracy SHALL be ±5%
+- PERF-013: Distance accuracy SHALL be ±15-20% without GPS
+- PERF-014: Distance accuracy SHALL be ±1-3% with GPS
+- PERF-015: GPS updates with accuracy >20m SHALL be ignored
 
 ---
 

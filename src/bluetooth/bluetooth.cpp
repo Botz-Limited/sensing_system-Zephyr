@@ -17,8 +17,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
-#include <string_view>
 #include <errno.h>
+#include <string_view>
 
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/byteorder.h>
@@ -59,10 +59,10 @@
 #include "ble_d2d_tx_service.hpp"
 #include "bluetooth_debug.hpp"
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-#include "ble_seq_manager.hpp"
-#include "ble_recovery_handler.hpp"
 #include "ble_d2d_rx_client.hpp"
 #include "ble_d2d_tx_queue.hpp"
+#include "ble_recovery_handler.hpp"
+#include "ble_seq_manager.hpp"
 #include "file_proxy.hpp"
 #include "fota_proxy.hpp"
 #include "smp_proxy.hpp"
@@ -78,7 +78,7 @@
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
 // Constants
-#define BLE_ADVERTISING_TIMEOUT_MS 30000 // 30 seconds advertising timeout
+#define BLE_ADVERTISING_TIMEOUT_MS 30000                   // 30 seconds advertising timeout
 static constexpr uint32_t DISCOVERY_INITIAL_DELAY_MS = 10; // Delay before starting discovery
 
 /********************************** BTH THREAD ********************************/
@@ -107,11 +107,13 @@ static bool pairing_failed_for_pending = false;
 static void find_active_conn_cb(struct bt_conn *conn, void *data)
 {
     struct bt_conn **active_conn = (struct bt_conn **)data;
-    
+
     // If we haven't found a connection yet and this one is valid
-    if (*active_conn == NULL && conn != NULL) {
+    if (*active_conn == NULL && conn != NULL)
+    {
         struct bt_conn_info info;
-        if (bt_conn_get_info(conn, &info) == 0) {
+        if (bt_conn_get_info(conn, &info) == 0)
+        {
             // Found an active connection, reference it
             *active_conn = bt_conn_ref(conn);
         }
@@ -213,7 +215,6 @@ void bluetooth_d2d_not_found(struct bt_conn *conn)
 #endif
 }
 
-
 // For secondary (central) role: variables needed early
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static bt_addr_le_t target_addr;  // Store address of target device
@@ -252,20 +253,23 @@ static void d2d_connected(struct bt_conn *conn, uint8_t err)
         k_work_init_delayable(&device_info_work, [](struct k_work *work) {
             ARG_UNUSED(work);
             LOG_INF("Sending device info and status after delay");
-            
+
             // Send device information to primary
             send_device_info_to_primary();
 
             // Send a status update to indicate secondary is ready
             uint32_t connected_status = STATUS_READY;
             int err = ble_d2d_tx_send_status(connected_status);
-            if (err) {
+            if (err)
+            {
                 LOG_ERR("Failed to send ready status: %d", err);
-            } else {
+            }
+            else
+            {
                 LOG_INF("Sent ready status to primary device");
             }
         });
-        
+
         // Schedule to run after 3 seconds (time for primary to subscribe)
         k_work_schedule(&device_info_work, K_SECONDS(3));
         LOG_INF("Scheduled device info and status to be sent in 3 seconds");
@@ -316,7 +320,7 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
         // Clear D2D TX connection
         ble_d2d_tx_set_connection(NULL);
         LOG_INF("D2D TX connection cleared");
-        
+
         // Clear D2D file client connection
         ble_d2d_file_client_init(NULL);
 
@@ -844,16 +848,17 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
         LOG_INF("Connected");
         ble_status_connected = 1;
-        
-        #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Update Activity Metrics Service with connection (primary only)
         ams_set_connection(conn);
 #endif
-        
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Check if this is a reconnection and start recovery if needed
         BleSequenceManager::getInstance().onReconnect();
-        if (BleSequenceManager::getInstance().isInRecovery()) {
+        if (BleSequenceManager::getInstance().isInRecovery())
+        {
             LOG_INF("Starting BLE packet recovery after reconnection");
             BleRecoveryHandler::getInstance().startRecovery();
         }
@@ -872,18 +877,24 @@ static void connected(struct bt_conn *conn, uint8_t err)
         LOG_INF("===========================");
 
         // Check if we already have a secondary device connected
-        if (d2d_conn != nullptr) {
+        if (d2d_conn != nullptr)
+        {
             LOG_INF("PRIMARY: Secondary device already connected, assuming this is a phone connection");
             // This is likely a phone connection since we already have a secondary
             // Set security for phone connection
             int ret = bt_conn_set_security(conn, BT_SECURITY_L2);
-            if (ret != 0) {
+            if (ret != 0)
+            {
                 LOG_ERR("Failed to set security for phone connection (err %d)", ret);
                 bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
-            } else {
+            }
+            else
+            {
                 LOG_INF("Security requested for phone connection");
             }
-        } else {
+        }
+        else
+        {
             // For primary device, we need to determine if this is a D2D connection
             // Start discovery to identify the device type
             LOG_INF("PRIMARY: No secondary connected, starting D2D discovery to identify device type");
@@ -955,12 +966,12 @@ static bool bonds_present()
 static void disconnected(struct bt_conn *conn, uint8_t reason)
 {
     LOG_INF("Disconnected (reason 0x%02x)", reason);
-    
-    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Clear Activity Metrics Service connection (primary only)
     ams_set_connection(NULL);
 #endif
-    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Mark disconnection for potential recovery
     BleSequenceManager::getInstance().onDisconnect();
@@ -975,7 +986,8 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
     }
 
     // Clear phone connection from SMP proxy if this was a phone connection
-    if (conn != d2d_conn) {
+    if (conn != d2d_conn)
+    {
         smp_proxy_clear_phone_conn(conn);
     }
 
@@ -1160,20 +1172,18 @@ err_t bt_module_init(void)
         return err_t::BLUETOOTH_ERROR;
     }
 
-    static struct bt_conn_cb d2d_conn_callbacks = {
-        .connected = d2d_connected,
-        .disconnected = d2d_disconnected,
-        .recycled = NULL,
-        .le_param_req = NULL,
-        .le_param_updated = NULL,
+    static struct bt_conn_cb d2d_conn_callbacks = {.connected = d2d_connected,
+                                                   .disconnected = d2d_disconnected,
+                                                   .recycled = NULL,
+                                                   .le_param_req = NULL,
+                                                   .le_param_updated = NULL,
 #if defined(CONFIG_BT_SMP)
-        .identity_resolved = NULL,
+                                                   .identity_resolved = NULL,
 #endif
 #if defined(CONFIG_BT_SMP) || defined(CONFIG_BT_CLASSIC)
-        .security_changed = NULL,
+                                                   .security_changed = NULL,
 #endif
-        ._node = {}
-    };
+                                                   ._node = {}};
 
     bt_conn_cb_register(&d2d_conn_callbacks);
 
@@ -1181,19 +1191,22 @@ err_t bt_module_init(void)
     // Initialize BLE recovery handler (only for primary device)
     ble_recovery_handler_init();
     LOG_INF("BLE recovery handler initialized");
-    
+
     // Initialize connection parameter manager
     int conn_params_err = ble_conn_params_init();
-    if (conn_params_err != 0) {
+    if (conn_params_err != 0)
+    {
         LOG_ERR("Failed to initialize connection parameter manager: %d", conn_params_err);
-    } else {
+    }
+    else
+    {
         LOG_INF("Connection parameter manager initialized");
     }
-    
+
     // Log that services are being initialized
     LOG_INF("Initializing primary device BLE services...");
     LOG_INF("Information Service UUID: 0c372eaa-27eb-437e-bef4-775aefaf3c97");
-    
+
     // Clear any stale FOTA progress from Information Service
     fota_progress_msg_t clean_progress = {0};
     jis_fota_progress_notify(&clean_progress);
@@ -1210,7 +1223,7 @@ err_t bt_module_init(void)
     else
     {
         LOG_INF("FOTA proxy service initialized");
-    } 
+    }
 
     // Initialize file proxy service for primary device
     int file_err = file_proxy_init();
@@ -1221,7 +1234,7 @@ err_t bt_module_init(void)
     else
     {
         LOG_INF("File proxy service initialized");
-    } 
+    }
 
     // Initialize SMP proxy service for primary device
     int smp_err = smp_proxy_init();
@@ -1232,7 +1245,7 @@ err_t bt_module_init(void)
     else
     {
         LOG_INF("SMP proxy service initialized - mobile can use standard MCUmgr!");
-    } 
+    }
 
     // Check if we have a valid identity address before advertising
     bt_addr_le_t addr;
@@ -1262,16 +1275,16 @@ err_t bt_module_init(void)
 #else
     ble_d2d_tx_init();            // Prepare to send data to primary
     ble_d2d_file_transfer_init(); // Initialize D2D file transfer service
-    
-    // MCUmgr SMP Bluetooth transport is automatically registered when enabled
-    #if defined(CONFIG_MCUMGR_TRANSPORT_BT)
+
+// MCUmgr SMP Bluetooth transport is automatically registered when enabled
+#if defined(CONFIG_MCUMGR_TRANSPORT_BT)
     LOG_INF("MCUmgr SMP Bluetooth transport enabled for secondary device");
     LOG_INF("SMP service will be available for receiving commands from primary");
-    #else
+#else
     LOG_WRN("MCUmgr Bluetooth transport not enabled in configuration");
-    #endif
-    
-    start_scan();                 // Start scanning for primary device
+#endif
+
+    start_scan(); // Start scanning for primary device
     // Do NOT start advertising or initialize control/info services here
 #endif
 
@@ -1311,7 +1324,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
             switch (msg.type)
             {
                 case MSG_TYPE_FOOT_SAMPLES: {
-                    
+
                     // Directly access the data from the union member
                     foot_samples_t *foot_data = &msg.data.foot_samples; // Get pointer to data within the message
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -1354,43 +1367,47 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_BHI360_STEP_COUNT: {
                     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
-                    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     // Check if this is activity step count (from SENDER_MOTION_SENSOR)
-                    if (msg.sender == SENDER_MOTION_SENSOR) {
+                    if (msg.sender == SENDER_MOTION_SENSOR)
+                    {
                         // This is activity step count from primary
                         primary_activity_steps = step_data->step_count;
-                        
+
                         // Calculate total activity steps
                         uint32_t total_activity_steps = primary_activity_steps + secondary_activity_steps;
-                        LOG_INF("Activity Step Count - Primary=%u, Secondary=%u, Total=%u", 
-                                primary_activity_steps, secondary_activity_steps, total_activity_steps);
-                        
+                        LOG_INF("Activity Step Count - Primary=%u, Secondary=%u, Total=%u", primary_activity_steps,
+                                secondary_activity_steps, total_activity_steps);
+
                         ams_update_activity_step_count(total_activity_steps);
                         break;
                     }
-                    
-                    LOG_INF("Received BHI360 Step Count from %s: Steps=%u",
-                            get_sender_name(msg.sender), step_data->step_count);
-                    
+
+                    LOG_INF("Received BHI360 Step Count from %s: Steps=%u", get_sender_name(msg.sender),
+                            step_data->step_count);
+
                     // Update step counts based on sender
-                    if (msg.sender == SENDER_BHI360_THREAD) {
+                    if (msg.sender == SENDER_BHI360_THREAD)
+                    {
                         // Primary global step count from motion sensor
                         primary_step_count = step_data->step_count;
-                    } else if (msg.sender == SENDER_D2D_SECONDARY) {
+                    }
+                    else if (msg.sender == SENDER_D2D_SECONDARY)
+                    {
                         // Secondary global step count from D2D
                         secondary_step_count = step_data->step_count;
                     }
-                    
+
                     // Don't notify individual step counts anymore - only aggregated counts
                     // jis_bhi360_data2_notify(step_data);
-                    
+
                     // Calculate and notify total global steps
                     uint32_t total_steps = primary_step_count + secondary_step_count;
-                    
-                    LOG_DBG("Global step aggregation: Primary=%u, Secondary=%u, Total=%u", 
-                            primary_step_count, secondary_step_count, total_steps);
-                    
+
+                    LOG_DBG("Global step aggregation: Primary=%u, Secondary=%u, Total=%u", primary_step_count,
+                            secondary_step_count, total_steps);
+
                     ams_update_total_step_count(total_steps);
 #else
                     LOG_INF("Secondary device sending step count: %u", step_data->step_count);
@@ -1403,17 +1420,18 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_ACTIVITY_STEP_COUNT: {
                     // This is specifically for activity step counts
                     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
-                    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                    if (msg.sender == SENDER_D2D_SECONDARY) {
+                    if (msg.sender == SENDER_D2D_SECONDARY)
+                    {
                         // Activity step count from secondary
                         secondary_activity_steps = step_data->step_count;
-                        
+
                         // Calculate total activity steps
                         uint32_t total_activity_steps = primary_activity_steps + secondary_activity_steps;
-                        LOG_INF("Secondary Activity Step Count Update - Secondary=%u, Total=%u", 
+                        LOG_INF("Secondary Activity Step Count Update - Secondary=%u, Total=%u",
                                 secondary_activity_steps, total_activity_steps);
-                        
+
                         ams_update_activity_step_count(total_activity_steps);
                     }
 #endif
@@ -1456,19 +1474,22 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // If you send commands via char arrays in the union
                     char *command_str = msg.data.command_str;
                     LOG_INF("Received Command from %s: '%s'", get_sender_name(msg.sender), command_str);
-                    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                    if (strcmp(command_str, "RESET_ACTIVITY_STEPS") == 0) {
+                    if (strcmp(command_str, "RESET_ACTIVITY_STEPS") == 0)
+                    {
                         // Reset activity step counts
                         primary_activity_steps = 0;
                         secondary_activity_steps = 0;
-                        ams_update_activity_step_count(0);  // Notify 0 activity steps
+                        ams_update_activity_step_count(0); // Notify 0 activity steps
                         LOG_INF("Activity step counts reset to 0");
                     }
-                    else if (strncmp(command_str, "WEIGHT:", 7) == 0) {
+                    else if (strncmp(command_str, "WEIGHT:", 7) == 0)
+                    {
                         // Handle weight measurement result from activity metrics
                         float weight_kg;
-                        if (sscanf(command_str, "WEIGHT:%f", &weight_kg) == 1) {
+                        if (sscanf(command_str, "WEIGHT:%f", &weight_kg) == 1)
+                        {
                             LOG_INF("Received weight measurement: %.1f kg", (double)weight_kg);
                             // Send to information service for BLE notification
                             jis_weight_measurement_notify(weight_kg);
@@ -1481,24 +1502,26 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_FOTA_PROGRESS: {
                     // Handle FOTA progress updates
                     fota_progress_msg_t *progress = &msg.data.fota_progress;
-                    
+
                     // Debug: Log stale messages
-                    if (!progress->is_active && progress->bytes_received > 0) {
+                    if (!progress->is_active && progress->bytes_received > 0)
+                    {
                         LOG_WRN("Stale FOTA progress detected: bytes=%u, percent=%d%% (ignoring)",
                                 progress->bytes_received, progress->percent_complete);
                         break; // Ignore stale messages
                     }
-                    
+
                     LOG_INF("Received FOTA Progress: active=%d, status=%d, percent=%d%%, bytes=%u/%u",
                             progress->is_active, progress->status, progress->percent_complete, progress->bytes_received,
                             progress->total_size);
-                    
+
                     // Detect completion between app core and net core
                     static bool app_core_done = false;
                     // Check if FOTA is starting (status = 1 means in_progress)
-                    
+
                     // App core complete: status=2 and large size
-                    if (progress->status == 2 && progress->bytes_received > 500000 && !app_core_done) {
+                    if (progress->status == 2 && progress->bytes_received > 500000 && !app_core_done)
+                    {
                         LOG_INF("===========================================");
                         LOG_INF("=== APP CORE UPDATE COMPLETE ===");
                         LOG_INF("Size: %u bytes", progress->bytes_received);
@@ -1506,9 +1529,10 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         LOG_INF("===========================================");
                         app_core_done = true;
                     }
-                    
+
                     // Net core complete: status=2 and small size
-                    if (progress->status == 2 && progress->bytes_received < 200000 && progress->bytes_received > 100000) {
+                    if (progress->status == 2 && progress->bytes_received < 200000 && progress->bytes_received > 100000)
+                    {
                         LOG_INF("===========================================");
                         LOG_INF("=== NETWORK CORE UPDATE COMPLETE ===");
                         LOG_INF("Size: %u bytes", progress->bytes_received);
@@ -1517,147 +1541,193 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         app_core_done = false;
                     }
                     static bool fota_was_active = false;
-                    if (progress->is_active && progress->status == 1 && !fota_was_active) {
+                    if (progress->is_active && progress->status == 1 && !fota_was_active)
+                    {
                         LOG_WRN("FOTA update starting - stopping advertising and reducing BLE activity");
-                        
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                         // Stop advertising to prevent new connections during FOTA
                         int adv_err = bt_le_adv_stop();
-                        if (adv_err && adv_err != -EALREADY) {
+                        if (adv_err && adv_err != -EALREADY)
+                        {
                             LOG_ERR("Failed to stop advertising: %d", adv_err);
-                        } else {
+                        }
+                        else
+                        {
                             LOG_INF("Advertising stopped for FOTA update");
                         }
-                        
+
                         // Stop the BLE timer to prevent advertising restart
                         k_timer_stop(&ble_timer);
                         LOG_INF("BLE timer stopped for FOTA update");
-                        
+
                         // Request connection parameter update to reduce BLE activity
                         // Use BACKGROUND_IDLE profile for minimal interference
                         struct bt_conn *active_conn = NULL;
                         bt_conn_foreach(BT_CONN_TYPE_LE, find_active_conn_cb, &active_conn);
-                        
-                        if (active_conn) {
+
+                        if (active_conn)
+                        {
                             // Check if connection is in a state where parameters can be updated
                             struct bt_conn_info info;
                             int info_err = bt_conn_get_info(active_conn, &info);
-                            if (info_err == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+                            if (info_err == 0 && info.state == BT_CONN_STATE_CONNECTED)
+                            {
                                 LOG_INF("Updating connection parameters for FOTA - switching to BACKGROUND profile");
                                 int conn_err = ble_conn_params_update(active_conn, CONN_PROFILE_BACKGROUND);
-                                if (conn_err) {
-                                    if (conn_err == -EINVAL) {
-                                        LOG_WRN("Connection parameter update failed: Invalid parameters, trying FOREGROUND");
+                                if (conn_err)
+                                {
+                                    if (conn_err == -EINVAL)
+                                    {
+                                        LOG_WRN("Connection parameter update failed: Invalid parameters, trying "
+                                                "FOREGROUND");
                                         // Try FOREGROUND profile as fallback
                                         conn_err = ble_conn_params_update(active_conn, CONN_PROFILE_FOREGROUND);
-                                        if (conn_err == 0) {
+                                        if (conn_err == 0)
+                                        {
                                             LOG_INF("Using FOREGROUND profile for FOTA instead");
                                         }
-                                    } else if (conn_err == -EALREADY) {
+                                    }
+                                    else if (conn_err == -EALREADY)
+                                    {
                                         LOG_WRN("Connection parameter update already in progress");
-                                    } else {
+                                    }
+                                    else
+                                    {
                                         LOG_ERR("Failed to update connection parameters: %d", conn_err);
                                     }
                                     // Continue with FOTA even if parameter update fails
                                 }
-                            } else {
-                                LOG_WRN("Connection not in valid state for parameter update (state: %d)", 
+                            }
+                            else
+                            {
+                                LOG_WRN("Connection not in valid state for parameter update (state: %d)",
                                         info_err == 0 ? info.state : -1);
                             }
                             bt_conn_unref(active_conn);
-                        } else {
+                        }
+                        else
+                        {
                             LOG_DBG("No active connection found for parameter update");
                         }
 #else
                         // For secondary device, stop scanning
                         int scan_err = bt_le_scan_stop();
-                        if (scan_err && scan_err != -EALREADY) {
+                        if (scan_err && scan_err != -EALREADY)
+                        {
                             LOG_ERR("Failed to stop scanning: %d", scan_err);
-                        } else {
+                        }
+                        else
+                        {
                             LOG_INF("Scanning stopped for FOTA update");
                         }
 #endif
-                        
+
                         // Send message to stop all logging and reduce activity
                         generic_message_t stop_logging_msg = {};
                         stop_logging_msg.sender = SENDER_BTH;
                         stop_logging_msg.type = MSG_TYPE_COMMAND;
-                        strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING", sizeof(stop_logging_msg.data.command_str) - 1);
-                        
+                        strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING",
+                                sizeof(stop_logging_msg.data.command_str) - 1);
+
                         // Stop all logging in data module (this will close all open files)
-                        if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {
+                        if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0)
+                        {
                             LOG_WRN("Failed to send STOP_LOGGING command to data module");
-                        } else {
+                        }
+                        else
+                        {
                             LOG_INF("Sent STOP_LOGGING command to data module for FOTA");
                         }
-                        
+
                         // Send FOTA_IN_PROGRESS to other modules
                         generic_message_t fota_msg = {};
                         fota_msg.sender = SENDER_BTH;
                         fota_msg.type = MSG_TYPE_COMMAND;
                         strncpy(fota_msg.data.command_str, "FOTA_IN_PROGRESS", sizeof(fota_msg.data.command_str) - 1);
-                        
+
                         // Notify motion sensor to reduce update rate
-                        if (k_msgq_put(&motion_sensor_msgq, &fota_msg, K_NO_WAIT) != 0) {
+                        if (k_msgq_put(&motion_sensor_msgq, &fota_msg, K_NO_WAIT) != 0)
+                        {
                             LOG_WRN("Failed to notify motion sensor about FOTA");
                         }
-                        
+
                         // Also stop activity if it's running
                         struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
-                        if (foot_evt) {
+                        if (foot_evt)
+                        {
                             APP_EVENT_SUBMIT(foot_evt);
                             LOG_INF("Submitted stop activity event for foot sensor (FOTA starting)");
                         }
-                        
+
                         struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
-                        if (motion_evt) {
+                        if (motion_evt)
+                        {
                             APP_EVENT_SUBMIT(motion_evt);
                             LOG_INF("Submitted stop activity event for motion sensor (FOTA starting)");
                         }
-                        
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                         // Send stop activity command to secondary device using the existing mechanism
-                        if (d2d_conn != nullptr) {
+                        if (d2d_conn != nullptr)
+                        {
                             LOG_INF("Sending stop activity command to secondary device for FOTA");
-                            uint8_t stop_value = 1;  // 1 = stop activity
+                            uint8_t stop_value = 1; // 1 = stop activity
                             int d2d_err = ble_d2d_tx_send_stop_activity_command(stop_value);
-                            if (d2d_err != 0) {
+                            if (d2d_err != 0)
+                            {
                                 // If sending failed for any reason, try to queue it
-                                if (d2d_err == -EINVAL) {
+                                if (d2d_err == -EINVAL)
+                                {
                                     LOG_INF("D2D service discovery not complete, queuing stop activity command");
-                                } else {
-                                    LOG_WRN("Direct send failed (%d), attempting to queue stop activity command", d2d_err);
+                                }
+                                else
+                                {
+                                    LOG_WRN("Direct send failed (%d), attempting to queue stop activity command",
+                                            d2d_err);
                                 }
                                 d2d_err = ble_d2d_tx_queue_command(D2D_TX_CMD_STOP_ACTIVITY, &stop_value);
-                                if (d2d_err) {
+                                if (d2d_err)
+                                {
                                     LOG_ERR("Failed to queue stop activity command: %d", d2d_err);
-                                } else {
-                                    LOG_INF("Stop activity command queued for secondary device (will be sent after D2D discovery completes)");
                                 }
-                            } else {
+                                else
+                                {
+                                    LOG_INF("Stop activity command queued for secondary device (will be sent after D2D "
+                                            "discovery completes)");
+                                }
+                            }
+                            else
+                            {
                                 LOG_INF("Stop activity command sent to secondary device");
                             }
-                        } else {
+                        }
+                        else
+                        {
                             LOG_DBG("No secondary device connected, skipping D2D stop command");
                         }
 #endif
-                        
+
                         fota_was_active = true;
                     }
-                    
+
                     // Check if FOTA is complete or failed
-                    if (fota_was_active && (!progress->is_active || progress->status == 3 || progress->status == 4)) {
+                    if (fota_was_active && (!progress->is_active || progress->status == 3 || progress->status == 4))
+                    {
                         LOG_INF("FOTA update complete/failed - resuming normal BLE operation");
-                        
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                         // Restart advertising if no connections
                         struct bt_conn *active_conn = NULL;
                         bt_conn_foreach(BT_CONN_TYPE_LE, find_active_conn_cb, &active_conn);
-                        
-                        if (!active_conn) {
+
+                        if (!active_conn)
+                        {
                             LOG_INF("No active connections, restarting advertising");
                             bt_start_advertising(0);
-                        } else {
+                        }
+                        else
+                        {
                             // Restore normal connection parameters
                             LOG_INF("Restoring normal connection parameters - switching to FOREGROUND profile");
                             ble_conn_params_update(active_conn, CONN_PROFILE_FOREGROUND);
@@ -1665,35 +1735,40 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         }
 #else
                         // For secondary device, restart scanning if not connected
-                        if (d2d_conn == nullptr) {
+                        if (d2d_conn == nullptr)
+                        {
                             LOG_INF("Not connected to primary, restarting scanning");
                             start_scan();
                         }
 #endif
-                        
+
                         // Notify other modules that FOTA is complete
                         generic_message_t fota_complete_msg = {};
                         fota_complete_msg.sender = SENDER_BTH;
                         fota_complete_msg.type = MSG_TYPE_COMMAND;
-                        strncpy(fota_complete_msg.data.command_str, "FOTA_COMPLETE", sizeof(fota_complete_msg.data.command_str) - 1);
-                        
+                        strncpy(fota_complete_msg.data.command_str, "FOTA_COMPLETE",
+                                sizeof(fota_complete_msg.data.command_str) - 1);
+
                         k_msgq_put(&data_msgq, &fota_complete_msg, K_NO_WAIT);
                         k_msgq_put(&motion_sensor_msgq, &fota_complete_msg, K_NO_WAIT);
-                        
+
                         fota_was_active = false;
                     }
-                    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     jis_fota_progress_notify(progress);
 #else
                     // Secondary device: Send progress to primary via D2D
                     int err = ble_d2d_tx_send_fota_progress(progress);
-                    if (err) {
+                    if (err)
+                    {
                         LOG_WRN("Failed to send FOTA progress via D2D: %d", err);
-                    } else {
+                    }
+                    else
+                    {
                         LOG_DBG("FOTA progress sent to primary via D2D");
                     }
-                    
+
                     // Also send completion status when done
                     if (!progress->is_active && progress->status == 0 && progress->percent_complete == 100)
                     {
@@ -1748,33 +1823,35 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 #else
                     // Secondary device: Send to primary via D2D
                     int err = d2d_tx_notify_activity_log_available(log_info->file_sequence_id);
-                    if (err) {
+                    if (err)
+                    {
                         LOG_ERR("Failed to send activity log available via D2D: %d", err);
                     }
                     err = d2d_tx_notify_activity_log_path(log_info->file_path);
-                    if (err) {
+                    if (err)
+                    {
                         LOG_ERR("Failed to send activity log path via D2D: %d", err);
                     }
 #endif
                     break;
                 }
 
-                
                 case MSG_TYPE_ACTIVITY_METRICS_BLE: {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     // Handle activity metrics update from realtime_metrics module (primary only)
-                    if (msg.sender == SENDER_REALTIME_METRICS) {
+                    if (msg.sender == SENDER_REALTIME_METRICS)
+                    {
                         // Extract metrics data from message
                         // Note: We need to properly define how metrics are passed in the message
                         // For now, we'll cast the data assuming it fits
                         realtime_metrics_t metrics;
                         memcpy(&metrics, &msg.data, sizeof(metrics));
-                        
+
                         // Update the Activity Metrics Service
                         ams_update_realtime_metrics(&metrics);
-                        
-                        LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d",
-                                metrics.cadence_spm, metrics.pace_sec_km, metrics.form_score);
+
+                        LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d", metrics.cadence_spm,
+                                metrics.pace_sec_km, metrics.form_score);
                     }
 #else
                     // Secondary device doesn't have Activity Metrics Service
@@ -1782,7 +1859,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 #endif
                     break;
                 }
-                
+
                 case MSG_TYPE_DEVICE_INFO: {
                     // Handle device information
                     device_info_msg_t *dev_info = &msg.data.device_info;
@@ -1798,10 +1875,8 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                                                      dev_info->hw_rev, dev_info->fw_rev);
 #else
                     // Secondary device: Send to primary via D2D
-                    // TODO: Implement D2D TX for device info
-                    // For now, we can use the status field to indicate device info is available
-                    // Or implement a new D2D characteristic for device info
-                    LOG_WRN("D2D device info transmission not yet implemented");
+                    // Device info is automatically sent when secondary connects via send_device_info_to_primary()
+                    LOG_DBG("Device info from secondary is sent automatically on connection");
 #endif
                     break;
                 }
@@ -1809,92 +1884,56 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_WEIGHT_MEASUREMENT: {
                     // Handle weight measurement
                     weight_measurement_msg_t *weight_data = &msg.data.weight_measurement;
-                    LOG_INF("Received WEIGHT MEASUREMENT from %s: %.1f kg", 
-                            get_sender_name(msg.sender), (double)weight_data->weight_kg);
+                    LOG_INF("Received WEIGHT MEASUREMENT from %s: %.1f kg", get_sender_name(msg.sender),
+                            (double)weight_data->weight_kg);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     // Primary device: Aggregate weights from both devices
-                    if (msg.sender == SENDER_ACTIVITY_METRICS) {
+                    if (msg.sender == SENDER_ACTIVITY_METRICS)
+                    {
                         // This is our own weight measurement
                         primary_weight_kg = weight_data->weight_kg;
                         weight_request_time = k_uptime_get();
-                        
+
                         // Cancel any pending timeout
                         k_work_cancel_delayable(&weight_measurement_timeout_work);
-                        
+
                         // Check if secondary device is connected
-                        if (d2d_conn != nullptr) {
+                        if (d2d_conn != nullptr)
+                        {
                             // Request weight from secondary device
-                            LOG_INF("Primary weight measured: %.1f kg, requesting secondary weight", 
+                            LOG_INF("Primary weight measured: %.1f kg, requesting secondary weight",
                                     (double)primary_weight_kg);
-                            
-                            // Send weight measurement trigger to secondary (value 2)
-                            int err = ble_d2d_tx_send_weight_measurement_trigger_command(2);
-                            if (err == 0) {
-                                waiting_for_secondary = true;
-                                // Schedule timeout work (5 seconds)
-                                k_work_schedule(&weight_measurement_timeout_work, K_SECONDS(5));
-                            } else {
-                                LOG_WRN("Failed to request weight from secondary: %d, using primary only", err);
-                                // No secondary available, just send primary weight
-                                jis_weight_measurement_notify(primary_weight_kg);
-                                primary_weight_kg = 0;
-                            }
-                        } else {
-                            // No secondary connected, just send primary weight
-                            LOG_INF("No secondary connected, sending primary weight only: %.1f kg", 
-                                    (double)primary_weight_kg);
-                            jis_weight_measurement_notify(primary_weight_kg);
-                            primary_weight_kg = 0;
                         }
-                    } else if (msg.sender == SENDER_D2D_SECONDARY) {
-                        // This is weight from secondary device
-                        secondary_weight_kg = weight_data->weight_kg;
-                        
-                        if (waiting_for_secondary) {
-                            // Cancel timeout work
-                            k_work_cancel_delayable(&weight_measurement_timeout_work);
-                            
-                            // Calculate total weight
-                            float total_weight_kg = primary_weight_kg + secondary_weight_kg;
-                            LOG_INF("Weight aggregation: Primary=%.1f kg + Secondary=%.1f kg = Total=%.1f kg",
-                                    (double)primary_weight_kg, (double)secondary_weight_kg, (double)total_weight_kg);
-                            
-                            // Send aggregated weight to phone
-                            jis_weight_measurement_notify(total_weight_kg);
-                            
-                            // Reset state
-                            waiting_for_secondary = false;
-                            primary_weight_kg = 0;
-                            secondary_weight_kg = 0;
-                        } else {
-                            LOG_WRN("Received unexpected secondary weight measurement, ignoring");
+                        else if (msg.sender == SENDER_D2D_SECONDARY)
+                        {
+                            // This is weight from secondary device
+                            secondary_weight_kg = weight_data->weight_kg;
                         }
                     }
 #else
                     // Secondary device: Send to primary via D2D
                     int err = ble_d2d_tx_send_weight_measurement(weight_data->weight_kg);
-                    if (err) {
+                    if (err)
+                    {
                         LOG_ERR("Failed to send weight measurement via D2D: %d", err);
-                    } else {
+                    }
+                    else
+                    {
                         LOG_INF("Weight measurement sent to primary via D2D");
                     }
 #endif
-                    break;
+                        break;
+                    
                 }
 
-                default:
-                    LOG_WRN("Unknown message type received (%d) from %s", msg.type, get_sender_name(msg.sender));
-                    break;
+                    default:
+                        LOG_WRN("Unknown message type received (%d) from %s", msg.type, get_sender_name(msg.sender));
+                        break;
+                }
             }
         }
-        else
-        {
-            // This else block is generally not reached with K_FOREVER, as it implies a timeout or error.
-            // But it's good practice to have it for other k_msgq_get timeout values.
-            LOG_ERR("Failed to get message from queue: %d", ret);
-        }
     }
-}
+
 
 /**
  * @brief Starts Bluetooth advertising.
@@ -1914,241 +1953,241 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
  */
 // Only used by primary device
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-err_t bt_start_advertising(int err)
-{
-
-    bt_stop_advertising();
-
-    // Log advertising parameters for debugging
-    LOG_INF("Starting advertising with params: options=0x%02x, interval_min=%d, interval_max=%d",
-            bt_le_adv_conn_name.options, bt_le_adv_conn_name.interval_min, bt_le_adv_conn_name.interval_max);
-
-    err = bt_le_adv_start(&bt_le_adv_conn_name, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-
-    if (err)
+    err_t bt_start_advertising(int err)
     {
-        LOG_ERR("Advertising failed to start, error=%d", err);
 
-        // If advertising fails due to identity issues, try without USE_IDENTITY
-        if (err == -ENOENT || err == -EINVAL)
+        bt_stop_advertising();
+
+        // Log advertising parameters for debugging
+        LOG_INF("Starting advertising with params: options=0x%02x, interval_min=%d, interval_max=%d",
+                bt_le_adv_conn_name.options, bt_le_adv_conn_name.interval_min, bt_le_adv_conn_name.interval_max);
+
+        err = bt_le_adv_start(&bt_le_adv_conn_name, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+
+        if (err)
         {
-            LOG_WRN("Retrying advertising without USE_IDENTITY option");
+            LOG_ERR("Advertising failed to start, error=%d", err);
 
-            // Create temporary advertising params without USE_IDENTITY
-            struct bt_le_adv_param temp_adv_params = {
-                .id = 0,
-                .sid = 0,
-                .secondary_max_skip = 0,
-                .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_NAME,
-                .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
-                .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
-                .peer = NULL,
-            };
-
-            err = bt_le_adv_start(&temp_adv_params, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-            if (err)
+            // If advertising fails due to identity issues, try without USE_IDENTITY
+            if (err == -ENOENT || err == -EINVAL)
             {
-                LOG_ERR("Advertising retry also failed, error=%d", err);
-                return err_t::BLUETOOTH_ERROR;
+                LOG_WRN("Retrying advertising without USE_IDENTITY option");
+
+                // Create temporary advertising params without USE_IDENTITY
+                struct bt_le_adv_param temp_adv_params = {
+                    .id = 0,
+                    .sid = 0,
+                    .secondary_max_skip = 0,
+                    .options = BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_NAME,
+                    .interval_min = BT_GAP_ADV_FAST_INT_MIN_2,
+                    .interval_max = BT_GAP_ADV_FAST_INT_MAX_2,
+                    .peer = NULL,
+                };
+
+                err = bt_le_adv_start(&temp_adv_params, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+                if (err)
+                {
+                    LOG_ERR("Advertising retry also failed, error=%d", err);
+                    return err_t::BLUETOOTH_ERROR;
+                }
+                else
+                {
+                    LOG_WRN("Advertising started without USE_IDENTITY");
+                }
             }
             else
             {
-                LOG_WRN("Advertising started without USE_IDENTITY");
+                return err_t::BLUETOOTH_ERROR;
             }
         }
         else
         {
-            return err_t::BLUETOOTH_ERROR;
+            LOG_INF("Advertising successfully started");
+            LOG_WRN("Firmware version: %s", APP_VERSION_STRING);
         }
-    }
-    else
-    {
-        LOG_INF("Advertising successfully started");
-        LOG_WRN("Firmware version: %s", APP_VERSION_STRING);
-    }
 
-    k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
-    return err_t::NO_ERROR;
-}
+        k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
+        return err_t::NO_ERROR;
+    }
 #endif // CONFIG_PRIMARY_DEVICE
 
-/**
- * @brief Starts hidden Bluetooth Low Energy (BLE) advertising.
- *
- * This function initiates BLE advertising in a hidden mode, where the
- * advertising packets are not broadcasted openly. It logs an error message if
- * the advertising fails to start and logs an informational message if the
- * advertising starts successfully.
- */
-err_t ble_start_hidden()
-{
-    bt_stop_advertising();
-
-    int err = bt_le_adv_start(bt_le_adv_conn, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-    if (err)
+    /**
+     * @brief Starts hidden Bluetooth Low Energy (BLE) advertising.
+     *
+     * This function initiates BLE advertising in a hidden mode, where the
+     * advertising packets are not broadcasted openly. It logs an error message if
+     * the advertising fails to start and logs an informational message if the
+     * advertising starts successfully.
+     */
+    err_t ble_start_hidden()
     {
-        LOG_ERR("Hidden Advertising failed to start, error=%d", err);
-        return err_t::BLUETOOTH_ERROR;
-    }
+        bt_stop_advertising();
 
-    LOG_INF("Hidden Advertising successfully started");
-    return err_t::NO_ERROR;
-}
-
-/**
- * @brief The main timer expiry function for the BT,
- *
- * @param timer
- *
- */
-static void ble_timer_expiry_function(struct k_timer *timer)
-{
-    ARG_UNUSED(timer);
-
-    int ret = k_work_submit(&ble_handler);
-    if (ret < 0)
-    {
-        LOG_ERR("BLE submission error (err %d)", ret);
-        k_timer_stop(&ble_timer);
-    }
-}
-
-/**
- * @brief Handler function for the BLE timer.
- *
- * This function is called when the BLE timer expires. It stops the BLE timer,
- * turns off the BLE LED, stops BLE advertising, and starts the BLE in hidden
- * mode.
- *
- * @param work Pointer to the work item associated with the timer handler
- * (unused). This parameter is not used in the implementation of this function.
- */
-static void ble_timer_handler_function(struct k_work *work)
-{
-    ARG_UNUSED(work);
-    k_timer_stop(&ble_timer);
-    if (ble_status_connected == 0)
-    {
-    }
-    ble_status_connected = 0;
-
-    LOG_INF("Bluetooth advertising timeout");
-
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // For primary device, check if secondary (D2D) is connected
-    if (d2d_conn == nullptr)
-    {
-        // No secondary connected, restart advertising to allow secondary to connect
-        LOG_INF("No secondary device connected, restarting advertising");
-        // Forward declaration to ensure it's available
-        extern err_t bt_start_advertising(int err);
-        bt_start_advertising(0);
-        return;
-    }
-#endif
-
-    int ret = bt_le_adv_stop();
-    if (ret != 0)
-    {
-        LOG_ERR("Failed to stop (err 0x%02x)", ret);
-    }
-
-    if (bonds_present())
-    {
-        err_t err = ble_start_hidden();
-        if (err != err_t::NO_ERROR)
+        int err = bt_le_adv_start(bt_le_adv_conn, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+        if (err)
         {
-            LOG_ERR("Failed to start %d", (int)err);
+            LOG_ERR("Hidden Advertising failed to start, error=%d", err);
+            return err_t::BLUETOOTH_ERROR;
+        }
+
+        LOG_INF("Hidden Advertising successfully started");
+        return err_t::NO_ERROR;
+    }
+
+    /**
+     * @brief The main timer expiry function for the BT,
+     *
+     * @param timer
+     *
+     */
+    static void ble_timer_expiry_function(struct k_timer * timer)
+    {
+        ARG_UNUSED(timer);
+
+        int ret = k_work_submit(&ble_handler);
+        if (ret < 0)
+        {
+            LOG_ERR("BLE submission error (err %d)", ret);
+            k_timer_stop(&ble_timer);
         }
     }
-}
+
+    /**
+     * @brief Handler function for the BLE timer.
+     *
+     * This function is called when the BLE timer expires. It stops the BLE timer,
+     * turns off the BLE LED, stops BLE advertising, and starts the BLE in hidden
+     * mode.
+     *
+     * @param work Pointer to the work item associated with the timer handler
+     * (unused). This parameter is not used in the implementation of this function.
+     */
+    static void ble_timer_handler_function(struct k_work * work)
+    {
+        ARG_UNUSED(work);
+        k_timer_stop(&ble_timer);
+        if (ble_status_connected == 0)
+        {
+        }
+        ble_status_connected = 0;
+
+        LOG_INF("Bluetooth advertising timeout");
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-/**
- * @brief Handler for weight measurement timeout
- *
- * This function is called when we timeout waiting for secondary device weight measurement
- */
-static void weight_measurement_timeout_work_handler(struct k_work *work)
-{
-    ARG_UNUSED(work);
-    
-    if (waiting_for_secondary) {
-        LOG_WRN("Timeout waiting for secondary weight, using primary only: %.1f kg", 
-                (double)primary_weight_kg);
-        jis_weight_measurement_notify(primary_weight_kg);
-        
-        // Reset state
-        waiting_for_secondary = false;
-        primary_weight_kg = 0;
-        secondary_weight_kg = 0;
-    }
-}
+        // For primary device, check if secondary (D2D) is connected
+        if (d2d_conn == nullptr)
+        {
+            // No secondary connected, restart advertising to allow secondary to connect
+            LOG_INF("No secondary device connected, restarting advertising");
+            // Forward declaration to ensure it's available
+            extern err_t bt_start_advertising(int err);
+            bt_start_advertising(0);
+            return;
+        }
 #endif
 
-/**
- * @brief Resets Bluetooth bonding information.
- *
- * This function resets the bonding information for Bluetooth Low Energy (BLE)
- * devices. It stops the BLE timer and unpairs the device with any bonded BLE
- * devices. Logging information is provided to indicate that the bonds are being
- * reset.
- */
-// Currently unused - kept for future bond management
-__attribute__((unused)) err_t ble_reset_bonds()
-{
-    LOG_INF("Reset bonds");
-    k_timer_stop(&ble_timer);
-    int err = bt_unpair(BT_ID_DEFAULT, BT_ADDR_LE_ANY);
-    if (err)
-    {
-        LOG_ERR("Failed to unpair connections");
-        return err_t::BLUETOOTH_ERROR;
-    }
-    return err_t::NO_ERROR;
-}
-
-/**
- * @brief Stops Bluetooth advertising.
- *
- * This function stops Bluetooth advertising by calling the appropriate API
- * function. It is responsible for halting the transmission of advertising
- * packets.
- */
-err_t bt_stop_advertising()
-{
-    int err = bt_le_adv_stop();
-    if (err)
-    {
-        LOG_ERR("Failed to unpair connections");
-        return err_t::BLUETOOTH_ERROR;
-    }
-    return err_t::NO_ERROR;
-}
-
-static bool app_event_handler(const struct app_event_header *aeh)
-{
-    if (is_module_state_event(aeh))
-    {
-        auto *event = cast_module_state_event(aeh);
-
-        if (check_state(event, MODULE_ID(data), MODULE_STATE_READY))
+        int ret = bt_le_adv_stop();
+        if (ret != 0)
         {
-            err_t init = bt_module_init();
-            if (init != err_t::NO_ERROR)
+            LOG_ERR("Failed to stop (err 0x%02x)", ret);
+        }
+
+        if (bonds_present())
+        {
+            err_t err = ble_start_hidden();
+            if (err != err_t::NO_ERROR)
             {
-                module_set_state(MODULE_STATE_ERROR);
+                LOG_ERR("Failed to start %d", (int)err);
             }
-            else
+        }
+    }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    /**
+     * @brief Handler for weight measurement timeout
+     *
+     * This function is called when we timeout waiting for secondary device weight measurement
+     */
+    static void weight_measurement_timeout_work_handler(struct k_work * work)
+    {
+        ARG_UNUSED(work);
+
+        if (waiting_for_secondary)
+        {
+            LOG_WRN("Timeout waiting for secondary weight, using primary only: %.1f kg", (double)primary_weight_kg);
+            jis_weight_measurement_notify(primary_weight_kg);
+
+            // Reset state
+            waiting_for_secondary = false;
+            primary_weight_kg = 0;
+            secondary_weight_kg = 0;
+        }
+    }
+#endif
+
+    /**
+     * @brief Resets Bluetooth bonding information.
+     *
+     * This function resets the bonding information for Bluetooth Low Energy (BLE)
+     * devices. It stops the BLE timer and unpairs the device with any bonded BLE
+     * devices. Logging information is provided to indicate that the bonds are being
+     * reset.
+     */
+    // Currently unused - kept for future bond management
+    __attribute__((unused)) err_t ble_reset_bonds()
+    {
+        LOG_INF("Reset bonds");
+        k_timer_stop(&ble_timer);
+        int err = bt_unpair(BT_ID_DEFAULT, BT_ADDR_LE_ANY);
+        if (err)
+        {
+            LOG_ERR("Failed to unpair connections");
+            return err_t::BLUETOOTH_ERROR;
+        }
+        return err_t::NO_ERROR;
+    }
+
+    /**
+     * @brief Stops Bluetooth advertising.
+     *
+     * This function stops Bluetooth advertising by calling the appropriate API
+     * function. It is responsible for halting the transmission of advertising
+     * packets.
+     */
+    err_t bt_stop_advertising()
+    {
+        int err = bt_le_adv_stop();
+        if (err)
+        {
+            LOG_ERR("Failed to unpair connections");
+            return err_t::BLUETOOTH_ERROR;
+        }
+        return err_t::NO_ERROR;
+    }
+
+    static bool app_event_handler(const struct app_event_header *aeh)
+    {
+        if (is_module_state_event(aeh))
+        {
+            auto *event = cast_module_state_event(aeh);
+
+            if (check_state(event, MODULE_ID(data), MODULE_STATE_READY))
             {
-                module_set_state(MODULE_STATE_READY);
+                err_t init = bt_module_init();
+                if (init != err_t::NO_ERROR)
+                {
+                    module_set_state(MODULE_STATE_ERROR);
+                }
+                else
+                {
+                    module_set_state(MODULE_STATE_READY);
+                }
             }
+            return false;
         }
         return false;
     }
-    return false;
-}
 
-APP_EVENT_LISTENER(MODULE, app_event_handler);
-APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
-APP_EVENT_SUBSCRIBE_FINAL(MODULE, module_state_event);
+    APP_EVENT_LISTENER(MODULE, app_event_handler);
+    APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
+    APP_EVENT_SUBSCRIBE_FINAL(MODULE, module_state_event);

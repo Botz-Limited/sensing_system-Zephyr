@@ -75,6 +75,7 @@ typedef enum
     MSG_TYPE_WEIGHT_CALIBRATION_DATA, // Weight calibration data response
     MSG_TYPE_START_WEIGHT_CALIBRATION, // Start weight calibration procedure
     MSG_TYPE_WEIGHT_MEASUREMENT, // Weight measurement result
+    MSG_TYPE_GPS_UPDATE, // GPS update from mobile app
 } msg_type_t;
 
 // Define sender types

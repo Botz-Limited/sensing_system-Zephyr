@@ -382,9 +382,51 @@ static void convert_quaternion_to_fixed(const struct bhy2_data_quaternion *quat,
 }
 ```
 
-### 3.4 Bluetooth Module (`/src/bluetooth/`)
+### 3.4 Activity Metrics Module (`/src/activity_metrics/`)
 
-#### 3.4.1 Service Architecture
+#### 3.4.1 Module Overview
+- **Purpose**: Process activity sessions, calculate metrics, handle weight measurement
+- **Thread Priority**: 10 (normal priority)
+- **Stack Size**: 12288 bytes
+- **Work Queue Stack**: 4096 bytes
+
+#### 3.4.2 Thread-Safe Work Item Pattern
+
+**Problem**: Race conditions when passing data from message thread to work handlers using global variables.
+
+**Solution**: Double-buffered work items with embedded data.
+
+```c
+// Work item with embedded data
+struct foot_data_work {
+    struct k_work work;        // Must be first member
+    foot_samples_t data;       // Embedded data copy
+    uint8_t foot_id;          // Additional context
+};
+
+// Double buffering for concurrent access
+static struct foot_data_work foot_work_items[2];
+static atomic_t foot_work_idx = ATOMIC_INIT(0);
+
+// Message handler (thread A)
+int idx = atomic_inc(&foot_work_idx) & 1;  // Get buffer 0 or 1
+struct foot_data_work *work_item = &foot_work_items[idx];
+memcpy(&work_item->data, &msg.data, sizeof(data));
+k_work_submit(&work_item->work);
+
+// Work handler (thread B)
+struct foot_data_work *work_item = CONTAINER_OF(work, struct foot_data_work, work);
+process_foot_sensor_data(&work_item->data, work_item->foot_id);
+```
+
+**Benefits**:
+- No race conditions
+- Allows concurrent processing
+- Scalable to more buffers if needed
+
+### 3.5 Bluetooth Module (`/src/bluetooth/`)
+
+#### 3.5.1 Service Architecture
 
 ```c
 // Service registration structure
@@ -405,7 +447,7 @@ static const struct bt_service_registration services[] = {
 };
 ```
 
-#### 3.4.2 Message Handler Pattern
+#### 3.5.2 Message Handler Pattern
 
 ```c
 // Main Bluetooth thread message handler
@@ -437,7 +479,7 @@ static void bluetooth_process(void *p1, void *p2, void *p3)
 }
 ```
 
-#### 3.4.3 D2D Communication Flow
+#### 3.5.3 D2D Communication Flow
 
 ```c
 // Primary device: Aggregate data from secondary

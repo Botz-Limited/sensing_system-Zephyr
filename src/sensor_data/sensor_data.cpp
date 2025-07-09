@@ -24,62 +24,8 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_SENSOR_DATA_MODULE_LOG_LEVEL);
 
-// Consolidated sensor data structure
-typedef struct {
-    // Timing - only delta time, no timestamps!
-    uint16_t delta_time_ms;  // Time since last sample (typically 10ms for 100Hz)
-    
-    // Contact state
-    uint8_t left_contact_phase;
-    uint8_t right_contact_phase;
-    bool left_in_contact;
-    bool right_in_contact;
-    
-    // Contact duration (in ms) - only valid when transitioning out of contact
-    uint16_t left_contact_duration_ms;
-    uint16_t right_contact_duration_ms;
-    
-    // Forces and loading
-    uint16_t left_peak_force;
-    uint16_t right_peak_force;
-    uint16_t left_loading_rate;  // N/s
-    uint16_t right_loading_rate;  // N/s
-    
-    // Pressure distribution
-    uint8_t left_heel_pct;
-    uint8_t left_mid_pct;
-    uint8_t left_fore_pct;
-    uint8_t right_heel_pct;
-    uint8_t right_mid_pct;
-    uint8_t right_fore_pct;
-    
-    // Center of pressure
-    int16_t left_cop_x;  // mm, lateral-medial
-    int16_t left_cop_y;  // mm, posterior-anterior
-    int16_t right_cop_x;
-    int16_t right_cop_y;
-    
-    // IMU data
-    float quaternion[4];
-    float linear_acc[3];
-    float gyro[3];
-    
-    // Enhanced biomechanics
-    int8_t left_pronation_deg;   // Enhanced with pressure validation
-    int8_t right_pronation_deg;
-    int8_t left_strike_angle;    // Foot angle at contact
-    int8_t right_strike_angle;
-    uint8_t left_arch_collapse;  // 0-100 index
-    uint8_t right_arch_collapse;
-    
-    // Bilateral timing
-    uint16_t true_flight_time_ms;    // Both feet off ground
-    uint16_t double_support_time_ms; // Both feet on ground
-    
-    // Step count
-    uint32_t step_count;
-    uint8_t step_count_delta;  // Steps since last sample (usually 0-2)
-} sensor_data_consolidated_t;
+// Include the consolidated data structure
+#include "sensor_data_consolidated.h"
 
 // Thread configuration
 static constexpr int sensor_data_stack_size = CONFIG_SENSOR_DATA_MODULE_STACK_SIZE;
@@ -99,10 +45,26 @@ static struct k_work process_imu_data_work;
 static struct k_work process_command_work;
 static struct k_work_delayable periodic_sample_work;
 
-// Ring buffers for different message types
-static foot_data_ring_t foot_ring = {0};
-static imu_data_ring_t imu_ring = {0};
-static command_ring_t command_ring = {0};
+// Ring buffers for different message types - properly initialized
+static foot_data_ring_t foot_ring = {
+    .data = {{0}},
+    .foot_id = {0},
+    .write_idx = 0,
+    .read_idx = 0,
+    .count = ATOMIC_INIT(0)
+};
+static imu_data_ring_t imu_ring = {
+    .data = {{0}},
+    .write_idx = 0,
+    .read_idx = 0,
+    .count = ATOMIC_INIT(0)
+};
+static command_ring_t command_ring = {
+    .data = {{0}},
+    .write_idx = 0,
+    .read_idx = 0,
+    .count = ATOMIC_INIT(0)
+};
 
 // Statistics - initialize all fields to avoid warnings
 static sensor_data_stats_t stats = {
@@ -496,7 +458,6 @@ static void process_foot_data_work_handler(struct k_work *work)
         }
     }
 }
-
 // Work handler for processing IMU data
 static void process_imu_data_work_handler(struct k_work *work)
 {
@@ -641,48 +602,49 @@ static void process_sensor_sample(void)
         sensor_state.double_support_time_ms
     );
     
-    // Create consolidated data structure
-    sensor_data_consolidated_t consolidated = {
-        .delta_time_ms = delta_time_ms,
-        
-        // Contact state
-        .left_contact_phase = (uint8_t)sensor_state.left_phase,
-        .right_contact_phase = (uint8_t)sensor_state.right_phase,
-        .left_in_contact = sensor_state.left_foot_contact,
-        .right_in_contact = sensor_state.right_foot_contact,
-        
-        // Contact duration - only valid when transitioning out of contact
-        .left_contact_duration_ms = sensor_state.left_foot_contact ? 0 : sensor_state.left_contact_elapsed_ms,
-        .right_contact_duration_ms = sensor_state.right_foot_contact ? 0 : sensor_state.right_contact_elapsed_ms,
-        
-        // Forces and loading
-        .left_peak_force = sensor_state.left_peak_force_current,
-        .right_peak_force = sensor_state.right_peak_force_current,
-        .left_loading_rate = sensor_state.left_loading_rate,
-        .right_loading_rate = sensor_state.right_loading_rate,
-        
-        // Center of pressure
-        .left_cop_x = sensor_state.left_cop_x,
-        .left_cop_y = sensor_state.left_cop_y,
-        .right_cop_x = sensor_state.right_cop_x,
-        .right_cop_y = sensor_state.right_cop_y,
-        
-        // Enhanced biomechanics
-        .left_pronation_deg = sensor_state.left_pronation_deg,
-        .right_pronation_deg = sensor_state.right_pronation_deg,
-        .left_strike_angle = sensor_state.left_strike_angle,
-        .right_strike_angle = sensor_state.right_strike_angle,
-        .left_arch_collapse = sensor_state.left_arch_collapse,
-        .right_arch_collapse = sensor_state.right_arch_collapse,
-        
-        // Bilateral timing
-        .true_flight_time_ms = sensor_state.true_flight_time_ms,
-        .double_support_time_ms = sensor_state.double_support_time_ms,
-        
-        // Step count
-        .step_count = sensor_state.latest_step_count,
-        .step_count_delta = (uint8_t)(sensor_state.latest_step_count - sensor_state.last_step_count)
-    };
+    // Create consolidated data structure - initialize all fields
+    sensor_data_consolidated_t consolidated = {};
+    
+    // Set all fields explicitly
+    consolidated.delta_time_ms = delta_time_ms;
+    
+    // Contact state
+    consolidated.left_contact_phase = (uint8_t)sensor_state.left_phase;
+    consolidated.right_contact_phase = (uint8_t)sensor_state.right_phase;
+    consolidated.left_in_contact = sensor_state.left_foot_contact;
+    consolidated.right_in_contact = sensor_state.right_foot_contact;
+    
+    // Contact duration - only valid when transitioning out of contact
+    consolidated.left_contact_duration_ms = (uint16_t)(sensor_state.left_foot_contact ? 0 : sensor_state.left_contact_elapsed_ms);
+    consolidated.right_contact_duration_ms = (uint16_t)(sensor_state.right_foot_contact ? 0 : sensor_state.right_contact_elapsed_ms);
+    
+    // Forces and loading
+    consolidated.left_peak_force = sensor_state.left_peak_force_current;
+    consolidated.right_peak_force = sensor_state.right_peak_force_current;
+    consolidated.left_loading_rate = sensor_state.left_loading_rate;
+    consolidated.right_loading_rate = sensor_state.right_loading_rate;
+    
+    // Center of pressure
+    consolidated.left_cop_x = sensor_state.left_cop_x;
+    consolidated.left_cop_y = sensor_state.left_cop_y;
+    consolidated.right_cop_x = sensor_state.right_cop_x;
+    consolidated.right_cop_y = sensor_state.right_cop_y;
+    
+    // Enhanced biomechanics
+    consolidated.left_pronation_deg = sensor_state.left_pronation_deg;
+    consolidated.right_pronation_deg = sensor_state.right_pronation_deg;
+    consolidated.left_strike_angle = sensor_state.left_strike_angle;
+    consolidated.right_strike_angle = sensor_state.right_strike_angle;
+    consolidated.left_arch_collapse = sensor_state.left_arch_collapse;
+    consolidated.right_arch_collapse = sensor_state.right_arch_collapse;
+    
+    // Bilateral timing
+    consolidated.true_flight_time_ms = sensor_state.true_flight_time_ms;
+    consolidated.double_support_time_ms = sensor_state.double_support_time_ms;
+    
+    // Step count
+    consolidated.step_count = sensor_state.latest_step_count;
+    consolidated.step_count_delta = (uint8_t)(sensor_state.latest_step_count - sensor_state.last_step_count);
     
     // Update last step count
     sensor_state.last_step_count = sensor_state.latest_step_count;
@@ -720,8 +682,7 @@ static void process_sensor_sample(void)
     out_msg.type = MSG_TYPE_SENSOR_DATA_CONSOLIDATED;
     
     // Copy consolidated data to message
-    // Note: We need to define how to pass this data in the generic_message_t structure
-    // For now, we'll just send the notification that data is ready
+    memcpy(&out_msg.data.sensor_consolidated, &consolidated, sizeof(sensor_data_consolidated_t));
     
     // Send to realtime metrics, analytics, and session threads
     k_msgq_put(&sensor_data_queue, &out_msg, K_NO_WAIT);

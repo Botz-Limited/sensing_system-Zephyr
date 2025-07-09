@@ -253,7 +253,6 @@ static void perform_complex_analytics(void)
     
     k_msgq_put(&analytics_queue, &out_msg, K_NO_WAIT);
 }
-
 // Establish baseline metrics
 static void establish_baseline(void)
 {

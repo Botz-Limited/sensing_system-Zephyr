@@ -219,6 +219,8 @@ struct ActivitySessionState {
     // GPS calibration
     float stride_correction_factor;
     uint32_t last_gps_update_time;
+    uint32_t distance_at_last_gps;    // Distance at last GPS update (cm)
+    int32_t total_elevation_gain_cm;  // Total elevation gain
 };
 
 // Function declarations

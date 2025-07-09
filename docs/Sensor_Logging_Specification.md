@@ -57,6 +57,16 @@ graph LR
     F2 -->|"-42%"| X2
 ```
 
+### Write Optimization
+
+The system implements write batching to reduce flash wear and improve performance:
+
+- **Foot Sensor**: Batches 3 samples before writing (reduces writes by 3x)
+- **BHI360**: Batches 3 samples before writing (reduces writes by 3x)
+- **Activity**: Batches 2 samples before writing (reduces writes by 2x)
+- **Page Alignment**: All writes are aligned to 256-byte flash pages
+- **Timeout Flush**: Batches are flushed after 1 second of inactivity
+
 ---
 
 ## 2. System Architecture

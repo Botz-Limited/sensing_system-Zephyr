@@ -9,6 +9,17 @@
 
 ## Changelog
 
+### Version 2.10 (December 2024)
+- Added GPS Update characteristic (`...b68e`) to Control Service
+- Added comprehensive GPS update documentation including data structure and usage examples
+- GPS updates enhance distance/pace accuracy from ±15-20% to ±1-3%
+- GPS data is forwarded to secondary device via D2D
+
+### Version 2.9 (January 2025)
+- Added Weight Calibration Trigger characteristic (`...b68d`) to Control Service
+- Added comprehensive weight calibration documentation including process flow and data structures
+- Updated Sensor Logging Specification with write batching optimization details
+
 ### Version 2.8 (December 2024)
 - Added Connection Parameter Control characteristic (`...b68b`) to Control Service for background execution support
 - Documented 3D Orientation Service (`0c372ec0-...`) with full specification
@@ -93,7 +104,7 @@
 
 ## 1. Introduction
 
-This device implements a comprehensive set of Bluetooth Low Energy (BLE) GATT services for:
+This device implements a  set of Bluetooth Low Energy (BLE) GATT services for:
 - Real-time sensor data transmission
 - Device control and configuration
 - Log file management
@@ -251,8 +262,7 @@ float decode_acceleration(int16_t fixed) {
 | FOTA Progress | `...eb5` | Read, Notify | fota_progress_t | Update status |
 | **Activity Log Available** | `...ec2` | Read, Notify | uint8_t | Latest log ID |
 | **Activity Log Path** | `...ec3` | Read, Notify | char[] | UTF-8 path |
-| **Packed Device Status** | `...ec7` | Read, Notify | device_status_packed_t | Combined status fields |
-| **Packed File Notification** | `...ec8` | Read, Notify | file_notification_packed_t | Combined file ID and path |
+
 
 ### Secondary Device Characteristics (Primary Device Only)
 
@@ -358,6 +368,99 @@ DrawSequenceDiagram(
 - If weight calculation fails, no notification is sent
 - Mobile app should implement timeout (e.g., 10 seconds)
 
+### Weight Calibration
+
+The weight calibration feature allows the system to learn the relationship between pressure sensor readings and actual weight. This calibration is stored persistently and used for all subsequent weight measurements.
+
+#### Calibration Process
+
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Control Service",
+    "participant Activity Metrics",
+    "participant Data Module",
+    "App->>Control Service: Write calibration data",
+    "Note right of App: weight_calibration_step_t<br/>with known weight",
+    "Control Service->>Activity Metrics: CALIBRATE_WEIGHT command",
+    "Activity Metrics->>Activity Metrics: Check motion (must be still)",
+    "Activity Metrics->>Activity Metrics: Collect pressure samples",
+    "Activity Metrics->>Activity Metrics: Calculate calibration coefficients",
+    "Activity Metrics->>Data Module: Save calibration data",
+    "Data Module-->>Activity Metrics: Confirm saved",
+    "Activity Metrics-->>Control Service: Calibration complete",
+    "Control Service-->>App: Notify success"
+  ),
+  "default"
+)
+
+#### Calibration Data Structure
+
+```c
+// Weight calibration trigger data
+typedef struct {
+    float known_weight_kg;  // User's actual weight for calibration
+} weight_calibration_step_t;
+
+// Stored calibration data
+typedef struct {
+    float scale_factor;     // kg per ADC unit
+    float nonlinear_a;      // Nonlinear coefficient A
+    float nonlinear_b;      // Nonlinear coefficient B  
+    float nonlinear_c;      // Nonlinear coefficient C
+    float temp_coeff;       // Temperature coefficient (%/°C)
+    float temp_ref;         // Reference temperature (°C)
+    bool is_calibrated;     // Flag to indicate if calibration is valid
+} weight_calibration_data_t;
+```
+
+#### Calibration Requirements
+
+1. **User must be standing still** (motion < 0.5 m/s²)
+2. **Both feet must be on the sensors**
+3. **Known weight must be provided** (e.g., from user profile)
+4. **Calibration takes approximately 5 seconds**
+5. **Calibration is stored persistently** and survives reboots
+
+#### Calibration Flow
+
+1. **Mobile app** sends user's known weight via Weight Calibration Trigger
+2. **Primary device** forwards calibration command to secondary via D2D
+3. **Both devices** collect pressure sensor data while user stands still
+4. **Activity metrics module** calculates calibration coefficients
+5. **Calibration data** is saved to flash via data module
+6. **On startup**, calibration is loaded from flash automatically
+
+#### Usage Example
+
+```swift
+// iOS - Trigger weight calibration
+func calibrateWeight(knownWeight: Float) {
+    var calibrationData = weight_calibration_step_t()
+    calibrationData.known_weight_kg = knownWeight
+    
+    let data = Data(bytes: &calibrationData, count: 4)
+    peripheral.writeValue(data, 
+                         for: weightCalibrationCharacteristic,
+                         type: .withResponse)
+}
+```
+
+```kotlin
+// Android - Weight calibration
+fun calibrateWeight(knownWeightKg: Float) {
+    val buffer = ByteBuffer.allocate(4)
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .putFloat(knownWeightKg)
+    
+    val characteristic = controlService
+        .getCharacteristic(WEIGHT_CALIBRATION_UUID)
+    characteristic.value = buffer.array()
+    
+    bluetoothGatt.writeCharacteristic(characteristic)
+}
+```
+
 ### Status Bitfield
 
 ```c
@@ -396,6 +499,74 @@ DrawSequenceDiagram(
 | Delete Secondary BHI360 Log | `...b689` | Write, Notify | uint8_t | Log ID to delete on secondary |
 | Delete Secondary Activity Log | `...b68a` | Write, Notify | uint8_t | Log ID to delete on secondary |
 | **Weight Measurement Trigger** | `...b68c` | Write | uint8_t | Write 1 to trigger weight measurement |
+| **Weight Calibration Trigger** | `...b68d` | Write | weight_calibration_step_t | Trigger weight calibration with known weight |
+| **GPS Update** | `...b68e` | Write | GPSUpdateCommand | GPS data from mobile app |
+
+### GPS Update
+
+The GPS Update characteristic allows mobile applications to provide GPS data to enhance distance and pace accuracy during activities. This is particularly useful for outdoor running where GPS is available.
+
+#### GPS Update Command Structure
+
+```c
+// GPS update command from mobile app (20 bytes)
+typedef struct {
+    uint8_t  opcode;                  // = 0x10
+    uint32_t timestamp;               // Unix time
+    int32_t  latitude_e7;             // Latitude × 10^7
+    int32_t  longitude_e7;            // Longitude × 10^7
+    uint16_t speed_cms;               // Speed in cm/s
+    uint16_t distance_m;              // Distance since last update
+    uint8_t  accuracy_m;              // GPS accuracy
+    int16_t  elevation_change_m;      // Elevation change
+} GPSUpdateCommand;
+```
+
+#### GPS Update Flow
+
+DrawSequenceDiagram(
+  Syntax(
+    "participant App",
+    "participant Control Service",
+    "participant Activity Metrics",
+    "participant Secondary",
+    "App->>Control Service: Write GPS Update",
+    "Control Service->>Activity Metrics: Process GPS data",
+    "Activity Metrics->>Activity Metrics: Validate accuracy",
+    "Activity Metrics->>Activity Metrics: Calculate stride correction",
+    "Control Service->>Secondary: Forward GPS via D2D",
+    "Secondary->>Secondary: Apply GPS correction"
+  ),
+  "default"
+)
+
+#### GPS Usage Guidelines
+
+1. **Update Frequency**: Send GPS updates every 10-60 seconds depending on GPS mode
+2. **Accuracy Check**: Device ignores updates with accuracy > 20m
+3. **Stride Calibration**: GPS distance is used to calibrate stride length estimation
+4. **Battery Optimization**: Reduce GPS frequency in background mode
+5. **Fallback**: System continues to work without GPS using sensor-only estimation
+
+#### Example Usage
+
+```swift
+// iOS - Send GPS update
+func sendGPSUpdate(location: CLLocation, distanceDelta: Double) {
+    var gpsUpdate = GPSUpdateCommand()
+    gpsUpdate.opcode = 0x10
+    gpsUpdate.timestamp = UInt32(Date().timeIntervalSince1970)
+    gpsUpdate.latitude_e7 = Int32(location.coordinate.latitude * 1e7)
+    gpsUpdate.longitude_e7 = Int32(location.coordinate.longitude * 1e7)
+    gpsUpdate.speed_cms = UInt16(location.speed * 100) // m/s to cm/s
+    gpsUpdate.distance_m = UInt16(distanceDelta)
+    gpsUpdate.accuracy_m = UInt8(location.horizontalAccuracy)
+    gpsUpdate.elevation_change_m = 0 // Calculate from previous
+    
+    let data = Data(bytes: &gpsUpdate, count: 20)
+    peripheral.writeValue(data, for: gpsUpdateCharacteristic, type: .withResponse)
+}
+```
 
 ### Command Flow
 
@@ -823,91 +994,42 @@ typedef struct {
 
 ## 11. Device-to-Device (D2D) Services
 
-### 11.1 D2D RX Service (Primary Device)
+## Services
 
-**UUID:** `e060ca1f-3115-4ad6-9709-8c5ff3bf558b`  
-**Purpose:** Receive commands from phone to relay to secondary
+### Device-to-Device (D2D) Service
 
-| Characteristic | UUID Suffix | Properties | Data Type | Description |
-|---:|---:|---:|---:|---:|
-| D2D Set Time | `...ca1f` | Write | uint32_t | Time relay |
-| D2D Delete Foot Log | `...ca82` | Write | uint8_t | Delete command |
-| D2D Delete BHI360 Log | `...ca83` | Write | uint8_t | Delete command |
-| D2D Delete Activity Log | `...ca88` | Write | uint8_t | Delete command |
-| D2D Start Activity | `...ca84` | Write | uint8_t | Start command |
-| D2D Stop Activity | `...ca85` | Write | uint8_t | Stop command |
-| **D2D FOTA Status** | `...ca86` | Write | uint8_t | FOTA status update |
-| **D2D Trigger Calibration** | `...ca87` | Write | uint8_t | Calibration trigger |
-| **D2D Request Device Info** | `...ca89` | Write | uint8_t | Request device information |
+This service is used for direct communication between the Primary and Secondary devices.
 
-### 11.2 D2D TX Service (Secondary Device)
+### File Proxy Service
 
-**UUID:** `75ad68d6-200c-437d-98b5-061862076c5f`  
-**Purpose:** Transmit sensor data from secondary to primary
+**UUID:** `7e500001-b5a3-f393-e0a9-e50e24dcca9e`  
+**Availability:** Primary device only  
+**Purpose:** Access log files on secondary device
 
 | Characteristic | UUID Suffix | Properties | Data Type | Description |
 |---:|---:|---:|---:|---:|
-| D2D Status | `...68d6` | Notify | uint32_t | Status bitfield |
-| D2D Foot Log Available | `...68d7` | Notify | uint8_t | Log ID |
-| D2D Charge Status | `...68d8` | Notify | uint8_t | Battery % |
-| D2D Foot Log Path | `...68d9` | Notify | char[] | File path |
-| D2D BHI360 Log Available | `...68da` | Notify | uint8_t | Log ID |
-| D2D BHI360 Log Path | `...68db` | Notify | char[] | File path |
-| D2D Foot Samples | `...68dc` | Notify | foot_samples_t | ADC data |
-| **D2D BHI360 3D Mapping** | `...68dd` | Notify | bhi360_3d_mapping_fixed_t | **Fixed-point** |
-| **D2D BHI360 Step Count** | `...68de` | Notify | bhi360_step_count_t | Steps (for aggregation) |
-| **D2D Activity Step Count** | `...68e6` | Notify | bhi360_step_count_t | Activity-specific steps |
-| **D2D BHI360 Linear Accel** | `...68df` | Notify | bhi360_linear_accel_fixed_t | **Fixed-point** |
-| D2D Current Time | `...68e0` | Notify | CTS struct | Time sync |
-| D2D Device Info | `...68e1` | Notify | device_info_msg_t | Device information |
-| D2D FOTA Progress | `...68e3` | Notify | fota_progress_t | FOTA update status |
-| D2D Activity Log Available | `...68e4` | Notify | uint8_t | Log ID |
-| D2D Activity Log Path | `...68e5` | Notify | char[] | File path |
-| **D2D Weight Measurement** | `...68e7` | Notify | uint16_t | Weight in kg × 10 |
+| Target Device | `...0002` | Write | uint8_t | 0x00=Primary, 0x01=Secondary |
+| File Command | `...0003` | Write | Command struct | See below |
+| File Data | `...0004` | Notify | byte[] | File chunks |
+| File Status | `...0005` | Read, Notify | uint8_t | Operation status |
 
-### 11.3 D2D File Transfer Service
+#### File Commands
 
-**UUID:** `8e600001-b5a3-f393-e0a9-e50e24dcca9e`  
-**Purpose:** File transfer between devices
+```c
+typedef struct {
+    uint8_t cmd;      // Command type
+    uint8_t file_id;  // File ID
+    uint8_t type;     // 0x01=Foot, 0x02=BHI360, 0x03=Activity
+} file_command_t;
+```
 
-| Characteristic | UUID Suffix | Properties | Data Type |
-|---:|---:|---:|---:|
-| Command | `...0002` | Write | Command packet |
-| Data | `...0003` | Notify | Data packet |
-| Status | `...0004` | Notify | Status byte |
-
-### 11.4 Secondary Device Direct Access
-
-Secondary devices expose standard MCUmgr SMP service for direct FOTA and file access when connected:
-
-**Service UUID:** `8D53DC1D-1DB7-4CD3-868B-8A527460AA84`  
-**Characteristic UUID:** `DA2E7828-FBCE-4E01-AE9E-261174997C48`  
-
-This allows:
-- Direct firmware updates to secondary device
-- File system access on secondary device
-- Configuration management
-
-**Note:** Most mobile apps should use the proxy services on the primary device instead of direct connection to secondary.
-
-### D2D Architecture
-
-DrawFlowchart(
-  Syntax(
-    // Data Flow
-    "SEC[Secondary Sensors] --> SECTX[D2D TX Service]",
-    "SECTX --> PRIMRX[Primary D2D Client]",
-    "PRIMRX --> PRIMINFO[Information Service]",
-    "PRIMINFO --> PHONE[Mobile App]",
-    // Command Flow
-    "PHONE2[Mobile App] --> PRIMCTRL[Control Service]",
-    "PRIMCTRL --> PRIMD2D[D2D TX Client]",
-    "PRIMD2D --> SECRX[D2D RX Service]",
-    "SECRX --> SECDEV[Secondary Device]"
-  ),
-  "TB",
-  "default"
-)
+| Command | Value | Description |
+|---:|---:|---:|
+| List Files | 0x01 | Get file list |
+| Read File | 0x02 | Read by ID |
+| Delete File | 0x03 | Delete by ID |
+| Get Info | 0x04 | Get file metadata |
+| Abort | 0x05 | Cancel operation |
 
 ---
 

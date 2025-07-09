@@ -73,13 +73,11 @@ static struct bt_uuid_128 d2d_rx_fota_status_uuid =
 static struct bt_uuid_128 d2d_rx_trigger_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca87, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
-// Weight measurement trigger command UUID (matches d2d_weight_measurement_trigger_uuid in ble_d2d_rx.cpp)
-static struct bt_uuid_128 d2d_rx_weight_measurement_trigger_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8a, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 static struct bt_uuid_128 d2d_rx_delete_activity_log_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca88, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 static struct bt_uuid_128 d2d_rx_request_device_info_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+// Note: This UUID must match d2d_weight_calibration_uuid in ble_d2d_rx.cpp
 static struct bt_uuid_128 d2d_rx_weight_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
@@ -95,7 +93,6 @@ struct d2d_discovered_handles
     uint16_t fota_status_handle;
     uint16_t trigger_calibration_handle;
     uint16_t request_device_info_handle;
-    uint16_t weight_measurement_trigger_handle;
     uint16_t weight_calibration_handle;
     bool discovery_complete;
 };
@@ -109,7 +106,6 @@ static struct d2d_discovered_handles d2d_handles = {.set_time_handle = 0,
                                                     .fota_status_handle = 0,
                                                     .trigger_calibration_handle = 0,
                                                     .request_device_info_handle = 0,
-                                                    .weight_measurement_trigger_handle = 0,
                                                     .weight_calibration_handle = 0,
                                                     .discovery_complete = false};
 
@@ -136,7 +132,6 @@ enum discover_state
     DISCOVER_FOTA_STATUS_CHAR,
     DISCOVER_TRIGGER_CALIBRATION_CHAR,
     DISCOVER_REQUEST_DEVICE_INFO_CHAR,
-    DISCOVER_WEIGHT_MEASUREMENT_TRIGGER_CHAR,
     DISCOVER_WEIGHT_CALIBRATION_CHAR,
     DISCOVER_COMPLETE
 };
@@ -250,15 +245,6 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             {
                 d2d_handles.request_device_info_handle = bt_gatt_attr_value_handle(attr);
                 LOG_INF("Found request device info characteristic, handle: %u", d2d_handles.request_device_info_handle);
-                discovery_state = DISCOVER_WEIGHT_MEASUREMENT_TRIGGER_CHAR;
-            }
-            break;
-
-        case DISCOVER_WEIGHT_MEASUREMENT_TRIGGER_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_weight_measurement_trigger_uuid.uuid) == 0)
-            {
-                d2d_handles.weight_measurement_trigger_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found weight measurement trigger characteristic, handle: %u", d2d_handles.weight_measurement_trigger_handle);
                 discovery_state = DISCOVER_WEIGHT_CALIBRATION_CHAR;
             }
             break;
@@ -381,9 +367,6 @@ static void continue_discovery(void)
         case DISCOVER_REQUEST_DEVICE_INFO_CHAR:
             discover_params.uuid = &d2d_rx_request_device_info_uuid.uuid;
             break;
-        case DISCOVER_WEIGHT_MEASUREMENT_TRIGGER_CHAR:
-            discover_params.uuid = &d2d_rx_weight_measurement_trigger_uuid.uuid;
-            break;
         case DISCOVER_WEIGHT_CALIBRATION_CHAR:
             discover_params.uuid = &d2d_rx_weight_calibration_uuid.uuid;
             break;
@@ -455,6 +438,51 @@ int ble_d2d_tx_send_foot_sensor_data(const foot_samples_t *samples)
 #else
     // Primary device shouldn't call this
     LOG_WRN("Primary device shouldn't send foot sensor data via D2D");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_gps_update(const GPSUpdateCommand *gps_data)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete, cannot send GPS update");
+        // TODO: Add queuing support for GPS updates if needed
+        return -EBUSY;
+    }
+
+    // GPS updates are sent to the same characteristic as weight calibration
+    // This is a temporary solution - ideally GPS should have its own characteristic
+    if (d2d_handles.weight_calibration_handle == 0)
+    {
+        LOG_WRN("D2D TX: Weight calibration handle not found (used for GPS)");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding GPS update - lat=%d, lon=%d, speed=%u cm/s", 
+            gps_data->latitude_e7, gps_data->longitude_e7, gps_data->speed_cms);
+
+    // Send GPS data using the weight calibration characteristic
+    // The secondary device will need to distinguish based on message size
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.weight_calibration_handle, 
+                                            gps_data, sizeof(GPSUpdateCommand), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send GPS update (err %d)", err);
+        return err;
+    }
+
+    return 0;
+#else
+    // Secondary device doesn't send GPS updates
+    LOG_WRN("Secondary device shouldn't send GPS updates");
     return -EINVAL;
 #endif
 }
@@ -979,48 +1007,6 @@ int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step
 #else
     // Secondary device doesn't send weight calibration commands
     LOG_WRN("Secondary device shouldn't send weight calibration commands");
-    return -EINVAL;
-#endif
-}
-
-int ble_d2d_tx_send_weight_measurement_trigger_command(uint8_t value)
-{
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    if (!d2d_conn)
-    {
-        LOG_WRN("D2D TX: No connection");
-        return -ENOTCONN;
-    }
-
-    if (!d2d_handles.discovery_complete)
-    {
-        LOG_WRN("D2D TX: Service discovery not complete, queueing weight measurement trigger command");
-        // TODO: Add queuing support for weight measurement trigger
-        return -EBUSY;
-    }
-
-    // Use the dedicated weight measurement trigger handle
-    if (d2d_handles.weight_measurement_trigger_handle == 0)
-    {
-        LOG_WRN("D2D TX: Weight measurement trigger handle not found");
-        return -EINVAL;
-    }
-
-    LOG_INF("D2D TX: Forwarding weight measurement trigger command - value: %u to handle: %u", 
-            value, d2d_handles.weight_measurement_trigger_handle);
-
-    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.weight_measurement_trigger_handle, 
-                                            &value, sizeof(value), false);
-    if (err)
-    {
-        LOG_ERR("D2D TX: Failed to send weight measurement trigger command (err %d)", err);
-        return err;
-    }
-
-    return 0;
-#else
-    // Secondary device doesn't send weight measurement trigger commands
-    LOG_WRN("Secondary device shouldn't send weight measurement trigger commands");
     return -EINVAL;
 #endif
 }

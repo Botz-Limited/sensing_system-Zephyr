@@ -21,7 +21,9 @@ extern "C" {
 #endif
 
 // Performance optimization hints
+#ifndef ALWAYS_INLINE
 #define ALWAYS_INLINE __attribute__((always_inline)) static inline
+#endif
 #define HOT_FUNCTION __attribute__((hot))
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
@@ -195,6 +197,8 @@ ALWAYS_INLINE void calculate_pressure_distribution(const uint16_t pressure[8],
  */
 ALWAYS_INLINE uint8_t detect_strike_pattern(uint8_t heel_pct, uint8_t mid_pct, uint8_t fore_pct)
 {
+    (void)mid_pct;  // Currently unused but kept for API consistency
+    
     if (heel_pct > 50) {
         return 0;  // Heel strike
     } else if (fore_pct > 50) {

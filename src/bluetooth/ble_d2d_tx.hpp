@@ -56,8 +56,8 @@ int ble_d2d_tx_send_weight_calibration_trigger_command(uint8_t value);
 // Send weight calibration with known weight (primary -> secondary)
 int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step_t *calib_data);
 
-// Send weight measurement trigger command (primary -> secondary)
-int ble_d2d_tx_send_weight_measurement_trigger_command(uint8_t value);
+// Send GPS update (primary -> secondary)
+int ble_d2d_tx_send_gps_update(const GPSUpdateCommand *gps_data);
 
 #ifdef __cplusplus
 }

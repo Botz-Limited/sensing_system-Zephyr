@@ -17,6 +17,8 @@
 #include <zephyr/kernel.h>
 #include <time.h>
 #include <errors.hpp>
+#include <activity_session.hpp>  // For GPSUpdateCommand
+#include "../src/sensor_data/sensor_data_consolidated.h"  // For sensor_data_consolidated_t
 
 void app_log(const char *fmt, ...);
 
@@ -167,6 +169,8 @@ typedef struct
         weight_calibration_data_t weight_calibration;
         weight_calibration_step_t weight_calibration_step;
         weight_measurement_msg_t weight_measurement;
+        GPSUpdateCommand gps_update;  // GPS update data
+        sensor_data_consolidated_t sensor_consolidated;  // Consolidated sensor data
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 
