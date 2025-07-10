@@ -1,6 +1,6 @@
 # BHI360 Metrics Capability Analysis
 
-**Date:** December 2024  
+**Date:** June 2025  
 **Purpose:** Analysis of which proposed metrics can be calculated using BHI360 sensors alone versus requiring pressure sensors
 
 ---

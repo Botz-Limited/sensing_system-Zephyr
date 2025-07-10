@@ -1,6 +1,5 @@
 # nRF7002 WiFi Integration Guide for Lab Version
 
-Hey team! Here's a detailed guide on integrating the nRF7002 WiFi companion chip for fast log file transfers in our lab version firmware.
 
 ## Overview
 

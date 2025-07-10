@@ -37,13 +37,13 @@
 #include <events/data_event.h>
 #include <util.hpp>
 
+#include <activity_messages.pb.h>
 #include <app.hpp>
 #include <app_fixed_point.hpp>
 #include <bhi360_sensor_messages.pb.h>
 #include <ble_services.hpp>
 #include <data.hpp>
 #include <foot_sensor_messages.pb.h>
-#include <activity_messages.pb.h>
 #include <pb_decode.h>
 #include <pb_encode.h>
 #include <status_codes.h>
@@ -55,6 +55,8 @@ FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(littlefs_storage);
 // Define File System parameters
 #define STORAGE_PARTITION_LABEL storage_ext
 #define STORAGE_PARTITION_ID FIXED_PARTITION_ID(STORAGE_PARTITION_LABEL)
+
+#define FLUSH_SYNC_INTERVAL 10  // Sync every N writes
 
 static struct fs_mount_t lfs_ext_storage_mnt = {};
 
@@ -84,7 +86,8 @@ err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, u
 int close_all_files_in_directory(const char *dir_path);
 err_t delete_oldest_log_file_checked(const char *file_prefix, const char *dir_path);
 int delete_all_files_in_directory(const char *dir_path);
-int find_latest_log_file(const char *file_prefix, record_type_t record_type, char *file_path, const char *open_file_path);
+int find_latest_log_file(const char *file_prefix, record_type_t record_type, char *file_path,
+                         const char *open_file_path);
 
 int delete_oldest_log_files(const char *file_prefix, const char *dir_path);
 err_t delete_by_type_and_id(record_type_t type, uint8_t id);
@@ -122,22 +125,22 @@ static size_t activity_write_buffer_pos = 0;
 
 // --- Write Coalescing Configuration ---
 // Minimal batch sizes to save RAM while still providing benefit
-constexpr size_t FOOT_SENSOR_BATCH_SIZE = 3;   // Further reduced to save RAM
-constexpr size_t BHI360_BATCH_SIZE = 3;        // Further reduced to save RAM
-constexpr size_t ACTIVITY_BATCH_SIZE = 2;      // Further reduced to save RAM
+constexpr size_t FOOT_SENSOR_BATCH_SIZE = 3; // Further reduced to save RAM
+constexpr size_t BHI360_BATCH_SIZE = 3;      // Further reduced to save RAM
+constexpr size_t ACTIVITY_BATCH_SIZE = 2;    // Further reduced to save RAM
 
 // Instead of storing full protobuf messages, we'll encode directly to a buffer
 // This saves significant RAM as we don't need to store the full message structures
 // Using exactly one page size to minimize RAM usage while maintaining alignment
-static uint8_t foot_sensor_batch_buffer[FLASH_PAGE_SIZE];  // 256 bytes
+static uint8_t foot_sensor_batch_buffer[FLASH_PAGE_SIZE]; // 256 bytes
 static size_t foot_sensor_batch_bytes = 0;
 static size_t foot_sensor_batch_count = 0;
 
-static uint8_t bhi360_batch_buffer[FLASH_PAGE_SIZE];  // 256 bytes
+static uint8_t bhi360_batch_buffer[FLASH_PAGE_SIZE]; // 256 bytes
 static size_t bhi360_batch_bytes = 0;
 static size_t bhi360_batch_count = 0;
 
-static uint8_t activity_batch_buffer[FLASH_PAGE_SIZE];  // 256 bytes
+static uint8_t activity_batch_buffer[FLASH_PAGE_SIZE]; // 256 bytes
 static size_t activity_batch_bytes = 0;
 static size_t activity_batch_count = 0;
 
@@ -145,7 +148,7 @@ static size_t activity_batch_count = 0;
 static uint32_t last_foot_sensor_flush_time = 0;
 static uint32_t last_bhi360_flush_time = 0;
 static uint32_t last_activity_flush_time = 0;
-constexpr uint32_t MAX_BATCH_AGE_MS = 1000;  // Force flush if data is older than 1 second
+constexpr uint32_t MAX_BATCH_AGE_MS = 1000; // Force flush if data is older than 1 second
 
 // --- Thread safety ---
 K_MUTEX_DEFINE(foot_sensor_file_mutex);
@@ -160,153 +163,196 @@ static bool foot_sensor_first_packet = true;
 static bool bhi360_first_packet = true;
 static bool activity_first_packet = true;
 
-static void flush_foot_sensor_buffer() {
-    if (foot_sensor_write_buffer_pos > 0) {
+static void flush_foot_sensor_buffer()
+{
+    static int foot_sensor_sync_counter = 0;
+    
+    if (foot_sensor_write_buffer_pos > 0)
+    {
         fs_write(&foot_sensor_log_file, foot_sensor_write_buffer, foot_sensor_write_buffer_pos);
-        fs_sync(&foot_sensor_log_file);
+        
+        // Only sync periodically, not on every write
+        foot_sensor_sync_counter++;
+        if (foot_sensor_sync_counter >= FLUSH_SYNC_INTERVAL) {
+            fs_sync(&foot_sensor_log_file);
+            foot_sensor_sync_counter = 0;
+        }
+        
         foot_sensor_write_buffer_pos = 0;
     }
 }
-static void flush_bhi360_buffer() {
-    if (bhi360_write_buffer_pos > 0) {
+
+static void flush_bhi360_buffer()
+{
+    static int bhi360_sync_counter = 0;
+    
+    if (bhi360_write_buffer_pos > 0)
+    {
         fs_write(&bhi360_log_file, bhi360_write_buffer, bhi360_write_buffer_pos);
-        fs_sync(&bhi360_log_file);
+        
+        // Only sync periodically, not on every write
+        bhi360_sync_counter++;
+        if (bhi360_sync_counter >= FLUSH_SYNC_INTERVAL) {
+            fs_sync(&bhi360_log_file);
+            bhi360_sync_counter = 0;
+        }
+        
         bhi360_write_buffer_pos = 0;
     }
 }
-static void flush_activity_buffer() {
-    if (activity_write_buffer_pos > 0) {
+
+static void flush_activity_buffer()
+{
+    static int activity_sync_counter = 0;
+    
+    if (activity_write_buffer_pos > 0)
+    {
         fs_write(&activity_log_file, activity_write_buffer, activity_write_buffer_pos);
-        fs_sync(&activity_log_file);
+        
+        // Only sync periodically, not on every write
+        activity_sync_counter++;
+        if (activity_sync_counter >= FLUSH_SYNC_INTERVAL) {
+            fs_sync(&activity_log_file);
+            activity_sync_counter = 0;
+        }
+        
         activity_write_buffer_pos = 0;
     }
 }
 
 // --- Batch Writing Functions ---
-static err_t flush_foot_sensor_batch() {
-    if (foot_sensor_batch_bytes == 0) {
+static err_t flush_foot_sensor_batch()
+{
+    if (foot_sensor_batch_bytes == 0)
+    {
         return err_t::NO_ERROR;
     }
-    
+
     // Write the batched data through the page-aligned buffer system
     size_t bytes_written = 0;
-    while (bytes_written < foot_sensor_batch_bytes) {
+    while (bytes_written < foot_sensor_batch_bytes)
+    {
         size_t remaining = foot_sensor_batch_bytes - bytes_written;
         size_t space_in_buffer = FLASH_PAGE_SIZE - foot_sensor_write_buffer_pos;
         size_t to_copy = (remaining < space_in_buffer) ? remaining : space_in_buffer;
-        
+
         // Copy to write buffer
-        memcpy(&foot_sensor_write_buffer[foot_sensor_write_buffer_pos], 
-               &foot_sensor_batch_buffer[bytes_written], 
+        memcpy(&foot_sensor_write_buffer[foot_sensor_write_buffer_pos], &foot_sensor_batch_buffer[bytes_written],
                to_copy);
         foot_sensor_write_buffer_pos += to_copy;
         bytes_written += to_copy;
-        
+
         // Flush write buffer if full
-        if (foot_sensor_write_buffer_pos >= FLASH_PAGE_SIZE) {
+        if (foot_sensor_write_buffer_pos >= FLASH_PAGE_SIZE)
+        {
             flush_foot_sensor_buffer();
         }
     }
-    
+
     // Reset batch
     foot_sensor_batch_bytes = 0;
     foot_sensor_batch_count = 0;
     last_foot_sensor_flush_time = k_uptime_get_32();
-    
+
     LOG_DBG("Flushed foot sensor batch: %u samples", foot_sensor_batch_count);
-    
+
     return err_t::NO_ERROR;
 }
 
-static err_t flush_bhi360_batch() {
-    if (bhi360_batch_bytes == 0) {
+static err_t flush_bhi360_batch()
+{
+    if (bhi360_batch_bytes == 0)
+    {
         return err_t::NO_ERROR;
     }
-    
+
     // Write the batched data through the page-aligned buffer system
     size_t bytes_written = 0;
-    while (bytes_written < bhi360_batch_bytes) {
+    while (bytes_written < bhi360_batch_bytes)
+    {
         size_t remaining = bhi360_batch_bytes - bytes_written;
         size_t space_in_buffer = FLASH_PAGE_SIZE - bhi360_write_buffer_pos;
         size_t to_copy = (remaining < space_in_buffer) ? remaining : space_in_buffer;
-        
+
         // Copy to write buffer
-        memcpy(&bhi360_write_buffer[bhi360_write_buffer_pos], 
-               &bhi360_batch_buffer[bytes_written], 
-               to_copy);
+        memcpy(&bhi360_write_buffer[bhi360_write_buffer_pos], &bhi360_batch_buffer[bytes_written], to_copy);
         bhi360_write_buffer_pos += to_copy;
         bytes_written += to_copy;
-        
+
         // Flush write buffer if full
-        if (bhi360_write_buffer_pos >= FLASH_PAGE_SIZE) {
+        if (bhi360_write_buffer_pos >= FLASH_PAGE_SIZE)
+        {
             flush_bhi360_buffer();
         }
     }
-    
+
     // Reset batch
     bhi360_batch_bytes = 0;
     bhi360_batch_count = 0;
     last_bhi360_flush_time = k_uptime_get_32();
-    
+
     LOG_DBG("Flushed BHI360 batch: %u samples", bhi360_batch_count);
-    
+
     return err_t::NO_ERROR;
 }
 
-static err_t flush_activity_batch() {
-    if (activity_batch_bytes == 0) {
+static err_t flush_activity_batch()
+{
+    if (activity_batch_bytes == 0)
+    {
         return err_t::NO_ERROR;
     }
-    
+
     // Write the batched data through the page-aligned buffer system
     size_t bytes_written = 0;
-    while (bytes_written < activity_batch_bytes) {
+    while (bytes_written < activity_batch_bytes)
+    {
         size_t remaining = activity_batch_bytes - bytes_written;
         size_t space_in_buffer = FLASH_PAGE_SIZE - activity_write_buffer_pos;
         size_t to_copy = (remaining < space_in_buffer) ? remaining : space_in_buffer;
-        
+
         // Copy to write buffer
-        memcpy(&activity_write_buffer[activity_write_buffer_pos], 
-               &activity_batch_buffer[bytes_written], 
-               to_copy);
+        memcpy(&activity_write_buffer[activity_write_buffer_pos], &activity_batch_buffer[bytes_written], to_copy);
         activity_write_buffer_pos += to_copy;
         bytes_written += to_copy;
-        
+
         // Flush write buffer if full
-        if (activity_write_buffer_pos >= FLASH_PAGE_SIZE) {
+        if (activity_write_buffer_pos >= FLASH_PAGE_SIZE)
+        {
             flush_activity_buffer();
         }
     }
-    
+
     // Reset batch
     activity_batch_bytes = 0;
     activity_batch_count = 0;
     last_activity_flush_time = k_uptime_get_32();
-    
+
     LOG_DBG("Flushed activity batch: %u samples", activity_batch_count);
-    
+
     return err_t::NO_ERROR;
 }
 
 // Check if any batch needs to be flushed due to age
-static void check_batch_timeouts() {
+static void check_batch_timeouts()
+{
     uint32_t current_time = k_uptime_get_32();
-    
+
     // Check foot sensor batch age
-    if (foot_sensor_batch_count > 0 && 
-        (current_time - last_foot_sensor_flush_time) > MAX_BATCH_AGE_MS) {
+    if (foot_sensor_batch_count > 0 && (current_time - last_foot_sensor_flush_time) > MAX_BATCH_AGE_MS)
+    {
         flush_foot_sensor_batch();
     }
-    
+
     // Check BHI360 batch age
-    if (bhi360_batch_count > 0 && 
-        (current_time - last_bhi360_flush_time) > MAX_BATCH_AGE_MS) {
+    if (bhi360_batch_count > 0 && (current_time - last_bhi360_flush_time) > MAX_BATCH_AGE_MS)
+    {
         flush_bhi360_batch();
     }
-    
+
     // Check activity batch age
-    if (activity_batch_count > 0 && 
-        (current_time - last_activity_flush_time) > MAX_BATCH_AGE_MS) {
+    if (activity_batch_count > 0 && (current_time - last_activity_flush_time) > MAX_BATCH_AGE_MS)
+    {
         flush_activity_batch();
     }
 }
@@ -345,6 +391,11 @@ static bool filesystem_available = false;
 
 // Counter for periodic filesystem mount retry
 static uint32_t filesystem_retry_counter = 0;
+
+// Add this new flag to control filesystem checking
+static bool filesystem_check_enabled = true;
+constexpr uint32_t FILESYSTEM_CHECK_TIME_INTERVAL_MS = 10000; // Check every 10 seconds
+
 constexpr uint32_t FILESYSTEM_RETRY_INTERVAL = 60000; // Retry every 60 seconds
 
 // Calibration file paths
@@ -352,19 +403,18 @@ constexpr char calibration_dir_path[] = "/lfs1/calibration";
 constexpr char bhi360_calib_file_prefix[] = "bhi360_calib_";
 
 // Filesystem usage thresholds
-constexpr uint8_t FILESYSTEM_USAGE_THRESHOLD_PERCENT = 80;  // Start cleanup at 80% usage
-constexpr uint8_t FILESYSTEM_USAGE_TARGET_PERCENT = 70;     // Clean up until 70% usage
+constexpr uint8_t FILESYSTEM_USAGE_THRESHOLD_PERCENT = 80; // Start cleanup at 80% usage
+constexpr uint8_t FILESYSTEM_USAGE_TARGET_PERCENT = 70;    // Clean up until 70% usage
 
 // Counter for periodic filesystem space checks during logging
 // static uint32_t filesystem_space_check_counter = 0;  // Currently unused
-constexpr uint32_t FILESYSTEM_SPACE_CHECK_INTERVAL = 1000;  // Check every 1000 writes
+constexpr uint32_t FILESYSTEM_SPACE_CHECK_INTERVAL = 1000; // Check every 1000 writes
 
 // Time-based filesystem space checking
 static uint32_t last_filesystem_check_time_ms = 0;
-constexpr uint32_t FILESYSTEM_CHECK_TIME_INTERVAL_MS = 60000;  // Check every 60 seconds
 
 // Configuration for runtime space checking
-constexpr bool ENABLE_RUNTIME_SPACE_CHECKING = true;  // Set to false to disable runtime checks
+constexpr bool ENABLE_RUNTIME_SPACE_CHECKING = true; // Set to false to disable runtime checks
 
 // Define the file path variables declared as extern in data.hpp
 char foot_sensor_file_path[util::max_path_length];
@@ -444,26 +494,26 @@ static err_t data_init()
 {
     // Initialize the fs_mount_t structure
     init_fs_mount();
-    
+
     struct fs_mount_t *mp = &lfs_ext_storage_mnt;
     // Mount the File System
     err_t err = mount_file_system(mp);
     if (err != err_t::NO_ERROR)
     {
         LOG_ERR("Error mounting littlefs: %d", (int)err);
-        
+
         // Report error to Bluetooth module but don't block system
         send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, true);
-        
+
         // Set flag to indicate filesystem is not available
         filesystem_available = false;
-        
+
         LOG_WRN("Filesystem not available - system will operate without logging capability");
     }
     else
     {
         LOG_DBG("File System Mounted at [%s]", mp->mnt_point);
-        
+
         // Set flag to indicate filesystem is available
         filesystem_available = true;
 
@@ -471,12 +521,14 @@ static err_t data_init()
         cap_and_reindex_log_files(foot_sensor_file_prefix, hardware_dir_path, 200, 1);
         cap_and_reindex_log_files(bhi360_file_prefix, hardware_dir_path, 200, 1);
         cap_and_reindex_log_files(activity_file_prefix, hardware_dir_path, 200, 1);
-        
+
         // Check filesystem space at startup
         uint8_t usage = get_filesystem_usage_percent();
-        if (usage != 255) {
+        if (usage != 255)
+        {
             LOG_INF("Filesystem usage at startup: %u%%", usage);
-            if (usage >= FILESYSTEM_USAGE_THRESHOLD_PERCENT) {
+            if (usage >= FILESYSTEM_USAGE_THRESHOLD_PERCENT)
+            {
                 LOG_WRN("Filesystem usage high at startup, performing cleanup");
                 check_filesystem_space_and_cleanup();
             }
@@ -488,7 +540,7 @@ static err_t data_init()
                                proccess_data, nullptr, nullptr, nullptr, data_priority, 0, K_NO_WAIT);
 
     LOG_DBG("Data module initialised, thread created.");
-    
+
     // Always set module to ready state to allow system to continue
     module_set_state(MODULE_STATE_READY);
 
@@ -496,8 +548,7 @@ static err_t data_init()
 }
 
 // Currently unused - kept for debugging directory contents
-__attribute__((unused))
-static int lsdir(const char *path)
+__attribute__((unused)) static int lsdir(const char *path)
 {
     int res;
     struct fs_dir_t dirp;
@@ -554,7 +605,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
     // For testing only
     // delete_all_files_in_directory("/lfs1/hardware");
 
-    if (filesystem_available) {
+    if (filesystem_available)
+    {
         // Notify about latest FOOT sensor log file
         uint8_t current_foot_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
         uint8_t latest_foot_log_id_to_report = (current_foot_seq > 0) ? (current_foot_seq - 1) : 0;
@@ -635,10 +687,12 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         {
             LOG_DBG("Initial activity log notification sent (ID: %u).", latest_activity_log_id_to_report);
         }
-    } else {
+    }
+    else
+    {
         // Filesystem not available - send empty notifications
         LOG_WRN("Filesystem not available - sending empty log notifications");
-        
+
         // Send empty foot sensor log notification
         log_info_msg.type = MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE;
         log_info_msg.data.new_hardware_log_file.file_sequence_id = 0;
@@ -647,7 +701,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         log_info_msg.data.new_hardware_log_file
             .file_path[sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
         k_msgq_put(&bluetooth_msgq, &log_info_msg, K_NO_WAIT);
-        
+
         // Send empty BHI360 log notification
         log_info_msg.type = MSG_TYPE_NEW_BHI360_LOG_FILE;
         log_info_msg.data.new_hardware_log_file.file_sequence_id = 0;
@@ -656,7 +710,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         log_info_msg.data.new_hardware_log_file
             .file_path[sizeof(log_info_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
         k_msgq_put(&bluetooth_msgq, &log_info_msg, K_NO_WAIT);
-        
+
         // Send empty activity log notification
         log_info_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
         log_info_msg.data.new_hardware_log_file.file_sequence_id = 0;
@@ -670,39 +724,11 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
     generic_message_t msg;
     int ret;
 
+    static uint64_t last_filesystem_check_ms = 0;
+
     while (true)
     {
-        // Use timeout instead of K_FOREVER to allow periodic filesystem retry
-        ret = k_msgq_get(&data_msgq, &msg, K_SECONDS(1));
-
-        // Periodic filesystem mount retry if not available
-        if (!filesystem_available) {
-            filesystem_retry_counter++;
-            if (filesystem_retry_counter >= (FILESYSTEM_RETRY_INTERVAL / 1000)) {
-                filesystem_retry_counter = 0;
-                LOG_INF("Retrying filesystem mount...");
-                
-                struct fs_mount_t *mp = &lfs_ext_storage_mnt;
-                err_t err = mount_file_system(mp);
-                if (err == err_t::NO_ERROR) {
-                    LOG_INF("Filesystem mount successful on retry!");
-                    filesystem_available = true;
-                    
-                    // Clear the error status
-                    send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, false);
-                    
-                    // Perform initial setup
-                    cap_and_reindex_log_files(foot_sensor_file_prefix, hardware_dir_path, 200, 1);
-                    cap_and_reindex_log_files(bhi360_file_prefix, hardware_dir_path, 200, 1);
-                    cap_and_reindex_log_files(activity_file_prefix, hardware_dir_path, 200, 1);
-                }
-            }
-        }
-        
-        // Check for batch timeouts periodically
-        if (filesystem_available) {
-            check_batch_timeouts();
-        }
+        ret = k_msgq_get(&data_msgq, &msg, K_FOREVER);
 
         if (ret == 0)
         {
@@ -711,149 +737,189 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
             switch (msg.type)
             {
                 case MSG_TYPE_FOOT_SAMPLES: {
-                const foot_samples_t *foot_data = &msg.data.foot_samples;
-                
-                // Only log data from our own foot sensor, not from D2D
-                // D2D data (from secondary device) should only be forwarded to phone via BLE
-                if (msg.sender == SENDER_FOOT_SENSOR_THREAD) {
-                    // This is our own foot sensor data - log it
-                    if (filesystem_available && atomic_get(&logging_foot_active) == 1)
+                    const foot_samples_t *foot_data = &msg.data.foot_samples;
+
+                    // Only log data from our own foot sensor, not from D2D
+                    // D2D data (from secondary device) should only be forwarded to phone via BLE
+                    if (msg.sender == SENDER_FOOT_SENSOR_THREAD)
                     {
-                        // Create FootSensorLogMessage
-                        sensor_data_messages_FootSensorLogMessage foot_log_msg =
-                            sensor_data_messages_FootSensorLogMessage_init_default;
-                        foot_log_msg.which_payload = sensor_data_messages_FootSensorLogMessage_foot_sensor_tag;
+                        // This is our own foot sensor data - log it
+                        if (filesystem_available && atomic_get(&logging_foot_active) == 1)
+                        {
+                            // Create FootSensorLogMessage
+                            sensor_data_messages_FootSensorLogMessage foot_log_msg =
+                                sensor_data_messages_FootSensorLogMessage_init_default;
+                            foot_log_msg.which_payload = sensor_data_messages_FootSensorLogMessage_foot_sensor_tag;
 
-                        // Populate FootSensorData fields
-                        foot_log_msg.payload.foot_sensor.readings.funcs.encode = &encode_foot_sensor_readings_callback;
-                        foot_log_msg.payload.foot_sensor.readings.arg = (void *)foot_data;
+                            // Populate FootSensorData fields
+                            foot_log_msg.payload.foot_sensor.readings.funcs.encode =
+                                &encode_foot_sensor_readings_callback;
+                            foot_log_msg.payload.foot_sensor.readings.arg = (void *)foot_data;
 
-                        // Calculate delta time
-                        uint32_t current_time_ms = (uint32_t)k_uptime_get();
-                        uint16_t delta_ms = 0;
-                        
-                        if (foot_sensor_first_packet) {
-                            delta_ms = 0;  // First packet after header has delta 0
-                            foot_sensor_first_packet = false;
-                        } else {
-                            uint32_t time_diff = current_time_ms - foot_sensor_last_timestamp_ms;
-                            // Cap at 65535ms (about 65 seconds) to fit in 2 bytes
-                            delta_ms = (time_diff > 65535) ? 65535 : (uint16_t)time_diff;
-                        }
-                        
-                        foot_sensor_last_timestamp_ms = current_time_ms;
-                        foot_log_msg.payload.foot_sensor.delta_ms = delta_ms;
+                            // Calculate delta time
+                            uint32_t current_time_ms = (uint32_t)k_uptime_get();
+                            uint16_t delta_ms = 0;
 
-                        // Encode directly to batch buffer
-                        uint8_t temp_buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
-                        pb_ostream_t stream = pb_ostream_from_buffer(temp_buffer, sizeof(temp_buffer));
-                        bool encode_status = pb_encode(&stream, sensor_data_messages_FootSensorLogMessage_fields, &foot_log_msg);
-                        
-                        if (encode_status && (foot_sensor_batch_bytes + stream.bytes_written <= sizeof(foot_sensor_batch_buffer))) {
-                            // Add to batch buffer
-                            memcpy(&foot_sensor_batch_buffer[foot_sensor_batch_bytes], temp_buffer, stream.bytes_written);
-                            foot_sensor_batch_bytes += stream.bytes_written;
-                            foot_sensor_batch_count++;
-                            
-                            // Flush batch if full or buffer is getting full
-                            if (foot_sensor_batch_count >= FOOT_SENSOR_BATCH_SIZE ||
-                                foot_sensor_batch_bytes > (sizeof(foot_sensor_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE)) {
-                                err_t write_status = flush_foot_sensor_batch();
-                                if (write_status != err_t::NO_ERROR) {
-                                    LOG_ERR("Failed to flush foot sensor batch: %d", (int)write_status);
+                            if (foot_sensor_first_packet)
+                            {
+                                delta_ms = 0; // First packet after header has delta 0
+                                foot_sensor_first_packet = false;
+                            }
+                            else
+                            {
+                                uint32_t time_diff = current_time_ms - foot_sensor_last_timestamp_ms;
+                                // Cap at 65535ms (about 65 seconds) to fit in 2 bytes
+                                delta_ms = (time_diff > 65535) ? 65535 : (uint16_t)time_diff;
+                            }
+
+                            foot_sensor_last_timestamp_ms = current_time_ms;
+                            foot_log_msg.payload.foot_sensor.delta_ms = delta_ms;
+
+                            // Encode directly to batch buffer
+                            uint8_t temp_buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
+                            pb_ostream_t stream = pb_ostream_from_buffer(temp_buffer, sizeof(temp_buffer));
+                            bool encode_status =
+                                pb_encode(&stream, sensor_data_messages_FootSensorLogMessage_fields, &foot_log_msg);
+
+                            if (encode_status &&
+                                (foot_sensor_batch_bytes + stream.bytes_written <= sizeof(foot_sensor_batch_buffer)))
+                            {
+                                // Add to batch buffer
+                                memcpy(&foot_sensor_batch_buffer[foot_sensor_batch_bytes], temp_buffer,
+                                       stream.bytes_written);
+                                foot_sensor_batch_bytes += stream.bytes_written;
+                                foot_sensor_batch_count++;
+
+                                // Flush batch if full or buffer is getting full
+                                if (foot_sensor_batch_count >= FOOT_SENSOR_BATCH_SIZE ||
+                                    foot_sensor_batch_bytes >
+                                        (sizeof(foot_sensor_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE))
+                                {
+                                    err_t write_status = flush_foot_sensor_batch();
+                                    if (write_status != err_t::NO_ERROR)
+                                    {
+                                        LOG_ERR("Failed to flush foot sensor batch: %d", (int)write_status);
+                                    }
                                 }
                             }
-                        } else {
-                            // Buffer full or encode error - flush and retry
-                            flush_foot_sensor_batch();
-                            if (!encode_status) {
-                                LOG_ERR("Failed to encode foot sensor data: %s", stream.errmsg);
+                            else
+                            {
+                                // Buffer full or encode error - flush and retry
+                                flush_foot_sensor_batch();
+                                if (!encode_status)
+                                {
+                                    LOG_ERR("Failed to encode foot sensor data: %s", stream.errmsg);
+                                }
                             }
                         }
+                        else if (!filesystem_available && atomic_get(&logging_foot_active) == 1)
+                        {
+                            LOG_DBG("Foot sensor logging requested but filesystem not available");
+                        }
                     }
-                    else if (!filesystem_available && atomic_get(&logging_foot_active) == 1)
+                    else if (msg.sender == SENDER_D2D_SECONDARY)
                     {
-                        LOG_DBG("Foot sensor logging requested but filesystem not available");
+                        // This is foot sensor data from secondary device via D2D
+                        // Don't log it - it's only for real-time BLE transmission
+                        LOG_DBG("Received foot sensor data from secondary device via D2D - not logging");
                     }
-                } else if (msg.sender == SENDER_D2D_SECONDARY) {
-                    // This is foot sensor data from secondary device via D2D
-                    // Don't log it - it's only for real-time BLE transmission
-                    LOG_DBG("Received foot sensor data from secondary device via D2D - not logging");
-                } else {
-                    LOG_WRN("Received foot sensor data from unexpected sender: %s", get_sender_name(msg.sender));
-                }
-                break;
+                    else
+                    {
+                        LOG_WRN("Received foot sensor data from unexpected sender: %s", get_sender_name(msg.sender));
+                    }
+                    break;
                 }
 
                 case MSG_TYPE_BHI360_LOG_RECORD: {
                     const bhi360_log_record_t *record = &msg.data.bhi360_log_record;
-                    
+
                     // Only attempt logging if filesystem is available and logging is active
                     if (filesystem_available && atomic_get(&logging_bhi360_active) == 1)
                     {
-                         LOG_INF("bhi360 sample data");
+                        LOG_INF("bhi360 sample data");
                         sensor_data_messages_BHI360LogMessage bhi360_log_msg =
                             sensor_data_messages_BHI360LogMessage_init_default;
                         bhi360_log_msg.which_payload = sensor_data_messages_BHI360LogMessage_bhi360_log_record_tag;
 
                         // Populate BHI360LogRecord fields with fixed-point conversion
                         // Quaternion components scaled by 10000
-                        bhi360_log_msg.payload.bhi360_log_record.quat_x = float_to_fixed16(record->quat_x, FixedPoint::QUAT_SCALE);
-                        bhi360_log_msg.payload.bhi360_log_record.quat_y = float_to_fixed16(record->quat_y, FixedPoint::QUAT_SCALE);
-                        bhi360_log_msg.payload.bhi360_log_record.quat_z = float_to_fixed16(record->quat_z, FixedPoint::QUAT_SCALE);
-                        bhi360_log_msg.payload.bhi360_log_record.quat_w = float_to_fixed16(record->quat_w, FixedPoint::QUAT_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.quat_x =
+                            float_to_fixed16(record->quat_x, FixedPoint::QUAT_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.quat_y =
+                            float_to_fixed16(record->quat_y, FixedPoint::QUAT_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.quat_z =
+                            float_to_fixed16(record->quat_z, FixedPoint::QUAT_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.quat_w =
+                            float_to_fixed16(record->quat_w, FixedPoint::QUAT_SCALE);
                         // Quaternion accuracy scaled by 100
-                        bhi360_log_msg.payload.bhi360_log_record.quat_accuracy = static_cast<uint8_t>(record->quat_accuracy * FixedPoint::ACCURACY_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.quat_accuracy =
+                            static_cast<uint8_t>(record->quat_accuracy * FixedPoint::ACCURACY_SCALE);
                         // Linear acceleration scaled by 1000 (mm/s²)
-                        bhi360_log_msg.payload.bhi360_log_record.lacc_x = float_to_fixed16(record->lacc_x, FixedPoint::ACCEL_SCALE);
-                        bhi360_log_msg.payload.bhi360_log_record.lacc_y = float_to_fixed16(record->lacc_y, FixedPoint::ACCEL_SCALE);
-                        bhi360_log_msg.payload.bhi360_log_record.lacc_z = float_to_fixed16(record->lacc_z, FixedPoint::ACCEL_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.lacc_x =
+                            float_to_fixed16(record->lacc_x, FixedPoint::ACCEL_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.lacc_y =
+                            float_to_fixed16(record->lacc_y, FixedPoint::ACCEL_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.lacc_z =
+                            float_to_fixed16(record->lacc_z, FixedPoint::ACCEL_SCALE);
                         // Gyroscope scaled by 10000 (0.0001 rad/s)
-                        bhi360_log_msg.payload.bhi360_log_record.gyro_x = float_to_fixed16(record->gyro_x, FixedPoint::GYRO_SCALE);
-                        bhi360_log_msg.payload.bhi360_log_record.gyro_y = float_to_fixed16(record->gyro_y, FixedPoint::GYRO_SCALE);
-                        bhi360_log_msg.payload.bhi360_log_record.gyro_z = float_to_fixed16(record->gyro_z, FixedPoint::GYRO_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.gyro_x =
+                            float_to_fixed16(record->gyro_x, FixedPoint::GYRO_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.gyro_y =
+                            float_to_fixed16(record->gyro_y, FixedPoint::GYRO_SCALE);
+                        bhi360_log_msg.payload.bhi360_log_record.gyro_z =
+                            float_to_fixed16(record->gyro_z, FixedPoint::GYRO_SCALE);
                         // Step count remains as is
                         bhi360_log_msg.payload.bhi360_log_record.step_count = record->step_count;
 
                         // Calculate delta time
                         uint32_t current_time_ms = (uint32_t)k_uptime_get();
                         uint16_t delta_ms = 0;
-                        
-                        if (bhi360_first_packet) {
-                            delta_ms = 0;  // First packet after header has delta 0
+
+                        if (bhi360_first_packet)
+                        {
+                            delta_ms = 0; // First packet after header has delta 0
                             bhi360_first_packet = false;
-                        } else {
+                        }
+                        else
+                        {
                             uint32_t time_diff = current_time_ms - bhi360_last_timestamp_ms;
                             // Cap at 65535ms (about 65 seconds) to fit in 2 bytes
                             delta_ms = (time_diff > 65535) ? 65535 : (uint16_t)time_diff;
                         }
-                        
+
                         bhi360_last_timestamp_ms = current_time_ms;
                         bhi360_log_msg.payload.bhi360_log_record.delta_ms = delta_ms;
 
                         // Encode directly to batch buffer
                         uint8_t temp_buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
                         pb_ostream_t stream = pb_ostream_from_buffer(temp_buffer, sizeof(temp_buffer));
-                        bool encode_status = pb_encode(&stream, sensor_data_messages_BHI360LogMessage_fields, &bhi360_log_msg);
-                        
-                        if (encode_status && (bhi360_batch_bytes + stream.bytes_written <= sizeof(bhi360_batch_buffer))) {
+                        bool encode_status =
+                            pb_encode(&stream, sensor_data_messages_BHI360LogMessage_fields, &bhi360_log_msg);
+
+                        if (encode_status && (bhi360_batch_bytes + stream.bytes_written <= sizeof(bhi360_batch_buffer)))
+                        {
                             // Add to batch buffer
                             memcpy(&bhi360_batch_buffer[bhi360_batch_bytes], temp_buffer, stream.bytes_written);
                             bhi360_batch_bytes += stream.bytes_written;
                             bhi360_batch_count++;
-                            
+
                             // Flush batch if full or buffer is getting full
                             if (bhi360_batch_count >= BHI360_BATCH_SIZE ||
-                                bhi360_batch_bytes > (sizeof(bhi360_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE)) {
+                                bhi360_batch_bytes > (sizeof(bhi360_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE))
+                            {
                                 err_t write_status = flush_bhi360_batch();
-                                if (write_status != err_t::NO_ERROR) {
+                                if (write_status != err_t::NO_ERROR)
+                                {
                                     LOG_ERR("Failed to flush BHI360 batch: %d", (int)write_status);
                                 }
                             }
-                        } else {
+                        }
+                        else
+                        {
                             // Buffer full or encode error - flush and retry
                             flush_bhi360_batch();
-                            if (!encode_status) {
+                            if (!encode_status)
+                            {
                                 LOG_ERR("Failed to encode BHI360 data: %s", stream.errmsg);
                             }
                         }
@@ -868,7 +934,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_BHI360_STEP_COUNT: {
                     const bhi360_step_count_t *step_count_data = &msg.data.bhi360_step_count;
-                    
+
                     // Only attempt logging if filesystem is available and logging is active
                     if (filesystem_available && atomic_get(&logging_bhi360_active) == 1)
                     {
@@ -897,7 +963,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_ACTIVITY_STEP_COUNT: {
                     const activity_step_count_t *activity_data = &msg.data.activity_step_count;
-                    
+
                     // Only attempt logging if filesystem is available and logging is active
                     if (filesystem_available && atomic_get(&logging_activity_active) == 1)
                     {
@@ -912,42 +978,53 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         // Calculate delta time
                         uint32_t current_time_ms = (uint32_t)k_uptime_get();
                         uint16_t delta_ms = 0;
-                        
-                        if (activity_first_packet) {
-                            delta_ms = 0;  // First packet after header has delta 0
+
+                        if (activity_first_packet)
+                        {
+                            delta_ms = 0; // First packet after header has delta 0
                             activity_first_packet = false;
-                        } else {
+                        }
+                        else
+                        {
                             uint32_t time_diff = current_time_ms - activity_last_timestamp_ms;
                             // Cap at 65535ms (about 65 seconds) to fit in 2 bytes
                             delta_ms = (time_diff > 65535) ? 65535 : (uint16_t)time_diff;
                         }
-                        
+
                         activity_last_timestamp_ms = current_time_ms;
                         activity_log_msg.payload.activity_data.delta_ms = delta_ms;
 
                         // Encode directly to batch buffer
                         uint8_t temp_buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
                         pb_ostream_t stream = pb_ostream_from_buffer(temp_buffer, sizeof(temp_buffer));
-                        bool encode_status = pb_encode(&stream, sensor_data_messages_ActivityLogMessage_fields, &activity_log_msg);
-                        
-                        if (encode_status && (activity_batch_bytes + stream.bytes_written <= sizeof(activity_batch_buffer))) {
+                        bool encode_status =
+                            pb_encode(&stream, sensor_data_messages_ActivityLogMessage_fields, &activity_log_msg);
+
+                        if (encode_status &&
+                            (activity_batch_bytes + stream.bytes_written <= sizeof(activity_batch_buffer)))
+                        {
                             // Add to batch buffer
                             memcpy(&activity_batch_buffer[activity_batch_bytes], temp_buffer, stream.bytes_written);
                             activity_batch_bytes += stream.bytes_written;
                             activity_batch_count++;
-                            
+
                             // Flush batch if full or buffer is getting full
                             if (activity_batch_count >= ACTIVITY_BATCH_SIZE ||
-                                activity_batch_bytes > (sizeof(activity_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE)) {
+                                activity_batch_bytes > (sizeof(activity_batch_buffer) - PROTOBUF_ENCODE_BUFFER_SIZE))
+                            {
                                 err_t write_status = flush_activity_batch();
-                                if (write_status != err_t::NO_ERROR) {
+                                if (write_status != err_t::NO_ERROR)
+                                {
                                     LOG_ERR("Failed to flush activity batch: %d", (int)write_status);
                                 }
                             }
-                        } else {
+                        }
+                        else
+                        {
                             // Buffer full or encode error - flush and retry
                             flush_activity_batch();
-                            if (!encode_status) {
+                            if (!encode_status)
+                            {
                                 LOG_ERR("Failed to encode activity data: %s", stream.errmsg);
                             }
                         }
@@ -961,13 +1038,17 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_COMMAND: {
                     LOG_INF("Received generic command: %s", msg.data.command_str);
-                    if ((strcmp(msg.data.command_str, "START_LOGGING_FOOT_SENSOR") == 0) && (atomic_get(&logging_foot_active) == 0))
+                    if ((strcmp(msg.data.command_str, "START_LOGGING_FOOT_SENSOR") == 0) &&
+                        (atomic_get(&logging_foot_active) == 0))
                     {
-                        if (!filesystem_available) {
+                        if (!filesystem_available)
+                        {
                             LOG_WRN("Command: Cannot start foot sensor logging - filesystem not available");
                             // Still set the flag so we know logging was requested
                             atomic_set(&logging_foot_active, 1);
-                        } else {
+                        }
+                        else
+                        {
                             LOG_INF("Command: Starting foot sensor logging.");
                             err_t foot_status = start_foot_sensor_logging(msg.sampling_frequency, msg.fw_version);
                             if (foot_status == err_t::NO_ERROR)
@@ -981,11 +1062,13 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             }
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_FOOT_SENSOR") == 0) && (atomic_get(&logging_foot_active) == 1))
+                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_FOOT_SENSOR") == 0) &&
+                             (atomic_get(&logging_foot_active) == 1))
                     {
                         LOG_INF("Command: Stopping foot sensor logging.");
                         atomic_set(&logging_foot_active, 0);
-                        if (filesystem_available) {
+                        if (filesystem_available)
+                        {
                             // Log batching statistics
                             LOG_INF("Foot sensor batching stats: %u samples in batch", foot_sensor_batch_count);
                             err_t foot_status = end_foot_sensor_logging();
@@ -997,13 +1080,17 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             k_msleep(10);
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "START_LOGGING_BHI360") == 0) && (atomic_get(&logging_bhi360_active) == 0))
+                    else if ((strcmp(msg.data.command_str, "START_LOGGING_BHI360") == 0) &&
+                             (atomic_get(&logging_bhi360_active) == 0))
                     {
-                        if (!filesystem_available) {
+                        if (!filesystem_available)
+                        {
                             LOG_WRN("Command: Cannot start BHI360 logging - filesystem not available");
                             // Still set the flag so we know logging was requested
                             atomic_set(&logging_bhi360_active, 1);
-                        } else {
+                        }
+                        else
+                        {
                             LOG_INF("Command: Starting BHI360 logging.");
                             err_t bhi360_status = start_bhi360_logging(msg.sampling_frequency, msg.fw_version);
                             if (bhi360_status == err_t::NO_ERROR)
@@ -1017,11 +1104,13 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             }
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_BHI360") == 0) && (atomic_get(&logging_bhi360_active) == 1))
+                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_BHI360") == 0) &&
+                             (atomic_get(&logging_bhi360_active) == 1))
                     {
                         LOG_INF("Command: Stopping BHI360 logging.");
                         atomic_set(&logging_bhi360_active, 0);
-                        if (filesystem_available) {
+                        if (filesystem_available)
+                        {
                             err_t bhi360_status = end_bhi360_logging();
                             if (bhi360_status != err_t::NO_ERROR)
                             {
@@ -1031,13 +1120,17 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             k_msleep(10);
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "START_LOGGING_ACTIVITY") == 0) && (atomic_get(&logging_activity_active) == 0))
+                    else if ((strcmp(msg.data.command_str, "START_LOGGING_ACTIVITY") == 0) &&
+                             (atomic_get(&logging_activity_active) == 0))
                     {
-                        if (!filesystem_available) {
+                        if (!filesystem_available)
+                        {
                             LOG_WRN("Command: Cannot start activity logging - filesystem not available");
                             // Still set the flag so we know logging was requested
                             atomic_set(&logging_activity_active, 1);
-                        } else {
+                        }
+                        else
+                        {
                             LOG_INF("Command: Starting activity logging.");
                             err_t activity_status = start_activity_logging(msg.sampling_frequency, msg.fw_version);
                             if (activity_status == err_t::NO_ERROR)
@@ -1051,11 +1144,13 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             }
                         }
                     }
-                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_ACTIVITY") == 0) && (atomic_get(&logging_activity_active) == 1))
+                    else if ((strcmp(msg.data.command_str, "STOP_LOGGING_ACTIVITY") == 0) &&
+                             (atomic_get(&logging_activity_active) == 1))
                     {
                         LOG_INF("Command: Stopping activity logging.");
                         atomic_set(&logging_activity_active, 0);
-                        if (filesystem_available) {
+                        if (filesystem_available)
+                        {
                             err_t activity_status = end_activity_logging();
                             if (activity_status != err_t::NO_ERROR)
                             {
@@ -1072,27 +1167,34 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         err_t foot_status = err_t::NO_ERROR;
                         err_t bhi360_status = err_t::NO_ERROR;
                         err_t activity_status = err_t::NO_ERROR;
-                        
-                        if (atomic_get(&logging_foot_active) == 1) {
+
+                        if (atomic_get(&logging_foot_active) == 1)
+                        {
                             atomic_set(&logging_foot_active, 0);
-                            if (filesystem_available) {
+                            if (filesystem_available)
+                            {
                                 foot_status = end_foot_sensor_logging();
                             }
                         }
-                        if (atomic_get(&logging_bhi360_active) == 1) {
+                        if (atomic_get(&logging_bhi360_active) == 1)
+                        {
                             atomic_set(&logging_bhi360_active, 0);
-                            if (filesystem_available) {
+                            if (filesystem_available)
+                            {
                                 bhi360_status = end_bhi360_logging();
                             }
                         }
-                        if (atomic_get(&logging_activity_active) == 1) {
+                        if (atomic_get(&logging_activity_active) == 1)
+                        {
                             atomic_set(&logging_activity_active, 0);
-                            if (filesystem_available) {
+                            if (filesystem_available)
+                            {
                                 activity_status = end_activity_logging();
                             }
                         }
-                        
-                        if (filesystem_available) {
+
+                        if (filesystem_available)
+                        {
                             if (foot_status != err_t::NO_ERROR)
                             {
                                 LOG_ERR("Failed to stop foot sensor logging from command: %d", (int)foot_status);
@@ -1117,9 +1219,12 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_DELETE_FOOT_LOG: {
                     LOG_INF("Received DELETE FOOT LOG command for ID: %u", msg.data.delete_cmd.id);
-                    if (!filesystem_available) {
+                    if (!filesystem_available)
+                    {
                         LOG_WRN("Cannot delete foot log - filesystem not available");
-                    } else {
+                    }
+                    else
+                    {
                         err_t delete_status =
                             delete_by_type_and_id(RECORD_HARDWARE_FOOT_SENSOR, (uint8_t)msg.data.delete_cmd.id);
                         if (delete_status != err_t::NO_ERROR)
@@ -1137,9 +1242,12 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_DELETE_BHI360_LOG: { // New: Handle BHI360 delete messages
                     LOG_INF("Received DELETE BHI360 LOG command for ID: %u", msg.data.delete_cmd.id);
-                    if (!filesystem_available) {
+                    if (!filesystem_available)
+                    {
                         LOG_WRN("Cannot delete BHI360 log - filesystem not available");
-                    } else {
+                    }
+                    else
+                    {
                         err_t delete_status =
                             delete_by_type_and_id(RECORD_HARDWARE_BHI360, (uint8_t)msg.data.delete_cmd.id);
                         if (delete_status != err_t::NO_ERROR)
@@ -1157,9 +1265,12 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_DELETE_ACTIVITY_LOG: {
                     LOG_INF("Received DELETE ACTIVITY LOG command for ID: %u", msg.data.delete_cmd.id);
-                    if (!filesystem_available) {
+                    if (!filesystem_available)
+                    {
                         LOG_WRN("Cannot delete activity log - filesystem not available");
-                    } else {
+                    }
+                    else
+                    {
                         err_t delete_status =
                             delete_by_type_and_id(RECORD_HARDWARE_ACTIVITY, (uint8_t)msg.data.delete_cmd.id);
                         if (delete_status != err_t::NO_ERROR)
@@ -1176,11 +1287,14 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 }
 
                 case MSG_TYPE_SAVE_BHI360_CALIBRATION: {
-                    LOG_INF("Received SAVE BHI360 CALIBRATION command for sensor type: %u", 
+                    LOG_INF("Received SAVE BHI360 CALIBRATION command for sensor type: %u",
                             msg.data.bhi360_calibration.sensor_type);
-                    if (!filesystem_available) {
+                    if (!filesystem_available)
+                    {
                         LOG_WRN("Cannot save calibration - filesystem not available");
-                    } else {
+                    }
+                    else
+                    {
                         err_t save_status = save_bhi360_calibration_data(&msg.data.bhi360_calibration);
                         if (save_status != err_t::NO_ERROR)
                         {
@@ -1195,11 +1309,14 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 }
 
                 case MSG_TYPE_LOAD_BHI360_CALIBRATION: {
-                    LOG_INF("Received LOAD BHI360 CALIBRATION command for sensor type: %u", 
+                    LOG_INF("Received LOAD BHI360 CALIBRATION command for sensor type: %u",
                             msg.data.bhi360_calibration.sensor_type);
-                    if (!filesystem_available) {
+                    if (!filesystem_available)
+                    {
                         LOG_WRN("Cannot load calibration - filesystem not available");
-                    } else {
+                    }
+                    else
+                    {
                         err_t load_status = load_bhi360_calibration_data(msg.data.bhi360_calibration.sensor_type);
                         if (load_status != err_t::NO_ERROR)
                         {
@@ -1215,15 +1332,20 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_REQUEST_BHI360_CALIBRATION: {
                     LOG_INF("Received REQUEST BHI360 CALIBRATION from %s", get_sender_name(msg.sender));
-                    if (!filesystem_available) {
+                    if (!filesystem_available)
+                    {
                         LOG_WRN("Cannot load calibration - filesystem not available");
-                    } else {
+                    }
+                    else
+                    {
                         // Load and send calibration data for both accel and gyro
-                        for (uint8_t sensor_type = 0; sensor_type <= 1; sensor_type++) {
+                        for (uint8_t sensor_type = 0; sensor_type <= 1; sensor_type++)
+                        {
                             err_t load_status = load_bhi360_calibration_data(sensor_type);
-                            if (load_status != err_t::NO_ERROR && load_status != err_t::FILE_SYSTEM_NO_FILES) {
-                                LOG_ERR("Failed to load BHI360 calibration data for sensor %u: %d", 
-                                        sensor_type, (int)load_status);
+                            if (load_status != err_t::NO_ERROR && load_status != err_t::FILE_SYSTEM_NO_FILES)
+                            {
+                                LOG_ERR("Failed to load BHI360 calibration data for sensor %u: %d", sensor_type,
+                                        (int)load_status);
                             }
                         }
                     }
@@ -1232,13 +1354,19 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_SAVE_WEIGHT_CALIBRATION: {
                     LOG_INF("Received SAVE WEIGHT CALIBRATION command");
-                    if (!filesystem_available) {
+                    if (!filesystem_available)
+                    {
                         LOG_WRN("Cannot save weight calibration - filesystem not available");
-                    } else {
+                    }
+                    else
+                    {
                         err_t save_status = save_weight_calibration_data(&msg.data.weight_calibration);
-                        if (save_status != err_t::NO_ERROR) {
+                        if (save_status != err_t::NO_ERROR)
+                        {
                             LOG_ERR("Failed to save weight calibration data: %d", (int)save_status);
-                        } else {
+                        }
+                        else
+                        {
                             LOG_INF("Successfully saved weight calibration data");
                         }
                     }
@@ -1247,11 +1375,15 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_REQUEST_WEIGHT_CALIBRATION: {
                     LOG_INF("Received REQUEST WEIGHT CALIBRATION from %s", get_sender_name(msg.sender));
-                    if (!filesystem_available) {
+                    if (!filesystem_available)
+                    {
                         LOG_WRN("Cannot load weight calibration - filesystem not available");
-                    } else {
+                    }
+                    else
+                    {
                         err_t load_status = load_weight_calibration_data();
-                        if (load_status != err_t::NO_ERROR && load_status != err_t::FILE_SYSTEM_NO_FILES) {
+                        if (load_status != err_t::NO_ERROR && load_status != err_t::FILE_SYSTEM_NO_FILES)
+                        {
                             LOG_ERR("Failed to load weight calibration data: %d", (int)load_status);
                         }
                     }
@@ -1286,9 +1418,11 @@ err_t mount_file_system(struct fs_mount_t *mount)
     }
 
     // Conditionally erase flash if config is enabled
-    if (IS_ENABLED(CONFIG_APP_WIPE_STORAGE)) {
+    if (IS_ENABLED(CONFIG_APP_WIPE_STORAGE))
+    {
         err_t rc = littlefs_flash_erase((uintptr_t)mount->storage_dev);
-        if (rc != err_t::NO_ERROR) {
+        if (rc != err_t::NO_ERROR)
+        {
             return err_t::DATA_ERROR;
         }
     }
@@ -1301,8 +1435,8 @@ err_t mount_file_system(struct fs_mount_t *mount)
     }
 
     // Use hardware_dir_path from data.hpp
-    //For testing, list files in the directory
-   //   int err_ls = lsdir(hardware_dir_path);
+    // For testing, list files in the directory
+    //   int err_ls = lsdir(hardware_dir_path);
 
     return err_t::NO_ERROR;
 }
@@ -1460,13 +1594,15 @@ err_t close_directory(fs_dir_t *dirp)
 }
 
 // Find the latest (not open) log file for a given type
-int find_latest_log_file(const char *file_prefix, record_type_t record_type, char *file_path, const char *open_file_path)
+int find_latest_log_file(const char *file_prefix, record_type_t record_type, char *file_path,
+                         const char *open_file_path)
 {
     fs_dir_t dirp{};
     static fs_dirent entry{};
 
     char dir_path_buf[util::max_path_length]{};
-    if (record_type == RECORD_HARDWARE_FOOT_SENSOR || record_type == RECORD_HARDWARE_BHI360 || record_type == RECORD_HARDWARE_ACTIVITY)
+    if (record_type == RECORD_HARDWARE_FOOT_SENSOR || record_type == RECORD_HARDWARE_BHI360 ||
+        record_type == RECORD_HARDWARE_ACTIVITY)
     {
         std::strcpy(dir_path_buf, hardware_dir_path);
     }
@@ -1503,8 +1639,7 @@ int find_latest_log_file(const char *file_prefix, record_type_t record_type, cha
         size_t prefix_len = std::strlen(file_prefix);
         size_t ext_len = std::strlen(".pb");
 
-        if (entry.type == FS_DIR_ENTRY_FILE &&
-            name_len > (prefix_len + ext_len) &&
+        if (entry.type == FS_DIR_ENTRY_FILE && name_len > (prefix_len + ext_len) &&
             std::strncmp(entry.name, file_prefix, prefix_len) == 0 &&
             std::strcmp(entry.name + name_len - ext_len, ".pb") == 0)
         {
@@ -1528,7 +1663,8 @@ int find_latest_log_file(const char *file_prefix, record_type_t record_type, cha
             }
             else
             {
-                LOG_WRN("find_latest_log_file: Skipping non-conforming file name '%s' for prefix '%s'", entry.name, file_prefix);
+                LOG_WRN("find_latest_log_file: Skipping non-conforming file name '%s' for prefix '%s'", entry.name,
+                        file_prefix);
             }
         }
     }
@@ -1566,104 +1702,112 @@ static void strremove(char *str, const char *sub)
 
 /**
  * @brief Get the filesystem usage percentage
- * 
+ *
  * @return uint8_t Percentage of filesystem used (0-100), or 255 on error
  */
 static uint8_t get_filesystem_usage_percent(void)
 {
     struct fs_statvfs stat;
     int ret = fs_statvfs(CONFIG_FILE_SYSTEM_MOUNT, &stat);
-    
-    if (ret != 0) {
+
+    if (ret != 0)
+    {
         LOG_ERR("Failed to get filesystem statistics: %d", ret);
         return 255; // Error value
     }
-    
+
     // Calculate total and used blocks
     uint64_t total_blocks = stat.f_blocks;
     uint64_t free_blocks = stat.f_bfree;
     uint64_t used_blocks = total_blocks - free_blocks;
-    
-    if (total_blocks == 0) {
+
+    if (total_blocks == 0)
+    {
         return 255; // Error: no blocks
     }
-    
+
     // Calculate percentage (avoid overflow)
     uint8_t usage_percent = (uint8_t)((used_blocks * 100) / total_blocks);
-    
-    LOG_DBG("Filesystem usage: %u%% (used: %llu blocks, total: %llu blocks)", 
-            usage_percent, used_blocks, total_blocks);
-    
+
+    LOG_DBG("Filesystem usage: %u%% (used: %llu blocks, total: %llu blocks)", usage_percent, used_blocks, total_blocks);
+
     return usage_percent;
 }
 
 /**
  * @brief Check filesystem space and cleanup if needed
- * 
+ *
  * @return true if there is enough space (or cleanup was successful), false otherwise
  */
 static bool check_filesystem_space_and_cleanup(void)
 {
     uint8_t usage_percent = get_filesystem_usage_percent();
-    
-    if (usage_percent == 255) {
+
+    if (usage_percent == 255)
+    {
         // Error getting filesystem stats, assume we have space
         LOG_WRN("Could not get filesystem stats, assuming space available");
         return true;
     }
-    
-    if (usage_percent < FILESYSTEM_USAGE_THRESHOLD_PERCENT) {
+
+    if (usage_percent < FILESYSTEM_USAGE_THRESHOLD_PERCENT)
+    {
         // Enough space available
         return true;
     }
-    
-    LOG_WRN("Filesystem usage at %u%%, starting cleanup (threshold: %u%%)", 
-            usage_percent, FILESYSTEM_USAGE_THRESHOLD_PERCENT);
-    
+
+    LOG_WRN("Filesystem usage at %u%%, starting cleanup (threshold: %u%%)", usage_percent,
+            FILESYSTEM_USAGE_THRESHOLD_PERCENT);
+
     // Keep deleting oldest files until we reach target usage
     int total_files_deleted = 0;
-    while (usage_percent > FILESYSTEM_USAGE_TARGET_PERCENT) {
+    while (usage_percent > FILESYSTEM_USAGE_TARGET_PERCENT)
+    {
         int files_deleted_this_iteration = 0;
-        
+
         // Try to delete oldest foot sensor file
         err_t err = delete_oldest_log_file_checked(foot_sensor_file_prefix, hardware_dir_path);
-        if (err == err_t::NO_ERROR) {
+        if (err == err_t::NO_ERROR)
+        {
             files_deleted_this_iteration++;
             total_files_deleted++;
         }
-        
+
         // Try to delete oldest BHI360 file
         err = delete_oldest_log_file_checked(bhi360_file_prefix, hardware_dir_path);
-        if (err == err_t::NO_ERROR) {
+        if (err == err_t::NO_ERROR)
+        {
             files_deleted_this_iteration++;
             total_files_deleted++;
         }
-        
+
         // Try to delete oldest activity file
         err = delete_oldest_log_file_checked(activity_file_prefix, hardware_dir_path);
-        if (err == err_t::NO_ERROR) {
+        if (err == err_t::NO_ERROR)
+        {
             files_deleted_this_iteration++;
             total_files_deleted++;
         }
-        
+
         // If we couldn't delete any files in this iteration, break to avoid infinite loop
-        if (files_deleted_this_iteration == 0) {
+        if (files_deleted_this_iteration == 0)
+        {
             LOG_ERR("Could not delete any more files to free space");
             break;
         }
-        
+
         // Check usage again
         usage_percent = get_filesystem_usage_percent();
-        if (usage_percent == 255) {
+        if (usage_percent == 255)
+        {
             // Error getting stats
             break;
         }
     }
-    
-    LOG_INF("Filesystem cleanup complete. Deleted %d files, usage now at %u%%", 
-            total_files_deleted, usage_percent);
-    
-    return (usage_percent < 100);  // Return true if we have any space left
+
+    LOG_INF("Filesystem cleanup complete. Deleted %d files, usage now at %u%%", total_files_deleted, usage_percent);
+
+    return (usage_percent < 100); // Return true if we have any space left
 }
 
 typedef struct
@@ -1694,7 +1838,7 @@ static bool encode_string_callback(pb_ostream_t *stream, const pb_field_t *field
 err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_version)
 {
     err_t status = err_t::NO_ERROR;
-    
+
     // Lock mutex for thread safety
     k_mutex_lock(&foot_sensor_file_mutex, K_FOREVER);
 
@@ -1712,7 +1856,8 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
     }
 
     // --- Check filesystem space and cleanup if needed ---
-    if (!check_filesystem_space_and_cleanup()) {
+    if (!check_filesystem_space_and_cleanup())
+    {
         LOG_ERR("Insufficient filesystem space for new foot sensor log");
         k_mutex_unlock(&foot_sensor_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
@@ -1722,7 +1867,8 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
     // Protect sequence number generation with mutex
     k_mutex_lock(&sequence_number_mutex, K_FOREVER);
     next_foot_sensor_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
-    if (next_foot_sensor_file_sequence == 0) {
+    if (next_foot_sensor_file_sequence == 0)
+    {
         next_foot_sensor_file_sequence = 1;
     }
     k_mutex_unlock(&sequence_number_mutex);
@@ -1735,7 +1881,7 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
     {
         LOG_ERR("FAIL: open foot sensor log %s: %d", foot_sensor_file_path, ret_fs_open);
         status = err_t::FILE_SYSTEM_ERROR;
-        
+
         // Report error to Bluetooth module
         send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, true);
     }
@@ -1781,7 +1927,7 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
                 }
                 LOG_DBG("Foot sensor SensingData header written to %s (%u bytes).", foot_sensor_file_path,
                         stream.bytes_written);
-                
+
                 // Clear any previous file system errors since we succeeded
                 send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, false);
             }
@@ -1801,7 +1947,7 @@ err_t start_foot_sensor_logging(uint32_t sampling_frequency, const char *fw_vers
 err_t end_foot_sensor_logging()
 {
     err_t overall_status = err_t::NO_ERROR;
-    
+
     // Lock mutex for thread safety
     k_mutex_lock(&foot_sensor_file_mutex, K_FOREVER);
 
@@ -1923,7 +2069,7 @@ static bool encode_foot_sensor_readings_callback(pb_ostream_t *stream, const pb_
 err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
 {
     err_t status = err_t::NO_ERROR;
-    
+
     // Lock mutex for thread safety
     k_mutex_lock(&bhi360_file_mutex, K_FOREVER);
 
@@ -1932,7 +2078,8 @@ err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
     bhi360_first_packet = true;
 
     // --- Check filesystem space and cleanup if needed ---
-    if (!check_filesystem_space_and_cleanup()) {
+    if (!check_filesystem_space_and_cleanup())
+    {
         LOG_ERR("Insufficient filesystem space for new BHI360 log");
         k_mutex_unlock(&bhi360_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
@@ -1942,7 +2089,8 @@ err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
     // Protect sequence number generation with mutex
     k_mutex_lock(&sequence_number_mutex, K_FOREVER);
     next_bhi360_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
-    if (next_bhi360_file_sequence == 0) {
+    if (next_bhi360_file_sequence == 0)
+    {
         next_bhi360_file_sequence = 1;
     }
     k_mutex_unlock(&sequence_number_mutex);
@@ -2015,7 +2163,7 @@ err_t start_bhi360_logging(uint32_t sampling_frequency, const char *fw_version)
 err_t end_bhi360_logging()
 {
     err_t overall_status = err_t::NO_ERROR;
-    
+
     // Lock mutex for thread safety
     k_mutex_lock(&bhi360_file_mutex, K_FOREVER);
 
@@ -2057,7 +2205,8 @@ err_t end_bhi360_logging()
         bhi360_msg.data.new_hardware_log_file.file_sequence_id = next_bhi360_file_sequence;
         strncpy(bhi360_msg.data.new_hardware_log_file.file_path, bhi360_file_path,
                 sizeof(bhi360_msg.data.new_hardware_log_file.file_path) - 1);
-        bhi360_msg.data.new_hardware_log_file.file_path[sizeof(bhi360_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+        bhi360_msg.data.new_hardware_log_file.file_path[sizeof(bhi360_msg.data.new_hardware_log_file.file_path) - 1] =
+            '\0';
 
         if (k_msgq_put(&bluetooth_msgq, &bhi360_msg, K_NO_WAIT) != 0)
         {
@@ -2087,7 +2236,8 @@ err_t end_bhi360_logging()
         bhi360_msg.data.new_hardware_log_file.file_sequence_id = next_bhi360_file_sequence;
         strncpy(bhi360_msg.data.new_hardware_log_file.file_path, bhi360_file_path,
                 sizeof(bhi360_msg.data.new_hardware_log_file.file_path) - 1);
-        bhi360_msg.data.new_hardware_log_file.file_path[sizeof(bhi360_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+        bhi360_msg.data.new_hardware_log_file.file_path[sizeof(bhi360_msg.data.new_hardware_log_file.file_path) - 1] =
+            '\0';
         if (k_msgq_put(&bluetooth_msgq, &bhi360_msg, K_NO_WAIT) != 0)
         {
             // First attempt failed, try with a small timeout
@@ -2118,22 +2268,26 @@ err_t end_bhi360_logging()
  */
 static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSensorLogMessage *sensor_msg)
 {
-    if (!filesystem_available) {
+    if (!filesystem_available)
+    {
         return err_t::FILE_SYSTEM_ERROR;
     }
-    
+
     // Periodically check filesystem space (if enabled)
-    if (ENABLE_RUNTIME_SPACE_CHECKING) {
+    if (ENABLE_RUNTIME_SPACE_CHECKING)
+    {
         uint32_t current_time_ms = k_uptime_get_32();
-        if ((current_time_ms - last_filesystem_check_time_ms) >= FILESYSTEM_CHECK_TIME_INTERVAL_MS) {
+        if ((current_time_ms - last_filesystem_check_time_ms) >= FILESYSTEM_CHECK_TIME_INTERVAL_MS)
+        {
             last_filesystem_check_time_ms = current_time_ms;
-            if (!check_filesystem_space_and_cleanup()) {
+            if (!check_filesystem_space_and_cleanup())
+            {
                 LOG_ERR("Filesystem full during foot sensor logging");
                 return err_t::FILE_SYSTEM_ERROR;
             }
         }
     }
-    
+
     uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE]; // Ensure this buffer is large enough for any FootSensorLogMessage
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
@@ -2146,9 +2300,10 @@ static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSens
 
     // Lock mutex for buffer access
     k_mutex_lock(&foot_sensor_file_mutex, K_FOREVER);
-    
+
     // Batch buffering logic
-    if (foot_sensor_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE) {
+    if (foot_sensor_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE)
+    {
         flush_foot_sensor_buffer();
     }
     memcpy(&foot_sensor_write_buffer[foot_sensor_write_buffer_pos], buffer, stream.bytes_written);
@@ -2156,13 +2311,15 @@ static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSens
 
     // Optionally, flush immediately for header or session end messages
     if (sensor_msg->which_payload == sensor_data_messages_FootSensorLogMessage_sensing_data_tag ||
-        sensor_msg->which_payload == sensor_data_messages_FootSensorLogMessage_session_end_tag) {
+        sensor_msg->which_payload == sensor_data_messages_FootSensorLogMessage_session_end_tag)
+    {
         flush_foot_sensor_buffer();
     }
 
     k_mutex_unlock(&foot_sensor_file_mutex);
-    
-    LOG_DBG("Foot sensor data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written, (unsigned)foot_sensor_write_buffer_pos, FLASH_PAGE_SIZE);
+
+    LOG_DBG("Foot sensor data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written,
+            (unsigned)foot_sensor_write_buffer_pos, FLASH_PAGE_SIZE);
     return err_t::NO_ERROR;
 }
 
@@ -2174,22 +2331,26 @@ static err_t write_foot_sensor_protobuf_data(const sensor_data_messages_FootSens
  */
 static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMessage *sensor_msg)
 {
-    if (!filesystem_available) {
+    if (!filesystem_available)
+    {
         return err_t::FILE_SYSTEM_ERROR;
     }
-    
+
     // Periodically check filesystem space (if enabled)
-    if (ENABLE_RUNTIME_SPACE_CHECKING) {
+    if (ENABLE_RUNTIME_SPACE_CHECKING)
+    {
         uint32_t current_time_ms = k_uptime_get_32();
-        if ((current_time_ms - last_filesystem_check_time_ms) >= FILESYSTEM_CHECK_TIME_INTERVAL_MS) {
+        if ((current_time_ms - last_filesystem_check_time_ms) >= FILESYSTEM_CHECK_TIME_INTERVAL_MS)
+        {
             last_filesystem_check_time_ms = current_time_ms;
-            if (!check_filesystem_space_and_cleanup()) {
+            if (!check_filesystem_space_and_cleanup())
+            {
                 LOG_ERR("Filesystem full during BHI360 logging");
                 return err_t::FILE_SYSTEM_ERROR;
             }
         }
     }
-    
+
     uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
@@ -2202,9 +2363,10 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
 
     // Lock mutex for buffer access
     k_mutex_lock(&bhi360_file_mutex, K_FOREVER);
-    
+
     // Batch buffering logic
-    if (bhi360_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE) {
+    if (bhi360_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE)
+    {
         flush_bhi360_buffer();
     }
     memcpy(&bhi360_write_buffer[bhi360_write_buffer_pos], buffer, stream.bytes_written);
@@ -2212,13 +2374,15 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
 
     // Optionally, flush immediately for header or session end messages
     if (sensor_msg->which_payload == sensor_data_messages_BHI360LogMessage_sensing_data_tag ||
-        sensor_msg->which_payload == sensor_data_messages_BHI360LogMessage_session_end_tag) {
+        sensor_msg->which_payload == sensor_data_messages_BHI360LogMessage_session_end_tag)
+    {
         flush_bhi360_buffer();
     }
 
     k_mutex_unlock(&bhi360_file_mutex);
-    
-    LOG_DBG("BHI360 data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written, (unsigned)bhi360_write_buffer_pos, FLASH_PAGE_SIZE);
+
+    LOG_DBG("BHI360 data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written,
+            (unsigned)bhi360_write_buffer_pos, FLASH_PAGE_SIZE);
     return err_t::NO_ERROR;
 }
 
@@ -2231,7 +2395,7 @@ static err_t write_bhi360_protobuf_data(const sensor_data_messages_BHI360LogMess
 err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version)
 {
     err_t status = err_t::NO_ERROR;
-    
+
     // Lock mutex for thread safety
     k_mutex_lock(&activity_file_mutex, K_FOREVER);
 
@@ -2249,7 +2413,8 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     }
 
     // --- Check filesystem space and cleanup if needed ---
-    if (!check_filesystem_space_and_cleanup()) {
+    if (!check_filesystem_space_and_cleanup())
+    {
         LOG_ERR("Insufficient filesystem space for new activity log");
         k_mutex_unlock(&activity_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
@@ -2259,12 +2424,13 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     // Protect sequence number generation with mutex
     k_mutex_lock(&sequence_number_mutex, K_FOREVER);
     next_activity_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
-    if (next_activity_file_sequence == 0) {
+    if (next_activity_file_sequence == 0)
+    {
         next_activity_file_sequence = 1;
     }
     k_mutex_unlock(&sequence_number_mutex);
-    snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.pb", hardware_dir_path,
-             activity_file_prefix, next_activity_file_sequence);
+    snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.pb", hardware_dir_path, activity_file_prefix,
+             next_activity_file_sequence);
     fs_file_t_init(&activity_log_file);
 
     int ret_fs_open = fs_open(&activity_log_file, activity_file_path, FS_O_CREATE | FS_O_RDWR | FS_O_APPEND);
@@ -2272,7 +2438,7 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     {
         LOG_ERR("FAIL: open activity log %s: %d", activity_file_path, ret_fs_open);
         status = err_t::FILE_SYSTEM_ERROR;
-        
+
         // Report error to Bluetooth module
         send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, true);
     }
@@ -2318,7 +2484,7 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
                 }
                 LOG_DBG("Activity SensingData header written to %s (%u bytes).", activity_file_path,
                         stream.bytes_written);
-                
+
                 // Clear any previous file system errors since we succeeded
                 send_error_to_bluetooth(SENDER_DATA, err_t::FILE_SYSTEM_ERROR, false);
             }
@@ -2338,7 +2504,7 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
 err_t end_activity_logging()
 {
     err_t overall_status = err_t::NO_ERROR;
-    
+
     // Lock mutex for thread safety
     k_mutex_lock(&activity_file_mutex, K_FOREVER);
 
@@ -2378,7 +2544,8 @@ err_t end_activity_logging()
         activity_msg.data.new_hardware_log_file.file_sequence_id = next_activity_file_sequence;
         strncpy(activity_msg.data.new_hardware_log_file.file_path, activity_file_path,
                 sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1);
-        activity_msg.data.new_hardware_log_file.file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+        activity_msg.data.new_hardware_log_file
+            .file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
 
         if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
         {
@@ -2407,7 +2574,8 @@ err_t end_activity_logging()
         activity_msg.data.new_hardware_log_file.file_sequence_id = next_activity_file_sequence;
         strncpy(activity_msg.data.new_hardware_log_file.file_path, activity_file_path,
                 sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1);
-        activity_msg.data.new_hardware_log_file.file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+        activity_msg.data.new_hardware_log_file
+            .file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
         if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
         {
             LOG_ERR("Failed to put activity log notification message (file not open).");
@@ -2430,22 +2598,26 @@ err_t end_activity_logging()
  */
 static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLogMessage *sensor_msg)
 {
-    if (!filesystem_available) {
+    if (!filesystem_available)
+    {
         return err_t::FILE_SYSTEM_ERROR;
     }
-    
+
     // Periodically check filesystem space (if enabled)
-    if (ENABLE_RUNTIME_SPACE_CHECKING) {
+    if (ENABLE_RUNTIME_SPACE_CHECKING)
+    {
         uint32_t current_time_ms = k_uptime_get_32();
-        if ((current_time_ms - last_filesystem_check_time_ms) >= FILESYSTEM_CHECK_TIME_INTERVAL_MS) {
+        if ((current_time_ms - last_filesystem_check_time_ms) >= FILESYSTEM_CHECK_TIME_INTERVAL_MS)
+        {
             last_filesystem_check_time_ms = current_time_ms;
-            if (!check_filesystem_space_and_cleanup()) {
+            if (!check_filesystem_space_and_cleanup())
+            {
                 LOG_ERR("Filesystem full during activity logging");
                 return err_t::FILE_SYSTEM_ERROR;
             }
         }
     }
-    
+
     uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
     pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
 
@@ -2458,9 +2630,10 @@ static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLog
 
     // Lock mutex for buffer access
     k_mutex_lock(&activity_file_mutex, K_FOREVER);
-    
+
     // Batch buffering logic
-    if (activity_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE) {
+    if (activity_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE)
+    {
         flush_activity_buffer();
     }
     memcpy(&activity_write_buffer[activity_write_buffer_pos], buffer, stream.bytes_written);
@@ -2468,13 +2641,15 @@ static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLog
 
     // Optionally, flush immediately for header or session end messages
     if (sensor_msg->which_payload == sensor_data_messages_ActivityLogMessage_sensing_data_tag ||
-        sensor_msg->which_payload == sensor_data_messages_ActivityLogMessage_session_end_tag) {
+        sensor_msg->which_payload == sensor_data_messages_ActivityLogMessage_session_end_tag)
+    {
         flush_activity_buffer();
     }
 
     k_mutex_unlock(&activity_file_mutex);
-    
-    LOG_DBG("Activity data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written, (unsigned)activity_write_buffer_pos, FLASH_PAGE_SIZE);
+
+    LOG_DBG("Activity data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written,
+            (unsigned)activity_write_buffer_pos, FLASH_PAGE_SIZE);
     return err_t::NO_ERROR;
 }
 
@@ -2538,7 +2713,8 @@ err_t delete_by_type_and_id(record_type_t type, uint8_t id)
             strncpy(open_file_path, foot_sensor_file_path, sizeof(open_file_path) - 1);
             open_file_path[sizeof(open_file_path) - 1] = '\0';
         }
-        temp_latest_file_seq = (uint8_t)find_latest_log_file(foot_sensor_file_prefix, RECORD_HARDWARE_FOOT_SENSOR, latest_file_path, open_file_path);
+        temp_latest_file_seq = (uint8_t)find_latest_log_file(foot_sensor_file_prefix, RECORD_HARDWARE_FOOT_SENSOR,
+                                                             latest_file_path, open_file_path);
         if (temp_latest_file_seq == (uint32_t)err_t::DATA_ERROR)
         {
             LOG_INF("Foot sensor directory empty or error finding latest file after deletion. No file to report.");
@@ -2592,7 +2768,8 @@ err_t delete_by_type_and_id(record_type_t type, uint8_t id)
             strncpy(open_file_path, bhi360_file_path, sizeof(open_file_path) - 1);
             open_file_path[sizeof(open_file_path) - 1] = '\0';
         }
-        temp_latest_file_seq = (uint8_t)find_latest_log_file(bhi360_file_prefix, RECORD_HARDWARE_BHI360, latest_file_path, open_file_path);
+        temp_latest_file_seq =
+            (uint8_t)find_latest_log_file(bhi360_file_prefix, RECORD_HARDWARE_BHI360, latest_file_path, open_file_path);
         if (temp_latest_file_seq == (uint32_t)err_t::DATA_ERROR)
         {
             LOG_INF("BHI360 directory empty or error finding latest file after deletion. No file to report.");
@@ -2646,7 +2823,8 @@ err_t delete_by_type_and_id(record_type_t type, uint8_t id)
             strncpy(open_file_path, activity_file_path, sizeof(open_file_path) - 1);
             open_file_path[sizeof(open_file_path) - 1] = '\0';
         }
-        temp_latest_file_seq = (uint8_t)find_latest_log_file(activity_file_prefix, RECORD_HARDWARE_ACTIVITY, latest_file_path, open_file_path);
+        temp_latest_file_seq = (uint8_t)find_latest_log_file(activity_file_prefix, RECORD_HARDWARE_ACTIVITY,
+                                                             latest_file_path, open_file_path);
         if (temp_latest_file_seq == (uint32_t)err_t::DATA_ERROR)
         {
             LOG_INF("Activity directory empty or error finding latest file after deletion. No file to report.");
@@ -2701,7 +2879,6 @@ struct LogFileEntry
     uint8_t id;
     char name[util::max_path_length];
 };
-
 
 // Cap and reindex log files for a given prefix and directory
 err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, uint8_t max_files, uint8_t delete_count)
@@ -2759,20 +2936,26 @@ err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, u
     // 3. If too many files, delete the oldest
     size_t file_count = log_files.size();
     LOG_INF("Found %zu log files for prefix %s", file_count, file_prefix);
-    if (file_count > max_files) {
+    if (file_count > max_files)
+    {
         size_t to_delete = std::min<size_t>(delete_count, file_count - max_files + delete_count);
         LOG_INF("Capping: Deleting %zu oldest files for prefix %s", to_delete, file_prefix);
-        for (size_t i = 0; i < to_delete; ++i) {
+        for (size_t i = 0; i < to_delete; ++i)
+        {
             char full_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
             int written = snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, log_files[i].name);
-            if (written < 0 || written >= (int)sizeof(full_path)) {
+            if (written < 0 || written >= (int)sizeof(full_path))
+            {
                 LOG_ERR("Internal path buffer too small for deleting: '%s/%s'", dir_path, log_files[i].name);
                 continue;
             }
             int del_res = fs_unlink(full_path);
-            if (del_res != 0) {
+            if (del_res != 0)
+            {
                 LOG_ERR("Failed to unlink %s: %d", full_path, del_res);
-            } else {
+            }
+            else
+            {
                 LOG_INF("Deleted log file: %s", full_path);
             }
         }
@@ -2781,10 +2964,13 @@ err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, u
     }
 
     // 4. Reindex only if more than 255 files
-    if (log_files.size() > 255) {
-        for (size_t i = 0; i < log_files.size(); ++i) {
+    if (log_files.size() > 255)
+    {
+        for (size_t i = 0; i < log_files.size(); ++i)
+        {
             uint8_t new_id = (uint8_t)(i + 1); // Start from 1, not 0
-            if (log_files[i].id != new_id) {
+            if (log_files[i].id != new_id)
+            {
                 char old_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
                 char new_name[32];
                 char new_path[UTIL_MAX_INTERNAL_PATH_LENGTH];
@@ -2792,9 +2978,12 @@ err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, u
                 snprintf(new_name, sizeof(new_name), "%s%03u.pb", file_prefix, new_id);
                 snprintf(new_path, sizeof(new_path), "%s/%s", dir_path, new_name);
                 int rename_res = fs_rename(old_path, new_path);
-                if (rename_res != 0) {
+                if (rename_res != 0)
+                {
                     LOG_ERR("Failed to rename %s to %s: %d", old_path, new_path, rename_res);
-                } else {
+                }
+                else
+                {
                     LOG_INF("Renamed %s to %s", old_path, new_path);
                 }
             }
@@ -3050,7 +3239,8 @@ static bool app_event_handler(const struct app_event_header *aeh)
  */
 err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
 {
-    if (!calib_data) {
+    if (!calib_data)
+    {
         return err_t::INVALID_PARAMETER;
     }
 
@@ -3059,7 +3249,8 @@ err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
 
     // Create calibration directory if it doesn't exist
     int ret = fs_mkdir(calibration_dir_path);
-    if (ret != 0 && ret != -EEXIST) {
+    if (ret != 0 && ret != -EEXIST)
+    {
         LOG_ERR("Failed to create calibration directory: %d", ret);
         k_mutex_unlock(&calibration_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
@@ -3068,24 +3259,29 @@ err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
     // Create filename based on sensor type
     char filename[util::max_path_length];
     const char *sensor_name;
-    switch (calib_data->sensor_type) {
-        case 0: sensor_name = "accel"; break;
-        case 1: sensor_name = "gyro"; break;
+    switch (calib_data->sensor_type)
+    {
+        case 0:
+            sensor_name = "accel";
+            break;
+        case 1:
+            sensor_name = "gyro";
+            break;
         default:
             LOG_ERR("Invalid sensor type: %u (only 0=accel, 1=gyro supported)", calib_data->sensor_type);
             k_mutex_unlock(&calibration_file_mutex);
             return err_t::INVALID_PARAMETER;
     }
-    
-    snprintk(filename, sizeof(filename), "%s/%s%s.bin", 
-             calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
+
+    snprintk(filename, sizeof(filename), "%s/%s%s.bin", calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
 
     // Open file for writing
     struct fs_file_t file;
     fs_file_t_init(&file);
-    
+
     ret = fs_open(&file, filename, FS_O_CREATE | FS_O_WRITE);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         LOG_ERR("Failed to open calibration file %s: %d", filename, ret);
         k_mutex_unlock(&calibration_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
@@ -3094,7 +3290,8 @@ err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
     // Write calibration data
     // First write the profile size
     ret = fs_write(&file, &calib_data->profile_size, sizeof(calib_data->profile_size));
-    if (ret < 0) {
+    if (ret < 0)
+    {
         LOG_ERR("Failed to write profile size: %d", ret);
         fs_close(&file);
         k_mutex_unlock(&calibration_file_mutex);
@@ -3103,7 +3300,8 @@ err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
 
     // Then write the actual profile data
     ret = fs_write(&file, calib_data->profile_data, calib_data->profile_size);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         LOG_ERR("Failed to write calibration data: %d", ret);
         fs_close(&file);
         k_mutex_unlock(&calibration_file_mutex);
@@ -3114,8 +3312,7 @@ err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
     fs_sync(&file);
     fs_close(&file);
 
-    LOG_INF("Saved BHI360 %s calibration to %s (%u bytes)", 
-            sensor_name, filename, calib_data->profile_size);
+    LOG_INF("Saved BHI360 %s calibration to %s (%u bytes)", sensor_name, filename, calib_data->profile_size);
 
     k_mutex_unlock(&calibration_file_mutex);
     return err_t::NO_ERROR;
@@ -3132,22 +3329,27 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
     // Create filename based on sensor type
     char filename[util::max_path_length];
     const char *sensor_name;
-    switch (sensor_type) {
-        case 0: sensor_name = "accel"; break;
-        case 1: sensor_name = "gyro"; break;
+    switch (sensor_type)
+    {
+        case 0:
+            sensor_name = "accel";
+            break;
+        case 1:
+            sensor_name = "gyro";
+            break;
         default:
             LOG_ERR("Invalid sensor type: %u (only 0=accel, 1=gyro supported)", sensor_type);
             k_mutex_unlock(&calibration_file_mutex);
             return err_t::INVALID_PARAMETER;
     }
-    
-    snprintk(filename, sizeof(filename), "%s/%s%s.bin", 
-             calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
+
+    snprintk(filename, sizeof(filename), "%s/%s%s.bin", calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
 
     // Check if file exists
     struct fs_dirent entry;
     int ret = fs_stat(filename, &entry);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         LOG_WRN("Calibration file %s not found", filename);
         return err_t::FILE_SYSTEM_NO_FILES;
     }
@@ -3155,9 +3357,10 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
     // Open file for reading
     struct fs_file_t file;
     fs_file_t_init(&file);
-    
+
     ret = fs_open(&file, filename, FS_O_READ);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         LOG_ERR("Failed to open calibration file %s: %d", filename, ret);
         k_mutex_unlock(&calibration_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
@@ -3166,14 +3369,16 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
     // Read profile size
     uint16_t profile_size;
     ret = fs_read(&file, &profile_size, sizeof(profile_size));
-    if (ret < 0) {
+    if (ret < 0)
+    {
         LOG_ERR("Failed to read profile size: %d", ret);
         fs_close(&file);
         return err_t::FILE_SYSTEM_ERROR;
     }
 
     // Validate profile size
-    if (profile_size > 512) {
+    if (profile_size > 512)
+    {
         LOG_ERR("Invalid profile size: %u", profile_size);
         fs_close(&file);
         return err_t::DATA_ERROR;
@@ -3182,7 +3387,8 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
     // Read calibration data
     uint8_t profile_data[512];
     ret = fs_read(&file, profile_data, profile_size);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         LOG_ERR("Failed to read calibration data: %d", ret);
         fs_close(&file);
         return err_t::FILE_SYSTEM_ERROR;
@@ -3190,9 +3396,8 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
 
     fs_close(&file);
 
-    LOG_INF("Loaded BHI360 %s calibration from %s (%u bytes)", 
-    sensor_name, filename, profile_size);
-    
+    LOG_INF("Loaded BHI360 %s calibration from %s (%u bytes)", sensor_name, filename, profile_size);
+
     // Send calibration data to motion sensor via message queue
     generic_message_t calib_msg = {};
     calib_msg.sender = SENDER_DATA;
@@ -3200,14 +3405,15 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
     calib_msg.data.bhi360_calibration.sensor_type = sensor_type;
     calib_msg.data.bhi360_calibration.profile_size = profile_size;
     memcpy(calib_msg.data.bhi360_calibration.profile_data, profile_data, profile_size);
-    
-    if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0) {
-    LOG_ERR("Failed to send calibration data to motion sensor");
-    return err_t::QUEUE_FULL;
+
+    if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0)
+    {
+        LOG_ERR("Failed to send calibration data to motion sensor");
+        return err_t::QUEUE_FULL;
     }
-    
+
     LOG_INF("Sent calibration data to motion sensor for sensor type %u", sensor_type);
-    
+
     return err_t::NO_ERROR;
 }
 
@@ -3221,10 +3427,10 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
  * @param actual_size Actual size of the calibration data read
  * @return err_t NO_ERROR on success, or an error code on failure
  */
-err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data, 
-                                  size_t max_size, size_t *actual_size)
+err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data, size_t max_size, size_t *actual_size)
 {
-    if (!profile_data || !actual_size) {
+    if (!profile_data || !actual_size)
+    {
         return err_t::INVALID_PARAMETER;
     }
 
@@ -3234,21 +3440,26 @@ err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data,
     // Create filename based on sensor type
     char filename[util::max_path_length];
     const char *sensor_name;
-    switch (sensor_type) {
-        case 0: sensor_name = "accel"; break;
-        case 1: sensor_name = "gyro"; break;
+    switch (sensor_type)
+    {
+        case 0:
+            sensor_name = "accel";
+            break;
+        case 1:
+            sensor_name = "gyro";
+            break;
         default:
             LOG_ERR("Invalid sensor type: %u (only 0=accel, 1=gyro supported)", sensor_type);
             return err_t::INVALID_PARAMETER;
     }
-    
-    snprintk(filename, sizeof(filename), "%s/%s%s.bin", 
-             calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
+
+    snprintk(filename, sizeof(filename), "%s/%s%s.bin", calibration_dir_path, bhi360_calib_file_prefix, sensor_name);
 
     // Check if file exists
     struct fs_dirent entry;
     int ret = fs_stat(filename, &entry);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         LOG_DBG("Calibration file %s not found", filename);
         k_mutex_unlock(&calibration_file_mutex);
         return err_t::FILE_SYSTEM_NO_FILES;
@@ -3257,9 +3468,10 @@ err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data,
     // Open file for reading
     struct fs_file_t file;
     fs_file_t_init(&file);
-    
+
     ret = fs_open(&file, filename, FS_O_READ);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         LOG_ERR("Failed to open calibration file %s: %d", filename, ret);
         return err_t::FILE_SYSTEM_ERROR;
     }
@@ -3267,7 +3479,8 @@ err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data,
     // Read profile size
     uint16_t profile_size;
     ret = fs_read(&file, &profile_size, sizeof(profile_size));
-    if (ret < 0) {
+    if (ret < 0)
+    {
         LOG_ERR("Failed to read profile size: %d", ret);
         fs_close(&file);
         k_mutex_unlock(&calibration_file_mutex);
@@ -3275,7 +3488,8 @@ err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data,
     }
 
     // Validate profile size
-    if (profile_size > max_size) {
+    if (profile_size > max_size)
+    {
         LOG_ERR("Profile size %u exceeds buffer size %u", profile_size, max_size);
         fs_close(&file);
         k_mutex_unlock(&calibration_file_mutex);
@@ -3284,7 +3498,8 @@ err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data,
 
     // Read calibration data
     ret = fs_read(&file, profile_data, profile_size);
-    if (ret < 0) {
+    if (ret < 0)
+    {
         LOG_ERR("Failed to read calibration data: %d", ret);
         fs_close(&file);
         k_mutex_unlock(&calibration_file_mutex);
@@ -3308,10 +3523,10 @@ err_t get_bhi360_calibration_data(uint8_t sensor_type, uint8_t *profile_data,
  * @param profile_size Size of the calibration data
  * @return err_t NO_ERROR on success, or an error code on failure
  */
-err_t store_bhi360_calibration_data(uint8_t sensor_type, const uint8_t *profile_data, 
-                                    size_t profile_size)
+err_t store_bhi360_calibration_data(uint8_t sensor_type, const uint8_t *profile_data, size_t profile_size)
 {
-    if (!profile_data || profile_size == 0 || profile_size > 512) {
+    if (!profile_data || profile_size == 0 || profile_size > 512)
+    {
         return err_t::INVALID_PARAMETER;
     }
 
@@ -3330,18 +3545,20 @@ constexpr char weight_calib_file_path[] = "/lfs1/calibration/weight_calib.bin";
 
 /**
  * @brief Save weight calibration data to filesystem
- * 
+ *
  * @param calib_data Pointer to weight calibration data structure
  * @return err_t NO_ERROR on success, error code on failure
  */
 err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data)
 {
-    if (!filesystem_available) {
+    if (!filesystem_available)
+    {
         LOG_ERR("Filesystem not available for weight calibration save");
         return err_t::FILE_SYSTEM_ERROR;
     }
 
-    if (!calib_data) {
+    if (!calib_data)
+    {
         LOG_ERR("Invalid weight calibration data pointer");
         return err_t::DATA_ERROR;
     }
@@ -3350,7 +3567,8 @@ err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data)
 
     // Create calibration directory if it doesn't exist
     int ret_mkdir = fs_mkdir(calibration_dir_path);
-    if (ret_mkdir != 0 && ret_mkdir != -EEXIST) {
+    if (ret_mkdir != 0 && ret_mkdir != -EEXIST)
+    {
         LOG_ERR("Failed to create calibration directory: %d", ret_mkdir);
         k_mutex_unlock(&calibration_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
@@ -3359,9 +3577,10 @@ err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data)
     // Open file for writing
     struct fs_file_t file;
     fs_file_t_init(&file);
-    
+
     int ret = fs_open(&file, weight_calib_file_path, FS_O_CREATE | FS_O_WRITE | FS_O_TRUNC);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         LOG_ERR("Failed to open weight calibration file for writing: %d", ret);
         k_mutex_unlock(&calibration_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
@@ -3369,7 +3588,8 @@ err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data)
 
     // Write calibration data
     ssize_t bytes_written = fs_write(&file, calib_data, sizeof(weight_calibration_data_t));
-    if (bytes_written != sizeof(weight_calibration_data_t)) {
+    if (bytes_written != sizeof(weight_calibration_data_t))
+    {
         LOG_ERR("Failed to write weight calibration data: %zd", bytes_written);
         fs_close(&file);
         k_mutex_unlock(&calibration_file_mutex);
@@ -3378,7 +3598,8 @@ err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data)
 
     // Sync to ensure data is written
     ret = fs_sync(&file);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         LOG_ERR("Failed to sync weight calibration file: %d", ret);
         fs_close(&file);
         k_mutex_unlock(&calibration_file_mutex);
@@ -3394,12 +3615,13 @@ err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data)
 
 /**
  * @brief Load weight calibration data from filesystem and send to bluetooth module
- * 
+ *
  * @return err_t NO_ERROR on success, error code on failure
  */
 err_t load_weight_calibration_data(void)
 {
-    if (!filesystem_available) {
+    if (!filesystem_available)
+    {
         LOG_ERR("Filesystem not available for weight calibration load");
         return err_t::FILE_SYSTEM_ERROR;
     }
@@ -3409,29 +3631,32 @@ err_t load_weight_calibration_data(void)
     // Open file for reading
     struct fs_file_t file;
     fs_file_t_init(&file);
-    
+
     int ret = fs_open(&file, weight_calib_file_path, FS_O_READ);
-    if (ret != 0) {
-        if (ret == -ENOENT) {
+    if (ret != 0)
+    {
+        if (ret == -ENOENT)
+        {
             LOG_INF("Weight calibration file not found, using defaults");
             k_mutex_unlock(&calibration_file_mutex);
-            
+
             // Send default calibration data to bluetooth module
             weight_calibration_data_t default_calib = {};
             default_calib.scale_factor = 1.0f;
             default_calib.nonlinear_a = 0.0f;
             default_calib.is_calibrated = false;
-            
+
             generic_message_t calib_msg = {};
             calib_msg.sender = SENDER_DATA;
             calib_msg.type = MSG_TYPE_WEIGHT_CALIBRATION_DATA;
             calib_msg.data.weight_calibration = default_calib;
-            
-            if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to send default weight calibration to activity metrics module");
-            return err_t::DATA_ERROR;
+
+            if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to send default weight calibration to activity metrics module");
+                return err_t::DATA_ERROR;
             }
-            
+
             return err_t::FILE_SYSTEM_NO_FILES;
         }
         LOG_ERR("Failed to open weight calibration file for reading: %d", ret);
@@ -3442,7 +3667,8 @@ err_t load_weight_calibration_data(void)
     // Read calibration data
     weight_calibration_data_t calib_data = {};
     ssize_t bytes_read = fs_read(&file, &calib_data, sizeof(weight_calibration_data_t));
-    if (bytes_read != sizeof(weight_calibration_data_t)) {
+    if (bytes_read != sizeof(weight_calibration_data_t))
+    {
         LOG_ERR("Failed to read weight calibration data: %zd", bytes_read);
         fs_close(&file);
         k_mutex_unlock(&calibration_file_mutex);
@@ -3457,8 +3683,9 @@ err_t load_weight_calibration_data(void)
     calib_msg.sender = SENDER_DATA;
     calib_msg.type = MSG_TYPE_WEIGHT_CALIBRATION_DATA;
     calib_msg.data.weight_calibration = calib_data;
-    
-    if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0) {
+
+    if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0)
+    {
         LOG_ERR("Failed to send weight calibration to activity metrics module");
         return err_t::DATA_ERROR;
     }

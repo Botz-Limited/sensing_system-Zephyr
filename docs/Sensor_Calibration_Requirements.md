@@ -1,32 +1,32 @@
 # Sensor Calibration Requirements Document
 
-**Version:** 1.0  
-**Date:** December 2024  
-**Purpose:** Define calibration procedures for all sensors in the dual-device biomechanical sensing system  
-**Audience:** Firmware developers and mobile app developers
+**Version:** 1.2  
+**Date:** July 2025  
+**Purpose:** Define calibration procedures for all sensors in the dual-device sensing system  
 
 ---
 
-## Executive Summary
+## Summary
 
-This document outlines the calibration requirements for the sensing device's three main sensor systems:
+This document outlines the calibration requirements for the sensing device's sensor system:
 1. **Foot Pressure Sensors** (8 points per foot)
 2. **BHI360 Motion Sensor** (IMU with 6-axis + sensor fusion)
 3. **Weight Measurement System** (using combined pressure sensors)
 
-Each sensor requires specific calibration procedures to ensure accurate measurements. Some calibrations are performed during manufacturing, while others require user participation through the mobile app onboarding process.
+The calibration process has been optimized to minimize user friction during onboarding while maintaining measurement accuracy. The approach intelligently combines calibration steps and leverages the natural device usage flow.
 
 ---
 
 ## Table of Contents
 
 1. [Overview](#1-overview)
-2. [Foot Pressure Sensor Calibration](#2-foot-pressure-sensor-calibration)
-3. [BHI360 Motion Sensor Calibration](#3-bhi360-motion-sensor-calibration)
-4. [Weight Measurement Calibration](#4-weight-measurement-calibration)
-5. [Mobile App Integration](#5-mobile-app-integration)
-6. [Calibration Data Storage](#6-calibration-data-storage)
-7. [Implementation Recommendations](#7-implementation-recommendations)
+2. [Optimized Calibration Flow](#2-optimized-calibration-flow)
+3. [Foot Pressure Sensor Calibration](#3-foot-pressure-sensor-calibration)
+4. [BHI360 Motion Sensor Calibration](#4-bhi360-motion-sensor-calibration)
+5. [Weight Measurement Calibration](#5-weight-measurement-calibration)
+6. [Mobile App Integration](#6-mobile-app-integration)
+7. [Calibration Data Storage](#7-calibration-data-storage)
+8. [Implementation Recommendations](#8-implementation-recommendations)
 
 ---
 
@@ -42,391 +42,374 @@ Each sensor requires specific calibration procedures to ensure accurate measurem
 
 ### 1.2 Calibration Goals
 
+- **Minimal User Friction**: Complete essential calibration seamlessly
 - **Accuracy**: Achieve specified measurement accuracy for each sensor
 - **Consistency**: Ensure repeatable measurements across devices
-- **User Experience**: Minimize calibration complexity for end users
-- **Adaptability**: Account for sensor drift and environmental changes
+- **User Experience**: Natural flow that doesn't feel like "calibration"
+
+### 1.3 Optimized Approach
+
+**Previous approach**: 16+ seconds with multiple movements  
+**New approach**: Automatic + 5 seconds of standing
 
 ---
 
-## 2. Foot Pressure Sensor Calibration
+## 2. Optimized Calibration Flow
 
-### 2.1 Sensor Configuration
+### 2.1 Intelligent Calibration Sequence
+
+The calibration is split into two natural phases:
+
+**Phase 1: Automatic Zero Calibration** (Before wearing)
+- Triggered when devices are powered on/connected
+- Captures pressure sensor zero offsets
+- No user action required
+
+**Phase 2: Combined Active Calibration** (5 seconds while wearing)
+- BHI360 orientation reference
+- Pressure sensor maximum range detection
+- Weight calculation (using pre-entered weight value)
+
+### 2.2 Complete Onboarding Flow
+
+```
+1. App Setup
+   ├─> User enters profile (including weight)
+   └─> App connects to devices
+
+2. Automatic Calibration (Hidden)
+   ├─> Devices detect they're not being worn
+   ├─> Pressure sensor zero calibration runs
+   └─> App shows "Setting up your shoes..."
+
+3. Active Calibration (5 seconds)
+   ├─> "Please put on both shoes"
+   ├─> "Stand normally on a flat surface"
+   ├─> [5-second countdown]
+   ├─> Simultaneous:
+   │   ├─> BHI360 orientation calibration
+   │   ├─> Pressure max range detection
+   │   └─> Weight scale factor calculation
+   └─> "Perfect! Your shoes are ready"
+```
+
+---
+
+## 3. Foot Pressure Sensor Calibration
+
+### 3.1 Sensor Configuration
 - **Type**: Force Sensitive Resistors (FSR) or similar
 - **Count**: 8 sensors per foot (16 total)
 - **Layout**: Heel (2), Midfoot (3), Forefoot (3)
 - **ADC Resolution**: 12-bit (0-4095)
 
-### 2.2 Calibration Requirements
+### 3.2 Two-Phase Calibration
 
-#### 2.2.1 Zero Calibration (Factory)
-**Purpose**: Remove sensor offset when no load is applied
+#### 3.2.1 Phase 1: Zero Offset Calibration (Automatic)
+**Purpose**: Capture true zero values when no pressure applied
 
-**Procedure**:
-1. Place device on flat surface with no load
-2. Read all 16 sensors for 3 seconds
-3. Calculate average for each sensor
-4. Store offsets in flash
-
-**Data Structure**:
-```c
-typedef struct {
-    uint16_t zero_offset[16];  // ADC offset for each sensor
-    uint32_t timestamp;        // Calibration timestamp
-} pressure_zero_cal_t;
-```
-
-#### 2.2.2 Dynamic Range Calibration (User - Onboarding)
-**Purpose**: Determine optimal ADC range for individual user weight/gait
+**Trigger**: Automatically when:
+- Devices first powered on
+- Connected to app but not worn
+- No pressure detected for >2 seconds
 
 **Procedure**:
-1. User wears shoes and stands normally
-2. Collect pressure data for 5 seconds
-3. User performs specific movements:
-   - Shift weight to left foot (2 seconds)
-   - Shift weight to right foot (2 seconds)
-   - Stand on toes (2 seconds)
-   - Stand on heels (2 seconds)
-4. Calculate max pressure per sensor
-5. Set gain/scaling factors
-
-**Mobile App Commands**:
-```
-// Start dynamic range calibration
-Control Service -> Write 0x01 to Calibration Trigger
-
-// Send calibration movements
-Control Service -> Write command strings:
-"CAL_PRESSURE:START"
-"CAL_PRESSURE:WEIGHT_LEFT"
-"CAL_PRESSURE:WEIGHT_RIGHT"
-"CAL_PRESSURE:TOES"
-"CAL_PRESSURE:HEELS"
-"CAL_PRESSURE:COMPLETE"
-```
-
-**Data Structure**:
 ```c
-typedef struct {
-    uint16_t max_pressure[16];     // Max ADC per sensor
-    float scale_factor[16];        // Scaling to normalize
-    uint8_t user_weight_kg;        // For reference
-} pressure_range_cal_t;
-```
-
-#### 2.2.3 Nonlinearity Compensation (Factory - Optional)
-**Purpose**: Correct for FSR nonlinear response
-
-**Options**:
-1. **Simple Linear**: Assume linear response (default)
-2. **Polynomial Fit**: Force = a×ADC² + b×ADC + c
-3. **Lookup Table**: Pre-characterized response curve
-
----
-
-## 3. BHI360 Motion Sensor Calibration
-
-### 3.1 Sensor Configuration
-- **Accelerometer**: ±16g range
-- **Gyroscope**: ±2000 dps range
-- **Virtual Sensors**: Quaternion, Linear Acceleration, Step Counter
-- **Mounting**: Vertical orientation in shoe
-
-### 3.2 Calibration Requirements
-
-#### 3.2.1 Orientation Calibration (User - Onboarding)
-**Purpose**: Determine exact mounting orientation in shoe
-
-**Procedure**:
-1. User places shoes on flat surface
-2. Shoes must be level and not moving
-3. Collect quaternion data for 3 seconds
-4. Calculate rotation matrix from sensor to world frame
-5. Store orientation offset
-
-**Mobile App Commands**:
-```
-// Trigger BHI360 orientation calibration
-Control Service -> Write 0x01 to BHI360 Calibration Trigger
-```
-
-**Current Implementation**:
-```c
-// Already implemented in motion_sensor.cpp
-void trigger_bhi360_calibration() {
-    // Saves quaternion offset when shoes are flat
-    // Stores in "bhi360_calibration.dat"
+void auto_zero_calibration() {
+    if (detect_not_worn()) {  // All sensors < threshold
+        for (int i = 0; i < 16; i++) {
+            zero_offset[i] = read_adc_average(i, 100);  // 100 samples
+        }
+        zero_cal_complete = true;
+        notify_app("ZERO_CAL_COMPLETE");
+    }
 }
 ```
 
-#### 3.2.2 Gyroscope Bias Calibration (Runtime)
-**Purpose**: Remove gyroscope drift
-
-**Procedure**:
-1. Detect stationary periods (no movement)
-2. Average gyroscope readings
-3. Update bias compensation
-4. Apply during motion processing
-
-**Implementation**: Already handled internally by BHI360
-
-#### 3.2.3 Accelerometer Calibration (Factory)
-**Purpose**: Ensure accurate acceleration measurements
-
-**Options**:
-1. **6-Point Calibration**: Place sensor in 6 orientations (±X, ±Y, ±Z)
-2. **Single-Point**: Use gravity reference when flat
-3. **BHI360 Internal**: Rely on Bosch's factory calibration
-
-### 3.3 Additional BHI360 Calibrations
-
-#### 3.3.1 Magnetometer Calibration (User - Optional)
-**Purpose**: Compass heading accuracy
-
-**Procedure**:
-1. Figure-8 motion pattern
-2. Rotate device in all orientations
-3. BHI360 calculates hard/soft iron compensation
-
-**Note**: May not be needed for gait analysis
-
-#### 3.3.2 Step Detection Tuning (User - Optional)
-**Purpose**: Optimize step counting for user's gait
-
-**Parameters**:
-- Minimum peak height
-- Minimum peak distance
-- Debounce time
-
----
-
-## 4. Weight Measurement Calibration
-
-### 4.1 System Configuration
-- Uses all 16 pressure sensors
-- Requires person standing still
-- Outputs total body weight
-
-### 4.2 Calibration Requirements
-
-#### 4.2.1 Basic Weight Calibration (User - Onboarding)
-**Purpose**: Establish ADC-to-weight conversion
-
-**Current Procedure**:
-1. User enters known weight in app
-2. User stands still on both feet
-3. System collects pressure data
-4. Calculates scale factor: Force(N) = Weight(kg) × 9.81 / Total_ADC
-
-**Mobile App Commands**:
-```
-// Send known weight and trigger calibration
+**Data Captured**:
+```c
 typedef struct {
-    float known_weight_kg;
-} weight_calibration_step_t;
-
-Control Service -> Write weight_calibration_step_t to Weight Calibration Trigger
+    uint16_t zero_offset[16];      // ADC value when no load
+    uint32_t timestamp;            // When calibrated
+    bool valid;                    // Calibration successful
+} pressure_zero_cal_t;
 ```
 
-#### 4.2.2 Multi-Point Calibration (Factory - Recommended)
-**Purpose**: Improve accuracy across weight range
+#### 3.2.2 Phase 2: Range Calibration (During 5-second stand)
+**Purpose**: Determine operating range with user's weight
 
 **Procedure**:
-1. Use 3 reference weights (e.g., 50kg, 70kg, 90kg)
-2. Collect ADC readings for each
-3. Fit polynomial or piecewise linear model
-4. Store coefficients
+1. User wearing shoes, standing normally
+2. Collect pressure data for 5 seconds
+3. Calculate:
+   - Maximum values per sensor
+   - Pressure distribution pattern
+   - Total force for weight verification
 
 **Data Structure**:
 ```c
 typedef struct {
-    float scale_factor;      // Linear scale
-    float nonlinear_a;       // x² coefficient  
-    float nonlinear_b;       // x coefficient
-    float nonlinear_c;       // Constant
-    float temp_coeff;        // Temperature compensation
-    float temp_ref;          // Reference temperature
-    bool is_calibrated;
-} weight_calibration_data_t;
+    uint16_t max_values[16];       // Peak ADC per sensor
+    uint8_t distribution_pattern;   // Foot type classification
+    float total_force;             // Sum of all sensors
+    uint32_t user_weight_g;        // From user profile
+} pressure_range_cal_t;
 ```
 
-#### 4.2.3 Temperature Compensation (Factory - Optional)
-**Purpose**: Correct for temperature-induced drift
+---
+
+## 4. BHI360 Motion Sensor Calibration
+
+### 4.1 Single-Phase Calibration (During 5-second stand)
+
+**No changes needed** - BHI360 calibration works perfectly during the 5-second standing phase:
 
 **Procedure**:
-1. Measure sensor response at different temperatures
-2. Calculate temperature coefficient
-3. Apply compensation: Force_corrected = Force × (1 + α×(T-T_ref))
+1. User stands still with shoes on feet
+2. Collect quaternion data
+3. Calculate mounting orientation
+4. Store calibration data
+
+**Implementation**:
+```c
+// Runs during the 5-second combined calibration
+void bhi360_orientation_calibration() {
+    // Average quaternion over 5 seconds
+    // Calculate rotation offset
+    // Save to persistent storage
+}
+```
 
 ---
 
-## 5. Mobile App Integration
+## 5. Weight Measurement Calibration
 
-### 5.1 Onboarding Flow
+### 5.1 Integrated into 5-Second Calibration
 
-```
-1. Welcome Screen
-   └─> "Let's calibrate your sensors for optimal performance"
+Since the user has already entered their weight during profile setup, we can calculate the scale factor during the same 5-second standing period.
 
-2. Foot Sensor Calibration
-   ├─> "Please put on both shoes"
-   ├─> "Stand normally for 5 seconds"
-   ├─> "Shift weight to left foot"
-   ├─> "Shift weight to right foot"
-   ├─> "Stand on your toes"
-   ├─> "Stand on your heels"
-   └─> "Calibration complete!"
+#### 5.1.1 Weight Scale Calculation
+**Prerequisites**:
+- User weight entered in app profile
+- Zero calibration completed (Phase 1)
+- User standing normally (Phase 2)
 
-3. Motion Sensor Calibration
-   ├─> "Place shoes on flat surface"
-   ├─> "Ensure shoes are level and still"
-   ├─> "Wait 3 seconds..."
-   └─> "Orientation calibrated!"
-
-4. Weight Calibration
-   ├─> "Enter your current weight: [___] kg"
-   ├─> "Stand still on both feet"
-   ├─> "Measuring..."
-   └─> "Weight calibration saved!"
-
-5. Completion
-   └─> "All sensors calibrated! You're ready to go."
+**Procedure**:
+```c
+void calculate_weight_scale_factor() {
+    // During 5-second stand
+    float total_adc = 0;
+    
+    // Sum all pressure sensors
+    for (int i = 0; i < 16; i++) {
+        total_adc += (adc_value[i] - zero_offset[i]);
+    }
+    
+    // Calculate scale factor
+    weight_cal.scale_factor = user_weight_g / total_adc;
+    weight_cal.is_calibrated = true;
+}
 ```
 
-### 5.2 Calibration Status Monitoring
-
-The app should query calibration status on connection:
-
-```
-// Check calibration status
-Information Service -> Read Status characteristic
-- Bit 9 (0x200): CALIBRATING flag
-
-// Get calibration data
-Control Service -> Write "GET_CAL_STATUS" command
-Response via notification with calibration flags
-```
-
-### 5.3 Recalibration Triggers
-
-App should prompt recalibration when:
-- First time setup
-- Significant weight change (>5kg)
-- Poor data quality detected
-- User requests via settings
-- After firmware update
+**Benefits**:
+- No additional calibration step
+- Immediate weight tracking capability
+- Verification of entered weight
 
 ---
 
-## 6. Calibration Data Storage
+## 6. Mobile App Integration
 
-### 6.1 Storage Locations
+### 6.1 Seamless Onboarding Flow
+
+```
+1. Profile Setup
+   ├─> "Enter your details"
+   ├─> Height: [___] cm
+   ├─> Weight: [___] kg
+   └─> [Continue]
+
+2. Connect Devices
+   ├─> "Turn on your smart shoes"
+   ├─> [Searching...]
+   ├─> "Found! Setting up..." (Hidden zero cal happens here)
+   └─> [✓] Ready
+
+3. Quick Calibration (5 seconds)
+   ├─> "Put on both shoes"
+   ├─> "Stand normally on a flat surface"
+   ├─> [5-second countdown with progress]
+   └─> "All set! Let's get started"
+```
+
+### 6.2 Backend Calibration Sequence
+
+```javascript
+// App automatically manages calibration phases
+async function setupDevices() {
+    // Phase 1: Connect and auto-zero
+    await connectToDevices();
+    // Devices auto-detect not worn and zero calibrate
+    await waitForNotification("ZERO_CAL_COMPLETE");
+    
+    // Phase 2: User calibration
+    showInstruction("Please put on both shoes");
+    await sendCommand("START_COMBINED_CALIBRATION", {
+        duration_ms: 5000,
+        user_weight_g: userProfile.weight * 1000
+    });
+    
+    await waitForNotification("CALIBRATION_COMPLETE");
+}
+```
+
+### 6.3 Calibration Commands
+
+```c
+// Command structure for combined calibration
+typedef struct {
+    uint16_t duration_ms;      // 5000ms standard
+    uint32_t user_weight_g;    // User weight in grams
+    bool calibrate_bhi360;     // true
+    bool calibrate_pressure;   // true (range only)
+    bool calculate_weight;     // true
+} combined_cal_params_t;
+```
+
+---
+
+## 7. Calibration Data Storage
+
+### 7.1 Storage Locations
 
 | Calibration Type | File Path | Format | Size |
 |-----------------|-----------|---------|------|
 | Pressure Zero | `/lfs1/config/pressure_zero.dat` | Binary | 32 bytes |
 | Pressure Range | `/lfs1/config/pressure_range.dat` | Binary | 64 bytes |
 | BHI360 Orientation | `/lfs1/config/bhi360_calibration.dat` | Binary | 64 bytes |
-| Weight Calibration | `/lfs1/config/weight_calibration.dat` | Binary | 32 bytes |
+| Weight Scale | `/lfs1/config/weight_calibration.dat` | Binary | 32 bytes |
 
-### 6.2 Data Persistence
-
-- All calibration data persists across power cycles
-- Stored in LittleFS partition
-- Loaded automatically on boot
-- Can be reset to factory defaults
-
-### 6.3 Firmware Interface
+### 7.2 Automatic Loading
 
 ```c
-// Save calibration
-generic_message_t msg = {
-    .type = MSG_TYPE_SAVE_CALIBRATION,
-    .data.calibration = cal_data
-};
-k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
-
-// Load calibration
-generic_message_t msg = {
-    .type = MSG_TYPE_REQUEST_CALIBRATION
-};
-k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
+void load_calibrations_on_boot() {
+    // Always load zero calibration
+    load_pressure_zero_cal();
+    
+    // Load others if they exist
+    if (file_exists("/lfs1/config/pressure_range.dat")) {
+        load_pressure_range_cal();
+    }
+    
+    // Check if recalibration needed
+    if (!zero_cal_valid() || cal_age_days() > 30) {
+        request_recalibration();
+    }
+}
 ```
 
 ---
 
-## 7. Implementation Recommendations
+## 8. Implementation Recommendations
 
-### 7.1 Priority Order
+### 8.1 Key Implementation Details
 
-1. **High Priority** (Required for basic function):
-   - BHI360 orientation calibration (already implemented)
-   - Basic weight calibration with known weight (already implemented)
-   - Pressure sensor zero calibration
+**Automatic Zero Detection**:
+```c
+bool detect_not_worn() {
+    const uint16_t WORN_THRESHOLD = 100;  // ADC counts
+    int sensors_active = 0;
+    
+    for (int i = 0; i < 16; i++) {
+        if (read_adc(i) > WORN_THRESHOLD) {
+            sensors_active++;
+        }
+    }
+    
+    return (sensors_active < 2);  // Less than 2 sensors active
+}
+```
 
-2. **Medium Priority** (Improves accuracy):
-   - Pressure sensor dynamic range calibration
-   - Multi-point weight calibration
-   - Temperature compensation
+**Combined Calibration Handler**:
+```c
+void handle_combined_calibration(combined_cal_params_t *params) {
+    // Start all calibrations
+    start_pressure_range_cal();
+    trigger_bhi360_calibration();
+    start_weight_calculation(params->user_weight_g);
+    
+    // Single timer for all
+    k_timer_start(&cal_timer, K_MSEC(params->duration_ms));
+}
+```
 
-3. **Low Priority** (Nice to have):
-   - Pressure sensor nonlinearity compensation
-   - Step detection parameter tuning
-   - Magnetometer calibration
+### 8.2 Testing Requirements
 
-### 7.2 Development Phases
+1. **Zero Calibration Accuracy**:
+   - Verify auto-detection of "not worn" state
+   - Confirm zero values are stable
+   - Test with different surface materials
 
-**Phase 1 - Basic Calibration** (Current):
-- ✅ BHI360 orientation calibration
-- ✅ Single-point weight calibration
-- ⏳ Pressure zero calibration
+2. **Combined Calibration**:
+   - Verify 5-second timing
+   - Test weight calculation accuracy
+   - Confirm BHI360 orientation capture
 
-**Phase 2 - Enhanced Accuracy**:
-- Pressure dynamic range calibration
-- Multi-point weight calibration
-- Calibration status reporting
+3. **User Experience**:
+   - Seamless transition between phases
+   - Clear instructions
+   - No perception of "calibration"
 
-**Phase 3 - Advanced Features**:
-- Temperature compensation
-- Nonlinearity correction
-- Auto-recalibration detection
+### 8.3 Benefits of This Approach
 
-### 7.3 Testing Requirements
+1. **Hidden Complexity**: Zero calibration happens automatically
+2. **Natural Flow**: Leverages the put-on sequence
+3. **Single User Action**: Just 5 seconds of standing
+4. **Complete Setup**: All sensors ready after onboarding
+5. **Accurate Weight**: Immediate weight tracking capability
 
-Each calibration procedure should be tested for:
-- Repeatability (±2% variation)
-- Accuracy (meets specification)
-- User experience (< 2 minutes total)
-- Error handling (motion detection, timeout)
-- Data persistence (survives reboot)
+### 8.4 Error Handling
 
-### 7.4 Error Handling
+```c
+typedef enum {
+    CAL_SUCCESS = 0,
+    CAL_ERR_NO_ZERO,        // Zero cal not completed
+    CAL_ERR_MOVEMENT,       // User moved during calibration
+    CAL_ERR_WEIGHT_MISMATCH,// Detected weight very different
+    CAL_ERR_TIMEOUT         // Calibration timeout
+} cal_error_t;
 
-Mobile app should handle:
-- Motion during calibration → Retry
-- Timeout (>30 seconds) → Abort with message
-- Invalid data → Request user verification
-- Communication loss → Save partial data
+// Smart retry logic
+if (error == CAL_ERR_NO_ZERO) {
+    // Prompt user to remove shoes briefly
+    // Retry zero calibration
+}
+```
 
 ---
 
-## Appendix A: Calibration Commands Summary
+## Appendix A: Calibration State Machine
 
-| Command | Service | Characteristic | Data | Purpose |
-|---------|---------|----------------|------|---------|
-| Start Pressure Cal | Control | Command | "CAL_PRESSURE:START" | Begin pressure calibration |
-| BHI360 Cal | Control | BHI360 Calibration | 0x01 | Trigger orientation cal |
-| Weight Cal | Control | Weight Calibration | weight_calibration_step_t | Calibrate with known weight |
-| Get Status | Control | Command | "GET_CAL_STATUS" | Query calibration state |
-| Save Cal | Internal | Message Queue | MSG_TYPE_SAVE_CALIBRATION | Store to flash |
-
-## Appendix B: Future Enhancements
-
-1. **Cloud Backup**: Store calibration data in cloud for device replacement
-2. **Auto-Calibration**: Detect drift and recalibrate automatically
-3. **Cross-Device Sync**: Share calibration between left/right devices
-4. **Machine Learning**: Improve calibration using population data
-5. **Diagnostic Mode**: Validate calibration with known test patterns
+```
+[INIT] ──power on──> [ZERO_CAL_WAIT]
+                          │
+                          ├──not worn detected──> [ZERO_CAL_ACTIVE]
+                          │                             │
+                          │                             ▼
+                          │                      [ZERO_CAL_COMPLETE]
+                          │                             │
+                          └─────────shoes worn─────────┘
+                                                       │
+                                                       ▼
+                                              [READY_FOR_COMBINED]
+                                                       │
+                                     ┌─────────────────┘
+                                     ▼
+                            [COMBINED_CAL_ACTIVE] (5 sec)
+                                     │
+                                     ▼
+                              [FULLY_CALIBRATED]
+```
 
 ---
 

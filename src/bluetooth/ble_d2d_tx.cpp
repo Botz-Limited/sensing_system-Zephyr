@@ -77,6 +77,8 @@ static struct bt_uuid_128 d2d_rx_delete_activity_log_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca88, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 static struct bt_uuid_128 d2d_rx_request_device_info_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_gps_update_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8a, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 // Note: This UUID must match d2d_weight_calibration_uuid in ble_d2d_rx.cpp
 static struct bt_uuid_128 d2d_rx_weight_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
@@ -93,6 +95,7 @@ struct d2d_discovered_handles
     uint16_t fota_status_handle;
     uint16_t trigger_calibration_handle;
     uint16_t request_device_info_handle;
+    uint16_t gps_update_handle;
     uint16_t weight_calibration_handle;
     bool discovery_complete;
 };
@@ -106,6 +109,7 @@ static struct d2d_discovered_handles d2d_handles = {.set_time_handle = 0,
                                                     .fota_status_handle = 0,
                                                     .trigger_calibration_handle = 0,
                                                     .request_device_info_handle = 0,
+                                                    .gps_update_handle = 0,
                                                     .weight_calibration_handle = 0,
                                                     .discovery_complete = false};
 
@@ -132,6 +136,7 @@ enum discover_state
     DISCOVER_FOTA_STATUS_CHAR,
     DISCOVER_TRIGGER_CALIBRATION_CHAR,
     DISCOVER_REQUEST_DEVICE_INFO_CHAR,
+    DISCOVER_GPS_UPDATE_CHAR,
     DISCOVER_WEIGHT_CALIBRATION_CHAR,
     DISCOVER_COMPLETE
 };
@@ -245,6 +250,15 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             {
                 d2d_handles.request_device_info_handle = bt_gatt_attr_value_handle(attr);
                 LOG_INF("Found request device info characteristic, handle: %u", d2d_handles.request_device_info_handle);
+                discovery_state = DISCOVER_GPS_UPDATE_CHAR;
+            }
+            break;
+
+        case DISCOVER_GPS_UPDATE_CHAR:
+            if (bt_uuid_cmp(params->uuid, &d2d_rx_gps_update_uuid.uuid) == 0)
+            {
+                d2d_handles.gps_update_handle = bt_gatt_attr_value_handle(attr);
+                LOG_INF("Found GPS update characteristic, handle: %u", d2d_handles.gps_update_handle);
                 discovery_state = DISCOVER_WEIGHT_CALIBRATION_CHAR;
             }
             break;
@@ -320,8 +334,8 @@ static void continue_discovery(void)
         return;
     }
 
-    // Check if we've discovered the essential characteristics
-    if (discovery_state == DISCOVER_WEIGHT_CALIBRATION_CHAR && 
+    // Check if we've discovered the essential characteristics and tried weight calibration
+    if (discovery_state > DISCOVER_WEIGHT_CALIBRATION_CHAR && 
         d2d_handles.start_activity_handle != 0 &&
         d2d_handles.stop_activity_handle != 0)
     {
@@ -366,6 +380,9 @@ static void continue_discovery(void)
             break;
         case DISCOVER_REQUEST_DEVICE_INFO_CHAR:
             discover_params.uuid = &d2d_rx_request_device_info_uuid.uuid;
+            break;
+        case DISCOVER_GPS_UPDATE_CHAR:
+            discover_params.uuid = &d2d_rx_gps_update_uuid.uuid;
             break;
         case DISCOVER_WEIGHT_CALIBRATION_CHAR:
             discover_params.uuid = &d2d_rx_weight_calibration_uuid.uuid;
@@ -458,20 +475,18 @@ int ble_d2d_tx_send_gps_update(const GPSUpdateCommand *gps_data)
         return -EBUSY;
     }
 
-    // GPS updates are sent to the same characteristic as weight calibration
-    // This is a temporary solution - ideally GPS should have its own characteristic
-    if (d2d_handles.weight_calibration_handle == 0)
+    // Use the dedicated GPS update characteristic
+    if (d2d_handles.gps_update_handle == 0)
     {
-        LOG_WRN("D2D TX: Weight calibration handle not found (used for GPS)");
+        LOG_WRN("D2D TX: GPS update handle not found");
         return -EINVAL;
     }
 
     LOG_INF("D2D TX: Forwarding GPS update - lat=%d, lon=%d, speed=%u cm/s", 
             gps_data->latitude_e7, gps_data->longitude_e7, gps_data->speed_cms);
 
-    // Send GPS data using the weight calibration characteristic
-    // The secondary device will need to distinguish based on message size
-    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.weight_calibration_handle, 
+    // Send GPS data using the dedicated GPS characteristic
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.gps_update_handle, 
                                             gps_data, sizeof(GPSUpdateCommand), false);
     if (err)
     {

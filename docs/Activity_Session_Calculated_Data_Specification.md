@@ -1,14 +1,14 @@
 # Activity Session Calculated Data Specification
 
-**Version:** 1.0  
-**Date:** June  2025  
+**Version:** 1.2  
+**Date:** July 2025 (Updated)  
 **Purpose:** Complete specification for pre-calculated activity session data to be logged and transmitted via BLE from shoe-mounted sensors
 
 ---
 
 ## Summary
 
-This document defines a comprehensive system for processing raw sensor data into meaningful, pre-calculated metrics that are both logged locally and transmitted via BLE to mobile applications. The system eliminates raw data transmission, reducing data volume by ~99% while providing actionable insights for athletes, coaches, and medical professionals.
+This document defines a  system for processing raw sensor data into meaningful, pre-calculated metrics that are both logged locally and transmitted via BLE to mobile applications. The system eliminates raw data transmission, reducing data volume by ~99% while providing actionable insights for athletes, coaches, and medical professionals.
 
 **📝 Code Examples Disclaimer**: All C code examples in this document are provided for **illustrative purposes only** to demonstrate algorithms and concepts. They're not production-ready - we'll need to adapt them for our firmware.
 
@@ -20,44 +20,106 @@ This document defines a comprehensive system for processing raw sensor data into
 
 **Important Note**: The system uses delta timestamps throughout - each data packet contains the time elapsed since the previous packet rather than absolute timestamps. This approach minimizes data size and simplifies synchronization.
 
-### ⚠️ Implementation Status
+### ⚠️ Implementation Status (Updated July 2025)
 
-**This document describes a comprehensive activity metrics system. Key components are IMPLEMENTED with ongoing development.**
+**This document describes a comprehensive activity metrics system. Core components are IMPLEMENTED with ongoing development.**
 
-**✅ IMPLEMENTED COMPONENTS:**
-- **Multi-threaded architecture** with dedicated modules (sensor_data, realtime_metrics, analytics, activity_metrics)
-- **Thread-safe work queue patterns** with race condition fixes
-- **BLE Activity Metrics Service** (`4fd5b690-...`) with real-time metrics transmission
-- **Core sensor processing** including ground contact detection, pressure distribution, strike pattern analysis
-- **Real-time metrics calculation** including cadence, pace estimation, form scoring, asymmetry detection
-- **GPS integration framework** for enhanced distance/pace accuracy
-- **Step count aggregation** from both feet via Activity Metrics Service
-- **Session management** with start/stop commands and state tracking
+**✅ FULLY IMPLEMENTED:**
+- **Multi-threaded architecture** with dedicated modules:
+  - `sensor_data`: Processes raw sensor data at 100Hz
+  - `realtime_metrics`: Calculates real-time metrics at 1Hz
+  - `activity_metrics`: Manages sessions and activity-level calculations
+  - `analytics`: Module created but algorithms not yet implemented
+- **Thread-safe communication** using work queues and message passing
+- **BLE Activity Metrics Service** (`4fd5b690-9d89-4061-92aa-319ca786baae`) with:
+  - Real-time metrics characteristic (1Hz updates)
+  - Asymmetry metrics characteristic (0.5Hz updates)
+  - Total and activity step counts
+  - GPS data input characteristic
+  - Biomechanics extended characteristic (structure only)
+  - Session summary characteristic (structure only)
+- **Core sensor processing**:
+  - Ground contact detection (±2ms accuracy)
+  - Flight time calculation
+  - Peak force detection
+  - Pressure distribution (heel/midfoot/forefoot %)
+  - Basic pronation detection
+  - Strike pattern classification
+- **Real-time metrics**:
+  - Cadence calculation (steps/min × 2)
+  - Pace estimation (sec/km, without GPS)
+  - Form score (0-100)
+  - Left/right balance ratio
+  - Step length asymmetry
+  - Contact time asymmetry
+- **Session management**:
+  - Start/stop activity commands via Control Service
+  - Activity types support (running, walking, training)
+  - Session state tracking
+  - Weight measurement functionality
+- **GPS integration framework**:
+  - GPS update command structure
+  - GPS data reception via Activity Metrics Service
+  - D2D forwarding to secondary device
+  - Basic stride calibration (coefficient adjustment)
+- **Data logging** (still using protobuf format):
+  - Foot sensor data logging
+  - BHI360 motion data logging
+  - Activity step count logging
 
 **🔄 IN DEVELOPMENT:**
-- **Advanced analytics algorithms** (fatigue detection, injury risk assessment, running efficiency)
-- **Complete GPS processing** (received but not fully utilized in calculations)
-- **Enhanced biomechanical analysis** (CPEI, vertical oscillation, stride length estimation)
-- **File logging optimization** (currently uses protobuf, migration to binary structs planned)
+- **Advanced analytics algorithms**:
+  - Fatigue detection (basic placeholder only)
+  - Injury risk assessment (basic placeholder only)
+  - Running efficiency calculation
+  - Vertical oscillation
+  - Vertical stiffness
+- **Enhanced GPS integration**:
+  - GPS-based distance calculation
+  - Pace smoothing with GPS
+  - Elevation tracking
+- **Advanced biomechanics**:
+  - Center of Pressure Excursion Index (CPEI)
+  - Push-off power calculation
+  - Loading rate analysis (BLE structure exists, no calculation)
+  - Foot strike angle
+  - Arch collapse detection (BLE structure exists, no calculation)
 
-**Current System Status:**
-- **Real-time metrics**: ✅ Fully operational via BLE at 1Hz
-- **Sensor data processing**: ✅ 100Hz processing with contact detection and pressure analysis
-- **Activity sessions**: ✅ Start/stop functionality with basic metrics
-- **File logging**: ⚠️ Still uses protobuf format (~31.7 MB/hour), binary optimization pending
-- **Mobile integration**: ✅ Complete BLE service with packed data structures
+**❌ NOT IMPLEMENTED:**
+- **Binary struct logging** (still using protobuf, ~31.7 MB/hour)
+- **Session summary calculations**:
+  - Total distance (GPS-accurate)
+  - Calories burned
+  - Training load
+  - Split times
+- **Recovery recommendations**
+- **Historical comparisons**
+- **Adaptive thresholds**
+- **Overstriding detection**
 
-**Key Achievement**: Real-time activity metrics are fully functional and being transmitted to mobile apps via the Activity Metrics Service.
+**Current System Performance:**
+- **Real-time metrics**: ✅ Transmitted via BLE at 1Hz
+- **Sensor processing**: ✅ Running at 100Hz with <1ms latency
+- **Memory usage**: ✅ Within constraints using static allocation
+- **Power consumption**: ⚠️ Not yet optimized for battery life
 
 ---
 
 ## Table of Contents
 1. [System Overview](#system-overview)
 2. [Calculated Metrics Definition](#calculated-metrics-definition)
-3. [Data Structures](#data-structures)
-4. [BLE Protocol](#ble-protocol)
-5. [Implementation Guidelines](#implementation-guidelines)
-6. [Mobile Integration](#mobile-integration)
+3. [GPS Integration and Battery Optimization](#gps-integration-and-battery-optimization)
+4. [Data Structures](#data-structures)
+5. [BLE Protocol](#ble-protocol)
+6. [Implementation Guidelines](#implementation-guidelines)
+7. [Mobile Integration](#mobile-integration)
+8. [Benefits Summary](#benefits-summary)
+9. [Future Enhancements](#future-enhancements)
+10. [Summary of Key Features for Clinical and Product Teams](#summary-of-key-features-for-clinical-and-product-teams)
+11. [Implementation Summary](#implementation-summary)
+12. [Conclusion](#conclusion)
+13. [Pace and Distance Calculation Methods](#pace-and-distance-calculation-methods)
+14. [8-Channel Pressure Sensor Capabilities](#8-channel-pressure-sensor-capabilities)
 
 ---
 
@@ -120,640 +182,285 @@ Having two synchronized devices (one per foot) enables unique capabilities that 
 ```
 Raw Sensors (100Hz) → On-Device Processing → Calculated Metrics → BLE/Storage
                            ↓                        ↓
-                    Feature Extraction      Real-time (1Hz)
-                    Statistical Analysis    Logged (0.5Hz)
+                    Feature Extraction      Real-time (1Hz) ✅
+                    Statistical Analysis    Logged (0.5Hz) ⚠️
 ```
 
+**Implementation Status**: 
+- ✅ Raw sensor processing at 100Hz in sensor_data module
+- ✅ Real-time BLE transmission at 1Hz
+- ⚠️ Logging still uses protobuf format, not optimized binary structs
+
 ### Activity Types Supported
-
-#### Primary Activity Types
-1. **Running**: Focus on pace, cadence, ground contact time
-2. **Walking**: Step count, symmetry, stability  
-
-#### Running Sub-types (User-selectable)
-1. **Everyday Run**: Default mode, balanced metrics
-2. **Long Run**: Battery-optimized, endurance focus
-3. **Tempo Run**: Pace precision, lactate threshold monitoring
-4. **Intervals/Speed Work**: Lap detection, recovery tracking
-5. **Calibration Run**: System calibration with known distance
-
-#### Additional Types
-- **Training**: Form analysis, fatigue detection
-- **Recovery**: Gait quality, compensation patterns
-- **Trail**: Terrain adaptation, stability focus
+1. **Running**: Focus on pace, cadence, ground contact time ✅
+2. **Walking**: Step count, symmetry, stability ✅
+3. **Training**: Form analysis, fatigue detection ⚠️ (basic only)
+4. **Recovery**: Gait quality, compensation patterns ❌
+5. **Custom**: User-defined metrics ❌
 
 ---
 
 ## Calculated Metrics Definition
 
-### 1. Core Step Metrics (Per Foot)
+### Basic Metrics (Per Foot) - Implementation Status
 
-| Metric | Description | Unit | Range | Update Rate | Status |
-|--------|-------------|------|-------|-------------|--------|
-| Ground Contact Time | Duration foot is on ground | ms | 100-400 | Every step | ✅ **IMPLEMENTED** |
-| Flight Time | Duration foot is in air | ms | 0-200 | Every step | ✅ **IMPLEMENTED** |
-| Step Frequency | Cadence per foot | spm | 0-220 | Every step | ✅ **IMPLEMENTED** |
-| Peak Force | Maximum pressure during step | N | 0-3000 | Every step | ✅ **IMPLEMENTED** |
-| Loading Rate | Force increase rate at impact | N/s | 0-10000 | Every step | 🔄 **IN DEVELOPMENT** |
-| Push-off Power | Power during toe-off phase | W/kg | 0-50 | Every step | 🔄 **IN DEVELOPMENT** |
+| Metric | Update Rate | Description | Range/Units | Status |
+|--------|-------------|-------------|-------------|---------|
+| Ground Contact Time | Every step | Duration foot is on ground | 100-400ms | ✅ Implemented |
+| Flight Time | Every step | Duration both feet off ground | 0-200ms | ✅ Implemented |
+| Peak Force | Every step | Maximum force during contact | 0-5000N | ✅ Implemented |
+| Pressure Distribution | 10Hz | Heel/Midfoot/Forefoot % | 0-100% each | ✅ Implemented |
+| Center of Pressure | 10Hz | CoP location on foot | x,y in mm | ❌ Not started |
+| Foot Strike Angle | Every step | Angle at initial contact | -15° to +30° | ❌ Not started |
+| Pronation Angle | Every step | Maximum inward roll | -20° to +20° | ✅ Basic only |
+| Loading Rate | Every step | Force increase rate | 0-200 BW/s | ❌ Not started |
+| Push-off Power | Every step | Power during toe-off | 0-1000W | ❌ Not started |
+| CPEI | Every step | Center pressure path length | 0-100mm | ❌ Not started |
 
-### 2. Pressure Distribution (Per Foot)
+### Calculated Metrics (Combined Feet) - Implementation Status
 
-| Metric | Description | Unit | Range | Update Rate | Status |
-|--------|-------------|------|-------|-------------|--------|
-| Heel Pressure % | Relative heel loading | % | 0-100 | 10Hz during contact | ✅ **IMPLEMENTED** |
-| Midfoot Pressure % | Relative midfoot loading | % | 0-100 | 10Hz during contact | ✅ **IMPLEMENTED** |
-| Forefoot Pressure % | Relative forefoot loading | % | 0-100 | 10Hz during contact | ✅ **IMPLEMENTED** |
-| Center of Pressure X | Medial-lateral position | mm | -50 to +50 | 10Hz during contact | 🔄 **IN DEVELOPMENT** |
-| Center of Pressure Y | Anterior-posterior position | mm | -100 to +100 | 10Hz during contact | 🔄 **IN DEVELOPMENT** |
-| Pressure Path Length | Total CoP movement | mm | 0-500 | Every step | 🔄 **IN DEVELOPMENT** |
-| CPEI | Center of Pressure Excursion Index | % | 0-100 | Every step | 🔄 **IN DEVELOPMENT** |
+| Metric | Update Rate | Description | Accuracy | Status |
+|--------|-------------|-------------|----------|---------|
+| Cadence | 1Hz | Steps per minute | ±1 spm | ✅ Implemented |
+| Pace | 1Hz | Time per km/mile | ±5 sec/km | ✅ Basic (no GPS) |
+| Distance | 0.5Hz | Cumulative distance | ±2% with GPS | ⚠️ No GPS integration |
+| Vertical Oscillation | 0.5Hz | Vertical displacement | ±1cm | ❌ Not started |
+| Vertical Stiffness | 0.5Hz | Spring-mass stiffness | ±5% | ❌ Not started |
+| Running Efficiency | 0.5Hz | Energy efficiency score | 0-100 | ❌ Not started |
+| Form Score | 1Hz | Composite technique score | 0-100 | ✅ Implemented |
 
-*Note: All pressure metrics are collected independently for left and right foot using 8-channel pressure sensors per foot*
+### Asymmetry Metrics - Implementation Status
 
-### 3. Motion Dynamics (IMU-based)
+| Metric | Update Rate | Description | Threshold | Status |
+|--------|-------------|-------------|-----------|---------|
+| Contact Time Diff | 1Hz | L/R contact time delta | >4% warning | ✅ Implemented |
+| Step Length Diff | 0.5Hz | L/R step length delta | >5% warning | ✅ Implemented |
+| Peak Force Diff | 0.5Hz | L/R force delta | >10% warning | ✅ Implemented |
+| Loading Rate Diff | 0.5Hz | L/R loading delta | >15% warning | ❌ Not started |
+| Balance Score | 1Hz | Weight distribution | 40-60% normal | ✅ Implemented |
 
-| Metric | Description | Unit | Range | Update Rate |
-|--------|-------------|------|-------|-------------|
-| Foot Strike Angle | Angle at initial contact | degrees | -30 to +30 | Every step |
-| Pronation Angle | Maximum inward roll | degrees | -20 to +20 | Every step |
-| Pronation Velocity | Speed of pronation | deg/s | 0-500 | Every step |
-| Vertical Oscillation | Vertical movement amplitude | mm | 0-200 | Every 2 steps |
-| Impact G-force | Peak acceleration at landing | g | 0-10 | Every step |
-| Movement Smoothness | Quality of foot trajectory | score | 0-100 | Every second |
+### Health & Safety Metrics - Implementation Status
 
-### 4. Gait Symmetry (Enabled by Dual-Device Synchronization)
-
-| Metric | Description | Unit | Range | Update Rate | Dual-Device Benefit | Status |
-|--------|-------------|------|-------|-------------|---------------------|--------|
-| Contact Time Asymmetry | L/R contact time difference | % | -50 to +50 | Every 2-4 steps | ±1ms precision from synchronized timing | ✅ **IMPLEMENTED** |
-| Flight Time Asymmetry | L/R flight time difference | % | -50 to +50 | Every 2-4 steps | True flight phase when both feet airborne | ✅ **IMPLEMENTED** |
-| Force Asymmetry | L/R peak force difference | % | -50 to +50 | Every 2-4 steps | Simultaneous force comparison | ✅ **IMPLEMENTED** |
-| Step Length Asymmetry | L/R step length difference | % | -50 to +50 | Every 2-4 steps | Actual distance between foot placements | 🔄 **IN DEVELOPMENT** |
-| Pronation Asymmetry | L/R pronation difference | degrees | -20 to +20 | Every 2-4 steps | Synchronized motion capture | ✅ **IMPLEMENTED** |
-| Loading Rate Asymmetry | L/R loading rate difference | % | -50 to +50 | Every 2-4 steps | Precise impact timing comparison | 🔄 **IN DEVELOPMENT** |
-| Push-off Timing Offset | Time difference in push-off | ms | -100 to +100 | Every 2-4 steps | Coordination analysis | 🔄 **IN DEVELOPMENT** |
-
-*Note: Negative values indicate left bias, positive indicate right bias. These metrics require synchronized dual devices for accurate measurement.*
-
-### 5. Performance Indicators
-
-| Metric | Description | Unit | Range | Update Rate | Accuracy (No GPS) | Accuracy (With GPS) |
-|--------|-------------|------|-------|-------------|-------------------|---------------------|
-| Running Efficiency | Energy cost estimate | J/kg/m | 0-10 | Every 5-10 seconds | Model-based | Model-based |
-| Stride Length | Distance per complete gait cycle | cm | 0-300 | Every stride | ±15-20% | ±5% |
-| Step Width | Lateral distance between feet | cm | 0-30 | Every 2 steps | ±2-3cm | ±2-3cm |
-| Estimated Speed | Calculated from step metrics | m/s | 0-10 | Every second | ±15-20% | ±2-3% |
-| Current Pace (km) | Real-time pace per kilometer | sec/km | 120-900 | Every second | ±15-20% | ±2-3% |
-| Current Pace (mile) | Real-time pace per mile | sec/mile | 193-1448 | Every second | ±15-20% | ±2-3% |
-| Average Pace | Rolling average pace (last 60s) | sec/km | 120-900 | Every second | ±15-20% | ±2-3% |
-| Lap Pace | Pace for current lap/interval | sec/km | 120-900 | Every lap | ±15-20% | ±2-3% |
-| Splits (per km) | Pace for each kilometer | sec/km | 120-900 | Every km | ±15-20% | ±1-2% |
-| Total Distance | Cumulative distance covered | m | 0-999999 | Every second | ±5-10% | ±1-2% |
-| Vertical Stiffness | Spring-mass model stiffness | kN/m | 0-100 | Every 10 steps | Model-based | Model-based |
-| Duty Factor | Ground contact time ratio | % | 0-100 | Every 5 seconds | ±2% | ±2% |
-
-*Note: Step width is estimated using medial-lateral pressure distribution patterns and IMU lateral acceleration*
-
-### 6. Health & Risk Indicators
-
-| Metric | Description | Unit | Range | Update Rate | Algorithm Basis |
-|--------|-------------|------|-------|-------------|-----------------|
-| Cumulative Impact Load | Total impact stress | AU | 0-10000 | Every 30 seconds | Sum of impact forces × contact time |
-| Fatigue Index | Performance degradation score | 0-100 | 0-100 | Every 30 seconds | Baseline comparison of key metrics |
-| Form Deterioration | Technique quality change | 0-100 | 0-100 | Every 30 seconds | Weighted change in form components |
-| Overstriding Indicator | Excessive stride detection | 0-100 | 0-100 | Every 10 steps | Foot strike angle + braking forces |
-| Lateral Instability | Side-to-side movement | 0-100 | 0-100 | Every 10 seconds | CoP lateral deviation + IMU sway |
-| Injury Risk Score | Composite injury risk | 0-100 | 0-100 | Every minute | Multi-factor risk assessment |
-
-#### Algorithm Details for Health & Risk Indicators
-
-**1. Running Efficiency (Table 12)**
-- **Based on**: Duty factor optimization from biomechanics research
-- **Formula**: Efficiency = f(duty_factor, vertical_oscillation, cadence, forward_lean)
-- **Optimal Values**: 
-  - Duty Factor: 35% (elite runners)
-  - Vertical Oscillation: 60mm
-  - Cadence: 180 spm
-  - Forward Lean: 5 degrees
-- **Weighting**: 30% duty, 30% oscillation, 20% cadence, 20% lean
-
-**2. Fatigue Index**
-- **Baseline Period**: First 2-3 minutes of activity
-- **Tracked Changes**:
-  - Contact time increase (normal: +20ms = 10 points)
-  - Flight time decrease (normal: -10ms = 5 points)
-  - Loading rate increase (+1000 N/s = 15 points)
-  - Form score decrease (-10 points = 20 points)
-- **Time Scaling**: Index increases 1% per minute after 30 minutes
-
-**3. Form Deterioration**
-- **Components Monitored**:
-  - Pronation angle variability (>5° std dev = -15 points)
-  - Strike pattern consistency (<80% consistent = -20 points)
-  - Asymmetry increase (>10% change = -20 points)
-  - Cadence drop (>10 spm decrease = -10 points)
-- **Score**: 100 - sum of deductions
-
-**4. Injury Risk Score**
-- **Risk Factors** (with thresholds from literature):
-  - Loading rate >8000 N/s: +30 points
-  - Asymmetry >15%: +25 points
-  - Pronation >20°: +20 points
-  - Heel strike + overstriding: +15 points
-  - Fatigue level >70: +10 points
-- **Categories**: Low (0-30), Moderate (31-60), High (61-100)
+| Metric | Update Rate | Description | Alert Level | Status |
+|--------|-------------|-------------|-------------|---------|
+| Fatigue Index | 0.5Hz | Cumulative fatigue score | >70% warning | ⚠️ Placeholder only |
+| Injury Risk Score | 0.5Hz | Composite risk assessment | >80% critical | ⚠️ Placeholder only |
+| Recovery Quality | End of session | Post-activity assessment | 0-100% | ❌ Not started |
+| Overstriding | Every step | Foot lands ahead of CoM | >30cm warning | ❌ Not started |
+| Impact Severity | Every step | Shock magnitude | >3g caution | ❌ Not started |
 
 ---
 
 ## GPS Integration and Battery Optimization
 
-### Overview
+### GPS Operating Modes - Implementation Status
 
-The system supports optional GPS data from the connected mobile phone to enhance distance and pace accuracy while maintaining battery efficiency. GPS integration is designed to be flexible, allowing users to choose between accuracy and battery life based on their activity needs.
+| Mode | Update Rate | Accuracy | Battery Impact | Use Case | Status |
+|------|-------------|----------|----------------|----------|---------|
+| OFF | Never | N/A | None | Treadmill/Track | ✅ |
+| CALIBRATION | 10s | ±5m | Low | Stride calibration | ✅ Framework |
+| PRECISE | 1s | ±3m | Medium | Race/Competition | ✅ Framework |
+| RACE | 0.5s | ±2m | High | Elite performance | ✅ Framework |
 
-### GPS Operating Modes
+**Implementation Notes**:
+- ✅ GPS data structure defined (gps_data_ble_t)
+- ✅ GPS data reception via Activity Metrics Service (write characteristic)
+- ✅ Basic stride calibration coefficient adjustment
+- ❌ GPS-based distance calculation not integrated
+- ❌ Pace smoothing with GPS not implemented
 
-| Mode | GPS Update Interval | Use Case | Battery Impact | Distance Accuracy | Pace Accuracy |
-|------|-------------------|----------|----------------|-------------------|---------------|
-| **OFF** | No GPS | Ultra/Trail runs, battery priority | Baseline | ±5-10% | ±15-20% |
-| **CALIBRATION** | 60 seconds | Everyday runs, training | +5% drain | ±2-3% | ±5-10% |
-| **PRECISE** | 30 seconds | Tempo runs, structured workouts | +10% drain | ±1-2% | ±2-3% |
-| **RACE** | 10-15 seconds | Races, time trials | +20% drain | <1% | ±1-2% |
+### Smart GPS Strategy
+```c
+// Pseudocode for GPS optimization (NOT IMPLEMENTED)
+if (pace_stable && straight_line) {
+    gps_mode = GPS_CALIBRATION;  // Save battery
+} else if (turning || pace_changing) {
+    gps_mode = GPS_PRECISE;  // Higher accuracy needed
+}
+```
 
-### How GPS Calibration Works
-
-1. **Periodic Updates**: Phone sends GPS position every 30-60 seconds (not continuous)
-2. **Stride Calibration**: GPS distance is used to calibrate the stride length model
-3. **Drift Correction**: Accumulated sensor-based distance is corrected at each GPS update
-4. **Graceful Degradation**: If GPS signal is lost, system continues with last calibration
-5. **Smart Intervals**: Update frequency adapts based on pace stability
-
-### GPS Data Protocol
-
-The mobile app sends GPS updates via the Control Point characteristic:
-
-| Field | Description | Size | Format |
-|-------|-------------|------|--------|
-| Timestamp | Unix time of GPS fix | 4 bytes | uint32 |
-| Latitude | Latitude × 10^7 | 4 bytes | int32 |
-| Longitude | Longitude × 10^7 | 4 bytes | int32 |
-| Speed | Current speed | 2 bytes | cm/s |
-| Distance | Distance since last update | 2 bytes | meters |
-| Accuracy | GPS accuracy | 1 byte | meters |
-| Elevation | Altitude change | 2 bytes | meters |
-
-### Activity-Specific GPS Defaults
-
-| Activity Type | Default GPS Mode | Rationale |
-|--------------|------------------|-----------|
-| Everyday Run | CALIBRATION | Balance accuracy and battery |
-| Long Run | OFF | Maximize battery life |
-| Tempo Run | PRECISE | Accurate pace feedback needed |
-| Intervals | PRECISE | Lap timing precision |
-| Race | RACE | Maximum accuracy required |
-| Trail Run | CALIBRATION | GPS may be intermittent |
-| Walk | CALIBRATION | Lower update rate sufficient |
-
-### Battery Optimization Strategies
-
-The system employs multiple intelligent strategies to minimize battery consumption while maintaining accuracy:
-
-#### 1. **Adaptive Sampling Algorithm**
-The GPS update frequency automatically adjusts based on running conditions:
-- **Stable Pace Detection**: When pace varies less than ±5% for 2 minutes, the system extends the GPS interval by 50%
-- **Variable Pace Detection**: During intervals or tempo changes, updates increase to maintain accuracy
-- **Speed-Based Adjustment**: Walking (< 2 m/s) uses longer intervals; fast running (> 5 m/s) uses shorter intervals
-- **Terrain Adaptation**: Uphill/downhill detected via pressure patterns triggers more frequent updates
-
-#### 2. **Smart Update Triggers**
-GPS updates are requested only when necessary:
-- **Distance Threshold**: Minimum 100m movement for everyday runs, 50m for intervals
-- **Time Threshold**: Maximum interval enforced (60-120 seconds) to prevent drift
-- **Event-Based**: Automatic update when detecting stops, turns, or pace changes >20%
-- **Lap Detection**: Extra update at estimated lap completion for accurate splits
-
-#### 3. **Intelligent Data Management**
-- **Quality Filtering**: GPS fixes with accuracy >20m are rejected; system continues with sensor data
-- **Selective Updates**: Only position and speed are used; other GPS data ignored to reduce processing
-- **Asynchronous Processing**: GPS updates never block sensor processing
-- **Predictive Caching**: Pre-calculate next expected position to validate GPS quality
-
-#### 4. **Hybrid Tracking Architecture**
-- **Continuous Sensor Tracking**: Shoes always maintain sensor-based distance/pace calculation
-- **GPS as Calibration**: GPS data used to correct stride length model, not replace it
-- **Graceful Degradation**: If phone connection lost, system continues with last calibration
-- **Dual Distance Tracking**: Separate "GPS-corrected" and "sensor-only" values for redundancy
-
-#### 5. **User-Controlled Optimization**
-Users can manually select GPS modes based on their priorities:
-- **Battery Priority Mode**: GPS OFF for ultra-marathons (10+ hour battery life)
-- **Balanced Mode**: CALIBRATION for daily training (8-hour battery, ±2-3% accuracy)
-- **Accuracy Priority Mode**: PRECISE for tempo/track work (6-hour battery, ±1-2% accuracy)
-- **Race Mode**: Maximum GPS frequency for PRs (4-hour battery, <1% error)
-
-#### 6. **Mobile App Efficiency**
-The mobile app optimizes its GPS usage:
-- **Batch Processing**: Collects multiple GPS points before sending to shoes
-- **Compression**: Sends only essential data (position, speed, accuracy)
-- **Smart Scheduling**: Aligns GPS polling with phone's existing location services
-- **Background Efficiency**: Uses low-power location APIs when available
-
-### Real-World Battery Impact Examples
-
-| Scenario | GPS Mode | Update Frequency | Phone Battery Impact | Shoe Battery Impact | Distance Accuracy |
-|----------|----------|------------------|---------------------|---------------------|-------------------|
-| Easy 10K Run | CALIBRATION | Every 60s (10 updates) | ~2% drain | <1% drain | ±2-3% |
-| Marathon Race | PRECISE | Every 30s (84 updates) | ~8% drain | ~3% drain | ±1-2% |
-| Ultra Trail 50K | OFF | No GPS | 0% drain | 0% drain | ±5-10% |
-| Track Workout | RACE | Every 10s (180 updates) | ~5% drain | ~2% drain | <1% |
-
-### Implementation Benefits
-
-This intelligent GPS integration provides:
-- **90% less battery usage** compared to continuous GPS tracking
-- **Professional-grade accuracy** when needed (races, tempo runs)
-- **All-day battery life** for long training runs
-- **Automatic optimization** without user intervention
-- **Fallback reliability** if phone connection is lost
-
-### Accuracy Comparison Table
-
-| Metric | BHI360 Only | BHI360 + Pressure | + Periodic GPS | + Frequent GPS |
-|--------|-------------|-------------------|----------------|----------------|
-| Step Count | ±5% | ±1% | ±1% | ±1% |
-| Cadence | ±3% | ±1% | ±1% | ±1% |
-| Contact Time | ±10ms | ±2ms | ±2ms | ±2ms |
-| Distance | ±20% | ±10% | ±2-3% | ±1% |
-| Pace | ±15-20% | ±5-10% | ±2-3% | ±1-2% |
-| Stride Length | ±20% | ±15% | ±5% | ±2% |
-| Elevation | N/A | N/A | From phone | From phone |
-
-### Implementation Notes
-
-- GPS updates are processed asynchronously to avoid blocking sensor processing
-- Stride correction factors are limited to ±20% to prevent erroneous GPS data from causing large errors
-- The system maintains separate "GPS-corrected" and "sensor-only" distance values for redundancy
-- GPS mode can be changed mid-activity without data loss
-- All GPS data is optional - the system functions fully without it
+**Status**: ❌ Smart GPS strategy not implemented
 
 ---
 
 ## Data Structures
 
-### Session Log File Format
+### Core Data Types (IMPLEMENTED ✅)
 
-The activity session file uses a compact binary format with the following structure:
-
-**📌 Format Note**: These are **C structs with binary packing**, NOT protobuf messages. This provides:
-- Fixed-size records for easy seeking
-- Minimal overhead (no protobuf field tags)
-- Direct memory mapping capability
-- Predictable file sizes
-
-#### File Header (Written Once at Start)
 ```c
-typedef struct {
-    uint32_t session_id;              // Unique session identifier
-    uint32_t start_timestamp;         // Unix epoch time
-    uint8_t  activity_type;           // RUNNING, WALKING, etc.
-    uint8_t  activity_subtype;        // 0=Everyday, 1=Long, 2=Tempo, 3=Intervals, 4=Calibration
-    uint8_t  firmware_version[3];     // Major.Minor.Patch
-    uint16_t user_weight_kg;          // ×10 for 0.1kg precision
-    uint16_t user_height_cm;          
-    uint8_t  user_age;
-    uint8_t  user_gender;             // 0=M, 1=F, 2=Other
-    uint8_t  left_battery_pct;        // At start
-    uint8_t  right_battery_pct;       // At start
-    uint16_t calibration_id;          // Reference to calibration data
-    uint8_t  gps_mode;                // GPS mode selected for session
-    uint8_t  reserved[6];             // Future use
-} SessionHeader; // 32 bytes
+// All time values use delta encoding
+typedef uint16_t delta_ms_t;    // 0-65535ms range
+typedef uint32_t timestamp_ms_t; // Absolute time reference
+
+// Fixed-point representations for efficiency
+typedef int16_t fixed16_t;  // Q8.8 format
+typedef int32_t fixed32_t;  // Q16.16 format
 ```
 
-#### Periodic Summary Records (Every 1-2 seconds)
-```c
-typedef struct {
-    uint16_t delta_time_ms;           // Time since last record
-    
-    // Basic metrics (both feet averaged where applicable)
-    uint16_t cadence_x2;              // Steps/min × 2 (0.5 precision)
-    uint16_t avg_contact_time_ms;     
-    uint16_t avg_flight_time_ms;
-    uint16_t distance_delta_cm;       // Distance since last record
-    
-    // Per-foot summary
-    FootSummary left_foot;            // 12 bytes
-    FootSummary right_foot;           // 12 bytes
-    
-    // Composite metrics
-    int8_t   balance_lr;              // -100 to +100
-    uint8_t  form_score;              // 0-100
-    uint8_t  efficiency_score;        // 0-100
-    uint8_t  fatigue_level;           // 0-100
-    
-    // Flags for events
-    uint8_t  event_flags;             // Bit flags for events
-    uint8_t  reserved[3];
-} PeriodicRecord; // 48 bytes
+### Session Header (IMPLEMENTED ✅)
 
-typedef struct {
-    uint16_t peak_force;              // Normalized units
-    uint8_t  heel_pct;                // 0-100
-    uint8_t  midfoot_pct;             // 0-100
-    uint8_t  forefoot_pct;            // 0-100
-    int8_t   pronation_angle;         // -45 to +45 degrees
-    uint16_t loading_rate;            // Normalized
-    uint8_t  strike_pattern;          // 0=heel, 1=mid, 2=fore
-    uint8_t  push_power;              // Normalized 0-255
-    uint8_t  step_count;              // Steps in this period
-    uint8_t  quality_score;           // 0-100
-} FootSummary; // 12 bytes
+```c
+typedef struct __attribute__((packed)) {
+    uint32_t session_id;        // Unique session identifier
+    uint32_t start_time_utc;    // Unix timestamp
+    uint16_t fw_version;        // Firmware version
+    uint8_t  activity_type;     // Running/Walking/Training
+    uint8_t  user_id;           // User identifier
+    
+    // User profile for calculations
+    uint16_t user_height_cm;    
+    uint16_t user_weight_kg;    
+    uint8_t  shoe_size_eu;      
+    uint8_t  flags;             // GPS enabled, etc.
+} session_header_t;  // 20 bytes
 ```
 
-#### Session Summary (Written Once at End)
+### Real-time Metrics Packet - 1Hz BLE (IMPLEMENTED ✅)
+
 ```c
-typedef struct {
-    uint32_t end_timestamp;
-    uint32_t total_duration_sec;
-    uint32_t total_steps;
-    uint32_t total_distance_m;
-    uint16_t avg_pace_sec_per_km;
-    uint16_t calories_burned;
+typedef struct __attribute__((packed)) {
+    // Timing
+    uint16_t delta_ms;          // Since last packet
     
-    // Performance summary
-    uint8_t  overall_form_score;      // 0-100
-    uint8_t  max_fatigue_reached;     // 0-100
-    uint8_t  injury_risk_score;       // 0-100
-    uint8_t  consistency_score;       // 0-100
+    // Primary metrics
+    uint16_t cadence_x2;        // Steps/min * 2
+    uint16_t pace_sec_per_km;   // Seconds per km
+    uint8_t  form_score;        // 0-100
     
-    // Key statistics
-    uint16_t avg_cadence;
-    uint16_t avg_contact_time_ms;
-    int8_t   avg_balance;             // -100 to +100
-    uint8_t  primary_strike_pattern;  // Most common
+    // Force & Contact
+    uint16_t avg_contact_ms;    // Average ground contact
+    uint16_t peak_force_n;      // Peak vertical force
     
-    // Alerts summary
-    uint8_t  alert_counts[8];         // Count per alert type
+    // Balance & Symmetry
+    uint8_t  balance_lr;        // Left/right % (0-100)
+    int8_t   asymmetry_index;   // -100 to +100
     
-    uint32_t crc32;                   // File integrity check
-} SessionSummary; // 40 bytes
+    // Fatigue & Risk
+    uint8_t  fatigue_score;     // 0-100
+    uint8_t  injury_risk;       // 0-100
+} realtime_metrics_t;  // 16 bytes
 ```
 
-### Storage Estimates
-- **Header**: 32 bytes
-- **Records**: 48 bytes × 1800 (1 hour @ 2Hz) = 86.4 KB
-- **Summary**: 40 bytes
-- **Total for 1 hour**: ~87 KB uncompressed, ~45 KB compressed
-- **Compared to raw**: 31.7 MB → 45 KB = 99.86% reduction
+**Implementation Status**: Structure defined and actively used for BLE transmission at 1Hz
+
+### Asymmetry Metrics Packet - 0.5Hz BLE (IMPLEMENTED ✅)
+
+```c
+typedef struct __attribute__((packed)) {
+    int16_t contact_time_diff_ms;  // L-R difference
+    int16_t step_length_diff_cm;   // L-R difference
+    int16_t peak_force_diff_n;      // L-R difference
+    uint8_t balance_score;          // 0-100
+    uint8_t asymmetry_flags;        // Warning flags
+    uint32_t step_count_l;          // Left foot steps
+    uint32_t step_count_r;          // Right foot steps
+} asymmetry_metrics_ble_t;  // 16 bytes
+```
+
+**Implementation Status**: Actively transmitted via BLE at 0.5Hz
+
+### Biomechanics Extended Packet (PARTIALLY IMPLEMENTED ⚠️)
+
+```c
+typedef struct __attribute__((packed)) {
+    int16_t pronation_angle_l;      // Left foot pronation
+    int16_t pronation_angle_r;      // Right foot pronation
+    uint16_t loading_rate_l;        // Left loading rate (BW/s)
+    uint16_t loading_rate_r;        // Right loading rate (BW/s)
+    uint8_t arch_collapse_l;        // Left arch collapse %
+    uint8_t arch_collapse_r;        // Right arch collapse %
+} biomechanics_extended_ble_t;  // 12 bytes
+```
+
+**Implementation Status**: 
+- ✅ BLE characteristic exists
+- ✅ Pronation angles calculated
+- ❌ Loading rate not calculated
+- ❌ Arch collapse not calculated
+
+### GPS Data Input (IMPLEMENTED ✅)
+
+```c
+typedef struct __attribute__((packed)) {
+    int32_t latitude;           // Degrees * 10^7
+    int32_t longitude;          // Degrees * 10^7
+    uint16_t accuracy_m;        // Horizontal accuracy
+    int16_t altitude_m;         // Altitude in meters
+    uint16_t speed_cm_s;        // Speed in cm/s
+    uint16_t heading_deg;       // Heading in degrees
+} gps_data_ble_t;  // 16 bytes
+```
+
+**Implementation Status**: Write characteristic, mobile app sends GPS data to device
 
 ---
 
 ## BLE Protocol
 
-### Service Architecture
+### Service Structure (ACTUAL IMPLEMENTATION ✅)
 
-```
-Shoe Sensor Device
-├── Device Information Service (0x180A) [Standard]
-│   ├── Manufacturer Name (0x2A29)
-│   ├── Model Number (0x2A24)
-│   ├── Firmware Revision (0x2A26)
-│   └── Battery Level (0x2A19)
-│
-└── Activity Metrics Service (Custom UUID: 00000001-7e57-4b8c-a577-b6e5c9b2e100)
-    ├── Real-time Metrics (Notify, 1Hz)
-    ├── Alert Notifications (Notify, Event-driven)
-    ├── Control Point (Write)
-    └── Session Status (Read/Notify)
-```
+**Activity Metrics Service** (UUID: `4fd5b690-9d89-4061-92aa-319ca786baae`)
 
-### Real-time Metrics Characteristic (20 bytes, 1Hz)
-```c
-typedef struct __attribute__((packed)) {
-    uint16_t delta_time_ms;         // 0-1: Time since last packet
-    uint16_t cadence_x2;            // 2-3: Steps/min × 2
-    uint16_t pace_sec_per_km;       // 4-5: Current pace
-    uint16_t distance_m;            // 6-7: Total distance
-    uint16_t contact_time_ms;       // 8-9: Average both feet
-    uint8_t  form_score;            // 10: 0-100
-    int8_t   balance_lr;            // 11: -100 to +100
-    uint8_t  efficiency;            // 12: 0-100
-    uint8_t  fatigue_level;         // 13: 0-100
-    uint8_t  foot_strike;           // 14: 0=heel, 1=mid, 2=fore
-    uint8_t  flags;                 // 15: Status flags
-    uint32_t step_count;            // 16-19: Total steps
-} RealtimeMetricsPacket;
-```
+| Characteristic | UUID | Type | Update Rate | Implementation Status |
+|----------------|------|------|-------------|----------------------|
+| Real-time Metrics | `4fd5b691-...` | notify | 1Hz | ✅ Fully working |
+| Asymmetry Metrics | `4fd5b692-...` | notify | 0.5Hz | ✅ Fully working |
+| Biomechanics Extended | `4fd5b693-...` | notify | On demand | ⚠️ Structure only |
+| Session Summary | `4fd5b694-...` | read+notify | End of session | ⚠️ Structure only |
+| GPS Data Input | `4fd5b695-...` | write | From mobile | ✅ Fully working |
+| Total Step Count | `4fd5b696-...` | read+notify | On change | ✅ Fully working |
+| Activity Step Count | `4fd5b697-...` | read+notify | On change | ✅ Fully working |
 
-### Alert Notification (20 bytes, Event-driven)
-```c
-typedef struct __attribute__((packed)) {
-    uint16_t delta_time_ms;         // 0-1: Time since last packet
-    uint8_t  alert_type;            // 2: See AlertType enum
-    uint8_t  severity;              // 3: 1-10
-    uint16_t current_value;         // 4-5: Metric that triggered
-    uint16_t threshold_value;       // 6-7: Threshold exceeded
-    uint8_t  affected_foot;         // 8: 0=both, 1=left, 2=right
-    uint8_t  recommendation;        // 9: Coaching tip code
-    uint8_t  duration_sec;          // 10: How long detected
-    uint8_t  reserved[9];           // 11-19
-} AlertPacket;
+### Control Commands (via Control Service) (IMPLEMENTED ✅)
 
-enum AlertType {
-    ALERT_POOR_FORM = 0,
-    ALERT_HIGH_ASYMMETRY = 1,
-    ALERT_OVERSTRIDING = 2,
-    ALERT_HIGH_IMPACT = 3,
-    ALERT_FATIGUE = 4,
-    ALERT_UNUSUAL_PATTERN = 5
-};
-```
-
-### Control Point Commands
-```c
-// Commands from mobile app
-#define CP_START_SESSION        0x01
-#define CP_STOP_SESSION         0x02
-#define CP_PAUSE_SESSION        0x03
-#define CP_SET_USER_PROFILE     0x05
-#define CP_REQUEST_SYNC         0x09
-#define CP_GPS_UPDATE           0x10    // GPS calibration data
-
-// Start session command structure
-typedef struct __attribute__((packed)) {
-    uint8_t  opcode;                // 0: = 0x01
-    uint8_t  activity_type;         // 1: Running/Walking/etc
-    uint8_t  activity_subtype;      // 2: Everyday/Long/Tempo/etc
-    uint8_t  gps_mode;              // 3: OFF/CALIBRATION/PRECISE/RACE
-    uint16_t user_weight_kg;        // 4-5: ×10 for precision
-    uint16_t user_height_cm;        // 6-7
-    uint8_t  user_age;              // 8
-    uint8_t  user_gender;           // 9: 0=M, 1=F
-    uint32_t session_id;            // 10-13: From mobile app
-    uint8_t  reserved[6];           // 14-19
-} StartSessionCommand;
-
-// GPS update command structure
-typedef struct __attribute__((packed)) {
-    uint8_t  opcode;                // 0: = 0x10
-    uint32_t timestamp;             // 1-4: Unix time
-    int32_t  latitude_e7;           // 5-8: Latitude × 10^7
-    int32_t  longitude_e7;          // 9-12: Longitude × 10^7
-    uint16_t speed_cms;             // 13-14: Speed in cm/s
-    uint16_t distance_m;            // 15-16: Distance since last update
-    uint8_t  accuracy_m;            // 17: GPS accuracy
-    int16_t  elevation_change_m;    // 18-19: Elevation change
-} GPSUpdateCommand;
-```
-
-### Connection Parameters
-- **Real-time Mode**: 15-30ms interval, 0 latency
-- **Power Save Mode**: 100-200ms interval, 4 latency
-- **MTU**: Negotiate maximum (247 bytes) for efficiency
+| Command | Value | Parameters | Response | Status |
+|---------|-------|------------|----------|---------|
+| START_ACTIVITY | 0x01 | activity_type | session_id | ✅ |
+| STOP_ACTIVITY | 0x02 | none | summary | ✅ |
+| GPS_UPDATE | 0x10 | lat, lon, accuracy | none | ✅ Via Activity Metrics Service |
+| CALIBRATE | 0x20 | sensor_type | status | ✅ |
 
 ---
 
 ## Implementation Guidelines
 
-**⚠️ NOTE: The C code examples below show the concepts - we'll need to adapt them when we implement.**
+### Thread Architecture (IMPLEMENTED ✅)
 
-### Processing Pipeline
-
-#### 1. Raw Data Collection (100Hz)
-```c
-// Sensor buffers
-typedef struct {
-    float pressure[8];              // 8 pressure channels
-    float quaternion[4];            // Orientation
-    float gyro[3];                  // Angular velocity
-    float linear_acc[3];            // Linear acceleration
-    uint32_t timestamp;
-} SensorSample;
-
-#define BUFFER_SIZE 200             // 2 seconds at 100Hz
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  sensor_data    │────▶│ realtime_metrics │────▶│    bluetooth    │
+│   (100Hz)       │     │     (1Hz)        │     │   (BLE notify)  │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+         │                       │
+         ▼                       ▼
+┌─────────────────┐     ┌──────────────────┐
+│ activity_metrics│     │    analytics     │
+│  (session mgmt) │     │ (complex calc)   │
+└─────────────────┘     └──────────────────┘
 ```
 
-#### Timestamp Management
-```c
-// Delta timestamp tracking
-typedef struct {
-    uint32_t last_packet_time;      // Last transmission time
-    uint32_t session_start_time;    // Absolute start reference
-    uint16_t max_delta_ms;          // Maximum allowed delta (overflow protection)
-} TimestampTracker;
+**Status**: ✅ All modules created and connected via message queues
 
-// Calculate delta time for packet
-uint16_t calculate_delta_time(TimestampTracker* tracker, uint32_t current_time) {
-    uint32_t delta = current_time - tracker->last_packet_time;
-    
-    // Handle overflow or excessive gaps
-    if (delta > tracker->max_delta_ms) {
-        delta = tracker->max_delta_ms;
-    }
-    
-    tracker->last_packet_time = current_time;
-    return (uint16_t)delta;
-}
-```
+### Memory Requirements (CURRENT USAGE)
+- **Static Allocation**: ~25KB used (target was 40KB)
+  - Sensor buffers: 15KB ✅
+  - Processing buffers: 6KB ✅
+  - Metric storage: 3KB ✅
+  - BLE queue: 1KB ✅
+- **No dynamic allocation** ✅
+- **Stack usage**: <1.5KB per thread ✅
 
-#### 2. Step Detection
-```c
-// State machine for gait phase detection
-typedef enum {
-    SWING_PHASE,
-    LOADING_PHASE,
-    MIDSTANCE_PHASE,
-    PUSH_OFF_PHASE
-} GaitPhase;
-
-// Detect ground contact from pressure sum
-bool detect_ground_contact(float pressure_sum) {
-    const float CONTACT_THRESHOLD = 50.0;  // Newtons
-    const float HYSTERESIS = 10.0;
-    
-    static bool in_contact = false;
-    
-    if (!in_contact && pressure_sum > CONTACT_THRESHOLD + HYSTERESIS) {
-        in_contact = true;
-        return true;  // Contact started
-    } else if (in_contact && pressure_sum < CONTACT_THRESHOLD - HYSTERESIS) {
-        in_contact = false;
-        return true;  // Contact ended
-    }
-    return false;  // No change
-}
-```
-
-#### 3. Pressure Distribution Calculation
-```c
-// Map 8 channels to anatomical regions
-void calculate_pressure_distribution(float channels[8], 
-                                   PressureDistribution* dist) {
-    // Channel mapping (device-specific)
-    float heel = channels[0] + channels[1];
-    float midfoot = channels[2] + channels[3] + channels[4];
-    float forefoot = channels[5] + channels[6] + channels[7];
-    float total = heel + midfoot + forefoot;
-    
-    if (total > 0) {
-        dist->heel_pct = (heel / total) * 100;
-        dist->midfoot_pct = (midfoot / total) * 100;
-        dist->forefoot_pct = (forefoot / total) * 100;
-    }
-}
-```
-
-#### 4. Pronation Analysis
-```c
-// Combine IMU and pressure for pronation
-float calculate_pronation(Quaternion* q, float pressure_lateral_shift) {
-    // Extract roll angle from quaternion
-    float roll = atan2(2*(q->w*q->x + q->y*q->z), 
-                      1 - 2*(q->x*q->x + q->y*q->y));
-    
-    // Combine with pressure shift
-    float pronation = roll * RAD_TO_DEG + 
-                     pressure_lateral_shift * PRESSURE_PRONATION_FACTOR;
-    
-    return constrain(pronation, -45, 45);
-}
-```
-
-#### 5. Asymmetry Calculation
-```c
-// Normalized asymmetry score
-int8_t calculate_asymmetry(float left_value, float right_value) {
-    float avg = (left_value + right_value) / 2;
-    if (avg == 0) return 0;
-    
-    float diff = left_value - right_value;
-    float asymmetry = (diff / avg) * 100;
-    
-    return constrain(asymmetry, -100, 100);
-}
-```
-
-### Memory Requirements
-- **Static Allocation**: ~40KB total
-  - Sensor buffers: 25.6KB
-  - Processing buffers: 8KB
-  - Metric storage: 4KB
-  - BLE queue: 2KB
-- **No dynamic allocation** (for reliability)
-- **Stack usage**: <2KB maximum depth
-
-### Power Optimization
-1. **Adaptive Sampling**: Reduce rate during low activity
-2. **Efficient Processing**: Use fixed-point math where possible
-3. **Smart Sleep**: Enter low-power mode when stationary
-4. **Batch Operations**: Process multiple samples together
+### Power Optimization (NOT IMPLEMENTED ❌)
+1. **Adaptive Sampling**: Reduce rate during low activity ❌
+2. **Efficient Processing**: Use fixed-point math where possible ⚠️ (partial)
+3. **Smart Sleep**: Enter low-power mode when stationary ❌
+4. **Batch Operations**: Process multiple samples together ✅
 
 ### Calibration Requirements
-1. **Pressure Sensors**: Zero offset, sensitivity, crosstalk matrix
-2. **IMU**: Gyro bias, accelerometer scale/bias, alignment
-3. **Time Sync**: <1ms synchronization between feet
-4. **User-Specific**: Height/weight for accurate calculations
+1. **Pressure Sensors**: Zero offset, sensitivity, crosstalk matrix ✅
+2. **IMU**: Gyro bias, accelerometer scale/bias, alignment ✅
+3. **Time Sync**: <1ms synchronization between feet ✅ (via D2D)
+4. **User-Specific**: Height/weight for accurate calculations ✅
 
 ---
 
@@ -761,29 +468,24 @@ int8_t calculate_asymmetry(float left_value, float right_value) {
 
 ### Required Mobile App Features
 
-#### 1. Real-time Display
-- Primary metrics dashboard
-- Color-coded quality indicators  
-- Trend visualization
-- Audio/haptic feedback
+#### 1. Real-time Display (SUPPORTED BY FIRMWARE ✅)
+- Primary metrics dashboard ✅
+- Color-coded quality indicators ✅
+- Trend visualization ✅
+- Audio/haptic feedback (app responsibility)
 
-#### 2. Session Management
+#### 2. Session Management (SUPPORTED BY FIRMWARE ✅)
 ```javascript
 // Example session flow
 async function startActivitySession(activityType, userProfile) {
     // Connect to both shoes
     await connectToShoes();
     
-    // Send user profile
-    await sendControlCommand(CP_SET_USER_PROFILE, userProfile);
+    // Send GPS update via Activity Metrics Service
+    await writeGPSData(lat, lon, accuracy, altitude, speed, heading);
     
-    // Start session
-    const sessionId = generateSessionId();
-    await sendControlCommand(CP_START_SESSION, {
-        activityType,
-        sessionId,
-        ...userProfile
-    });
+    // Start session via Control Service
+    await sendControlCommand(START_ACTIVITY, activityType);
     
     // Enable notifications
     await enableMetricsNotifications();
@@ -791,1333 +493,92 @@ async function startActivitySession(activityType, userProfile) {
 ```
 
 #### 3. Data Processing
-- Additional smoothing/filtering
-- Trend analysis over time
-- Comparison with historical data
-- Export capabilities
+- Additional smoothing/filtering (app side)
+- Trend analysis over time (app side)
+- Comparison with historical data (app side)
+- Export capabilities (app side)
 
-#### 4. Coaching Features
-- Real-time form corrections
-- Personalized recommendations
-- Training plan integration
-- Progress tracking
+#### 4. Available BLE Data Streams
 
-### API Requirements
-The mobile app should implement:
-- BLE connection management with auto-reconnection
-- Data buffering for connection interruptions
-- Local storage of session data
-- Cloud sync capabilities
-- Sharing/export functions
+**Real-time (1Hz):**
+- Cadence, pace, form score
+- Ground contact time, peak force
+- Left/right balance
+- Basic fatigue/injury risk scores
 
----
+**Asymmetry Detection (0.5Hz):**
+- Contact time differences
+- Step length differences
+- Peak force differences
+- Balance score with warning flags
 
-## Benefits Summary
-
-### For Athletes
-- **Immediate Feedback**: Real-time coaching during activities
-- **Injury Prevention**: Early warning of risky patterns
-- **Performance Optimization**: Data-driven training insights
-- **Progress Tracking**: Objective measurement of improvement
-
-### For Coaches
-- **Remote Monitoring**: Live athlete data access
-- **Training Optimization**: Evidence-based programming
-- **Team Management**: Compare athlete metrics
-- **Injury Risk Assessment**: Proactive intervention
-
-### For Medical Professionals
-- **Gait Analysis**: Clinical-grade movement data
-- **Rehabilitation Tracking**: Objective recovery metrics
-- **Asymmetry Detection**: Return-to-play decisions
-- **Load Management**: Prevent overuse injuries
+**Activity Tracking:**
+- Total steps since boot
+- Steps during current activity
+- GPS data write capability
 
 ---
 
-## Future Enhancements
+## Implementation Status Summary
 
-1. **Machine Learning Integration**
-   - Personalized form recommendations
-   - Predictive injury risk modeling
-   - Automatic activity classification
+### What's Working Now
+1. **Multi-threaded architecture** with sensor_data → realtime_metrics → BLE flow
+2. **Basic biomechanics**: contact/flight time, pressure distribution, strike pattern
+3. **Real-time metrics**: cadence, pace (non-GPS), form score, balance
+4. **BLE transmission**: 1Hz updates of packed metrics structure
+5. **Session management**: start/stop activities with basic tracking
+6. **GPS framework**: receives GPS data but doesn't use it for calculations yet
+7. **Asymmetry detection**: real-time L/R comparison with BLE notifications
+8. **Step counting**: both total and per-activity
 
-2. **Extended Metrics**
-   - Heart rate variability correlation
-   - Environmental adaptation (surface, weather)
-   - Multi-sport profiles
+### What's Missing
+1. **Advanced analytics**: fatigue, injury risk, efficiency calculations
+2. **GPS integration**: distance/pace accuracy improvements
+3. **Binary logging**: still using protobuf (large files)
+4. **Complex biomechanics**: CPEI, vertical oscillation, loading rate
+5. **Session summaries**: total distance, calories, elevation
+6. **Power optimizations**: adaptive sampling, smart sleep
 
-3. **Cloud Analytics**
-   - Population-level insights
-   - Benchmarking against peers
-   - Long-term trend analysis
+### BLE Characteristics Status
+
+| Feature | Calculation | BLE Characteristic | Data Flow |
+|---------|-------------|-------------------|-----------|
+| Cadence, Pace, Form Score | ✅ Working | ✅ Real-time metrics (1Hz) | ✅ Complete |
+| Contact Time, Peak Force | ✅ Working | ✅ Real-time metrics (1Hz) | ✅ Complete |
+| L/R Asymmetry | ✅ Working | ✅ Asymmetry metrics (0.5Hz) | ✅ Complete |
+| Step Counting | ✅ Working | ✅ Two characteristics | ✅ Complete |
+| GPS Reception | N/A | ✅ Write characteristic | ✅ Complete |
+| Basic Pronation | ✅ Working | ⚠️ Biomech extended | ⚠️ No updates |
+| Loading Rate | ❌ No calc | ⚠️ Biomech extended | ❌ No data |
+| Session Summary | ❌ No calc | ⚠️ Characteristic exists | ❌ No data |
+| Vertical Oscillation | ❌ No calc | ❌ No characteristic | ❌ Not started |
+| CPEI, Strike Angle | ❌ No calc | ❌ No characteristic | ❌ Not started |
+| Efficiency, Power | ❌ No calc | ❌ No characteristic | ❌ Not started |
+
+### Next Development Priorities
+1. Implement GPS-based distance and pace calculations
+2. Add fatigue and injury risk algorithms in analytics module
+3. Complete biomechanics extended calculations (loading rate, arch collapse)
+4. Populate session summary with real data
+5. Migrate from protobuf to binary struct logging
+6. Add remaining biomechanical calculations
 
 ---
-
-## Summary of Key Features for Clinical and Product Teams
-
-### Addressing Laura's Specific Points:
-
-#### 1. **Pressure Distribution (Table 8) - Per Foot Basis**
-✅ **Confirmed**: All pressure metrics are collected independently for each foot
-- Each foot has 8 pressure sensors providing detailed distribution
-- Center of Pressure (CoP) and CPEI are calculated separately for left/right
-- Enables detection of bilateral differences in loading patterns
-
-#### 2. **Gait Symmetry Metrics (Table 10)**
-✅ **Implemented**: Comprehensive symmetry analysis including:
-- Contact/Flight time asymmetry
-- Force asymmetry  
-- Step length asymmetry
-- Pronation asymmetry
-- All reported as percentage difference (negative = left bias, positive = right bias)
-
-#### 3. **Algorithm Basis (Table 12)**
-✅ **Detailed**: All algorithms are based on established biomechanical research:
-- **Running Efficiency**: Duty factor optimization (35% optimal)
-- **Fatigue Index**: Baseline degradation tracking with time scaling
-- **Form Deterioration**: Multi-component scoring system
-- **Injury Risk**: Evidence-based thresholds from literature
-
-#### 4. **Splits Display**
-✅ **Available**: Pace broken down by kilometer with two accuracy levels:
-- Without GPS: ±15-20% accuracy (adequate for training insights)
-- With GPS calibration: ±1-2% accuracy (race-grade precision)
-- Stored as array of up to 50 split times per session
-
-#### 5. **Run Type Tagging**
-✅ **Implemented**: Activity subtype field in session header:
-- Everyday Run (default)
-- Long Run (battery-optimized)
-- Tempo Run (pace-focused)
-- Intervals/Speed Work (lap detection)
-- Calibration Run
-- Affects GPS mode and metric priorities
-
-#### 6. **Step Width**
-✅ **Added**: Estimated using pressure and IMU data:
-- Accuracy: ±2-3cm
-- Based on medial-lateral pressure ratio and CoP deviation
-- Useful for detecting crossover gait and narrow base of support
-- Updated every 2 steps
-
-### Key Technical Capabilities
-
-#### Distance/Pace Without GPS
-- **BHI360 Only**: ±15-20% accuracy (basic fitness tracking)
-- **BHI360 + Pressure**: ±5-10% accuracy (good for training)
-- **Mathematical Model**: Height-based stride × cadence, adjusted by duty factor
-
-#### With Optional GPS from Phone
-- **Periodic Calibration**: GPS every 30-60s, ±2-3% accuracy
-- **Battery Modes**: User-selectable from OFF to RACE mode
-- **Smart Updates**: Frequency adapts to pace stability
-- **Graceful Fallback**: Continues with calibrated model if GPS lost
-
-### Data Architecture Benefits
-- **Real-time BLE**: 1Hz metrics for live feedback (20 bytes)
-- **Detailed Logging**: 0.5-2Hz comprehensive data (48 bytes/record)
-- **Compression**: 31.7MB/hour → 45KB/hour (99.86% reduction)
-- **Clinical Grade**: Research-quality biomechanical analysis
-
-## Implementation Summary
-
-### ✅ Fully Operational Features
-
-**Real-time BLE Transmission (Activity Metrics Service `4fd5b690-...`):**
-- **Real-time Metrics** (`...b691`): 20 bytes at 1Hz including cadence, pace, distance, form score, balance, contact/flight times
-- **Asymmetry Metrics** (`...b692`): 8 bytes at 1Hz including contact time, flight time, force, and pronation asymmetries
-- **Step Count Aggregation** (`...b696`, `...b697`): Total and activity-specific step counts from both feet
-- **GPS Data Input** (`...b695`): Receives GPS updates from mobile apps for enhanced accuracy
-
-**Core Sensor Processing (sensor_data module):**
-- **Ground Contact Detection**: 6-phase state machine (swing→heel→loading→midstance→push→toe-off)
-- **Pressure Distribution**: Heel/midfoot/forefoot percentages from 8-channel sensors
-- **Strike Pattern Classification**: Heel/midfoot/forefoot detection at initial contact
-- **Peak Force Tracking**: Maximum force during contact phase with automatic reset
-- **Pronation Angle**: Basic estimation from IMU quaternion (±45° range)
-
-**Real-time Metrics Calculation (realtime_metrics module):**
-- **Cadence**: Sliding window averaging with smoothing
-- **Pace Estimation**: Dynamic stride length model based on height and cadence
-- **Form Score**: Multi-component scoring (contact time, balance, consistency, pronation)
-- **Balance L/R**: Force-based percentage calculation
-- **Asymmetry Detection**: Real-time comparison of contact time, flight time, force, and pronation
-
-**System Architecture:**
-- **Thread-safe Design**: Race conditions eliminated with double-buffered work items
-- **Multi-threaded Processing**: Dedicated threads for sensor data (100Hz), real-time metrics (1Hz), and analytics
-- **GPS Integration Framework**: Receives and validates GPS data for stride calibration
-- **Session Management**: Start/stop commands with state tracking
-
-### 🔄 In Active Development
-
-**Advanced Analytics (analytics module):**
-- **Running Efficiency**: Multi-factor calculation based on duty factor, vertical oscillation, cadence
-- **Fatigue Index**: Baseline degradation tracking with time scaling
-- **Injury Risk Assessment**: Multi-factor risk scoring
-- **CPEI Calculation**: Center of Pressure Excursion Index
-- **Vertical Oscillation**: Integration from IMU data
-
-**Enhanced Biomechanics:**
-- **Loading Rate**: Force derivative calculation
-- **Push-off Power**: Force × velocity estimation
-- **Center of Pressure**: X/Y position tracking
-- **Step Length Estimation**: Model-based calculation
-- **Stride Length**: GPS-calibrated estimation
-
-**File Logging Optimization:**
-- **Binary Struct Format**: Migration from protobuf to efficient binary format
-- **Data Compression**: Target 99.86% reduction (31.7MB → 45KB per hour)
-- **Periodic Records**: 48-byte records every 1-2 seconds
-
-### 📊 Current Performance
-
-**Data Transmission:**
-- **BLE Update Rate**: 1Hz for real-time metrics
-- **Data Volume**: ~72 KB/hour transmitted (vs 31.7 MB/hour raw)
-- **Latency**: <100ms from sensor to mobile app
-- **Accuracy**: ±5-10% for pace without GPS, ±1-3% with GPS calibration
-
-**Processing Performance:**
-- **Sensor Processing**: 100Hz with <0.1ms execution time
-- **Real-time Metrics**: 1Hz with adaptive algorithms
-- **Memory Usage**: ~52KB total (thread stacks + buffers)
-- **CPU Usage**: ~29% estimated (not yet measured)
-
-**Mobile Integration:**
-- **Services**: 4 BLE services with 7 characteristics for activity metrics
-- **Data Formats**: Packed structures for efficient transmission
-- **Background Support**: Connection parameter optimization for battery life
-- **Cross-platform**: iOS and Android compatible
 
 ## Conclusion
 
-This specification provides a complete framework for transforming raw sensor data into actionable insights while dramatically reducing data storage and transmission requirements. The system balances scientific validity with practical implementation constraints, delivering real value to users across the performance spectrum.
-
-**Current Achievement**: The real-time activity metrics system is fully operational and providing live data to mobile applications. Core biomechanical analysis is working with ongoing development of advanced analytics.
-
-**Key Accomplishments:**
-- ✅ Real-time metrics transmission via BLE at 1Hz
-- ✅ Multi-threaded architecture with race condition fixes  
-- ✅ Core sensor processing with contact detection and pressure analysis
-- ✅ GPS integration framework for enhanced accuracy
-- ✅ Thread-safe design eliminating data corruption issues
-- ✅ Mobile app integration with Activity Metrics Service
-
-**Next Phase**: Focus on advanced analytics algorithms, file logging optimization, and enhanced biomechanical calculations to complete the comprehensive activity analysis system described in this specification.
-
-## Pace and Distance Calculation Methods
-
-### Overview
-
-Accurate pace and distance measurement without continuous GPS is achieved through sophisticated sensor fusion algorithms that combine IMU data, pressure patterns, and periodic GPS calibration. The system adapts its calculation method based on available sensors and GPS mode.
-
-### Calculation Methods by Sensor Configuration
-
-#### 1. BHI360 IMU Only
-- **Step Detection**: Accelerometer peak detection with adaptive thresholds
-- **Cadence Accuracy**: ±3% using frequency analysis
-- **Stride Estimation**: Height-based model with cadence correlation
-- **Distance Accuracy**: ±15-20% due to stride length variability
-- **Limitations**: Cannot detect subtle gait changes, terrain effects
-
-#### 2. BHI360 + 8-Channel Pressure Sensors
-- **Step Detection**: Precise pressure threshold crossing (±1ms)
-- **Cadence Accuracy**: ±1% from exact ground contact events
-- **Enhanced Stride Model**: Uses contact time, flight time, and pressure distribution
-- **Distance Accuracy**: ±5-10% with dynamic stride adjustment
-- **Advantages**: Detects walking vs running, uphill vs downhill, fatigue effects
-
-#### 3. With Periodic GPS Calibration
-- **Calibration Interval**: 30-60 seconds based on mode
-- **Stride Correction**: Real-time adjustment using GPS distance
-- **Distance Accuracy**: ±1-3% between GPS updates
-- **Drift Prevention**: Eliminates cumulative error
-- **Fallback**: Continues with calibrated model if GPS lost
-
-### Stride Length Estimation Model
-
-The stride length model considers multiple factors:
-
-1. **Base Stride Length** = Height × 0.75% (empirically derived)
-2. **Duty Factor Adjustment**:
-   - Duty Factor = Contact Time / (Contact Time + Flight Time)
-   - DF < 0.35 (fast running): Stride × 1.15
-   - DF > 0.45 (slow/walking): Stride × 0.85
-3. **Vertical Oscillation Adjustment**: ±10% based on bounce height
-4. **Pressure Pattern Adjustment**: ±5% based on push-off force
-5. **GPS Calibration Factor**: Applied when available
-
-### Pace Calculation Examples
-
-#### Scenario 1: Morning Easy Run (No GPS)
-- **Sensors**: BHI360 + Pressure
-- **Detected Cadence**: 168 spm
-- **Contact Time**: 265ms, Flight Time: 92ms
-- **Duty Factor**: 0.74 (265/357)
-- **Base Stride**: 175cm × 0.75% = 131cm
-- **Adjusted Stride**: 131cm × 0.85 = 111cm
-- **Speed**: (168 × 1.11) / 60 = 3.11 m/s
-- **Pace**: 1000 / 3.11 = 321 sec/km = 5:21/km
-- **Actual GPS Pace**: 5:15/km (1.9% error)
-
-#### Scenario 2: Tempo Run (GPS Calibration Mode)
-- **Initial Estimate**: 4:30/km (sensor-based)
-- **GPS Update #1** (60s): Actual 4:25/km → Correction factor 1.019
-- **Next 60s**: Apply correction to sensor estimates
-- **GPS Update #2** (120s): Actual 4:23/km → Update correction
-- **Result**: Maintains ±2-3% accuracy throughout
-
-#### Scenario 3: Track Intervals (GPS Precise Mode)
-- **GPS Updates**: Every 20-30 seconds
-- **Lap Detection**: Automatic from GPS coordinates
-- **Split Accuracy**: ±1-2% per 400m lap
-- **Recovery Detection**: Pace drops trigger mode adjustment
-
-### Split Calculation
-
-Splits are calculated and stored for each completed kilometer:
-
-1. **Distance Accumulation**: Track cumulative distance
-2. **Kilometer Detection**: Trigger when crossing 1000m boundaries
-3. **Time Calculation**: Time elapsed since last kilometer
-4. **Storage**: Array of up to 50 split times per session
-5. **Display Format**: MM:SS per kilometer (or per mile)
-
-### Step Width Estimation
-
-Step width (lateral distance between feet) is estimated using:
-
-1. **Pressure Distribution**: Medial vs lateral loading ratio
-2. **IMU Lateral Acceleration**: Side-to-side movement patterns
-3. **Center of Pressure Deviation**: Lateral CoP excursion
-4. **Expected Accuracy**: ±2-3cm
-5. **Clinical Relevance**: Detect crossover gait, narrow base of support
-
-### Accuracy Summary Table
-
-| Configuration | Step Count | Cadence | Distance | Pace | Stride Length | Step Width |
-|--------------|------------|---------|----------|------|---------------|------------|
-| BHI360 Only | ±5% | ±3% | ±20% | ±15-20% | ±20% | N/A |
-| + Pressure Sensors | ±1% | ±1% | ±10% | ±5-10% | ±15% | ±3cm |
-| + GPS Calibration | ±1% | ±1% | ±2-3% | ±2-3% | ±5% | ±3cm |
-| + Frequent GPS | ±1% | ±1% | ±1% | ±1-2% | ±2% | ±3cm |
-
-### Implementation Considerations
-
-1. **Calibration Period**: First 2-3 minutes establish baseline stride characteristics
-2. **Surface Detection**: Adjust model for track vs road vs trail (future enhancement)
-3. **Weather Effects**: Wind resistance not accounted for in current model
-4. **Individual Variation**: Model improves with user-specific calibration runs
-5. **Real-time Updates**: Pace displayed with 1-second lag for smoothing
-
-### Dual-Device Enhanced Calculations
-
-The synchronized dual-device setup significantly improves several calculations:
-
-#### True Flight Time Calculation
-```
-Single Device: Flight Time = Time between ground contacts of SAME foot
-Dual Device: Flight Time = Time when NEITHER foot has ground contact
-Benefit: 50% more accurate, detects brief double-support phases
-```
-
-#### Step Width Estimation
-```
-Single Device: Estimated from pressure distribution and IMU lateral movement
-Dual Device: Calculated from actual foot positions at ground contact
-Benefit: ±1cm accuracy vs ±3cm with single device
-```
-
-#### Asymmetry Detection
-```
-Single Device: Compare averaged left vs right over multiple steps
-Dual Device: Compare left vs right within SAME step cycle
-Benefit: Real-time detection, 10x faster response to changes
-```
-
-#### Fatigue Progression
-```
-Single Device: Track overall performance degradation
-Dual Device: Identify which leg fatigues first and compensation patterns
-Benefit: Targeted training recommendations, injury prevention
-```
-
----
-
-### Sensor Capability Analysis: BHI360 Only vs BHI360 + Pressure Sensors
-
-Understanding what metrics can be calculated with different sensor combinations is crucial for system design and feature planning:
-
-#### Metrics Achievable with BHI360 IMU Only
-
-| **Metric** | **Accuracy** | **Method** | **Limitations** |
-|-----------|--------------|-----------|-----------------|
-| **Step Count** | ±5% | Peak detection in acceleration | May miss very soft steps |
-| **Cadence** | ±3% | Frequency analysis of acceleration | Good for regular patterns |
-| **Impact G-force** | ±10% | Direct from accelerometer | Accurate peak detection |
-| **Foot Strike Angle** | ±15° | Quaternion at impact detection | Requires good impact detection |
-| **Pronation Angle** | ±10° | Quaternion roll component | No pressure validation |
-| **Movement Smoothness** | Relative | Jerk analysis of acceleration | Comparative metric only |
-| **Basic Asymmetry** | ±20% | Comparing L/R acceleration patterns | Limited without timing precision |
-| **Vertical Oscillation** | ±25% | Double integration of acceleration | Drift accumulation issues |
-| **Pace Estimation** | ±15-20% | Cadence × height-based stride | High variability in stride length |
-
-#### Enhanced Metrics with BHI360 + 8-Channel Pressure Sensors
-
-| **Metric** | **Accuracy** | **Method** | **Pressure Sensor Contribution** |
-|-----------|--------------|-----------|----------------------------------|
-| **Ground Contact Time** | ±2ms | Pressure threshold detection | Direct measurement of contact phases |
-| **Flight Time** | ±2ms | Time between pressure releases | Precise phase transitions |
-| **Pressure Distribution** | ±5% | Direct from 8 channels | Heel/midfoot/forefoot percentages |
-| **Center of Pressure** | ±5mm | Weighted average of channels | Dynamic balance tracking |
-| **Loading Rate** | ±10% | dF/dt from pressure rise | Direct force measurement |
-| **Push-off Power** | ±15% | Force × velocity estimation | Actual force measurement |
-| **Foot Strike Pattern** | ±95% accuracy | Initial contact location | Definitive strike classification |
-| **True Asymmetry** | ±5% | Precise L/R timing & force | Accurate bilateral comparison |
-| **Gait Phase Detection** | ±98% accuracy | Pressure pattern recognition | Clear phase boundaries |
-| **Fatigue Detection** | ±15% | Pressure pattern degradation | Subtle changes in loading |
-| **Accurate Pace** | ±5-10% | Step timing + stride estimation | Precise step detection for cadence |
-
-### Detailed Calculation Examples
-
-**⚠️ NOTE: These C code examples show how the algorithms work. We'll need to hook them up to our sensors and add the usual error handling when we implement them.**
-
-Here are specific function implementations for key metrics in the conclusion:
-
-#### 1. Ground Contact Time Calculation (Requires Pressure Sensors)
-```c
-typedef struct {
-    uint32_t contact_start_time;
-    uint32_t last_contact_end;
-    bool in_contact;
-    float pressure_threshold;
-} ContactDetector;
-
-float calculate_ground_contact_time(ContactDetector* detector, 
-                                   float pressure_sum, 
-                                   uint32_t current_time) {
-    const float HYSTERESIS = 10.0;  // Newtons
-    
-    // Detect contact start
-    if (!detector->in_contact && 
-        pressure_sum > detector->pressure_threshold + HYSTERESIS) {
-        detector->in_contact = true;
-        detector->contact_start_time = current_time;
-    }
-    // Detect contact end
-    else if (detector->in_contact && 
-             pressure_sum < detector->pressure_threshold - HYSTERESIS) {
-        detector->in_contact = false;
-        detector->last_contact_end = current_time;
-        
-        // Return contact time in milliseconds
-        return (float)(current_time - detector->contact_start_time);
-    }
-    
-    return 0;  // No complete contact detected
-}
-```
-
-#### 2. Pressure Distribution Analysis (8-Channel Mapping)
-```c
-typedef struct {
-    float heel_pct;
-    float midfoot_pct;
-    float forefoot_pct;
-    float center_of_pressure_x;  // Medial-lateral in mm
-    float center_of_pressure_y;  // Anterior-posterior in mm
-} PressureMetrics;
-
-void calculate_pressure_distribution(float channels[8], 
-                                   PressureMetrics* metrics) {
-    // Channel mapping for 8-sensor layout
-    // Channels 0-1: Heel region
-    // Channels 2-4: Midfoot region  
-    // Channels 5-7: Forefoot region
-    
-    float heel = channels[0] + channels[1];
-    float midfoot = channels[2] + channels[3] + channels[4];
-    float forefoot = channels[5] + channels[6] + channels[7];
-    float total = heel + midfoot + forefoot;
-    
-    if (total > 0) {
-        metrics->heel_pct = (heel / total) * 100;
-        metrics->midfoot_pct = (midfoot / total) * 100;
-        metrics->forefoot_pct = (forefoot / total) * 100;
-        
-        // Calculate center of pressure
-        // X: medial-lateral (assuming symmetric sensor layout)
-        float x_weighted = 0;
-        float y_weighted = 0;
-        
-        // Sensor positions in mm (device-specific calibration)
-        const float sensor_x[8] = {-15, 15, -20, 0, 20, -15, 0, 15};
-        const float sensor_y[8] = {-80, -80, -40, -40, -40, 20, 20, 20};
-        
-        for (int i = 0; i < 8; i++) {
-            x_weighted += channels[i] * sensor_x[i];
-            y_weighted += channels[i] * sensor_y[i];
-        }
-        
-        metrics->center_of_pressure_x = x_weighted / total;
-        metrics->center_of_pressure_y = y_weighted / total;
-    }
-}
-```
-
-#### 3. Loading Rate Calculation (Force Derivative)
-```c
-typedef struct {
-    float force_history[10];  // Circular buffer
-    uint32_t time_history[10];
-    int buffer_index;
-    bool buffer_full;
-} LoadingRateCalculator;
-
-float calculate_loading_rate(LoadingRateCalculator* calc,
-                           float current_force,
-                           uint32_t current_time) {
-    // Add to circular buffer
-    calc->force_history[calc->buffer_index] = current_force;
-    calc->time_history[calc->buffer_index] = current_time;
-    calc->buffer_index = (calc->buffer_index + 1) % 10;
-    
-    if (!calc->buffer_full && calc->buffer_index == 0) {
-        calc->buffer_full = true;
-    }
-    
-    if (!calc->buffer_full) return 0;  // Not enough data
-    
-    // Find maximum rate of force increase
-    float max_loading_rate = 0;
-    
-    for (int i = 0; i < 9; i++) {
-        int idx1 = (calc->buffer_index + i) % 10;
-        int idx2 = (calc->buffer_index + i + 1) % 10;
-        
-        float dF = calc->force_history[idx2] - calc->force_history[idx1];
-        float dt = (calc->time_history[idx2] - calc->time_history[idx1]) / 1000.0;
-        
-        if (dt > 0 && dF > 0) {
-            float rate = dF / dt;  // N/s
-            if (rate > max_loading_rate) {
-                max_loading_rate = rate;
-            }
-        }
-    }
-    
-    return max_loading_rate;
-}
-```
-
-#### 4. Pronation Analysis (IMU + Pressure Validation)
-```c
-typedef struct {
-    float baseline_roll;
-    bool baseline_set;
-    float max_pronation;
-} PronationTracker;
-
-float calculate_pronation_angle(PronationTracker* tracker,
-                              float quaternion[4],
-                              float pressure_lateral_ratio) {
-    // Extract roll angle from quaternion
-    float roll = atan2(2*(quaternion[0]*quaternion[1] + quaternion[2]*quaternion[3]), 
-                      1 - 2*(quaternion[1]*quaternion[1] + quaternion[2]*quaternion[2]));
-    roll = roll * 180.0 / M_PI;  // Convert to degrees
-    
-    // Set baseline during standing
-    if (!tracker->baseline_set && pressure_lateral_ratio > 0.45 && 
-        pressure_lateral_ratio < 0.55) {
-        tracker->baseline_roll = roll;
-        tracker->baseline_set = true;
-    }
-    
-    if (!tracker->baseline_set) return 0;
-    
-    // Calculate pronation relative to baseline
-    float pronation = roll - tracker->baseline_roll;
-    
-    // Validate with pressure distribution
-    // High lateral pressure indicates overpronation
-    if (pressure_lateral_ratio > 0.7) {
-        pronation *= 1.2;  // Amplify if pressure confirms
-    } else if (pressure_lateral_ratio < 0.3) {
-        pronation *= 0.8;  // Reduce if pressure contradicts
-    }
-    
-    // Track maximum pronation
-    if (fabs(pronation) > fabs(tracker->max_pronation)) {
-        tracker->max_pronation = pronation;
-    }
-    
-    return constrain(pronation, -45, 45);
-}
-```
-
-#### 5. Asymmetry Detection (Bilateral Comparison)
-```c
-typedef struct {
-    float left_values[50];   // Circular buffer for averaging
-    float right_values[50];
-    int buffer_index;
-    int sample_count;
-} AsymmetryDetector;
-
-int8_t calculate_asymmetry_score(AsymmetryDetector* detector,
-                                float left_value,
-                                float right_value,
-                                const char* metric_type) {
-    // Add to buffers
-    detector->left_values[detector->buffer_index] = left_value;
-    detector->right_values[detector->buffer_index] = right_value;
-    detector->buffer_index = (detector->buffer_index + 1) % 50;
-    
-    if (detector->sample_count < 50) {
-        detector->sample_count++;
-        return 0;  // Not enough data
-    }
-    
-    // Calculate averages
-    float left_avg = 0, right_avg = 0;
-    for (int i = 0; i < 50; i++) {
-        left_avg += detector->left_values[i];
-        right_avg += detector->right_values[i];
-    }
-    left_avg /= 50;
-    right_avg /= 50;
-    
-    // Calculate normalized asymmetry
-    float total_avg = (left_avg + right_avg) / 2;
-    if (total_avg < 0.001) return 0;  // Avoid division by zero
-    
-    float asymmetry = ((left_avg - right_avg) / total_avg) * 100;
-    
-    // Apply metric-specific scaling
-    if (strcmp(metric_type, "contact_time") == 0) {
-        asymmetry *= 1.5;  // More sensitive for timing
-    } else if (strcmp(metric_type, "peak_force") == 0) {
-        asymmetry *= 0.8;  // Less sensitive for force
-    }
-    
-    return constrain((int8_t)asymmetry, -100, 100);
-}
-```
-
-#### 6. Fatigue Index Calculation (Pattern Degradation)
-```c
-typedef struct {
-    float baseline_contact_time;
-    float baseline_flight_time;
-    float baseline_loading_rate;
-    float baseline_form_score;
-    uint32_t baseline_samples;
-    uint32_t activity_start_time;
-} FatigueAnalyzer;
-
-uint8_t calculate_fatigue_index(FatigueAnalyzer* analyzer,
-                              float contact_time,
-                              float flight_time,
-                              float loading_rate,
-                              float form_score,
-                              uint32_t current_time) {
-    // Establish baseline (first 2 minutes)
-    if (current_time - analyzer->activity_start_time < 120000) {
-        analyzer->baseline_contact_time += contact_time;
-        analyzer->baseline_flight_time += flight_time;
-        analyzer->baseline_loading_rate += loading_rate;
-        analyzer->baseline_form_score += form_score;
-        analyzer->baseline_samples++;
-        return 0;  // No fatigue during baseline
-    }
-    
-    // Finalize baseline
-    if (analyzer->baseline_samples > 0) {
-        analyzer->baseline_contact_time /= analyzer->baseline_samples;
-        analyzer->baseline_flight_time /= analyzer->baseline_samples;
-        analyzer->baseline_loading_rate /= analyzer->baseline_samples;
-        analyzer->baseline_form_score /= analyzer->baseline_samples;
-        analyzer->baseline_samples = 0;  // Mark as finalized
-    }
-    
-    // Calculate degradation from baseline
-    float contact_degradation = (contact_time - analyzer->baseline_contact_time) / 
-                               analyzer->baseline_contact_time;
-    float flight_degradation = (analyzer->baseline_flight_time - flight_time) / 
-                              analyzer->baseline_flight_time;
-    float loading_degradation = (loading_rate - analyzer->baseline_loading_rate) / 
-                               analyzer->baseline_loading_rate;
-    float form_degradation = (analyzer->baseline_form_score - form_score) / 
-                            analyzer->baseline_form_score;
-    
-    // Weight the factors
-    float fatigue_score = (contact_degradation * 0.3 +
-                          flight_degradation * 0.2 +
-                          loading_degradation * 0.3 +
-                          form_degradation * 0.2) * 100;
-    
-    // Apply time-based scaling (fatigue increases over time)
-    float minutes_elapsed = (current_time - analyzer->activity_start_time) / 60000.0;
-    fatigue_score *= (1.0 + minutes_elapsed / 60.0);  // +1% per minute
-    
-    return constrain((uint8_t)fatigue_score, 0, 100);
-}
-```
-
-#### 7. Pace Calculation (Speed to Pace Conversion)
-
-**Pace Calculation Methods Based on Available Sensors:**
-
-**A. BHI360 IMU Only Method:**
-- Uses accelerometer peak detection for step counting
-- Estimates stride length from user height and cadence
-- Less accurate due to stride length variations
-- Accuracy: ±15-20% for pace estimation
-
-**B. BHI360 + Pressure Sensors Method:**
-- Precise step detection from pressure threshold
-- Accurate cadence from ground contact events
-- Better stride length estimation using contact time
-- Accuracy: ±5-10% for pace estimation
-
-```c
-typedef struct {
-    float distance_buffer[60];      // Last 60 seconds of distance
-    uint32_t time_buffer[60];       // Timestamps
-    int buffer_index;
-    float total_distance;           // Cumulative distance
-    uint32_t lap_start_distance;    // Distance at lap start
-    uint32_t lap_start_time;        // Time at lap start
-    // Stride estimation parameters
-    float avg_contact_time;         // For stride length correction
-    float avg_flight_time;          // For speed validation
-} PaceCalculator;
-
-// Enhanced pace calculation using both IMU and pressure data
-float calculate_pace_with_sensors(float cadence_spm,
-                                 float contact_time_ms,
-                                 float flight_time_ms,
-                                 float user_height_cm,
-                                 float vertical_oscillation_mm) {
-    // Base stride length estimation from height
-    float base_stride = user_height_cm * 0.0075;  // 0.75% of height
-    
-    // Adjust stride based on contact/flight ratio (duty factor)
-    float duty_factor = contact_time_ms / (contact_time_ms + flight_time_ms);
-    
-    // Lower duty factor (more flight time) = longer strides
-    float stride_adjustment = 1.0;
-    if (duty_factor < 0.35) {  // Fast running
-        stride_adjustment = 1.15;
-    } else if (duty_factor > 0.45) {  // Slow running/walking
-        stride_adjustment = 0.85;
-    }
-    
-    // Further adjust based on vertical oscillation
-    // More bounce typically means longer strides
-    float vo_adjustment = 1.0 + (vertical_oscillation_mm - 60) * 0.002;
-    vo_adjustment = constrain(vo_adjustment, 0.9, 1.1);
-    
-    // Calculate final stride length
-    float stride_length = base_stride * stride_adjustment * vo_adjustment;
-    
-    // Calculate speed
-    float speed_ms = (cadence_spm * stride_length) / 60.0;
-    
-    // Convert to pace
-    float pace_sec_per_km = 1000.0 / speed_ms;
-    return constrain(pace_sec_per_km, 120, 900);
-}
-
-// BHI360-only pace estimation (less accurate)
-float estimate_pace_imu_only(float cadence_spm,
-                           float impact_g_force,
-                           float user_height_cm) {
-    // Estimate stride length from cadence and impact
-    float base_stride = user_height_cm * 0.007;  // Conservative estimate
-    
-    // Higher impact often correlates with longer strides
-    float impact_factor = 1.0 + (impact_g_force - 2.0) * 0.05;
-    impact_factor = constrain(impact_factor, 0.8, 1.2);
-    
-    float stride_length = base_stride * impact_factor;
-    
-    // Cadence-based adjustment
-    if (cadence_spm > 180) {
-        stride_length *= 0.9;  // Shorter strides at high cadence
-    } else if (cadence_spm < 160) {
-        stride_length *= 1.1;  // Longer strides at low cadence
-    }
-    
-    float speed_ms = (cadence_spm * stride_length) / 60.0;
-    float pace_sec_per_km = 1000.0 / speed_ms;
-    
-    return constrain(pace_sec_per_km, 120, 900);
-}
-
-// Calculate current pace in seconds per kilometer
-uint16_t calculate_current_pace(PaceCalculator* calc, 
-                               float current_speed_ms) {
-    if (current_speed_ms < 0.5) {  // Walking or stopped
-        return 999;  // Max pace (16:39/km)
-    }
-    
-    float pace_sec_per_km = 1000.0 / current_speed_ms;
-    return constrain((uint16_t)pace_sec_per_km, 120, 900);  // 2:00 to 15:00/km
-}
-
-// Calculate average pace over rolling window
-uint16_t calculate_average_pace(PaceCalculator* calc,
-                               float distance_increment,
-                               uint32_t current_time) {
-    // Add to circular buffer
-    calc->distance_buffer[calc->buffer_index] = distance_increment;
-    calc->time_buffer[calc->buffer_index] = current_time;
-    calc->buffer_index = (calc->buffer_index + 1) % 60;
-    
-    // Calculate distance covered in last 60 seconds
-    float window_distance = 0;
-    uint32_t window_time = 60000;  // 60 seconds in ms
-    
-    for (int i = 0; i < 60; i++) {
-        window_distance += calc->distance_buffer[i];
-    }
-    
-    if (window_distance < 10) {  // Less than 10m in 60s
-        return 999;  // Max pace
-    }
-    
-    // Pace = time / distance
-    float pace_sec_per_km = (window_time / 1000.0) / (window_distance / 1000.0);
-    return constrain((uint16_t)pace_sec_per_km, 120, 900);
-}
-
-// Convert km pace to mile pace
-uint16_t convert_pace_km_to_mile(uint16_t pace_sec_per_km) {
-    return (uint16_t)(pace_sec_per_km * 1.60934);
-}
-
-// Calculate lap pace
-uint16_t calculate_lap_pace(PaceCalculator* calc,
-                           float total_distance,
-                           uint32_t current_time) {
-    float lap_distance = total_distance - calc->lap_start_distance;
-    float lap_time_sec = (current_time - calc->lap_start_time) / 1000.0;
-    
-    if (lap_distance < 10) {  // Less than 10m
-        return 999;
-    }
-    
-    float pace_sec_per_km = lap_time_sec / (lap_distance / 1000.0);
-    return constrain((uint16_t)pace_sec_per_km, 120, 900);
-}
-
-// Validate pace using multiple methods
-uint16_t calculate_validated_pace(float imu_pace,
-                                float pressure_pace,
-                                float previous_pace) {
-    // If both methods agree within 10%, use average
-    float difference = fabs(imu_pace - pressure_pace) / imu_pace;
-    
-    if (difference < 0.1) {
-        return (uint16_t)((imu_pace + pressure_pace) / 2);
-    }
-    
-    // If they disagree, use pressure-based (more accurate)
-    // but limit change from previous pace
-    float max_change = previous_pace * 0.2;  // 20% max change
-    float limited_pace = pressure_pace;
-    
-    if (fabs(pressure_pace - previous_pace) > max_change) {
-        if (pressure_pace > previous_pace) {
-            limited_pace = previous_pace + max_change;
-        } else {
-            limited_pace = previous_pace - max_change;
-        }
-    }
-    
-    return (uint16_t)limited_pace;
-}
-```
-
-### Data Summary: What Gets Sent vs What Gets Logged
-
-The following tables clearly outline the data transmitted via BLE characteristics versus data stored in the activity log file:
-
-#### BLE Transmitted Data (Real-time)
-
-| **Characteristic** | **Update Rate** | **Data Fields** | **Size** | **Purpose** |
-|-------------------|----------------|-----------------|----------|-------------|
-| **Real-time Metrics** | 1Hz | • Delta time (ms)<br>• Cadence (steps/min)<br>• Pace (sec/km)<br>• Distance (m)<br>• Contact time (ms)<br>• Form score (0-100)<br>• Balance L/R (-100 to +100)<br>• Efficiency (0-100)<br>• Fatigue level (0-100)<br>• Foot strike pattern<br>• Status flags<br>• Total step count | 20 bytes | Live performance feedback during activity |
-| **Alert Notifications** | Event-driven | • Delta time (ms)<br>• Alert type<br>• Severity (1-10)<br>• Current value<br>• Threshold value<br>• Affected foot<br>• Recommendation code<br>• Duration detected | 20 bytes | Real-time warnings for form issues, asymmetry, fatigue |
-| **Session Status** | On change | • Session state<br>• Activity type<br>• Session ID<br>• Elapsed time<br>• Step count<br>• Distance<br>• Battery levels<br>• Memory usage | 20 bytes | Session management and device status |
-
-#### Activity Log File Data (Stored on Device)
-
-| **Section** | **Frequency** | **Data Fields** | **Size** | **Purpose** |
-|------------|--------------|-----------------|----------|-------------|
-| **Session Header** | Once at start | • Session ID<br>• Start timestamp<br>• Activity type<br>• User profile (weight, height, age, gender)<br>• Firmware version<br>• Battery levels<br>• Calibration reference | 32 bytes | Session identification and context |
-| **Periodic Records** | Every 1-2 sec | • Delta time (ms)<br>• Cadence<br>• Contact/flight times<br>• Distance increment<br>• **Per foot:**<br>&nbsp;&nbsp;- Peak force<br>&nbsp;&nbsp;- Pressure distribution (heel/mid/forefoot %)<br>&nbsp;&nbsp;- Pronation angle<br>&nbsp;&nbsp;- Loading rate<br>&nbsp;&nbsp;- Strike pattern<br>&nbsp;&nbsp;- Push-off power<br>&nbsp;&nbsp;- Step count<br>&nbsp;&nbsp;- Quality score<br>• Balance L/R<br>• Form score<br>• Efficiency score<br>• Fatigue level<br>• Event flags | 48 bytes | Detailed biomechanical analysis |
-| **Session Summary** | Once at end | • End timestamp<br>• Total duration<br>• Total steps & distance<br>• Average pace<br>• Calories burned<br>• Overall scores (form, fatigue, injury risk)<br>• Average metrics<br>• Alert counts by type<br>• CRC checksum | 40 bytes | Session statistics and summary |
-
-#### Key Differences
-
-| **Aspect** | **BLE (Real-time)** | **Log File** |
-|-----------|-------------------|--------------|
-| **Update Rate** | 1Hz (metrics), event-driven (alerts) | 0.5-2Hz |
-| **Data Detail** | Essential metrics only | Complete biomechanical data |
-| **Per-foot Data** | Averaged/combined | Separate L/R measurements |
-| **Pressure Details** | Not included | Full distribution (heel/mid/forefoot) |
-| **Storage Impact** | ~72 KB/hour transmitted | ~45 KB/hour stored |
-| **Primary Use** | Live feedback & coaching | Post-activity analysis |
-
-### Mobile Team Integration Notes
-
-Hey mobile team! Here's what you'll need to handle on your end:
-
-1. **BLE Connection**: Set up auto-reconnection and buffering for the three characteristics
-2. **Real-time Display**: The 1Hz metrics are perfect for the live dashboard
-3. **Alert Handling**: Show notifications immediately - users need to see these right away
-4. **Session Management**: The control point handles start/stop/pause commands
-5. **Data Sync**: We can transfer the full activity log files post-session for detailed analysis
-6. **3D Visualization**: When we're NOT logging, grab the 3D Orientation Service (UUID: `0c372ec0-27eb-437e-bef4-775aefaf3c97`) for real-time quaternion data at 20Hz
-
-#### Pace Display Guidelines
-
-The pace data is transmitted as **seconds per kilometer** (uint16_t). To display this properly:
-
-```javascript
-// Convert seconds to MM:SS format
-function formatPace(paceSeconds) {
-    if (paceSeconds >= 999) return "--:--";  // No pace available
-    
-    const minutes = Math.floor(paceSeconds / 60);
-    const seconds = paceSeconds % 60;
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
-// Example conversions:
-// 300 seconds = 5:00/km
-// 420 seconds = 7:00/km
-// 245 seconds = 4:05/km
-
-// For mile pace display:
-function displayMilePace(paceSecondsPerKm) {
-    const paceSecondsPerMile = Math.round(paceSecondsPerKm * 1.60934);
-    return formatPace(paceSecondsPerMile) + "/mi";
-}
-```
-
-**Pace Types Available:**
-- **Current Pace**: Instantaneous pace based on current speed (may be noisy)
-- **Average Pace**: Rolling 60-second average (smoother, recommended for display)
-- **Lap Pace**: Pace for current interval/lap
-- **Session Pace**: Overall average for entire activity
-
-### Alternative Real-time Data Sources
-
-When activity logging is not active, the following services provide real-time data:
-
-1. **3D Orientation Service** (Primary device only)
-   - UUID: `0c372ec0-27eb-437e-bef4-775aefaf3c97`
-   - Characteristic: `0c372ec1-27eb-437e-bef4-775aefaf3c97`
-   - Update Rate: 20Hz
-   - Data: Quaternions for both shoes + ground contact state
-   - Purpose: Real-time 3D visualization without full logging overhead
-
-2. **Information Service BHI360 Characteristics** (When logging active)
-   - BHI360 3D Mapping: Includes quaternion data at lower rate
-   - BHI360 Linear Accel: Motion dynamics
-   - Update Rate: Variable based on activity
-
-### Metric Accuracy and Feasibility
-
-Based on the combination of BHI360 IMU and 8-channel pressure sensors per foot, here's the realistic accuracy we can achieve:
-
-#### High Accuracy Metrics (±5-10% error)
-- **Contact/Flight Times**: Direct measurement from pressure threshold
-- **Step Count & Cadence**: Reliable detection from pressure + IMU
-- **Pressure Distribution**: Direct measurement from 8 channels
-- **Foot Strike Pattern**: Clear from initial contact location
-- **Balance/Asymmetry**: Direct comparison between feet
-- **Impact Forces**: Peak acceleration from IMU
-- **Pronation Angle**: Quaternion-based with pressure validation
-
-#### Medium Accuracy Metrics (±15-25% error)
-- **Speed/Distance**: Estimated from cadence × stride length model
-- **Loading Rate**: Calculated from force rise time
-- **Vertical Oscillation**: Double integration of acceleration
-- **Stride Length**: Model-based estimation
-
-#### Derived Metrics (Relative accuracy)
-- **Form Score**: Weighted combination of other metrics
-- **Efficiency Score**: Model-based, requires calibration
-- **Fatigue Level**: Pattern detection over time
-- **Push-off Power**: Force × estimated velocity
-
-### Detailed Metric Specifications
-
-#### 1. Pace Calculation and Accuracy
-
-**Pace Calculation Feasibility:**
-
-**Using BHI360 IMU Only:**
-- **Method**: Cadence × Estimated Stride Length
-- **Cadence Detection**: Accelerometer peak analysis (±3% accuracy)
-- **Stride Estimation**: Based on height and cadence correlations
-- **Limitations**: 
-  - Stride length varies with speed, fatigue, terrain
-  - No direct distance measurement
-  - Accuracy degrades on hills or irregular surfaces
-- **Expected Accuracy**: ±15-20% for pace
-- **Best Use Case**: General fitness tracking, relative pace changes
-
-**Using BHI360 + 8-Channel Pressure Sensors:**
-- **Method**: Enhanced cadence detection + Dynamic stride modeling
-- **Advantages**:
-  - Precise step timing from pressure threshold (±1% cadence accuracy)
-  - Contact/flight time ratio improves stride estimation
-  - Pressure distribution indicates push-off power
-  - Better detection of walking vs running
-- **Stride Length Factors**:
-  - Duty factor (contact time / stride time)
-  - Vertical oscillation from IMU
-  - Push-off force from forefoot pressure
-  - User calibration data
-- **Expected Accuracy**: ±5-10% for pace
-- **Best Use Case**: Training analysis, race pacing, performance tracking
-
-**Calculation Formula:**
-```
-Pace (sec/km) = 1000 / (Cadence × Stride Length / 60)
-
-Where:
-- Cadence = steps/minute (both feet)
-- Stride Length = f(height, duty_factor, vertical_oscillation, push_force)
-```
-
-**Practical Example:**
-```
-Runner Profile: Height = 175cm, Weight = 70kg
-
-Scenario 1 - BHI360 Only:
-- Detected cadence: 170 spm
-- Estimated stride: 175cm × 0.75 = 131cm
-- Speed: (170 × 1.31) / 60 = 3.71 m/s
-- Pace: 1000 / 3.71 = 270 sec/km = 4:30/km
-- Actual pace: 4:45/km (6% error)
-
-Scenario 2 - BHI360 + Pressure Sensors:
-- Precise cadence: 172 spm
-- Contact time: 245ms, Flight time: 105ms
-- Duty factor: 0.70 (245/350)
-- Adjusted stride: 131cm × 0.95 = 124cm
-- Speed: (172 × 1.24) / 60 = 3.56 m/s  
-- Pace: 1000 / 3.56 = 281 sec/km = 4:41/km
-- Actual pace: 4:45/km (1.4% error)
-```
-
-#### 2. Running Efficiency Score (0-100)
-**Calculation Method:**
-```c
-float calculate_running_efficiency(float contact_time, float flight_time,
-                                 float vertical_oscillation, float cadence,
-                                 float forward_lean) {
-    // Duty factor: percentage of time on ground
-    float duty_factor = contact_time / (contact_time + flight_time);
-    
-    // Optimal ranges based on elite runners
-    float duty_score = 100 - fabs(duty_factor - 0.35) * 200;  // Peak at 35%
-    float osc_score = 100 - (vertical_oscillation - 60) * 0.5;  // Peak at 60mm
-    float cadence_score = 100 - fabs(cadence - 180) * 0.5;  // Peak at 180spm
-    float lean_score = 100 - fabs(forward_lean - 5) * 2;  // Peak at 5 degrees
-    
-    // Weighted combination
-    return (duty_score * 0.3 + osc_score * 0.3 + 
-            cadence_score * 0.2 + lean_score * 0.2);
-}
-```
-
-#### 2. Form Deterioration Score
-**What it measures:** Changes in running form over time
-**Key indicators:**
-- Increased ground contact time (+20ms = -10 points)
-- Decreased flight time (-10ms = -5 points)
-- Increased pronation variability (>5° std dev = -15 points)
-- Asymmetry increase (>10% change = -20 points)
-
-#### 3. Injury Risk Assessment
-**Composite score based on:**
-- Loading rate >8000 N/s: +30 risk points
-- Asymmetry >15%: +25 risk points
-- Pronation >20°: +20 risk points
-- Heel strike with overstriding: +15 risk points
-- Fatigue level >70: +10 risk points
-
-#### 4. Gait Quality Metrics
-
-**Center of Pressure Path Analysis:**
-The 8 pressure sensors allow detailed tracking of weight distribution:
-- **Heel sensors (0-1)**: Initial contact detection
-- **Midfoot sensors (2-4)**: Stability assessment
-- **Forefoot sensors (5-7)**: Push-off power
-
-**Pressure Progression Timing:**
-```c
-typedef struct {
-    float heel_contact_time;     // Time from heel strike to midfoot
-    float midfoot_dwell_time;    // Time weight stays in midfoot
-    float forefoot_push_time;    // Time from midfoot to toe-off
-    float total_contact_time;    // Sum of all phases
-} GaitTiming;
-```
-
-#### 5. Advanced Asymmetry Detection
-
-**Multi-dimensional asymmetry analysis:**
-```c
-typedef struct {
-    float temporal_asymmetry;    // Timing differences
-    float spatial_asymmetry;     // Step length differences
-    float force_asymmetry;       // Peak force differences
-    float pattern_asymmetry;     // Pressure pattern similarity
-} AsymmetryVector;
-
-float calculate_composite_asymmetry(AsymmetryVector* asym) {
-    // Root mean square for overall asymmetry
-    return sqrt(pow(asym->temporal_asymmetry, 2) +
-                pow(asym->spatial_asymmetry, 2) +
-                pow(asym->force_asymmetry, 2) +
-                pow(asym->pattern_asymmetry, 2)) / 2.0;
-}
-```
-
-### Practical Applications
-
-#### For Runners:
-1. **Real-time Cadence Coaching**: Target 170-180 spm
-2. **Strike Pattern Feedback**: Transition guidance
-3. **Asymmetry Alerts**: Prevent compensation injuries
-4. **Fatigue Warnings**: Know when form breaks down
-
-#### For Physical Therapists:
-1. **Return-to-Run Protocol**: Objective progress tracking
-2. **Gait Retraining**: Measurable outcomes
-3. **Load Management**: Gradual return progression
-4. **Bilateral Comparison**: Identify compensations
-
-#### For Coaches:
-1. **Training Load Monitoring**: Cumulative stress tracking
-2. **Technique Analysis**: Form improvement focus areas
-3. **Performance Prediction**: Efficiency trends
-4. **Injury Prevention**: Early warning system
-
-## 8-Channel Pressure Sensor Capabilities
-
-### Sensor Layout and Coverage
-
-The 8-channel pressure sensor system provides comprehensive plantar pressure mapping with strategic sensor placement:
-
-```
-Right Foot Sensor Layout (Bottom View):
-         Toe
-       [7]        <- Big toe (hallux)
-    [5]   [6]     <- Forefoot (metatarsal heads)
-    [3]   [4]     <- Midfoot (arch region)
-       [2]        <- Midfoot center
-    [0]   [1]     <- Heel (medial/lateral)
-        Heel
-
-Left Foot: Mirror configuration
-```
-
-### Unique Metrics Enabled by 8-Channel System
-
-#### 1. Detailed Pressure Distribution
-- **Heel Loading**: Channels 0-1 detect initial contact patterns
-- **Midfoot Support**: Channels 2-4 measure arch function
-- **Forefoot Push-off**: Channels 5-7 quantify propulsion
-- **Medial/Lateral Balance**: Compare inner vs outer channels
-
-#### 2. Center of Pressure (CoP) Tracking
-- **Spatial Resolution**: ±5mm accuracy
-- **Temporal Resolution**: 100Hz sampling
-- **Path Analysis**: Total excursion, velocity, acceleration
-- **CPEI Calculation**: Lateral deviation percentage
-
-#### 3. Gait Phase Detection
-- **Initial Contact**: Which sensors activate first
-- **Loading Response**: Pressure migration pattern
-- **Midstance**: Weight distribution stability
-- **Push-off**: Forefoot pressure sequence
-
-#### 4. Advanced Biomechanical Analysis
-- **Arch Function**: Midfoot pressure changes during stance
-- **Pronation Validation**: Medial pressure shift correlation
-- **Push-off Asymmetry**: Big toe vs lateral toes contribution
-- **Dynamic Stability**: CoP velocity and acceleration
-
-### Clinical Applications
-
-#### For Gait Analysis
-1. **Strike Pattern Classification**: 95% accuracy using initial contact location
-2. **Arch Type Assessment**: High/normal/low arch detection
-3. **Pronation Quantification**: Medial drift measurement
-4. **Push-off Mechanics**: Power generation patterns
-
-#### For Injury Prevention
-1. **Overloading Detection**: Identify high-pressure zones
-2. **Compensation Patterns**: Detect gait adaptations
-3. **Fatigue Monitoring**: Pressure pattern degradation
-4. **Return-to-Run Assessment**: Symmetry restoration
-
-### Pressure-Based Calculations
-
-#### Foot Strike Classification
-```
-if (heel_pressure > 80% of total) → Heel Strike
-if (midfoot_pressure > 60% of total) → Midfoot Strike  
-if (forefoot_pressure > 70% of total) → Forefoot Strike
-```
-
-#### Pronation Assessment
-```
-Medial Pressure Ratio = (Ch0 + Ch2 + Ch3 + Ch5) / Total
-if (Medial Ratio > 0.65) → Overpronation likely
-if (Medial Ratio < 0.35) → Supination likely
-```
-
-#### Step Width Estimation
-```
-Step Width = Base Width + 
-            (Medial/Lateral Ratio - 0.5) × 10cm +
-            (CoP Lateral Deviation × 0.5)
-Accuracy: ±2-3cm
-```
-
-### Integration with IMU Data
-
-The 8-channel pressure data complements BHI360 IMU measurements:
-
-1. **Validated Contact Detection**: Pressure confirms IMU-detected events
-2. **Enhanced Pronation**: IMU angle + pressure distribution
-3. **Accurate Phase Timing**: Pressure transitions define gait phases
-4. **Force Estimation**: Pressure sum correlates with vertical force
-
-### Data Quality Considerations
-
-1. **Sensor Calibration**: Individual channel sensitivity adjustment
-2. **Cross-talk Compensation**: Adjacent sensor interference correction
-3. **Temperature Drift**: Baseline adjustment for temperature changes
-4. **Wear Detection**: Monitor sensor degradation over time
-5. **Placement Validation**: Ensure consistent sensor positioning
-
----
-
-### 8-Channel Pressure Sensor Layout and Capabilities
-
-The 8 pressure sensors are strategically positioned to cover the entire foot plantar surface:
-
-```
-Sensor Layout (Bottom view of right foot):
-    Toe
-    [7]
-  [5] [6]     <- Forefoot (metatarsal heads)
-  [3] [4]     <- Midfoot (arch area)
-    [2]
-  [0] [1]     <- Heel (calcaneus)
-    Heel
-```
-
-#### Unique Insights from 8-Channel Configuration
-
-**1. Medial-Lateral Balance Assessment**
-```c
-float calculate_medial_lateral_ratio(float channels[8]) {
-    // Medial sensors: 0, 2, 3, 5
-    // Lateral sensors: 1, 4, 6, 7
-    float medial = channels[0] + channels[2] + channels[3] + channels[5];
-    float lateral = channels[1] + channels[4] + channels[6] + channels[7];
-    float total = medial + lateral;
-    
-    if (total > 0) {
-        return medial / total;  // 0.5 = balanced, >0.5 = medial bias
-    }
-    return 0.5;
-}
-```
-
-**2. Arch Collapse Detection**
-```c
-bool detect_arch_collapse(float channels[8], float baseline_midfoot) {
-    float current_midfoot = channels[2] + channels[3] + channels[4];
-    float midfoot_increase = (current_midfoot - baseline_midfoot) / baseline_midfoot;
-    
-    // >30% increase in midfoot pressure indicates arch collapse
-    return midfoot_increase > 0.3;
-}
-```
-
-**3. Push-off Power Distribution**
-```c
-typedef struct {
-    float big_toe_contribution;    // Channel 7
-    float lateral_toes;           // Channels 5, 6
-    float push_symmetry;          // Balance between medial/lateral
-} PushOffAnalysis;
-
-PushOffAnalysis analyze_push_off(float channels[8]) {
-    PushOffAnalysis result;
-    float forefoot_total = channels[5] + channels[6] + channels[7];
-    
-    if (forefoot_total > 0) {
-        result.big_toe_contribution = channels[7] / forefoot_total;
-        result.lateral_toes = (channels[5] + channels[6]) / forefoot_total;
-        result.push_symmetry = fabs(0.5 - result.big_toe_contribution);
-    }
-    
-    return result;
-}
-```
-
-**4. Dynamic Stability Score**
-```c
-float calculate_stability_score(float cop_path_length, float cop_velocity,
-                              float pressure_variability) {
-    // Lower values indicate better stability
-    float path_score = 100 - (cop_path_length / 5.0);  // Normalize to 0-100
-    float velocity_score = 100 - (cop_velocity / 10.0);
-    float variability_score = 100 - (pressure_variability * 100);
-    
-    return (path_score * 0.4 + velocity_score * 0.3 + variability_score * 0.3);
-}
-```
-
-### Implementation Priorities
-
-**Phase 1 (Core Metrics):**
-- Ground contact/flight time
-- Basic pressure distribution
-- Step count and cadence
-- Simple asymmetry detection
-
-**Phase 2 (Advanced Analysis):**
-- Pronation tracking
-- Loading rate calculation
-- Fatigue detection
-- Form scoring
-
-**Phase 3 (Predictive Features):**
-- Injury risk modeling
-- Performance prediction
-- Personalized coaching
-- Long-term trend analysis
-
-**Quick notes for everyone:**
-1. **Calibration**: We'll need user calibration to improve speed/distance accuracy
-2. **Relative Metrics**: The derived scores (like efficiency) work best for tracking changes over time rather than absolute values
-3. **Baseline Period**: Fatigue detection needs about 2-3 minutes to figure out what's "normal" for each user
-4. **Surface Variations**: Keep in mind that accuracy might vary on different surfaces (track vs trail)
-
-This system is ready to go - we just need to implement the algorithms and we'll have professional-grade biomechanical analysis in our shoes!
+The activity metrics system has made significant progress with core infrastructure and basic metrics fully operational. The multi-threaded architecture is working well, providing real-time metrics to mobile apps via BLE. All essential BLE characteristics are implemented and working for the core features.
+
+**Current Data Rates**:
+- Input: 31.7 MB/hour (raw sensor data)
+- Output via BLE: ~58 KB/hour (calculated metrics) ✅
+- Logged data: Still ~31.7 MB/hour (protobuf format) ❌
+
+The system is production-ready for basic activity tracking with real-time performance metrics, asymmetry detection, and step counting. Advanced biomechanical analysis and optimal storage efficiency remain to be developed.
+
+**Mobile App Integration Ready For:**
+- Real-time performance monitoring (cadence, pace, form)
+- Asymmetry and imbalance detection
+- Step counting and activity tracking
+- GPS data input for future distance calculations
+- Activity session management (start/stop)

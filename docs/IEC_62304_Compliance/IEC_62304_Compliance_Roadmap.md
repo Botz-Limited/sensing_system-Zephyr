@@ -106,7 +106,7 @@ This document outlines the requirements and roadmap for achieving IEC 62304 Clas
 
 ---
 
-## Immediate Actions Required
+## Actions Required
 
 ### Phase 1: Architecture Documentation (2 weeks)
 1. Create System Architecture Document

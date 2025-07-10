@@ -42,6 +42,10 @@ static struct bt_uuid_128 d2d_delete_activity_log_command_uuid =
 static struct bt_uuid_128 d2d_request_device_info_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
+// GPS update command UUID
+static struct bt_uuid_128 d2d_gps_update_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8a, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
 // Weight calibration command UUID
 static struct bt_uuid_128 d2d_weight_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
@@ -415,9 +419,45 @@ static ssize_t d2d_trigger_bhi360_calibration_write(struct bt_conn *conn, const 
         return len;
     }
 
+    // Write handler for GPS update command
+    static ssize_t d2d_gps_update_write(struct bt_conn * conn, const struct bt_gatt_attr *attr, const void *buf,
+                                        uint16_t len, uint16_t offset, uint8_t flags)
+    {
+        ARG_UNUSED(conn);
+        ARG_UNUSED(attr);
+        ARG_UNUSED(offset);
+        ARG_UNUSED(flags);
+
+        if (len != sizeof(GPSUpdateCommand))
+        {
+            LOG_ERR("D2D RX: Invalid GPS update length: %u (expected %zu)", len, sizeof(GPSUpdateCommand));
+            return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+        }
+
+        GPSUpdateCommand gps_data;
+        memcpy(&gps_data, buf, sizeof(GPSUpdateCommand));
+
+        LOG_INF("D2D RX: GPS update received - lat=%d, lon=%d, speed=%u cm/s", gps_data.latitude_e7,
+                gps_data.longitude_e7, gps_data.speed_cms);
+
+        // Send GPS update to activity metrics module
+        generic_message_t gps_msg = {};
+        gps_msg.sender = SENDER_BTH;
+        gps_msg.type = MSG_TYPE_GPS_UPDATE;
+        memcpy(&gps_msg.data.gps_update, &gps_data, sizeof(GPSUpdateCommand));
+
+        if (k_msgq_put(&activity_metrics_msgq, &gps_msg, K_NO_WAIT) != 0)
+        {
+            LOG_ERR("Failed to send GPS update to activity metrics");
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        }
+
+        LOG_INF("D2D RX: GPS update sent to activity metrics");
+        return len;
+    }
+
     // Write handler for weight calibration command
     // This is a dedicated handler for weight calibration to match the D2D TX client expectations
-    // NOTE: This characteristic is also used for GPS updates from primary to secondary
     static ssize_t d2d_weight_calibration_write(struct bt_conn * conn, const struct bt_gatt_attr *attr, const void *buf,
                                                 uint16_t len, uint16_t offset, uint8_t flags)
     {
@@ -425,32 +465,6 @@ static ssize_t d2d_trigger_bhi360_calibration_write(struct bt_conn *conn, const 
         ARG_UNUSED(attr);
         ARG_UNUSED(offset);
         ARG_UNUSED(flags);
-
-        // Check if this is a GPS update (based on size)
-        if (len == sizeof(GPSUpdateCommand))
-        {
-            // GPS update from primary device
-            GPSUpdateCommand gps_data;
-            memcpy(&gps_data, buf, sizeof(GPSUpdateCommand));
-
-            LOG_INF("D2D RX: GPS update received - lat=%d, lon=%d, speed=%u cm/s", gps_data.latitude_e7,
-                    gps_data.longitude_e7, gps_data.speed_cms);
-
-            // Send GPS update to activity metrics module
-            generic_message_t gps_msg = {};
-            gps_msg.sender = SENDER_BTH;
-            gps_msg.type = MSG_TYPE_GPS_UPDATE;
-            memcpy(&gps_msg.data.gps_update, &gps_data, sizeof(GPSUpdateCommand));
-
-            if (k_msgq_put(&activity_metrics_msgq, &gps_msg, K_NO_WAIT) != 0)
-            {
-                LOG_ERR("Failed to send GPS update to activity metrics");
-                return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-            }
-
-            LOG_INF("D2D RX: GPS update sent to activity metrics");
-            return len;
-        }
 
         // This handler supports both simple trigger and calibration with known weight
         if (len == sizeof(uint8_t))
@@ -500,7 +514,7 @@ static ssize_t d2d_trigger_bhi360_calibration_write(struct bt_conn *conn, const 
         }
         else
         {
-            LOG_ERR("D2D RX: Invalid weight calibration/GPS length: %u", len);
+            LOG_ERR("D2D RX: Invalid weight calibration length: %u", len);
             return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
         }
 
@@ -526,6 +540,8 @@ static ssize_t d2d_trigger_bhi360_calibration_write(struct bt_conn *conn, const 
                                                   BT_GATT_PERM_WRITE, NULL, d2d_trigger_bhi360_calibration_write, NULL),
                            BT_GATT_CHARACTERISTIC(&d2d_request_device_info_uuid.uuid, BT_GATT_CHRC_WRITE,
                                                   BT_GATT_PERM_WRITE, NULL, d2d_request_device_info_write, NULL),
+                           BT_GATT_CHARACTERISTIC(&d2d_gps_update_uuid.uuid, BT_GATT_CHRC_WRITE,
+                                                  BT_GATT_PERM_WRITE, NULL, d2d_gps_update_write, NULL),
                            BT_GATT_CHARACTERISTIC(&d2d_weight_calibration_uuid.uuid, BT_GATT_CHRC_WRITE,
                                                   BT_GATT_PERM_WRITE, NULL, d2d_weight_calibration_write, NULL));
 
