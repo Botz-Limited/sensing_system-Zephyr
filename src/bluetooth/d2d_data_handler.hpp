@@ -11,10 +11,18 @@
 
 #include <stdint.h>
 #include <app_fixed_point.hpp>
+#include "ble_d2d_tx_service.hpp" // for d2d_sample_batch_t
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief Handle D2D batch data from secondary device
+ * @param batch Pointer to batch data
+ * @return 0 on success, negative on error
+ */
+int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch);
 
 /**
  * @brief Initialize the D2D data handler

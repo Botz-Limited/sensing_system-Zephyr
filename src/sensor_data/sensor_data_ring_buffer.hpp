@@ -7,8 +7,8 @@
  * @copyright Botz Innovation 2025
  */
 
-#ifndef SENSOR_DATA_RING_BUFFER_H
-#define SENSOR_DATA_RING_BUFFER_H
+#ifndef SENSOR_DATA_RING_BUFFER_HPP
+#define SENSOR_DATA_RING_BUFFER_HPP
 
 #include <zephyr/kernel.h>
 #include <app.hpp>
@@ -151,4 +151,4 @@ typedef struct {
     uint32_t max_imu_ring_depth;
 } sensor_data_stats_t;
 
-#endif // SENSOR_DATA_RING_BUFFER_H
+#endif // SENSOR_DATA_RING_BUFFER_HPP

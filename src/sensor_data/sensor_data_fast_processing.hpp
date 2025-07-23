@@ -9,8 +9,8 @@
  * These algorithms are optimized for speed (<0.1ms each) to maintain 100Hz processing
  */
 
-#ifndef SENSOR_DATA_FAST_PROCESSING_H
-#define SENSOR_DATA_FAST_PROCESSING_H
+#ifndef SENSOR_DATA_FAST_PROCESSING_HPP
+#define SENSOR_DATA_FAST_PROCESSING_HPP
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -40,7 +40,8 @@ typedef enum {
     PHASE_LOADING,          // Weight acceptance
     PHASE_MIDSTANCE,        // Full weight bearing
     PHASE_PUSH_OFF,         // Propulsion
-    PHASE_TOE_OFF          // Final contact
+    PHASE_TOE_OFF,          // Final contact
+    PHASE_NO_CONTACT
 } contact_phase_t;
 
 // Pressure region indices
@@ -212,4 +213,4 @@ ALWAYS_INLINE uint8_t detect_strike_pattern(uint8_t heel_pct, uint8_t mid_pct, u
 }
 #endif
 
-#endif // SENSOR_DATA_FAST_PROCESSING_H
+#endif // SENSOR_DATA_FAST_PROCESSING_HPP

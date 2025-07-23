@@ -56,7 +56,7 @@ FS_LITTLEFS_DECLARE_DEFAULT_CONFIG(littlefs_storage);
 #define STORAGE_PARTITION_LABEL storage_ext
 #define STORAGE_PARTITION_ID FIXED_PARTITION_ID(STORAGE_PARTITION_LABEL)
 
-#define FLUSH_SYNC_INTERVAL 10  // Sync every N writes
+#define FLUSH_SYNC_INTERVAL 10 // Sync every N writes
 
 static struct fs_mount_t lfs_ext_storage_mnt = {};
 
@@ -166,18 +166,19 @@ static bool activity_first_packet = true;
 static void flush_foot_sensor_buffer()
 {
     static int foot_sensor_sync_counter = 0;
-    
+
     if (foot_sensor_write_buffer_pos > 0)
     {
         fs_write(&foot_sensor_log_file, foot_sensor_write_buffer, foot_sensor_write_buffer_pos);
-        
+
         // Only sync periodically, not on every write
         foot_sensor_sync_counter++;
-        if (foot_sensor_sync_counter >= FLUSH_SYNC_INTERVAL) {
+        if (foot_sensor_sync_counter >= FLUSH_SYNC_INTERVAL)
+        {
             fs_sync(&foot_sensor_log_file);
             foot_sensor_sync_counter = 0;
         }
-        
+
         foot_sensor_write_buffer_pos = 0;
     }
 }
@@ -185,18 +186,19 @@ static void flush_foot_sensor_buffer()
 static void flush_bhi360_buffer()
 {
     static int bhi360_sync_counter = 0;
-    
+
     if (bhi360_write_buffer_pos > 0)
     {
         fs_write(&bhi360_log_file, bhi360_write_buffer, bhi360_write_buffer_pos);
-        
+
         // Only sync periodically, not on every write
         bhi360_sync_counter++;
-        if (bhi360_sync_counter >= FLUSH_SYNC_INTERVAL) {
+        if (bhi360_sync_counter >= FLUSH_SYNC_INTERVAL)
+        {
             fs_sync(&bhi360_log_file);
             bhi360_sync_counter = 0;
         }
-        
+
         bhi360_write_buffer_pos = 0;
     }
 }
@@ -204,18 +206,19 @@ static void flush_bhi360_buffer()
 static void flush_activity_buffer()
 {
     static int activity_sync_counter = 0;
-    
+
     if (activity_write_buffer_pos > 0)
     {
         fs_write(&activity_log_file, activity_write_buffer, activity_write_buffer_pos);
-        
+
         // Only sync periodically, not on every write
         activity_sync_counter++;
-        if (activity_sync_counter >= FLUSH_SYNC_INTERVAL) {
+        if (activity_sync_counter >= FLUSH_SYNC_INTERVAL)
+        {
             fs_sync(&activity_log_file);
             activity_sync_counter = 0;
         }
-        
+
         activity_write_buffer_pos = 0;
     }
 }
@@ -607,8 +610,8 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
     if (filesystem_available)
     {
-        // Notify about latest FOOT sensor log file
-        uint8_t current_foot_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
+        // Notify about latest FOOT sensor log file //disable for now
+     /*   uint8_t current_foot_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, foot_sensor_file_prefix);
         uint8_t latest_foot_log_id_to_report = (current_foot_seq > 0) ? (current_foot_seq - 1) : 0;
 
         log_info_msg.type = MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE;
@@ -632,10 +635,10 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         else
         {
             LOG_DBG("Initial foot sensor log notification sent (ID: %u).", latest_foot_log_id_to_report);
-        }
+        } */
 
         // Notify about latest BHI360 log file
-        uint8_t current_bhi360_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
+     /*   uint8_t current_bhi360_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, bhi360_file_prefix);
         uint8_t latest_bhi360_log_id_to_report = (current_bhi360_seq > 0) ? (current_bhi360_seq - 1) : 0;
 
         log_info_msg.type = MSG_TYPE_NEW_BHI360_LOG_FILE;
@@ -659,7 +662,7 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         else
         {
             LOG_DBG("Initial BHI360 log notification sent (ID: %u).", latest_bhi360_log_id_to_report);
-        }
+        } */
 
         // Notify about latest Activity log file
         uint8_t current_activity_seq = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
@@ -740,7 +743,6 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     const foot_samples_t *foot_data = &msg.data.foot_samples;
 
                     // Only log data from our own foot sensor, not from D2D
-                    // D2D data (from secondary device) should only be forwarded to phone via BLE
                     if (msg.sender == SENDER_FOOT_SENSOR_THREAD)
                     {
                         // This is our own foot sensor data - log it
@@ -3326,6 +3328,9 @@ err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
  */
 err_t load_bhi360_calibration_data(uint8_t sensor_type)
 {
+
+    // Lock mutex for thread safety - THIS WAS MISSING!
+    k_mutex_lock(&calibration_file_mutex, K_FOREVER);
     // Create filename based on sensor type
     char filename[util::max_path_length];
     const char *sensor_name;
@@ -3386,25 +3391,34 @@ err_t load_bhi360_calibration_data(uint8_t sensor_type)
 
     // Read calibration data
     uint8_t profile_data[512];
+
     ret = fs_read(&file, profile_data, profile_size);
     if (ret < 0)
     {
         LOG_ERR("Failed to read calibration data: %d", ret);
         fs_close(&file);
+        k_mutex_unlock(&calibration_file_mutex);
         return err_t::FILE_SYSTEM_ERROR;
     }
 
     fs_close(&file);
+    k_mutex_unlock(&calibration_file_mutex);
 
     LOG_INF("Loaded BHI360 %s calibration from %s (%u bytes)", sensor_name, filename, profile_size);
 
     // Send calibration data to motion sensor via message queue
     generic_message_t calib_msg = {};
+    memset(&calib_msg, 0, sizeof(calib_msg));  // Initialize the entire message
     calib_msg.sender = SENDER_DATA;
     calib_msg.type = MSG_TYPE_BHI360_CALIBRATION_DATA;
     calib_msg.data.bhi360_calibration.sensor_type = sensor_type;
     calib_msg.data.bhi360_calibration.profile_size = profile_size;
-    memcpy(calib_msg.data.bhi360_calibration.profile_data, profile_data, profile_size);
+    if (profile_size > 0 && profile_size <= sizeof(calib_msg.data.bhi360_calibration.profile_data)) {
+        memcpy(calib_msg.data.bhi360_calibration.profile_data, profile_data, profile_size);
+    } else {
+        LOG_ERR("Invalid profile size: %u", profile_size);
+        return err_t::DATA_ERROR;
+    }
 
     if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0)
     {

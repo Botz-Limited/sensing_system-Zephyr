@@ -13,22 +13,22 @@
 #define MODULE motion_sensor
 
 /*************************** INCLUDE HEADERS ********************************/
+#include <cstdio>
 #include <cstring>
 #include <time.h>
-#include <cstdio>
 
 #include <app.hpp>
-#include <app_version.h>
 #include <app_event_manager.h>
+#include <app_version.h>
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
 #include <events/motion_sensor_event.h>
 #if defined(CONFIG_WIFI_MODULE)
 #include <events/wifi_event.h>
 #endif
+#include <ble_services.hpp>
 #include <motion_sensor.hpp>
 #include <status_codes.h>
-#include <ble_services.hpp>
 
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "../bluetooth/ble_d2d_tx.hpp"
@@ -44,10 +44,10 @@
 #include <zephyr/sys/atomic.h>
 
 // DRIVER_INTEGRATION: Include driver header instead of direct paths
-#include <bhi360.h>
 #include "BHY2-Sensor-API/bhy2.h"
 #include "BHY2-Sensor-API/bhy2_parse.h"
 #include "BHY2-Sensor-API/firmware/bhi360/BHI360_Aux_BMM150.fw.h"
+#include <bhi360.h>
 
 #include <errors.hpp>
 
@@ -69,9 +69,9 @@ static atomic_t wifi_active = ATOMIC_INIT(0);
 static float configured_sample_rate = 50.0f;
 
 // Step count tracking variables (file scope for access across functions)
-static uint32_t latest_step_count = 0;  // Global step count from sensor
+static uint32_t latest_step_count = 0;          // Global step count from sensor
 static uint32_t activity_start_step_count = 0;  // Step count when activity started
-static uint32_t latest_activity_step_count = 0;  // Steps during current activity
+static uint32_t latest_activity_step_count = 0; // Steps during current activity
 static bool activity_logging_active = false;
 
 // Sensor IDs for BHI360 virtual sensors
@@ -92,8 +92,8 @@ static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_in
 static void print_api_error(int8_t rslt, struct bhy2_dev *dev);
 #endif
 static int8_t upload_firmware(struct bhy2_dev *dev);
-static void save_calibration_profile(const struct device *bhi360_dev, 
-                                   enum bhi360_sensor_type sensor, const char *sensor_name);
+static void save_calibration_profile(const struct device *bhi360_dev, enum bhi360_sensor_type sensor,
+                                     const char *sensor_name);
 static void check_and_save_calibration_updates(const struct device *bhi360_dev);
 static void perform_bhi360_calibration(void);
 static void apply_calibration_data(const bhi360_calibration_data_t *calib_data);
@@ -118,186 +118,218 @@ static void motion_sensor_init()
     bool init_failed = false;
     motion_sensor_initializing_entry();
     LOG_INF("Starting BHI360 initialization using driver");
-    
+
     // DRIVER_INTEGRATION: Check if driver is ready
-    if (!device_is_ready(bhi360_dev)) {
+    if (!device_is_ready(bhi360_dev))
+    {
         LOG_ERR("BHI360 device driver not ready");
         init_failed = true;
     }
-    
+
     // DRIVER_INTEGRATION: Get BHY2 device handle from driver
-    if (!init_failed) {
+    if (!init_failed)
+    {
         bhy2_ptr = bhi360_get_bhy2_dev(bhi360_dev);
-        if (!bhy2_ptr) {
+        if (!bhy2_ptr)
+        {
             LOG_ERR("Failed to get BHY2 device handle from driver");
             init_failed = true;
         }
     }
-    
-    if (!init_failed) {
+
+    if (!init_failed)
+    {
         LOG_INF("BHI360 driver ready, BHY2 handle obtained");
     }
-    
+
     // DRIVER_INTEGRATION: Driver already performed:
     // - Hardware reset
     // - SPI initialization
     // - Product ID verification
     // - Interrupt configuration
-    
+
     int8_t rslt;
     uint16_t version = 0;
     uint8_t hintr_ctrl, hif_ctrl, boot_status;
-    
-    if (!init_failed) {
+
+    if (!init_failed)
+    {
         // Configure FIFO and interrupts (enable INT output)
         hintr_ctrl = 0; // Enable all INT outputs
         rslt = bhy2_set_host_interrupt_ctrl(hintr_ctrl, bhy2_ptr);
-        if (rslt != BHY2_OK) {
+        if (rslt != BHY2_OK)
+        {
             LOG_ERR("Failed to set host interrupt control: %d", rslt);
             init_failed = true;
         }
-        
+
         hif_ctrl = 0;
         rslt = bhy2_set_host_intf_ctrl(hif_ctrl, bhy2_ptr);
-        if (rslt != BHY2_OK) {
+        if (rslt != BHY2_OK)
+        {
             LOG_ERR("Failed to set host interface control: %d", rslt);
             init_failed = true;
         }
     }
-    
+
     // Check boot status and upload firmware
-    if (!init_failed) {
+    if (!init_failed)
+    {
         rslt = bhy2_get_boot_status(&boot_status, bhy2_ptr);
-        if (rslt != BHY2_OK) {
+        if (rslt != BHY2_OK)
+        {
             LOG_ERR("Failed to get boot status: %d", rslt);
             init_failed = true;
-        } else if (!(boot_status & BHY2_BST_HOST_INTERFACE_READY)) {
+        }
+        else if (!(boot_status & BHY2_BST_HOST_INTERFACE_READY))
+        {
             LOG_ERR("BHI360: Host interface not ready");
             init_failed = true;
         }
     }
-    
-    if (!init_failed) {
+
+    if (!init_failed)
+    {
         LOG_INF("BHI360: Uploading firmware");
         rslt = upload_firmware(bhy2_ptr);
-        if (rslt != BHY2_OK) {
+        if (rslt != BHY2_OK)
+        {
             LOG_ERR("BHI360: Firmware upload failed");
             init_failed = true;
         }
-        
+
         // Boot from RAM and verify
-        if (!init_failed) {
+        if (!init_failed)
+        {
             rslt = bhy2_boot_from_ram(bhy2_ptr);
-            if (rslt != BHY2_OK) {
+            if (rslt != BHY2_OK)
+            {
                 LOG_ERR("BHI360: Boot from RAM failed: %d", rslt);
                 init_failed = true;
             }
         }
-        
-        if (!init_failed) {
+
+        if (!init_failed)
+        {
             rslt = bhy2_get_kernel_version(&version, bhy2_ptr);
-            if (rslt != BHY2_OK || version == 0) {
+            if (rslt != BHY2_OK || version == 0)
+            {
                 LOG_ERR("BHI360: Boot verification failed");
                 init_failed = true;
-            } else {
+            }
+            else
+            {
                 LOG_INF("BHI360: Boot successful, kernel version %u", version);
             }
         }
-        
+
         // Update virtual sensor list
-        if (!init_failed) {
+        if (!init_failed)
+        {
             LOG_INF("BHI360: Updating virtual sensor list");
             rslt = bhy2_update_virtual_sensor_list(bhy2_ptr);
-            if (rslt != BHY2_OK) {
+            if (rslt != BHY2_OK)
+            {
                 LOG_ERR("Failed to update virtual sensor list: %d", rslt);
                 init_failed = true;
             }
         }
-        
+
         // Configure sensor rates
-        float motion_sensor_rate = 50.0f;
-        float step_counter_rate = 5.0f;
+        float motion_sensor_rate = 100.0f;
+        float step_counter_rate = 20.0f;
         configured_sample_rate = motion_sensor_rate;
         uint32_t report_latency_ms = 0;
-        
+
         // Configure sensors
-        if (!init_failed) {
+        if (!init_failed)
+        {
             LOG_INF("BHI360: Configuring sensors");
             rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
-            if (rslt != BHY2_OK) {
+            if (rslt != BHY2_OK)
+            {
                 LOG_ERR("Failed to configure quaternion sensor: %d", rslt);
                 init_failed = true;
             }
-            
+
             rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
-            if (rslt != BHY2_OK) {
+            if (rslt != BHY2_OK)
+            {
                 LOG_ERR("Failed to configure linear acceleration sensor: %d", rslt);
                 init_failed = true;
             }
-            
+
             rslt = bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
-            if (rslt != BHY2_OK) {
+            if (rslt != BHY2_OK)
+            {
                 LOG_ERR("Failed to configure gyroscope sensor: %d", rslt);
                 init_failed = true;
             }
-            
+
             rslt = bhy2_set_virt_sensor_cfg(STEP_COUNTER_SENSOR_ID, step_counter_rate, report_latency_ms, bhy2_ptr);
-            if (rslt != BHY2_OK) {
+            if (rslt != BHY2_OK)
+            {
                 LOG_ERR("Failed to configure step counter sensor: %d", rslt);
                 init_failed = true;
             }
         }
-        
+
         // Register callbacks
-        if (!init_failed) {
+        if (!init_failed)
+        {
             LOG_INF("BHI360: Registering callbacks");
             rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
             rslt |= bhy2_register_fifo_parse_callback(LACC_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
             rslt |= bhy2_register_fifo_parse_callback(GYRO_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
             rslt |= bhy2_register_fifo_parse_callback(STEP_COUNTER_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
             rslt |= bhy2_register_fifo_parse_callback(BHY2_SYS_ID_META_EVENT, parse_meta_event, NULL, bhy2_ptr);
-            
-            if (rslt != BHY2_OK) {
+
+            if (rslt != BHY2_OK)
+            {
                 LOG_ERR("Failed to register callbacks: %d", rslt);
                 init_failed = true;
             }
         }
-        
-        if (!init_failed) {
+
+        if (!init_failed)
+        {
             LOG_INF("BHI360: Initialization complete");
-            
+
             // Request calibration data from data module
             LOG_INF("BHI360: Requesting calibration data from data module");
             generic_message_t request_msg = {};
             request_msg.sender = SENDER_MOTION_SENSOR;
             request_msg.type = MSG_TYPE_REQUEST_BHI360_CALIBRATION;
-            
-            if (k_msgq_put(&data_msgq, &request_msg, K_NO_WAIT) != 0) {
+
+            if (k_msgq_put(&data_msgq, &request_msg, K_NO_WAIT) != 0)
+            {
                 LOG_ERR("Failed to request calibration data from data module");
             }
         }
     }
-    
+
     // Handle initialization failure
-    if (init_failed) {
+    if (init_failed)
+    {
         // Report error to Bluetooth module
         send_error_to_bluetooth(SENDER_MOTION_SENSOR, err_t::MOTION_ERROR, true);
-        
-        #if IS_ENABLED(CONFIG_MOTION_SENSOR_OPTIONAL)
+
+#if IS_ENABLED(CONFIG_MOTION_SENSOR_OPTIONAL)
         LOG_WRN("Motion sensor initialization failed but continuing (non-critical)");
         module_set_state(MODULE_STATE_READY);
-        #else
+#else
         LOG_ERR("Motion sensor initialization failed (critical)");
         module_set_state(MODULE_STATE_ERROR);
         return;
-        #endif
+#endif
     }
-    
+
     // Start the motion sensor thread only if initialization succeeded
-    if (!init_failed) {
+    if (!init_failed)
+    {
         motion_sensor_tid = k_thread_create(&motion_sensor_thread_data, motion_sensor_stack_area,
-                                            K_THREAD_STACK_SIZEOF(motion_sensor_stack_area), motion_sensor_process, nullptr,
-                                            nullptr, nullptr, motion_sensor_priority, 0, K_NO_WAIT);
+                                            K_THREAD_STACK_SIZEOF(motion_sensor_stack_area), motion_sensor_process,
+                                            nullptr, nullptr, nullptr, motion_sensor_priority, 0, K_NO_WAIT);
         LOG_INF("Motion Sensor Module Initialised");
     }
 }
@@ -310,52 +342,63 @@ void motion_sensor_process(void *, void *, void *)
     uint32_t calibration_check_counter = 0;
     const uint32_t CALIBRATION_CHECK_INTERVAL = 1000; // Check every 1000 iterations
     generic_message_t msg;
-    
+
     // Check if BHY2 pointer is valid (in case we're in degraded mode)
-    if (!bhy2_ptr) {
+    if (!bhy2_ptr)
+    {
         LOG_ERR("BHY2 pointer is null, cannot process sensor data");
         return;
     }
-    
-    while (true) {
+
+    while (true)
+    {
         // Check for messages with a short timeout
         int msg_ret = k_msgq_get(&motion_sensor_msgq, &msg, K_MSEC(10));
-        if (msg_ret == 0) {
+        if (msg_ret == 0)
+        {
             // Handle messages
-            switch (msg.type) {
+            switch (msg.type)
+            {
                 case MSG_TYPE_TRIGGER_BHI360_CALIBRATION:
                     LOG_INF("Received calibration trigger from %s", get_sender_name(msg.sender));
                     perform_bhi360_calibration();
                     break;
-                    
+
                 case MSG_TYPE_BHI360_CALIBRATION_DATA:
                     LOG_INF("Received calibration data from %s", get_sender_name(msg.sender));
                     apply_calibration_data(&msg.data.bhi360_calibration);
                     break;
-                    
+
                 default:
                     LOG_WRN("Unknown message type %d from %s", msg.type, get_sender_name(msg.sender));
                     break;
             }
         }
-        
+
         // Periodically check and save calibration improvements
-        if (++calibration_check_counter >= CALIBRATION_CHECK_INTERVAL) {
+        if (++calibration_check_counter >= CALIBRATION_CHECK_INTERVAL)
+        {
             calibration_check_counter = 0;
             check_and_save_calibration_updates(bhi360_dev);
         }
-        
+
         // DRIVER_INTEGRATION: Use driver's wait function instead of manual semaphore
         int ret = bhi360_wait_for_data(bhi360_dev, K_MSEC(10));
-        if (ret == 0) {
+        if (ret == 0)
+        {
             // Process FIFO using BHY2 API directly
             int8_t rslt = bhy2_get_and_process_fifo(work_buffer, sizeof(work_buffer), bhy2_ptr);
-            if (rslt != BHY2_OK) {
+            if (rslt != BHY2_OK)
+            {
                 LOG_WRN("BHI360: FIFO processing error: %d", rslt);
             }
-        } else if (ret == -EAGAIN) {
+        }
+        else if (ret == -EAGAIN)
+        {
             // Timeout is expected with short wait time
-        } else if (ret != -EAGAIN) {
+        }
+        else if (ret != -EAGAIN)
+        {
             LOG_ERR("BHI360: Wait for data error: %d", ret);
         }
     }
@@ -376,7 +419,7 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
     static const uint8_t LACC_UPDATED = 0x02;
     static const uint8_t GYRO_UPDATED = 0x04;
     static const uint8_t ALL_MOTION_SENSORS = (QUAT_UPDATED | LACC_UPDATED | GYRO_UPDATED);
-    
+
     bool send_data = false;
 
     switch (callback_info->sensor_id)
@@ -397,9 +440,9 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             latest_quat_accuracy = (float)data.accuracy;
             latest_timestamp = *callback_info->time_stamp * 15625; // Convert to nanoseconds
             motion_update_mask |= QUAT_UPDATED;
-            
+
             // Removed: No longer send orientation data before logging starts
-            
+
             break;
         }
         case LACC_SENSOR_ID: {
@@ -430,28 +473,30 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             }
             latest_step_count = (callback_info->data_ptr[0]) | (callback_info->data_ptr[1] << 8) |
                                 (callback_info->data_ptr[2] << 16) | (callback_info->data_ptr[3] << 24);
-            
+
             // Calculate activity step count if activity is active
-            if (activity_logging_active) {
+            if (activity_logging_active)
+            {
                 latest_activity_step_count = latest_step_count - activity_start_step_count;
-                
+
                 // Send activity step count update to bluetooth (only during logging)
-                if (atomic_get(&logging_active) == 1) {
+                if (atomic_get(&logging_active) == 1)
+                {
                     generic_message_t activity_step_msg{};
-                    activity_step_msg.sender = SENDER_MOTION_SENSOR;  // Different sender to indicate activity steps
-                    activity_step_msg.type = MSG_TYPE_BHI360_STEP_COUNT;  // Reuse same message type
+                    activity_step_msg.sender = SENDER_MOTION_SENSOR;     // Different sender to indicate activity steps
+                    activity_step_msg.type = MSG_TYPE_BHI360_STEP_COUNT; // Reuse same message type
                     activity_step_msg.data.bhi360_step_count.step_count = latest_activity_step_count;
                     activity_step_msg.data.bhi360_step_count.activity_duration_s = 0;
-                    
-                    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     k_msgq_put(&bluetooth_msgq, &activity_step_msg, K_NO_WAIT);
-                    #else
+#else
                     // Secondary device: Send activity steps to primary via D2D using dedicated function
                     ble_d2d_tx_send_activity_step_count(&activity_step_msg.data.bhi360_step_count);
-                    #endif
+#endif
                 }
             }
-            
+
             // Step counter updates independently, don't wait for it
             // It will be included with whatever value it has when motion sensors sync
             break;
@@ -465,30 +510,28 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
     if ((motion_update_mask & ALL_MOTION_SENSORS) == ALL_MOTION_SENSORS)
     {
         send_data = true;
-        motion_update_mask = 0;  // Reset for next cycle
+        motion_update_mask = 0; // Reset for next cycle
     }
-    
+
     // Send data when we have a complete set or step counter update
     if (send_data)
     {
         // Update driver with latest sensor data for standard sensor API
-        struct bhi360_sensor_data driver_data = {
-            .quat_x = latest_quat_x,
-            .quat_y = latest_quat_y,
-            .quat_z = latest_quat_z,
-            .quat_w = latest_quat_w,
-            .quat_accuracy = (uint8_t)latest_quat_accuracy,
-            .lacc_x = latest_lacc_x,
-            .lacc_y = latest_lacc_y,
-            .lacc_z = latest_lacc_z,
-            .gyro_x = latest_gyro_x,
-            .gyro_y = latest_gyro_y,
-            .gyro_z = latest_gyro_z,
-            .step_count = latest_step_count,
-            .timestamp = latest_timestamp
-        };
+        struct bhi360_sensor_data driver_data = {.quat_x = latest_quat_x,
+                                                 .quat_y = latest_quat_y,
+                                                 .quat_z = latest_quat_z,
+                                                 .quat_w = latest_quat_w,
+                                                 .quat_accuracy = (uint8_t)latest_quat_accuracy,
+                                                 .lacc_x = latest_lacc_x,
+                                                 .lacc_y = latest_lacc_y,
+                                                 .lacc_z = latest_lacc_z,
+                                                 .gyro_x = latest_gyro_x,
+                                                 .gyro_y = latest_gyro_y,
+                                                 .gyro_z = latest_gyro_z,
+                                                 .step_count = latest_step_count,
+                                                 .timestamp = latest_timestamp};
         bhi360_update_sensor_data(bhi360_dev, &driver_data);
-        
+
         // Send combined log record to data module
         bhi360_log_record_t record{};
         record.quat_x = latest_quat_x;
@@ -510,12 +553,13 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             msg.sender = SENDER_BHI360_THREAD;
             msg.type = MSG_TYPE_BHI360_LOG_RECORD;
             msg.data.bhi360_log_record = record;
-            k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
-            
-            // Send to sensor data module (new multi-thread architecture)
-            #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
+            // Don't log bhi360 data anymore at the moment
+            // k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
+
+// Send to sensor data module (new multi-thread architecture)
+#if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
             k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
-            #endif
+#endif
 
             // Also send to WiFi module if WiFi is active
 #if defined(CONFIG_WIFI_MODULE)
@@ -537,12 +581,12 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             qmsg.data.bhi360_3d_mapping.accel_x = latest_quat_x;
             qmsg.data.bhi360_3d_mapping.accel_y = latest_quat_y;
             qmsg.data.bhi360_3d_mapping.accel_z = latest_quat_z;
-            qmsg.data.bhi360_3d_mapping.quat_w = latest_quat_w;  // Now including W component
-            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            qmsg.data.bhi360_3d_mapping.quat_w = latest_quat_w; // Now including W component
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
-            #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
-            k_msgq_put(&sensor_data_msgq, &qmsg, K_NO_WAIT);
-            #endif
+#if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
+// k_msgq_put(&sensor_data_msgq, &qmsg, K_NO_WAIT);
+#endif
 #else
             // Secondary device: Send to primary via D2D
             ble_d2d_tx_send_bhi360_data1(&qmsg.data.bhi360_3d_mapping);
@@ -555,7 +599,7 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             lmsg.data.bhi360_linear_accel.x = latest_lacc_x;
             lmsg.data.bhi360_linear_accel.y = latest_lacc_y;
             lmsg.data.bhi360_linear_accel.z = latest_lacc_z;
-            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &lmsg, K_NO_WAIT);
 #else
             // Secondary device: Send to primary via D2D
@@ -567,12 +611,12 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             smsg.sender = SENDER_BHI360_THREAD;
             smsg.type = MSG_TYPE_BHI360_STEP_COUNT;
             smsg.data.bhi360_step_count.step_count = latest_step_count;
-            smsg.data.bhi360_step_count.activity_duration_s = 0;  // Deprecated - always 0
-            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            smsg.data.bhi360_step_count.activity_duration_s = 0; // Deprecated - always 0
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
-            #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
-            k_msgq_put(&sensor_data_msgq, &smsg, K_NO_WAIT);
-            #endif
+#if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
+            // k_msgq_put(&sensor_data_msgq, &smsg, K_NO_WAIT);
+#endif
 #else
             // Secondary device: Send to primary via D2D
             ble_d2d_tx_send_bhi360_data2(&smsg.data.bhi360_step_count);
@@ -582,14 +626,14 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             generic_message_t activity_msg{};
             activity_msg.sender = SENDER_MOTION_SENSOR;
             activity_msg.type = MSG_TYPE_ACTIVITY_STEP_COUNT;
-            // Send activity-specific step count (not global count)
-            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+// Send activity-specific step count (not global count)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             activity_msg.data.activity_step_count.left_step_count = latest_activity_step_count;
             activity_msg.data.activity_step_count.right_step_count = 0;
-            #else
+#else
             activity_msg.data.activity_step_count.left_step_count = 0;
             activity_msg.data.activity_step_count.right_step_count = latest_activity_step_count;
-            #endif
+#endif
             k_msgq_put(&data_msgq, &activity_msg, K_NO_WAIT);
         }
     }
@@ -724,15 +768,17 @@ static int8_t upload_firmware(struct bhy2_dev *dev)
  */
 static void apply_calibration_data(const bhi360_calibration_data_t *calib_data)
 {
-    if (!calib_data) {
+    if (!calib_data)
+    {
         LOG_ERR("Invalid calibration data");
         return;
     }
-    
+
     enum bhi360_sensor_type sensor_type;
     const char *sensor_name;
-    
-    switch (calib_data->sensor_type) {
+
+    switch (calib_data->sensor_type)
+    {
         case 0:
             sensor_type = BHI360_SENSOR_ACCEL;
             sensor_name = "accel";
@@ -745,20 +791,22 @@ static void apply_calibration_data(const bhi360_calibration_data_t *calib_data)
             LOG_ERR("Unknown sensor type: %u", calib_data->sensor_type);
             return;
     }
-    
-    if (calib_data->profile_size > 0) {
-        int ret = bhi360_set_calibration_profile(bhi360_dev, 
-                                                sensor_type,
-                                                calib_data->profile_data, 
-                                                calib_data->profile_size);
-        if (ret == 0) {
-            LOG_INF("Applied %s calibration (%u bytes)", 
-                    sensor_name, calib_data->profile_size);
-        } else {
-            LOG_ERR("Failed to apply %s calibration: %d", 
-                    sensor_name, ret);
+
+    if (calib_data->profile_size > 0)
+    {
+        int ret =
+            bhi360_set_calibration_profile(bhi360_dev, sensor_type, calib_data->profile_data, calib_data->profile_size);
+        if (ret == 0)
+        {
+            LOG_INF("Applied %s calibration (%u bytes)", sensor_name, calib_data->profile_size);
         }
-    } else {
+        else
+        {
+            LOG_ERR("Failed to apply %s calibration: %d", sensor_name, ret);
+        }
+    }
+    else
+    {
         LOG_INF("No %s calibration data available", sensor_name);
     }
 }
@@ -769,109 +817,123 @@ static void apply_calibration_data(const bhi360_calibration_data_t *calib_data)
 static void perform_bhi360_calibration(void)
 {
     LOG_INF("Starting BHI360 calibration sequence...");
-    
+
     // Check current calibration status
     struct bhi360_calibration_status calib_status;
     int ret = bhi360_get_calibration_status(bhi360_dev, &calib_status);
-    if (ret == 0) {
-        LOG_INF("Current calibration status - Accel: %d, Gyro: %d",
-                calib_status.accel_calib_status,
+    if (ret == 0)
+    {
+        LOG_INF("Current calibration status - Accel: %d, Gyro: %d", calib_status.accel_calib_status,
                 calib_status.gyro_calib_status);
     }
-    
+
     // Perform gyroscope calibration
     LOG_INF("Performing gyroscope calibration...");
     LOG_INF("Please keep the device stationary");
-    
+
     // Give user time to ensure device is stationary
     k_sleep(K_SECONDS(2));
-    
+
     struct bhi360_foc_result foc_result;
     ret = bhi360_perform_gyro_foc(bhi360_dev, &foc_result);
-    if (ret == 0 && foc_result.success) {
-        LOG_INF("Gyro calibration successful! Offsets: X=%d, Y=%d, Z=%d",
-                foc_result.x_offset, foc_result.y_offset, foc_result.z_offset);
-        
+    if (ret == 0 && foc_result.success)
+    {
+        LOG_INF("Gyro calibration successful! Offsets: X=%d, Y=%d, Z=%d", foc_result.x_offset, foc_result.y_offset,
+                foc_result.z_offset);
+
         // Save the new calibration
         save_calibration_profile(bhi360_dev, BHI360_SENSOR_GYRO, "gyro");
-    } else {
+    }
+    else
+    {
         LOG_ERR("Gyro calibration failed");
     }
-    
+
     // Perform accelerometer calibration
     LOG_INF("Performing accelerometer calibration...");
     LOG_INF("Please place device on flat surface with Z-axis up");
-    
+
     // Give user time to position device
     k_sleep(K_SECONDS(3));
-    
+
     ret = bhi360_perform_accel_foc(bhi360_dev, &foc_result);
-    if (ret == 0 && foc_result.success) {
-        LOG_INF("Accel calibration successful! Offsets: X=%d, Y=%d, Z=%d",
-                foc_result.x_offset, foc_result.y_offset, foc_result.z_offset);
-        
+    if (ret == 0 && foc_result.success)
+    {
+        LOG_INF("Accel calibration successful! Offsets: X=%d, Y=%d, Z=%d", foc_result.x_offset, foc_result.y_offset,
+                foc_result.z_offset);
+
         // Save the new calibration
         save_calibration_profile(bhi360_dev, BHI360_SENSOR_ACCEL, "accel");
-    } else {
+    }
+    else
+    {
         LOG_ERR("Accel calibration failed");
     }
-    
+
     // Check final calibration status
     ret = bhi360_get_calibration_status(bhi360_dev, &calib_status);
-    if (ret == 0) {
-        LOG_INF("Final calibration status - Accel: %d, Gyro: %d",
-                calib_status.accel_calib_status,
+    if (ret == 0)
+    {
+        LOG_INF("Final calibration status - Accel: %d, Gyro: %d", calib_status.accel_calib_status,
                 calib_status.gyro_calib_status);
     }
-    
+
     LOG_INF("BHI360 calibration sequence complete");
 }
 
 /**
  * @brief Save calibration profile after successful calibration
  */
-static void save_calibration_profile(const struct device *bhi360_dev, 
-                                   enum bhi360_sensor_type sensor,
-                                   const char *sensor_name)
+static void save_calibration_profile(const struct device *bhi360_dev, enum bhi360_sensor_type sensor,
+                                     const char *sensor_name)
 {
     uint8_t type_id;
-    
+
     // Map sensor type to storage ID
-    switch (sensor) {
-        case BHI360_SENSOR_ACCEL: type_id = 0; break;
-        case BHI360_SENSOR_GYRO: type_id = 1; break;
-        default: return;
+    switch (sensor)
+    {
+        case BHI360_SENSOR_ACCEL:
+            type_id = 0;
+            break;
+        case BHI360_SENSOR_GYRO:
+            type_id = 1;
+            break;
+        default:
+            return;
     }
-    
+
     // Get current calibration profile from BHI360
     generic_message_t save_msg = {};
     save_msg.sender = SENDER_MOTION_SENSOR;
     save_msg.type = MSG_TYPE_SAVE_BHI360_CALIBRATION;
     save_msg.data.bhi360_calibration.sensor_type = type_id;
-    
+
     size_t actual_size;
-    int ret = bhi360_get_calibration_profile(bhi360_dev, sensor, 
-                                            save_msg.data.bhi360_calibration.profile_data, 
-                                            sizeof(save_msg.data.bhi360_calibration.profile_data), 
-                                            &actual_size);
+    int ret = bhi360_get_calibration_profile(bhi360_dev, sensor, save_msg.data.bhi360_calibration.profile_data,
+                                             sizeof(save_msg.data.bhi360_calibration.profile_data), &actual_size);
     save_msg.data.bhi360_calibration.profile_size = (uint16_t)actual_size;
-    if (ret == 0) {
+    if (ret == 0)
+    {
         // Send to data module for storage
-        if (k_msgq_put(&data_msgq, &save_msg, K_NO_WAIT) != 0) {
+        if (k_msgq_put(&data_msgq, &save_msg, K_NO_WAIT) != 0)
+        {
             LOG_ERR("Failed to send %s calibration to data module", sensor_name);
-        } else {
-            LOG_INF("Sent %s calibration to data module (%u bytes)", 
-                    sensor_name, save_msg.data.bhi360_calibration.profile_size);
         }
-    } else {
-        LOG_ERR("Failed to get %s calibration profile: %d", 
-                sensor_name, ret);
+        else
+        {
+            LOG_INF("Sent %s calibration to data module (%u bytes)", sensor_name,
+                    save_msg.data.bhi360_calibration.profile_size);
+        }
+    }
+    else
+    {
+        LOG_ERR("Failed to get %s calibration profile: %d", sensor_name, ret);
     }
 }
 
 /**
  * @brief Periodic calibration check and save
- * 
+ *
  * This function is called periodically to check if calibration
  * has improved and save it. Particularly useful for magnetometer.
  */
@@ -879,27 +941,27 @@ static void check_and_save_calibration_updates(const struct device *bhi360_dev)
 {
     static struct bhi360_calibration_status last_status = {0, 0, 0};
     struct bhi360_calibration_status current_status;
-    
+
     int ret = bhi360_get_calibration_status(bhi360_dev, &current_status);
-    if (ret != 0) {
+    if (ret != 0)
+    {
         return;
     }
-    
+
     // Check if any calibration status has improved
-    if (current_status.accel_calib_status > last_status.accel_calib_status) {
-        LOG_INF("Accel calibration improved: %d -> %d", 
-                last_status.accel_calib_status, 
+    if (current_status.accel_calib_status > last_status.accel_calib_status)
+    {
+        LOG_INF("Accel calibration improved: %d -> %d", last_status.accel_calib_status,
                 current_status.accel_calib_status);
         save_calibration_profile(bhi360_dev, BHI360_SENSOR_ACCEL, "accel");
     }
-    
-    if (current_status.gyro_calib_status > last_status.gyro_calib_status) {
-        LOG_INF("Gyro calibration improved: %d -> %d", 
-                last_status.gyro_calib_status, 
-                current_status.gyro_calib_status);
+
+    if (current_status.gyro_calib_status > last_status.gyro_calib_status)
+    {
+        LOG_INF("Gyro calibration improved: %d -> %d", last_status.gyro_calib_status, current_status.gyro_calib_status);
         save_calibration_profile(bhi360_dev, BHI360_SENSOR_GYRO, "gyro");
     }
-    
+
     last_status = current_status;
 }
 
@@ -924,16 +986,16 @@ static bool app_event_handler(const struct app_event_header *aeh)
             activity_start_step_count = latest_step_count;
             latest_activity_step_count = 0;
             LOG_INF("Activity started - capturing baseline step count: %u", activity_start_step_count);
-            
-            // Notify bluetooth to reset activity step count
-            #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
+// Notify bluetooth to reset activity step count
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             generic_message_t reset_msg{};
             reset_msg.sender = SENDER_MOTION_SENSOR;
             reset_msg.type = MSG_TYPE_COMMAND;
             strncpy(reset_msg.data.command_str, "RESET_ACTIVITY_STEPS", sizeof(reset_msg.data.command_str) - 1);
             reset_msg.data.command_str[sizeof(reset_msg.data.command_str) - 1] = '\0';
             k_msgq_put(&bluetooth_msgq, &reset_msg, K_NO_WAIT);
-            #endif
+#endif
             generic_message_t cmd_msg = {};
             cmd_msg.sender = SENDER_BHI360_THREAD;
             cmd_msg.type = MSG_TYPE_COMMAND;
@@ -944,18 +1006,19 @@ static bool app_event_handler(const struct app_event_header *aeh)
             strncpy(cmd_msg.fw_version, APP_VERSION_STRING, sizeof(cmd_msg.fw_version) - 1);
             cmd_msg.fw_version[sizeof(cmd_msg.fw_version) - 1] = '\0';
 
-            LOG_INF("Motion sensor sending start command: '%s', type: %d", cmd_msg.data.command_str, cmd_msg.type);
-            int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
-            if (cmd_ret == 0)
-            {
-                LOG_INF("Sent START_LOGGING_BHI360 command (via event)");
-                atomic_set(&logging_active, 1);
-            }
-            else
-            {
-                LOG_ERR("Failed to send START_LOGGING_BHI360 command: %d", cmd_ret);
-            }
-            
+            // Don't watnt to start logging imu data at the moment
+            // LOG_INF("Motion sensor sending start command: '%s', type: %d", cmd_msg.data.command_str, cmd_msg.type);
+            //   int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+            //    if (cmd_ret == 0)
+            //   {
+            //     LOG_INF("Sent START_LOGGING_BHI360 command (via event)");
+            //   atomic_set(&logging_active, 1);
+            //  }
+            //  else
+            //  {
+            //     LOG_ERR("Failed to send START_LOGGING_BHI360 command: %d", cmd_ret);
+            // }
+
             // Also start activity logging
             generic_message_t activity_cmd_msg = {};
             activity_cmd_msg.sender = SENDER_MOTION_SENSOR;
@@ -963,10 +1026,11 @@ static bool app_event_handler(const struct app_event_header *aeh)
             activity_cmd_msg.sampling_frequency = configured_sample_rate;
             strncpy(activity_cmd_msg.fw_version, APP_VERSION_STRING, sizeof(activity_cmd_msg.fw_version) - 1);
             activity_cmd_msg.fw_version[sizeof(activity_cmd_msg.fw_version) - 1] = '\0';
-            strncpy(activity_cmd_msg.data.command_str, "START_LOGGING_ACTIVITY", sizeof(activity_cmd_msg.data.command_str) - 1);
+            strncpy(activity_cmd_msg.data.command_str, "START_LOGGING_ACTIVITY",
+                    sizeof(activity_cmd_msg.data.command_str) - 1);
             activity_cmd_msg.data.command_str[sizeof(activity_cmd_msg.data.command_str) - 1] = '\0';
             LOG_INF("Motion sensor sending start activity command: '%s'", activity_cmd_msg.data.command_str);
-            cmd_ret = k_msgq_put(&data_msgq, &activity_cmd_msg, K_NO_WAIT);
+            int cmd_ret = k_msgq_put(&data_msgq, &activity_cmd_msg, K_NO_WAIT);
             if (cmd_ret == 0)
             {
                 LOG_INF("Sent START_LOGGING_ACTIVITY command");
@@ -991,25 +1055,27 @@ static bool app_event_handler(const struct app_event_header *aeh)
             cmd_msg.type = MSG_TYPE_COMMAND;
             strncpy(cmd_msg.data.command_str, "STOP_LOGGING_BHI360", sizeof(cmd_msg.data.command_str) - 1);
             cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
-            int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
-            if (cmd_ret == 0)
-            {
-                LOG_INF("Sent STOP_LOGGING_BHI360 command (via event)");
-                atomic_set(&logging_active, 0);
-            }
-            else
-            {
-                LOG_ERR("Failed to send STOP_LOGGING_BHI360 command: %d", cmd_ret);
-            }
-            
+            // Don't want to log imu data at the moment
+            // int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+            // if (cmd_ret == 0)
+            // {
+            //    LOG_INF("Sent STOP_LOGGING_BHI360 command (via event)");
+            //   atomic_set(&logging_active, 0);
+            //  }
+            //  else
+            //  {
+            //     LOG_ERR("Failed to send STOP_LOGGING_BHI360 command: %d", cmd_ret);
+            // }
+
             // Also stop activity logging
             generic_message_t activity_cmd_msg = {};
             activity_cmd_msg.sender = SENDER_MOTION_SENSOR;
             activity_cmd_msg.type = MSG_TYPE_COMMAND;
-            strncpy(activity_cmd_msg.data.command_str, "STOP_LOGGING_ACTIVITY", sizeof(activity_cmd_msg.data.command_str) - 1);
+            strncpy(activity_cmd_msg.data.command_str, "STOP_LOGGING_ACTIVITY",
+                    sizeof(activity_cmd_msg.data.command_str) - 1);
             activity_cmd_msg.data.command_str[sizeof(activity_cmd_msg.data.command_str) - 1] = '\0';
             LOG_INF("Motion sensor sending stop activity command: '%s'", activity_cmd_msg.data.command_str);
-            cmd_ret = k_msgq_put(&data_msgq, &activity_cmd_msg, K_NO_WAIT);
+            int cmd_ret = k_msgq_put(&data_msgq, &activity_cmd_msg, K_NO_WAIT);
             if (cmd_ret == 0)
             {
                 LOG_INF("Sent STOP_LOGGING_ACTIVITY command");
@@ -1021,7 +1087,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
         }
         return false;
     }
-    #if defined(CONFIG_WIFI_MODULE)
+#if defined(CONFIG_WIFI_MODULE)
     if (is_wifi_connected_event(aeh))
     {
         LOG_INF("Motion sensor: WiFi connected - enabling WiFi data transmission");
@@ -1038,7 +1104,6 @@ static bool app_event_handler(const struct app_event_header *aeh)
     return false;
 }
 
-
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, module_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
@@ -1050,21 +1115,21 @@ APP_EVENT_SUBSCRIBE(MODULE, wifi_connected_event);
 APP_EVENT_SUBSCRIBE(MODULE, wifi_disconnected_event);
 #endif
 
-/* 
+/*
  * DRIVER_INTEGRATION SUMMARY:
- * 
+ *
  * 1. Removed manual SPI initialization - driver handles this
  * 2. Removed GPIO configuration - driver handles interrupts
  * 3. Get BHY2 device from driver API
  * 4. Use driver's wait_for_data function
  * 5. Kept all application logic unchanged
- * 
+ *
  * Benefits:
  * - Cleaner code with less hardware-specific details
  * - Driver manages device lifecycle
  * - Better error handling and recovery
  * - Thread-safe interrupt handling
- * 
+ *
  * Next steps:
  * - Test the refactored code
  * - Consider moving firmware upload to driver

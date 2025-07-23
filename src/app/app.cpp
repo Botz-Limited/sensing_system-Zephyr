@@ -101,11 +101,17 @@ static void fota_reset_handler(struct k_work *work)
 K_MSGQ_DEFINE(bluetooth_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(motion_sensor_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+#ifdef CONFIG_SENSOR_DATA_MSGQ_SIZE
+K_MSGQ_DEFINE(sensor_data_msgq, MSG_QUEUE_MESSAGE_SIZE, CONFIG_SENSOR_DATA_MSGQ_SIZE, 4);
+#else
 K_MSGQ_DEFINE(sensor_data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
-K_MSGQ_DEFINE(sensor_data_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);  // Legacy name for realtime_metrics input
+#endif
+K_MSGQ_DEFINE(sensor_data_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(realtime_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(analytics_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(activity_metrics_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(sync_pair_msgq, MSG_QUEUE_MESSAGE_SIZE, 10, 4);  // Add this - smaller queue for sync pairs
+K_MSGQ_DEFINE(full_sync_msgq, MSG_QUEUE_MESSAGE_SIZE, 10, 4);  // Full synchronized data queue
 
 // Add other slab definitions here as needed
 

@@ -1284,8 +1284,17 @@ err_t bt_module_init(void)
     LOG_WRN("MCUmgr Bluetooth transport not enabled in configuration");
 #endif
 
+    // ADD: Start advertising so phones can discover the secondary device
+    LOG_INF("Secondary device starting advertising as 'SensingGL'");
+    int adv_err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
+    if (adv_err) {
+        LOG_ERR("Failed to start advertising: %d", adv_err);
+        // Continue anyway - D2D functionality is more important
+    } else {
+        LOG_INF("Secondary device is now advertising and visible to phones");
+    }
+
     start_scan(); // Start scanning for primary device
-    // Do NOT start advertising or initialize control/info services here
 #endif
 
     bluetooth_tid =
@@ -1328,6 +1337,15 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // Directly access the data from the union member
                     foot_samples_t *foot_data = &msg.data.foot_samples; // Get pointer to data within the message
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Primary device: Check sender to avoid mixing primary/secondary data
+                    if (msg.sender == SENDER_D2D_SECONDARY) {
+                        // Secondary foot data - needs separate handling
+                        LOG_WRN("Secondary foot data received - needs separate handling!");
+                        // TODO: Call jis_secondary_foot_sensor_notify() if it exists
+                        // For now, skip to avoid data mixing
+                        break;
+                    }
+                    // Primary's own foot sensor data
                     jis_foot_sensor_notify(foot_data);
 #else
                     // Secondary device: Send to primary via D2D
@@ -1336,7 +1354,6 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     break;
                 }
 
-                // Similarly for BHI360 messages:
                 case MSG_TYPE_BHI360_3D_MAPPING: {
                     bhi360_3d_mapping_t *mapping_data = &msg.data.bhi360_3d_mapping;
                     LOG_INF("Received BHI360 3D Mapping from %s: Accel(%.2f,%.2f,%.2f), Gyro(%.2f,%.2f,%.2f)",
@@ -1344,6 +1361,15 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                             (double)mapping_data->accel_z, (double)mapping_data->gyro_x, (double)mapping_data->gyro_y,
                             (double)mapping_data->gyro_z);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Primary device: Check sender to avoid mixing primary/secondary data
+                    if (msg.sender == SENDER_D2D_SECONDARY) {
+                        // Secondary BHI360 data - needs separate handling
+                        LOG_WRN("Secondary BHI360 3D data received - needs separate handling!");
+                        // TODO: Call jis_secondary_bhi360_data1_notify() if it exists
+                        // For now, skip to avoid data mixing
+                        break;
+                    }
+                    // Primary's own BHI360 data
                     jis_bhi360_data1_notify(mapping_data);
 #else
                     // Secondary device: Send to primary via D2D
@@ -1357,6 +1383,15 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     LOG_INF("Received BHI360 Linear Accel from %s: (%.2f,%.2f,%.2f)", get_sender_name(msg.sender),
                             (double)lacc_data->x, (double)lacc_data->y, (double)lacc_data->z);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Primary device: Check sender to avoid mixing primary/secondary data
+                    if (msg.sender == SENDER_D2D_SECONDARY) {
+                        // Secondary BHI360 linear accel data - needs separate handling
+                        LOG_WRN("Secondary BHI360 linear accel received - needs separate handling!");
+                        // TODO: Call jis_secondary_bhi360_data3_notify() if it exists
+                        // For now, skip to avoid data mixing
+                        break;
+                    }
+                    // Primary's own BHI360 data
                     jis_bhi360_data3_notify(lacc_data);
 #else
                     // Secondary device: Send to primary via D2D
@@ -1367,51 +1402,29 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                 case MSG_TYPE_BHI360_STEP_COUNT: {
                     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
-
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     // Check if this is activity step count (from SENDER_MOTION_SENSOR)
-                    if (msg.sender == SENDER_MOTION_SENSOR)
-                    {
-                        // This is activity step count from primary
+                    if (msg.sender == SENDER_MOTION_SENSOR) {
                         primary_activity_steps = step_data->step_count;
-
-                        // Calculate total activity steps
                         uint32_t total_activity_steps = primary_activity_steps + secondary_activity_steps;
-                        LOG_INF("Activity Step Count - Primary=%u, Secondary=%u, Total=%u", primary_activity_steps,
-                                secondary_activity_steps, total_activity_steps);
-
+                        LOG_INF("Activity Step Count - Primary=%u, Secondary=%u, Total=%u", primary_activity_steps, secondary_activity_steps, total_activity_steps);
                         ams_update_activity_step_count(total_activity_steps);
                         break;
                     }
-
-                    LOG_INF("Received BHI360 Step Count from %s: Steps=%u", get_sender_name(msg.sender),
-                            step_data->step_count);
-
+                    LOG_INF("Received BHI360 Step Count from %s: Steps=%u", get_sender_name(msg.sender), step_data->step_count);
                     // Update step counts based on sender
-                    if (msg.sender == SENDER_BHI360_THREAD)
-                    {
-                        // Primary global step count from motion sensor
+                    if (msg.sender == SENDER_BHI360_THREAD) {
                         primary_step_count = step_data->step_count;
-                    }
-                    else if (msg.sender == SENDER_D2D_SECONDARY)
-                    {
-                        // Secondary global step count from D2D
+                    } else if (msg.sender == SENDER_D2D_SECONDARY) {
                         secondary_step_count = step_data->step_count;
                     }
-
-                    // Don't notify individual step counts anymore - only aggregated counts
-                    // jis_bhi360_data2_notify(step_data);
-
-                    // Calculate and notify total global steps
+                    // Only notify aggregated counts
                     uint32_t total_steps = primary_step_count + secondary_step_count;
-
-                    LOG_DBG("Global step aggregation: Primary=%u, Secondary=%u, Total=%u", primary_step_count,
-                            secondary_step_count, total_steps);
-
+                    LOG_DBG("Global step aggregation: Primary=%u, Secondary=%u, Total=%u", primary_step_count, secondary_step_count, total_steps);
                     ams_update_total_step_count(total_steps);
 #else
                     LOG_INF("Secondary device sending step count: %u", step_data->step_count);
-                    // Secondary device: Send to primary via D2D
+                    // Secondary device: Send to primary via D2D batching logic
                     ble_d2d_tx_send_bhi360_data2(step_data);
 #endif
                     break;

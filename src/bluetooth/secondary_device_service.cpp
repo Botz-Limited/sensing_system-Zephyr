@@ -615,4 +615,62 @@ void sds_set_connection(struct bt_conn *conn)
     }
 }
 
+#else // Secondary device
+
+// For secondary device, we implement a minimal information service for direct phone access
+// Service UUID: 4fd5b6a1-9d89-4061-92aa-319ca786baaf (slight variation from primary's UUID)
+static struct bt_uuid_128 SECONDARY_INFO_SERVICE_UUID = BT_UUID_INIT_128(
+    BT_UUID_128_ENCODE(0x4fd5b6a1, 0x9d89, 0x4061, 0x92aa, 0x319ca786baaf));
+
+// Characteristic UUIDs
+static struct bt_uuid_128 secondary_device_type_uuid = BT_UUID_INIT_128(
+    BT_UUID_128_ENCODE(0x4fd5b6a2, 0x9d89, 0x4061, 0x92aa, 0x319ca786baaf));
+
+static struct bt_uuid_128 secondary_connection_status_uuid = BT_UUID_INIT_128(
+    BT_UUID_128_ENCODE(0x4fd5b6a3, 0x9d89, 0x4061, 0x92aa, 0x319ca786baaf));
+
+// Static data
+static const char device_type[] = "Secondary";
+static uint8_t connection_status = 0; // 0=not connected to primary, 1=connected
+
+// Read callbacks
+static ssize_t read_device_type(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                               void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, device_type, strlen(device_type));
+}
+
+static ssize_t read_connection_status(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                     void *buf, uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &connection_status, sizeof(connection_status));
+}
+
+// Service definition for secondary device
+BT_GATT_SERVICE_DEFINE(secondary_info_svc,
+    BT_GATT_PRIMARY_SERVICE(&SECONDARY_INFO_SERVICE_UUID),
+    
+    // Device type characteristic (read only)
+    BT_GATT_CHARACTERISTIC(&secondary_device_type_uuid.uuid,
+                          BT_GATT_CHRC_READ,
+                          BT_GATT_PERM_READ,
+                          read_device_type, NULL, NULL),
+    
+    // Connection status characteristic (read + notify)
+    BT_GATT_CHARACTERISTIC(&secondary_connection_status_uuid.uuid,
+                          BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                          BT_GATT_PERM_READ,
+                          read_connection_status, NULL, NULL),
+    BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+);
+
+// Update connection status when D2D connection changes
+void secondary_device_update_d2d_status(bool connected)
+{
+    connection_status = connected ? 1 : 0;
+    
+    // Notify any subscribed phones
+    bt_gatt_notify(NULL, &secondary_info_svc.attrs[3], &connection_status, sizeof(connection_status));
+}
+
 #endif // CONFIG_PRIMARY_DEVICE

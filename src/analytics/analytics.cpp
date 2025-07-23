@@ -239,10 +239,10 @@ static void perform_complex_analytics(void)
     
     // Log periodically
     if (analytics_state.analytics_count % 25 == 0) {
-        LOG_INF("Analytics: efficiency=%.1f%%, fatigue=%.1f%%, risk=%.1f%%",
-                analytics_state.running_efficiency,
-                analytics_state.fatigue_index,
-                analytics_state.injury_risk);
+        LOG_INF("Analytics: efficiency=%.2f%%, fatigue=%.2f, risk=%.2f",
+                (double)analytics_state.running_efficiency,
+                (double)analytics_state.fatigue_index,
+                (double)analytics_state.injury_risk);
     }
     
     // Send to session management

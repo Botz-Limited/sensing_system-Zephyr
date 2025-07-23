@@ -541,12 +541,6 @@ void ams_update_total_step_count(uint32_t total_steps)
     }
 }
 
-/**
- * @brief Update activity step count (steps during current activity)
- * Note: This should only be called from the bluetooth thread
- * 
- * @param activity_steps Activity step count
- */
 void ams_update_activity_step_count(uint32_t activity_steps)
 {
     activity_step_count_value.step_count = activity_steps;

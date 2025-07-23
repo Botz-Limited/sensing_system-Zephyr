@@ -22,7 +22,7 @@
 #include "realtime_metrics.h"
 
 // Include sensor data structures
-#include "../sensor_data/sensor_data_consolidated.h"
+#include "../sensor_data/sensor_data_consolidated.hpp"
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_REALTIME_METRICS_MODULE_LOG_LEVEL);
 

@@ -9,13 +9,13 @@
  * These algorithms use sensor fusion to provide more accurate metrics
  */
 
-#ifndef SENSOR_DATA_ENHANCED_ALGORITHMS_H
-#define SENSOR_DATA_ENHANCED_ALGORITHMS_H
+#ifndef SENSOR_DATA_ENHANCED_ALGORITHMS_HPP
+#define SENSOR_DATA_ENHANCED_ALGORITHMS_HPP
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
-#include "sensor_data_fast_processing.h"
+#include "sensor_data_fast_processing.hpp"
 
 #ifdef __cplusplus
 extern "C" {
@@ -327,4 +327,4 @@ ALWAYS_INLINE uint8_t detect_arch_collapse(const uint16_t pressure[8],
 }
 #endif
 
-#endif // SENSOR_DATA_ENHANCED_ALGORITHMS_H
+#endif // SENSOR_DATA_ENHANCED_ALGORITHMS_HPP

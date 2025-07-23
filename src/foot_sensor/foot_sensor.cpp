@@ -68,9 +68,9 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL); // NOLINT
 
 static constexpr uint32_t US_PER_SECOND = 1000000UL;
 static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
-static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_NORMAL = 1; // normal sampling rate (10 Hz)
+static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_NORMAL = 100; // normal sampling rate (10 Hz)
 static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_CALIBRATION =
-    100; // Higher rate for quick calibration (1000 Hz = 1 ms period)
+    200; // Higher rate for quick calibration (1000 Hz = 1 ms period)
 
 static constexpr uint32_t TIME_TO_WAIT_US_NORMAL = US_PER_SECOND / SAADC_SAMPLE_RATE_HZ_NORMAL;
 // New definition for calibration
@@ -305,18 +305,19 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
                         LOG_WRN("Failed to send foot sensor data to bluetooth module");
                     }
 
-                    if (k_msgq_put(&data_msgq, &msg, K_NO_WAIT) != 0)
-                    {
-                        LOG_WRN("Failed to send foot sensor data to data module");
-                    }
+                    // Don't log foot sample to data module, commented out for now/
+                    //    if (k_msgq_put(&data_msgq, &msg, K_NO_WAIT) != 0)
+                    //   {
+                    //      LOG_WRN("Failed to send foot sensor data to data module");
+                    //   }
 
-                    // Send to sensor data module (new multi-thread architecture)
-                    #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
+// Send to sensor data module (new multi-thread architecture)
+#if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
                     if (k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT) != 0)
                     {
                         LOG_WRN("Failed to send foot sensor data to sensor data module");
                     }
-                    #endif
+#endif
 
                     // Also send to WiFi module if WiFi is active
 #if defined(CONFIG_WIFI_MODULE)
@@ -568,16 +569,18 @@ static bool app_event_handler(const struct app_event_header *aeh)
             strncpy(cmd_msg.fw_version, APP_VERSION_STRING, sizeof(cmd_msg.fw_version) - 1);
             cmd_msg.fw_version[sizeof(cmd_msg.fw_version) - 1] = '\0';
 
-            int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
-            if (cmd_ret == 0)
-            {
-                LOG_INF("Sent START_LOGGING_FOOT_SENSOR command (via event)");
-                atomic_set(&logging_active, 1);
-            }
-            else
-            {
-                LOG_ERR("Failed to send START_LOGGING_FOOT_SENSOR command: %d", cmd_ret);
-            }
+            // Don't want to log foot sample data at the moment.
+
+            //   int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+            //  if (cmd_ret == 0)
+            //  {
+            //     LOG_INF("Sent START_LOGGING_FOOT_SENSOR command (via event)");
+            //    atomic_set(&logging_active, 1);
+            //  }
+            //  else
+            //  {
+            //     LOG_ERR("Failed to send START_LOGGING_FOOT_SENSOR command: %d", cmd_ret);
+            // }
         }
         return false;
     }
@@ -591,16 +594,17 @@ static bool app_event_handler(const struct app_event_header *aeh)
             cmd_msg.type = MSG_TYPE_COMMAND;
             strncpy(cmd_msg.data.command_str, "STOP_LOGGING_FOOT_SENSOR", sizeof(cmd_msg.data.command_str) - 1);
             cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
-            int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
-            if (cmd_ret == 0)
-            {
-                LOG_INF("Sent STOP_LOGGING_FOOT_SENSOR command (via event)");
-                atomic_set(&logging_active, 0);
-            }
-            else
-            {
-                LOG_ERR("Failed to send STOP_LOGGING_FOOT_SENSOR command: %d", cmd_ret);
-            }
+            // Don't want to log foot sample data at the moment.
+            //  int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
+            //  if (cmd_ret == 0)
+            // {
+            //    LOG_INF("Sent STOP_LOGGING_FOOT_SENSOR command (via event)");
+            //   atomic_set(&logging_active, 0);
+            // }
+            // else
+            // {
+            //    LOG_ERR("Failed to send STOP_LOGGING_FOOT_SENSOR command: %d", cmd_ret);
+            // }
         }
         return false;
     }

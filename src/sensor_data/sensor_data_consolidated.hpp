@@ -7,8 +7,8 @@
  * @copyright Botz Innovation 2025
  */
 
-#ifndef SENSOR_DATA_CONSOLIDATED_H
-#define SENSOR_DATA_CONSOLIDATED_H
+#ifndef SENSOR_DATA_CONSOLIDATED_HPP
+#define SENSOR_DATA_CONSOLIDATED_HPP
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -78,4 +78,4 @@ typedef struct {
 }
 #endif
 
-#endif // SENSOR_DATA_CONSOLIDATED_H
+#endif // SENSOR_DATA_CONSOLIDATED_HPP

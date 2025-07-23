@@ -31,4 +31,13 @@ config SENSOR_DATA_MODULE_PRIORITY
 	help
 	  Priority for sensor data processing thread (lower number = higher priority)
 
+config SENSOR_DATA_MSGQ_SIZE
+    int "Sensor data message queue size"
+    default 32
+    range 16 128
+    help
+      Size of the sensor data message queue. Increase this if you see
+      "Failed to send foot sensor data to sensor data module" warnings.
+      Primary devices need larger queues to handle data from both feet.
+
 endmenu

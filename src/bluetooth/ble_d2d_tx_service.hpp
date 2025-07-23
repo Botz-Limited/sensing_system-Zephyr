@@ -9,6 +9,36 @@ extern "C" {
 #endif
 
 /**
+ * @brief Send D2D batch notification to primary device
+ * @param batch Pointer to d2d_sample_batch_t
+ * @return 0 on success, negative error code on failure
+ */
+
+
+#define D2D_BATCH_SIZE 1
+
+typedef struct __attribute__((packed)) {
+    uint32_t timestamp[D2D_BATCH_SIZE];
+    foot_samples_t foot[D2D_BATCH_SIZE];
+    bhi360_log_record_t imu[D2D_BATCH_SIZE];
+    uint8_t count; // Number of valid samples in this packet
+} d2d_sample_batch_t;
+
+typedef struct {
+    bool foot_ready;
+    bool imu_ready;
+    foot_samples_t foot;
+    bhi360_log_record_t imu;
+    uint32_t timestamp;
+} d2d_pending_sample_t;
+
+
+static d2d_pending_sample_t pending_sample {};
+static d2d_sample_batch_t d2d_batch_buffer = {};
+static uint8_t d2d_batch_count = 0;
+int d2d_tx_notify_d2d_batch(const d2d_sample_batch_t *batch);
+
+/**
  * @brief Initialize the D2D TX GATT service
  */
 void d2d_tx_service_init(void);

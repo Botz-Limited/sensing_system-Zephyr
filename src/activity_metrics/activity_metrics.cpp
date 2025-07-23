@@ -873,7 +873,7 @@ static void calculate_realtime_metrics(void)
             session_state.baseline_contact_time = sensor_data.avg_contact_time;
             session_state.baseline_form_score = calculate_form_score();
             session_state.baseline_established = true;
-            LOG_INF("Baseline established: contact=%.1fms, form=%d", 
+            LOG_INF("Baseline established: contact=%.1fms, form=%f", 
                     (double)session_state.baseline_contact_time, 
                     session_state.baseline_form_score);
         }

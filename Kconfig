@@ -42,6 +42,15 @@ menu "SENSING"
         select BT_PERIPHERAL if !PRIMARY_DEVICE   
         select BT_PRIVACY if !PRIMARY_DEVICE      
 
+    config SENSOR_DATA_MSGQ_SIZE
+        int "Sensor data message queue size"
+        default 20
+        range 10 50
+        help
+          Size of the sensor data message queue. Increased to handle
+          D2D latency and ensure left/right foot data can be buffered
+          until pairs are matched.
+
     endmenu    
         
     rsource "src/Kconfig"

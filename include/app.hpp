@@ -18,7 +18,7 @@
 #include <time.h>
 #include <errors.hpp>
 #include <activity_session.hpp>  // For GPSUpdateCommand
-#include "../src/sensor_data/sensor_data_consolidated.h"  // For sensor_data_consolidated_t
+#include "../src/sensor_data/sensor_data_consolidated.hpp"  // For sensor_data_consolidated_t
 
 void app_log(const char *fmt, ...);
 
@@ -141,6 +141,44 @@ typedef struct {
     uint32_t timestamp;
 } weight_measurement_msg_t;
 
+// Synchronized foot data structure
+typedef struct {
+    foot_samples_t left;   // Secondary device (left foot)
+    foot_samples_t right;  // Primary device (right foot)
+    uint32_t sync_time;    // Optional: k_uptime_get_32() when paired
+} synchronized_foot_data_t;
+
+// Enhanced synchronized data with IMU information
+typedef struct {
+    // Foot pressure data
+    foot_samples_t left_foot;
+    foot_samples_t right_foot;
+    
+    // IMU data from each device
+    struct {
+        float quaternion[4];
+        float linear_acc[3];
+        float gyro[3];
+        uint32_t step_count;
+        bool valid;  // Indicates if IMU data is available
+    } left_imu;  // From secondary device
+    
+    struct {
+        float quaternion[4];
+        float linear_acc[3];
+        float gyro[3];
+        uint32_t step_count;
+        bool valid;  // Indicates if IMU data is available
+    } right_imu;  // From primary device
+    
+    // Timing
+    uint32_t sync_time;
+    uint16_t delta_time_ms;
+    
+    // Metadata
+    uint8_t sync_quality;  // 0-100%, based on time difference
+} full_synchronized_data_t;
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -171,6 +209,8 @@ typedef struct
         weight_measurement_msg_t weight_measurement;
         GPSUpdateCommand gps_update;  // GPS update data
         sensor_data_consolidated_t sensor_consolidated;  // Consolidated sensor data
+        synchronized_foot_data_t sync_foot_data;  // Add this
+        full_synchronized_data_t full_sync_data;  // Full sync data
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 
@@ -185,6 +225,8 @@ extern struct k_msgq data_msgq;
 extern struct k_msgq motion_sensor_msgq;
 extern struct k_msgq activity_metrics_msgq;
 extern struct k_msgq sensor_data_msgq;  // New multi-thread architecture queue
+extern struct k_msgq sync_pair_msgq;  //synchronized pairs
+extern struct k_msgq full_sync_msgq;
 #if defined(CONFIG_WIFI_MODULE)
 extern struct k_msgq wifi_msgq;
 #endif

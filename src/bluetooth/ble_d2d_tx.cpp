@@ -4,7 +4,7 @@
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/logging/log.h>
-
+#include "ble_d2d_tx_service.hpp"
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_tx_service.hpp"
 #endif
@@ -82,6 +82,9 @@ static struct bt_uuid_128 d2d_rx_gps_update_uuid =
 // Note: This UUID must match d2d_weight_calibration_uuid in ble_d2d_rx.cpp
 static struct bt_uuid_128 d2d_rx_weight_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+// D2D batch characteristic UUID (must match on both sides)
+static struct bt_uuid_128 d2d_rx_d2d_batch_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8c, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));    
 
 // Discovered characteristic handles
 struct d2d_discovered_handles
@@ -97,8 +100,10 @@ struct d2d_discovered_handles
     uint16_t request_device_info_handle;
     uint16_t gps_update_handle;
     uint16_t weight_calibration_handle;
+    uint16_t d2d_batch_handle;
     bool discovery_complete;
 };
+
 
 static struct d2d_discovered_handles d2d_handles = {.set_time_handle = 0,
                                                     .delete_foot_log_handle = 0,
@@ -138,10 +143,22 @@ enum discover_state
     DISCOVER_REQUEST_DEVICE_INFO_CHAR,
     DISCOVER_GPS_UPDATE_CHAR,
     DISCOVER_WEIGHT_CALIBRATION_CHAR,
+    DISCOVER_D2D_BATCH_CHAR,
     DISCOVER_COMPLETE
 };
 
 static enum discover_state discovery_state = DISCOVER_SERVICE;
+
+
+// Extern declarations for batching symbols defined in the header
+extern d2d_pending_sample_t pending_sample;
+extern d2d_sample_batch_t d2d_batch_buffer;
+extern uint8_t d2d_batch_count;
+void try_combine_and_buffer();
+void d2d_flush_buffer();
+void on_new_foot_sample(const foot_samples_t* foot, uint32_t timestamp);
+void on_new_imu_sample(const bhi360_log_record_t* imu, uint32_t timestamp);
+
 
 // Service discovery callback
 static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
@@ -269,13 +286,20 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
                 d2d_handles.weight_calibration_handle = bt_gatt_attr_value_handle(attr);
                 LOG_INF("Found weight calibration characteristic, handle: %u", d2d_handles.weight_calibration_handle);
             }
-            // Mark discovery as complete even if weight calibration is not found
-            // This ensures basic functionality works even without weight calibration
+            // Continue to D2D batch characteristic
+            discovery_state = DISCOVER_D2D_BATCH_CHAR;
+            break;
+        case DISCOVER_D2D_BATCH_CHAR:
+            if (bt_uuid_cmp(params->uuid, &d2d_rx_d2d_batch_uuid.uuid) == 0)
+            {
+                d2d_handles.d2d_batch_handle = bt_gatt_attr_value_handle(attr);
+                LOG_INF("Found D2D batch characteristic, handle: %u", d2d_handles.d2d_batch_handle);
+            }
+            // Mark discovery as complete even if batch is not found
             discovery_state = DISCOVER_COMPLETE;
             d2d_handles.discovery_complete = true;
             LOG_INF("D2D TX discovery complete - found %s characteristics", 
-                    d2d_handles.weight_calibration_handle ? "all" : "most");
-            
+                    d2d_handles.d2d_batch_handle ? "all" : "most");
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // Process any queued commands (only available on primary device)
             ble_d2d_tx_process_queued_commands();
@@ -386,6 +410,9 @@ static void continue_discovery(void)
             break;
         case DISCOVER_WEIGHT_CALIBRATION_CHAR:
             discover_params.uuid = &d2d_rx_weight_calibration_uuid.uuid;
+            break;
+        case DISCOVER_D2D_BATCH_CHAR:
+            discover_params.uuid = &d2d_rx_d2d_batch_uuid.uuid;
             break;
         default:
             LOG_INF("Discovery sequence complete");
@@ -1024,4 +1051,53 @@ int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step
     LOG_WRN("Secondary device shouldn't send weight calibration commands");
     return -EINVAL;
 #endif
+}
+
+void try_combine_and_buffer()
+{
+    if (pending_sample.foot_ready && pending_sample.imu_ready)
+    {
+        d2d_batch_buffer.foot[d2d_batch_count] = pending_sample.foot;
+        d2d_batch_buffer.imu[d2d_batch_count] = pending_sample.imu;
+        d2d_batch_buffer.timestamp[d2d_batch_count] = pending_sample.timestamp;
+        d2d_batch_count++;
+
+        pending_sample.foot_ready = false;
+        pending_sample.imu_ready = false;
+
+        if (d2d_batch_count == D2D_BATCH_SIZE)
+        {
+            d2d_batch_buffer.count = D2D_BATCH_SIZE;
+            d2d_tx_notify_d2d_batch(&d2d_batch_buffer);
+            d2d_batch_count = 0;
+        }
+    }
+}
+
+void d2d_flush_buffer()
+{
+    if (d2d_batch_count > 0)
+    {
+        d2d_batch_buffer.count = d2d_batch_count;
+        d2d_tx_notify_d2d_batch(&d2d_batch_buffer);
+        d2d_batch_count = 0;
+    }
+}
+
+void on_new_foot_sample(const foot_samples_t* foot, uint32_t timestamp)
+{
+    pending_sample.foot = *foot;
+    pending_sample.foot_ready = true;
+    pending_sample.timestamp = timestamp;
+    try_combine_and_buffer();
+}
+
+// Call this when a new IMU sample arrives
+void on_new_imu_sample(const bhi360_log_record_t* imu, uint32_t timestamp)
+{
+    pending_sample.imu = *imu;
+    pending_sample.imu_ready = true;
+    if (timestamp > pending_sample.timestamp)
+        pending_sample.timestamp = timestamp;
+    try_combine_and_buffer();
 }
