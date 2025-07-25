@@ -1,9 +1,0 @@
-sequenceDiagram
-    participant Phone
-    participant Primary
-    participant Secondary
-    
-    Phone->>Primary: Control Command
-    Primary->>Primary: Process locally
-    Primary->>Secondary: Forward via D2D TX
-    Secondary->>Secondary: Process command

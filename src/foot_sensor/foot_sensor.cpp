@@ -284,8 +284,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event)
             }
             else // Normal operation after calibration
             {
-
-                if (atomic_get(&logging_active) == 1)
+                if (atomic_get(&logging_active) == 0)
                 {
 
                     generic_message_t msg;

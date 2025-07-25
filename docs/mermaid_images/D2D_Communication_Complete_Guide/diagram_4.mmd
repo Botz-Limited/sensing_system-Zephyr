@@ -1,9 +1,0 @@
-sequenceDiagram
-    participant Secondary
-    participant Primary
-    participant Phone
-    
-    Secondary->>Secondary: Collect sensor data
-    Secondary->>Primary: Send via D2D TX
-    Primary->>Primary: Aggregate data
-    Primary->>Phone: Notify combined data

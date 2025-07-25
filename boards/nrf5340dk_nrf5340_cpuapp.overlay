@@ -77,7 +77,7 @@
 
 
 &i2c1 {
-    status = "disabled";
+    status = "ok";
 };
 
 &uart0 {

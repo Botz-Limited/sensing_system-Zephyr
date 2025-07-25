@@ -24,14 +24,7 @@ int d2d_data_handler_init(void)
 // Handle D2D batch data from secondary device
 int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
 {
-    if (!batch || batch->count == 0) {
-        LOG_WRN("Received empty or null D2D batch");
-        return -EINVAL;
-    }
-
-    LOG_INF("Processing D2D batch: count=%u, timestamp[0]=%u", batch->count, batch->timestamp[0]);
-
-    //To implement
+    //To implement  TODO
 
     return 0;
 }

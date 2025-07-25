@@ -1,7 +1,0 @@
-stateDiagram-v2
-    [*] --> IDLE
-    IDLE --> SCANNING: Start scanning
-    SCANNING --> D2D_CONNECTED: Found "SensingGR"
-    D2D_CONNECTED --> READY: Services discovered
-    READY --> SCANNING: Connection lost
-    SCANNING --> IDLE: Timeout

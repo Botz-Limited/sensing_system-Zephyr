@@ -112,7 +112,7 @@ config BLUETOOTH_MODULE_STACK_SIZE
 
 config BLUETOOTH_MODULE_PRIORITY
 	int "BTH module thread priority"
-	default 4
+	default 3
 
 config FOTA_PROXY_TIMEOUT_SEC
 	int "FOTA proxy operation timeout in seconds"

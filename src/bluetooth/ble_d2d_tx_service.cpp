@@ -452,36 +452,29 @@ static void try_combine_and_buffer(void)
 {
     if (pending_sample.foot_ready && pending_sample.imu_ready)
     {
-        uint8_t idx = d2d_batch_buffer.count;
-        d2d_batch_buffer.timestamp[idx] = pending_sample.timestamp;
+        d2d_batch_buffer.timestamp[0] = pending_sample.timestamp;
         // Convert and store foot sample as fixed-point
-        convert_foot_samples_to_fixed(&pending_sample.foot, &d2d_batch_buffer.foot[idx]);
-            // Convert and store IMU sample as fixed-point (cast to correct type)
-            convert_bhi360_log_record_to_fixed(&pending_sample.imu, (bhi360_log_record_fixed_t *)&d2d_batch_buffer.imu[idx]);
-        d2d_batch_buffer.count++;
+        convert_foot_samples_to_fixed(&pending_sample.foot, &d2d_batch_buffer.foot[0]);
+        // Convert and store IMU sample as fixed-point (cast to correct type)
+        convert_bhi360_log_record_to_fixed(&pending_sample.imu, (bhi360_log_record_fixed_t *)&d2d_batch_buffer.imu[0]);
 
         // Reset pending
         pending_sample.foot_ready = false;
         pending_sample.imu_ready = false;
-static fota_progress_msg_t fota_progress_data = {0, 0, 0, 0, 0, 0};
 
-        // If batch is full, send notification
-        if (d2d_batch_buffer.count >= D2D_BATCH_SIZE)
+        // Send the single-sample batch
+        if (primary_conn && d2d_batch_notify_enabled)
         {
-            if (primary_conn && d2d_batch_notify_enabled)
+            const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 2];
+            int err = bt_gatt_notify(primary_conn, char_attr, &d2d_batch_buffer, sizeof(d2d_sample_batch_t));
+            if (err)
             {
-                const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 2];
-                int err = bt_gatt_notify(primary_conn, char_attr, &d2d_batch_buffer, sizeof(d2d_sample_batch_t));
-                if (err)
-                {
-                    LOG_ERR("Failed to send D2D batch notification: %d", err);
-                }
-                else
-                {
-                    LOG_DBG("D2D batch notification sent (%u samples)", d2d_batch_buffer.count);
-                }
+                LOG_ERR("Failed to send D2D batch notification: %d", err);
             }
-            d2d_batch_buffer.count = 0;
+            else
+            {
+                LOG_DBG("D2D batch notification sent");
+            }
         }
     }
 }

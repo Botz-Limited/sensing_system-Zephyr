@@ -1067,7 +1067,6 @@ void try_combine_and_buffer()
 
         if (d2d_batch_count == D2D_BATCH_SIZE)
         {
-            d2d_batch_buffer.count = D2D_BATCH_SIZE;
             d2d_tx_notify_d2d_batch(&d2d_batch_buffer);
             d2d_batch_count = 0;
         }
@@ -1078,7 +1077,6 @@ void d2d_flush_buffer()
 {
     if (d2d_batch_count > 0)
     {
-        d2d_batch_buffer.count = d2d_batch_count;
         d2d_tx_notify_d2d_batch(&d2d_batch_buffer);
         d2d_batch_count = 0;
     }

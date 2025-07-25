@@ -1945,7 +1945,6 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
 
     return BT_GATT_ITER_CONTINUE;
 }
-// D2D batch notification handler (stub)
 static uint8_t d2d_batch_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data,
                                         uint16_t length)
 {
@@ -1970,12 +1969,11 @@ static uint8_t d2d_batch_notify_handler(struct bt_conn *conn, struct bt_gatt_sub
         return BT_GATT_ITER_STOP;
     }
 
-    // TODO: Parse and process the batch data here
     LOG_INF("=== RECEIVED D2D BATCH NOTIFICATION FROM SECONDARY ===");
     LOG_HEXDUMP_INF(data, length, "Batch data:");
 
     // Call the handler to process the batch data
-     d2d_data_handler_process_batch((const d2d_sample_batch_t *)data);
+    d2d_data_handler_process_batch((const d2d_sample_batch_t *)data);
 
     return BT_GATT_ITER_CONTINUE;
 }
@@ -2135,6 +2133,58 @@ void d2d_rx_client_disconnected(void)
 void d2d_rx_client_start_discovery(struct bt_conn *conn)
 {
     ARG_UNUSED(conn);
+}
+
+int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
+{
+    if (!batch) {
+        LOG_WRN("Received null D2D batch");
+        return -EINVAL;
+    }
+
+    LOG_INF("Processing D2D batch: timestamp[0]=%u", batch->timestamp[0]);
+
+    // Process the single sample
+    // Unpack foot sample (no conversion needed, assuming raw integers)
+    foot_samples_t foot = batch->foot[0];
+
+    // Unpack and convert IMU sample from fixed-point to float
+    bhi360_log_record_t imu;
+    imu.quat_x = fixed16_to_float(batch->imu[0].quat_x, FixedPoint::QUAT_SCALE);
+    imu.quat_y = fixed16_to_float(batch->imu[0].quat_y, FixedPoint::QUAT_SCALE);
+    imu.quat_z = fixed16_to_float(batch->imu[0].quat_z, FixedPoint::QUAT_SCALE);
+    imu.quat_w = fixed16_to_float(batch->imu[0].quat_w, FixedPoint::QUAT_SCALE);
+    imu.gyro_x = fixed16_to_float(batch->imu[0].gyro_x, FixedPoint::GYRO_SCALE);
+    imu.gyro_y = fixed16_to_float(batch->imu[0].gyro_y, FixedPoint::GYRO_SCALE);
+    imu.gyro_z = fixed16_to_float(batch->imu[0].gyro_z, FixedPoint::GYRO_SCALE);
+    imu.lacc_x = fixed16_to_float(batch->imu[0].lacc_x, FixedPoint::ACCEL_SCALE);
+    imu.lacc_y = fixed16_to_float(batch->imu[0].lacc_y, FixedPoint::ACCEL_SCALE);
+    imu.lacc_z = fixed16_to_float(batch->imu[0].lacc_z, FixedPoint::ACCEL_SCALE);
+    imu.quat_accuracy = fixed16_to_float(batch->imu[0].quat_accuracy, FixedPoint::ACCURACY_SCALE);
+    imu.step_count = batch->imu[0].step_count;  // Assuming uint32_t, no conversion
+
+    // Create and send foot message
+    generic_message_t foot_msg = {};
+    foot_msg.sender = SENDER_D2D_SECONDARY;
+    foot_msg.type = MSG_TYPE_FOOT_SAMPLES;
+    memcpy(&foot_msg.data.foot_samples, &foot, sizeof(foot_samples_t));
+    if (k_msgq_put(&sensor_data_msgq, &foot_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to queue foot sample from batch");
+    }
+
+    // Create and send IMU message
+    generic_message_t imu_msg = {};
+    imu_msg.sender = SENDER_D2D_SECONDARY;
+    imu_msg.type = MSG_TYPE_BHI360_LOG_RECORD;
+    memcpy(&imu_msg.data.bhi360_log_record, &imu, sizeof(bhi360_log_record_t));
+    if (k_msgq_put(&sensor_data_msgq, &imu_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to queue IMU sample from batch");
+    }
+
+    // Optional: Handle timestamp for delta calculation if needed
+    LOG_DBG("Unpacked batch: timestamp=%u", batch->timestamp[0]);
+
+    return 0;
 }
 
 void d2d_rx_client_disconnected(void)
