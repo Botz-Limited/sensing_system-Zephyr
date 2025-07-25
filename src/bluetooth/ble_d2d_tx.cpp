@@ -84,7 +84,11 @@ static struct bt_uuid_128 d2d_rx_weight_calibration_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 // D2D batch characteristic UUID (must match on both sides)
 static struct bt_uuid_128 d2d_rx_d2d_batch_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8c, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));    
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8c, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
+// Connection parameter control characteristic UUID (must match on both sides)
+static struct bt_uuid_128 d2d_rx_conn_param_control_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8d, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
 
 // Discovered characteristic handles
 struct d2d_discovered_handles
@@ -101,6 +105,7 @@ struct d2d_discovered_handles
     uint16_t gps_update_handle;
     uint16_t weight_calibration_handle;
     uint16_t d2d_batch_handle;
+    uint16_t conn_param_control_handle;
     bool discovery_complete;
 };
 
@@ -144,6 +149,7 @@ enum discover_state
     DISCOVER_GPS_UPDATE_CHAR,
     DISCOVER_WEIGHT_CALIBRATION_CHAR,
     DISCOVER_D2D_BATCH_CHAR,
+    DISCOVER_CONN_PARAM_CONTROL_CHAR,
     DISCOVER_COMPLETE
 };
 
@@ -295,11 +301,19 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
                 d2d_handles.d2d_batch_handle = bt_gatt_attr_value_handle(attr);
                 LOG_INF("Found D2D batch characteristic, handle: %u", d2d_handles.d2d_batch_handle);
             }
-            // Mark discovery as complete even if batch is not found
+            discovery_state = DISCOVER_CONN_PARAM_CONTROL_CHAR;
+            break;
+        case DISCOVER_CONN_PARAM_CONTROL_CHAR:
+            if (bt_uuid_cmp(params->uuid, &d2d_rx_conn_param_control_uuid.uuid) == 0)
+            {
+                d2d_handles.conn_param_control_handle = bt_gatt_attr_value_handle(attr);
+                LOG_INF("Found connection parameter control characteristic, handle: %u", d2d_handles.conn_param_control_handle);
+            }
+            // Mark discovery as complete even if not all characteristics are found
             discovery_state = DISCOVER_COMPLETE;
             d2d_handles.discovery_complete = true;
-            LOG_INF("D2D TX discovery complete - found %s characteristics", 
-                    d2d_handles.d2d_batch_handle ? "all" : "most");
+            LOG_INF("D2D TX discovery complete - found %s characteristics",
+                    d2d_handles.conn_param_control_handle ? "all" : "most");
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // Process any queued commands (only available on primary device)
             ble_d2d_tx_process_queued_commands();
@@ -413,6 +427,9 @@ static void continue_discovery(void)
             break;
         case DISCOVER_D2D_BATCH_CHAR:
             discover_params.uuid = &d2d_rx_d2d_batch_uuid.uuid;
+            break;
+        case DISCOVER_CONN_PARAM_CONTROL_CHAR:
+            discover_params.uuid = &d2d_rx_conn_param_control_uuid.uuid;
             break;
         default:
             LOG_INF("Discovery sequence complete");
@@ -1011,6 +1028,7 @@ int ble_d2d_tx_send_weight_calibration_trigger_command(uint8_t value)
 #endif
 }
 
+// Send weight calibration with known weight (primary -> secondary)
 int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step_t *calib_data)
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -1034,10 +1052,10 @@ int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step
         return -EINVAL;
     }
 
-    LOG_INF("D2D TX: Forwarding weight calibration with known weight: %.1f kg", 
+    LOG_INF("D2D TX: Forwarding weight calibration with known weight: %.1f kg",
             (double)calib_data->known_weight_kg);
 
-    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.trigger_calibration_handle, 
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.trigger_calibration_handle,
                                             calib_data, sizeof(weight_calibration_step_t), false);
     if (err)
     {
@@ -1049,6 +1067,47 @@ int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step
 #else
     // Secondary device doesn't send weight calibration commands
     LOG_WRN("Secondary device shouldn't send weight calibration commands");
+    return -EINVAL;
+#endif
+}
+
+// Send connection parameter control command (primary -> secondary)
+int ble_d2d_tx_send_conn_param_control_command(uint8_t profile)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete, cannot send connection parameter control command");
+        // TODO: Add queuing support for connection parameter control if needed
+        return -EBUSY;
+    }
+
+    if (d2d_handles.conn_param_control_handle == 0)
+    {
+        LOG_WRN("D2D TX: Connection parameter control handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding connection parameter control command - profile: %u", profile);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.conn_param_control_handle,
+                                            &profile, sizeof(profile), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send connection parameter control command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+#else
+    // Secondary device doesn't send connection parameter control commands
+    LOG_WRN("Secondary device shouldn't send connection parameter control commands");
     return -EINVAL;
 #endif
 }

@@ -26,7 +26,7 @@ config REALTIME_METRICS_MODULE_STACK_SIZE
 
 config REALTIME_METRICS_MODULE_PRIORITY
 	int "Realtime metrics module thread priority"
-	default 5
+	default 6
 	depends on REALTIME_METRICS_MODULE
 	help
 	  Priority for realtime metrics processing thread (lower number = higher priority)

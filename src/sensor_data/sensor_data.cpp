@@ -184,8 +184,8 @@ static void sensor_data_init(void)
 
     k_thread_name_set(sensor_data_tid, "sensor_data");
 
-    // Start periodic sampling work at 100Hz
-    k_work_schedule_for_queue(&sensor_data_work_q, &periodic_sample_work, K_MSEC(10));
+    // Start periodic sampling work at 80Hz
+    k_work_schedule_for_queue(&sensor_data_work_q, &periodic_sample_work, K_MSEC(12));
 
     // Initialize synchronization
     sensor_data_sync_init();
@@ -269,6 +269,16 @@ static void sensor_data_thread_fn(void *arg1, void *arg2, void *arg3)
                         {
                             stats.foot_data_dropped++;
                             LOG_WRN("Foot data ring buffer full, dropping sample");
+                            // Implement basic backpressure: slow down sensor sampling if buffer is full
+                            if (stats.foot_data_dropped > 10) {
+                                LOG_ERR("Excessive foot data drops, increasing thread priority");
+                                // Dynamically increase thread priority to handle backlog
+                                int current_priority = k_thread_priority_get(k_current_get());
+                                if (current_priority > 2) { // Assuming lower number is higher priority
+                                    k_thread_priority_set(k_current_get(), current_priority - 1);
+                                    LOG_INF("Increased sensor data thread priority to %d", current_priority - 1);
+                                }
+                            }
                         }
                     }
                     else
@@ -328,6 +338,16 @@ static void sensor_data_thread_fn(void *arg1, void *arg2, void *arg3)
                         {
                             stats.imu_data_dropped++;
                             LOG_WRN("IMU data ring buffer full, dropping sample");
+                            // Implement basic backpressure: slow down sensor sampling if buffer is full
+                            if (stats.imu_data_dropped > 10) {
+                                LOG_ERR("Excessive IMU data drops, increasing thread priority");
+                                // Dynamically increase thread priority to handle backlog
+                                int current_priority = k_thread_priority_get(k_current_get());
+                                if (current_priority > 2) { // Assuming lower number is higher priority
+                                    k_thread_priority_set(k_current_get(), current_priority - 1);
+                                    LOG_INF("Increased sensor data thread priority to %d", current_priority - 1);
+                                }
+                            }
                         }
                     }
 
@@ -444,8 +464,8 @@ static void process_foot_data_work_handler(struct k_work *work)
                 {
                     sensor_state.left_loading_rate =
                         calculate_loading_rate(current_force, sensor_state.left_previous_force,
-                                               10 // Assuming 10ms between samples at 100Hz
-                        );
+                                               12 // Adjusted to 12.5ms between samples at 80Hz, approximated as 12ms
+                    );
                 }
                 sensor_state.left_previous_force = current_force;
 
@@ -518,7 +538,7 @@ static void process_foot_data_work_handler(struct k_work *work)
                 {
                     sensor_state.right_loading_rate =
                         calculate_loading_rate(current_force, sensor_state.right_previous_force,
-                                               10 // Assuming 10ms between samples at 100Hz
+                                               12 // Adjusted to 12.5ms between samples at 80Hz, approximated as 12ms
                         );
                 }
                 sensor_state.right_previous_force = current_force;
@@ -625,10 +645,21 @@ static void periodic_sample_work_handler(struct k_work *work)
     {
         process_sensor_sample();
         sensor_state.sample_count++;
+        
+        // Check if thread priority needs to be adjusted back to normal after processing backlog
+        if (stats.foot_data_dropped == 0 && stats.imu_data_dropped == 0)
+        {
+            int current_priority = k_thread_priority_get(k_current_get());
+            if (current_priority < sensor_data_priority) // Assuming lower number is higher priority
+            {
+                k_thread_priority_set(k_current_get(), sensor_data_priority);
+                LOG_INF("Restored sensor data thread priority to default %d", sensor_data_priority);
+            }
+        }
     }
 
-    // Reschedule for next sample (10ms = 100Hz)
-    k_work_schedule_for_queue(&sensor_data_work_q, &periodic_sample_work, K_MSEC(10));
+    // Reschedule for next sample (12.5ms ≈ 80Hz, using 12ms as approximation)
+    k_work_schedule_for_queue(&sensor_data_work_q, &periodic_sample_work, K_MSEC(12));
 }
 
 // Process sensor data at 100Hz
@@ -637,7 +668,7 @@ static void process_sensor_sample(void)
     uint32_t current_time = k_uptime_get_32();
 
     // Calculate delta time since last sample
-    uint16_t delta_time_ms = 10; // Default to 10ms (100Hz)
+    uint16_t delta_time_ms = 12; // Default to 12ms (approximately 80Hz)
     if (sensor_state.last_sample_time > 0)
     {
         delta_time_ms = current_time - sensor_state.last_sample_time;
@@ -697,15 +728,20 @@ static void process_sensor_sample(void)
     // PRIMARY DEVICE: Has data from BOTH feet
     // Left foot = from D2D (secondary), Right foot = local
     
-    // Check D2D data freshness for left foot
+    // Check D2D data freshness for left foot with buffering mechanism
     uint32_t left_data_age = current_time - sensor_state.left_foot_last_update_time;
-    bool left_data_valid = (left_data_age < 100); // Consider data stale after 100ms
+    bool left_data_valid = (left_data_age < 200); // Extended window to 200ms for buffering
+    
+    // Buffer for primary (right) foot data to wait for secondary (left) data
+    static sensor_data_consolidated_t buffered_primary_data = {};
+    static bool primary_data_buffered = false;
+    static uint32_t primary_buffer_time = 0;
     
     if (left_data_valid) {
-        // Left foot data (from D2D)
+        // Left foot data (from D2D) is available and fresh
         consolidated.left_contact_phase = (uint8_t)sensor_state.left_phase;
         consolidated.left_in_contact = sensor_state.left_foot_contact;
-        consolidated.left_contact_duration_ms = 
+        consolidated.left_contact_duration_ms =
             (uint16_t)(sensor_state.left_foot_contact ? 0 : sensor_state.left_contact_elapsed_ms);
         consolidated.left_peak_force = sensor_state.left_peak_force_current;
         consolidated.left_loading_rate = sensor_state.left_loading_rate;
@@ -718,8 +754,55 @@ static void process_sensor_sample(void)
                                       &consolidated.left_heel_pct,
                                       &consolidated.left_mid_pct,
                                       &consolidated.left_fore_pct);
+        
+        // Check if we have buffered primary data to pair with this secondary data
+        if (primary_data_buffered && (current_time - primary_buffer_time) < 200) {
+            // Use buffered primary data for right foot to ensure synchronization
+            consolidated.right_contact_phase = buffered_primary_data.right_contact_phase;
+            consolidated.right_in_contact = buffered_primary_data.right_in_contact;
+            consolidated.right_contact_duration_ms = buffered_primary_data.right_contact_duration_ms;
+            consolidated.right_peak_force = buffered_primary_data.right_peak_force;
+            consolidated.right_loading_rate = buffered_primary_data.right_loading_rate;
+            consolidated.right_cop_x = buffered_primary_data.right_cop_x;
+            consolidated.right_cop_y = buffered_primary_data.right_cop_y;
+            consolidated.right_pronation_deg = buffered_primary_data.right_pronation_deg;
+            consolidated.right_strike_angle = buffered_primary_data.right_strike_angle;
+            consolidated.right_arch_collapse = buffered_primary_data.right_arch_collapse;
+            consolidated.right_heel_pct = buffered_primary_data.right_heel_pct;
+            consolidated.right_mid_pct = buffered_primary_data.right_mid_pct;
+            consolidated.right_fore_pct = buffered_primary_data.right_fore_pct;
+            consolidated.true_flight_time_ms = buffered_primary_data.true_flight_time_ms;
+            consolidated.double_support_time_ms = buffered_primary_data.double_support_time_ms;
+            primary_data_buffered = false; // Clear buffer after use
+            LOG_DBG("Used buffered primary data for synchronized processing");
+        }
     } else {
-        // D2D data is stale - mark as invalid
+        // D2D data is stale - buffer the primary data and mark left as invalid
+        if (!primary_data_buffered) {
+            // Buffer current primary data for right foot
+            buffered_primary_data.right_contact_phase = (uint8_t)sensor_state.right_phase;
+            buffered_primary_data.right_in_contact = sensor_state.right_foot_contact;
+            buffered_primary_data.right_contact_duration_ms =
+                (uint16_t)(sensor_state.right_foot_contact ? 0 : sensor_state.right_contact_elapsed_ms);
+            buffered_primary_data.right_peak_force = sensor_state.right_peak_force_current;
+            buffered_primary_data.right_loading_rate = sensor_state.right_loading_rate;
+            buffered_primary_data.right_cop_x = sensor_state.right_cop_x;
+            buffered_primary_data.right_cop_y = sensor_state.right_cop_y;
+            buffered_primary_data.right_pronation_deg = sensor_state.right_pronation_deg;
+            buffered_primary_data.right_strike_angle = sensor_state.right_strike_angle;
+            buffered_primary_data.right_arch_collapse = sensor_state.right_arch_collapse;
+            calculate_pressure_distribution(sensor_state.right_pressure,
+                                          &buffered_primary_data.right_heel_pct,
+                                          &buffered_primary_data.right_mid_pct,
+                                          &buffered_primary_data.right_fore_pct);
+            buffered_primary_data.true_flight_time_ms = sensor_state.true_flight_time_ms;
+            buffered_primary_data.double_support_time_ms = sensor_state.double_support_time_ms;
+            primary_data_buffered = true;
+            primary_buffer_time = current_time;
+            LOG_DBG("Buffered primary data waiting for secondary data");
+        }
+        
+        // Mark left foot data as invalid since it's stale
         consolidated.left_contact_phase = PHASE_NO_CONTACT;
         consolidated.left_in_contact = false;
         consolidated.left_contact_duration_ms = 0;
@@ -735,7 +818,7 @@ static void process_sensor_sample(void)
         consolidated.left_fore_pct = 0;
         
         if (sensor_state.sample_count % 100 == 0 && left_data_age > 1000) {
-            LOG_WRN("Left foot D2D data is stale (age: %u ms)", left_data_age);
+            LOG_WRN("Left foot D2D data is stale (age: %u ms), buffering primary data", left_data_age);
         }
     }
     

@@ -7,6 +7,7 @@
 #include <zephyr/logging/log.h>
 #include <ble_services.hpp>
 #include <app.hpp>
+#include "../data_dispatcher/data_dispatcher.h"
 
 LOG_MODULE_REGISTER(d2d_data_handler, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -24,7 +25,58 @@ int d2d_data_handler_init(void)
 // Handle D2D batch data from secondary device
 int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
 {
-    //To implement  TODO
+    if (!batch) {
+        LOG_WRN("Received null D2D batch");
+        return -EINVAL;
+    }
+
+    LOG_INF("Processing D2D batch: timestamp[0]=%u", batch->timestamp[0]);
+
+    // Process each sample in the batch (assuming batch size is defined as D2D_BATCH_SIZE)
+    for (int i = 0; i < D2D_BATCH_SIZE; i++) {
+        // Unpack foot sample (no conversion needed, assuming raw integers)
+        foot_samples_t foot = batch->foot[i];
+
+        // Unpack and convert IMU sample from fixed-point to float
+        bhi360_log_record_t imu;
+        imu.quat_x = fixed16_to_float(batch->imu[i].quat_x, FixedPoint::QUAT_SCALE);
+        imu.quat_y = fixed16_to_float(batch->imu[i].quat_y, FixedPoint::QUAT_SCALE);
+        imu.quat_z = fixed16_to_float(batch->imu[i].quat_z, FixedPoint::QUAT_SCALE);
+        imu.quat_w = fixed16_to_float(batch->imu[i].quat_w, FixedPoint::QUAT_SCALE);
+        imu.gyro_x = fixed16_to_float(batch->imu[i].gyro_x, FixedPoint::GYRO_SCALE);
+        imu.gyro_y = fixed16_to_float(batch->imu[i].gyro_y, FixedPoint::GYRO_SCALE);
+        imu.gyro_z = fixed16_to_float(batch->imu[i].gyro_z, FixedPoint::GYRO_SCALE);
+        imu.lacc_x = fixed16_to_float(batch->imu[i].lacc_x, FixedPoint::ACCEL_SCALE);
+        imu.lacc_y = fixed16_to_float(batch->imu[i].lacc_y, FixedPoint::ACCEL_SCALE);
+        imu.lacc_z = fixed16_to_float(batch->imu[i].lacc_z, FixedPoint::ACCEL_SCALE);
+        imu.quat_accuracy = fixed16_to_float(batch->imu[i].quat_accuracy, FixedPoint::ACCURACY_SCALE);
+        imu.step_count = batch->imu[i].step_count;  // Assuming uint32_t, no conversion
+
+        // Send foot data to central hub with tagging
+        extern struct k_msgq central_data_hub_msgq;
+        tagged_message_t foot_msg;
+        foot_msg.msg.sender = SENDER_D2D_SECONDARY;
+        foot_msg.msg.type = MSG_TYPE_FOOT_SAMPLES;
+        foot_msg.tag = SECONDARY_FOOT;
+        memcpy(&foot_msg.msg.data.foot_samples, &foot, sizeof(foot_samples_t));
+        if (k_msgq_put(&central_data_hub_msgq, &foot_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to queue foot sample %d from batch to central hub");
+        } else {
+            LOG_DBG("Foot sample %d from batch queued to central hub with tag SECONDARY_FOOT", i);
+        }
+
+        // Send IMU data to central hub with tagging
+        tagged_message_t imu_msg;
+        imu_msg.msg.sender = SENDER_D2D_SECONDARY;
+        imu_msg.msg.type = MSG_TYPE_BHI360_LOG_RECORD;
+        imu_msg.tag = SECONDARY_IMU;
+        memcpy(&imu_msg.msg.data.bhi360_log_record, &imu, sizeof(bhi360_log_record_t));
+        if (k_msgq_put(&central_data_hub_msgq, &imu_msg, K_NO_WAIT) != 0) {
+            LOG_ERR("Failed to queue IMU sample %d from batch to central hub");
+        } else {
+            LOG_DBG("IMU sample %d from batch queued to central hub with tag SECONDARY_IMU", i);
+        }
+    }
 
     return 0;
 }
@@ -53,16 +105,18 @@ int d2d_data_handler_process_foot_samples(const foot_samples_t *samples)
         LOG_DBG("Secondary foot data forwarded to bluetooth_msgq for proper routing");
     }
     
-    // Also forward to sensor_data_msgq for consolidation
-    generic_message_t sensor_msg;
-    sensor_msg.sender = SENDER_D2D_SECONDARY;
-    sensor_msg.type = MSG_TYPE_FOOT_SAMPLES;
-    memcpy(&sensor_msg.data.foot_samples, samples, sizeof(foot_samples_t));
+    // Forward to central_data_hub_msgq with tagging for new architecture
+    extern struct k_msgq central_data_hub_msgq;
+    tagged_message_t tagged_msg;
+    tagged_msg.msg.sender = SENDER_D2D_SECONDARY;
+    tagged_msg.msg.type = MSG_TYPE_FOOT_SAMPLES;
+    tagged_msg.tag = SECONDARY_FOOT;
+    memcpy(&tagged_msg.msg.data.foot_samples, samples, sizeof(foot_samples_t));
     
-    if (k_msgq_put(&sensor_data_msgq, &sensor_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary foot data to sensor data module");
+    if (k_msgq_put(&central_data_hub_msgq, &tagged_msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to forward secondary foot data to central data hub");
     } else {
-        LOG_DBG("Secondary foot data forwarded to sensor_data_msgq");
+        LOG_DBG("Secondary foot data forwarded to central_data_hub_msgq with tag SECONDARY_FOOT");
     }
     
     return 0;
@@ -92,27 +146,29 @@ int d2d_data_handler_process_bhi360_3d_mapping(const bhi360_3d_mapping_t *data)
         LOG_DBG("Secondary BHI360 3D data forwarded to bluetooth_msgq for proper routing");
     }
     
-    // Also forward to sensor_data_msgq as BHI360_LOG_RECORD
-    generic_message_t sensor_msg;
-    sensor_msg.sender = SENDER_D2D_SECONDARY;
-    sensor_msg.type = MSG_TYPE_BHI360_LOG_RECORD;
+    // Forward to central_data_hub_msgq with tagging for new architecture
+    extern struct k_msgq central_data_hub_msgq;
+    tagged_message_t tagged_msg_imu;
+    tagged_msg_imu.msg.sender = SENDER_D2D_SECONDARY;
+    tagged_msg_imu.msg.type = MSG_TYPE_BHI360_LOG_RECORD;
+    tagged_msg_imu.tag = SECONDARY_IMU;
     
     // Convert 3D mapping to log record format
-    // Note: In 3D mapping, accel_x/y/z contain quaternion x/y/z
-    sensor_msg.data.bhi360_log_record.quat_x = data->accel_x;
-    sensor_msg.data.bhi360_log_record.quat_y = data->accel_y;
-    sensor_msg.data.bhi360_log_record.quat_z = data->accel_z;
-    sensor_msg.data.bhi360_log_record.quat_w = data->quat_w;
-    sensor_msg.data.bhi360_log_record.gyro_x = data->gyro_x;
-    sensor_msg.data.bhi360_log_record.gyro_y = data->gyro_y;
-    sensor_msg.data.bhi360_log_record.gyro_z = data->gyro_z;
-    // Linear acceleration not available in 3D mapping
-    sensor_msg.data.bhi360_log_record.lacc_x = 0;
-    sensor_msg.data.bhi360_log_record.lacc_y = 0;
-    sensor_msg.data.bhi360_log_record.lacc_z = 0;
+    tagged_msg_imu.msg.data.bhi360_log_record.quat_x = data->accel_x;
+    tagged_msg_imu.msg.data.bhi360_log_record.quat_y = data->accel_y;
+    tagged_msg_imu.msg.data.bhi360_log_record.quat_z = data->accel_z;
+    tagged_msg_imu.msg.data.bhi360_log_record.quat_w = data->quat_w;
+    tagged_msg_imu.msg.data.bhi360_log_record.gyro_x = data->gyro_x;
+    tagged_msg_imu.msg.data.bhi360_log_record.gyro_y = data->gyro_y;
+    tagged_msg_imu.msg.data.bhi360_log_record.gyro_z = data->gyro_z;
+    tagged_msg_imu.msg.data.bhi360_log_record.lacc_x = 0;
+    tagged_msg_imu.msg.data.bhi360_log_record.lacc_y = 0;
+    tagged_msg_imu.msg.data.bhi360_log_record.lacc_z = 0;
     
-    if (k_msgq_put(&sensor_data_msgq, &sensor_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary BHI360 3D data to sensor data module");
+    if (k_msgq_put(&central_data_hub_msgq, &tagged_msg_imu, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to forward secondary BHI360 3D data to central data hub");
+    } else {
+        LOG_DBG("Secondary BHI360 3D data forwarded to central_data_hub_msgq with tag SECONDARY_IMU");
     }
     
     return 0;
@@ -137,6 +193,20 @@ int d2d_data_handler_process_bhi360_step_count(const bhi360_step_count_t *data)
         LOG_WRN("Failed to forward secondary step count to activity metrics module");
     } else {
         LOG_DBG("Secondary step count forwarded to activity_metrics_msgq");
+    }
+    
+    // Also forward to central_data_hub_msgq with tagging
+    extern struct k_msgq central_data_hub_msgq;
+    tagged_message_t tagged_msg_step;
+    tagged_msg_step.msg.sender = SENDER_D2D_SECONDARY;
+    tagged_msg_step.msg.type = MSG_TYPE_BHI360_STEP_COUNT;
+    tagged_msg_step.tag = ACTIVITY_DATA;
+    memcpy(&tagged_msg_step.msg.data.bhi360_step_count, data, sizeof(bhi360_step_count_t));
+    
+    if (k_msgq_put(&central_data_hub_msgq, &tagged_msg_step, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to forward secondary step count to central data hub");
+    } else {
+        LOG_DBG("Secondary step count forwarded to central_data_hub_msgq with tag ACTIVITY_DATA");
     }
     
     return 0;
@@ -165,14 +235,18 @@ int d2d_data_handler_process_bhi360_linear_accel(const bhi360_linear_accel_t *da
         LOG_DBG("Secondary BHI360 linear accel forwarded to bluetooth_msgq for proper routing");
     }
     
-    // Also forward to sensor_data_msgq
-    generic_message_t sensor_msg;
-    sensor_msg.sender = SENDER_D2D_SECONDARY;
-    sensor_msg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
-    memcpy(&sensor_msg.data.bhi360_linear_accel, data, sizeof(bhi360_linear_accel_t));
+    // Forward to central_data_hub_msgq with tagging
+    extern struct k_msgq central_data_hub_msgq;
+    tagged_message_t tagged_msg_accel;
+    tagged_msg_accel.msg.sender = SENDER_D2D_SECONDARY;
+    tagged_msg_accel.msg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
+    tagged_msg_accel.tag = SECONDARY_IMU;
+    memcpy(&tagged_msg_accel.msg.data.bhi360_linear_accel, data, sizeof(bhi360_linear_accel_t));
     
-    if (k_msgq_put(&sensor_data_msgq, &sensor_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary linear accel to sensor data module");
+    if (k_msgq_put(&central_data_hub_msgq, &tagged_msg_accel, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to forward secondary linear accel to central data hub");
+    } else {
+        LOG_DBG("Secondary linear accel forwarded to central_data_hub_msgq with tag SECONDARY_IMU");
     }
     
     return 0;

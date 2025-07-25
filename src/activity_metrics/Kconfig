@@ -22,7 +22,7 @@ config ACTIVITY_METRICS_MODULE_STACK_SIZE
 
 config ACTIVITY_METRICS_MODULE_PRIORITY
     int "Priority of activity metrics thread"
-    default 5
+    default 6
     range 1 10
     help
       Thread priority for activity metrics processing.

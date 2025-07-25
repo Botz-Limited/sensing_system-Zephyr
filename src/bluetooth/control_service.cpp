@@ -656,12 +656,19 @@ static ssize_t write_conn_param_control_vnd(struct bt_conn *conn, const struct b
 
     LOG_INF("Mobile app requested connection profile change to: %d", requested_profile);
 
-    // Update connection parameters
+    // Update connection parameters for primary device
     int err = ble_conn_params_update(conn, (conn_profile_t)requested_profile);
     if (err) {
         LOG_ERR("Failed to update connection parameters: %d", err);
         return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
     }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_conn_param_control_command,
+                        D2D_TX_CMD_CONN_PARAM_CONTROL, requested_profile,
+                        "connection parameter control command");
+#endif
 
     LOG_INF("Connection parameter update initiated successfully");
     return len;

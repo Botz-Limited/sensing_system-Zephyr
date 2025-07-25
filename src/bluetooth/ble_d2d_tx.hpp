@@ -59,6 +59,9 @@ int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step
 // Send GPS update (primary -> secondary)
 int ble_d2d_tx_send_gps_update(const GPSUpdateCommand *gps_data);
 
+// Send connection parameter control command (primary -> secondary)
+int ble_d2d_tx_send_conn_param_control_command(uint8_t profile);
+
 #ifdef __cplusplus
 }
 #endif

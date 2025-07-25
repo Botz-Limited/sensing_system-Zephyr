@@ -123,6 +123,16 @@ static void motion_sensor_init()
     if (!device_is_ready(bhi360_dev))
     {
         LOG_ERR("BHI360 device driver not ready");
+        generic_message_t err_msg;
+        err_msg.sender = SENDER_MOTION_SENSOR;
+        err_msg.type = MSG_TYPE_ERROR_STATUS;
+        err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+        err_msg.data.error_status.is_set = true;
+        if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+            LOG_WRN("Failed to send error status to Bluetooth module");
+        } else {
+            LOG_INF("Sent error status to Bluetooth module");
+        }
         init_failed = true;
     }
 
@@ -133,6 +143,16 @@ static void motion_sensor_init()
         if (!bhy2_ptr)
         {
             LOG_ERR("Failed to get BHY2 device handle from driver");
+            generic_message_t err_msg;
+            err_msg.sender = SENDER_MOTION_SENSOR;
+            err_msg.type = MSG_TYPE_ERROR_STATUS;
+            err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+            err_msg.data.error_status.is_set = true;
+            if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                LOG_WRN("Failed to send error status to Bluetooth module");
+            } else {
+                LOG_INF("Sent error status to Bluetooth module");
+            }
             init_failed = true;
         }
     }
@@ -160,6 +180,16 @@ static void motion_sensor_init()
         if (rslt != BHY2_OK)
         {
             LOG_ERR("Failed to set host interrupt control: %d", rslt);
+            generic_message_t err_msg;
+            err_msg.sender = SENDER_MOTION_SENSOR;
+            err_msg.type = MSG_TYPE_ERROR_STATUS;
+            err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+            err_msg.data.error_status.is_set = true;
+            if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                LOG_WRN("Failed to send error status to Bluetooth module");
+            } else {
+                LOG_INF("Sent error status to Bluetooth module");
+            }
             init_failed = true;
         }
 
@@ -168,6 +198,16 @@ static void motion_sensor_init()
         if (rslt != BHY2_OK)
         {
             LOG_ERR("Failed to set host interface control: %d", rslt);
+            generic_message_t err_msg;
+            err_msg.sender = SENDER_MOTION_SENSOR;
+            err_msg.type = MSG_TYPE_ERROR_STATUS;
+            err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+            err_msg.data.error_status.is_set = true;
+            if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                LOG_WRN("Failed to send error status to Bluetooth module");
+            } else {
+                LOG_INF("Sent error status to Bluetooth module");
+            }
             init_failed = true;
         }
     }
@@ -179,11 +219,31 @@ static void motion_sensor_init()
         if (rslt != BHY2_OK)
         {
             LOG_ERR("Failed to get boot status: %d", rslt);
+            generic_message_t err_msg;
+            err_msg.sender = SENDER_MOTION_SENSOR;
+            err_msg.type = MSG_TYPE_ERROR_STATUS;
+            err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+            err_msg.data.error_status.is_set = true;
+            if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                LOG_WRN("Failed to send error status to Bluetooth module");
+            } else {
+                LOG_INF("Sent error status to Bluetooth module");
+            }
             init_failed = true;
         }
         else if (!(boot_status & BHY2_BST_HOST_INTERFACE_READY))
         {
             LOG_ERR("BHI360: Host interface not ready");
+            generic_message_t err_msg;
+            err_msg.sender = SENDER_MOTION_SENSOR;
+            err_msg.type = MSG_TYPE_ERROR_STATUS;
+            err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+            err_msg.data.error_status.is_set = true;
+            if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                LOG_WRN("Failed to send error status to Bluetooth module");
+            } else {
+                LOG_INF("Sent error status to Bluetooth module");
+            }
             init_failed = true;
         }
     }
@@ -195,6 +255,16 @@ static void motion_sensor_init()
         if (rslt != BHY2_OK)
         {
             LOG_ERR("BHI360: Firmware upload failed");
+            generic_message_t err_msg;
+            err_msg.sender = SENDER_MOTION_SENSOR;
+            err_msg.type = MSG_TYPE_ERROR_STATUS;
+            err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+            err_msg.data.error_status.is_set = true;
+            if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                LOG_WRN("Failed to send error status to Bluetooth module");
+            } else {
+                LOG_INF("Sent error status to Bluetooth module");
+            }
             init_failed = true;
         }
 
@@ -205,6 +275,16 @@ static void motion_sensor_init()
             if (rslt != BHY2_OK)
             {
                 LOG_ERR("BHI360: Boot from RAM failed: %d", rslt);
+                generic_message_t err_msg;
+                err_msg.sender = SENDER_MOTION_SENSOR;
+                err_msg.type = MSG_TYPE_ERROR_STATUS;
+                err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+                err_msg.data.error_status.is_set = true;
+                if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send error status to Bluetooth module");
+                } else {
+                    LOG_INF("Sent error status to Bluetooth module");
+                }
                 init_failed = true;
             }
         }
@@ -215,6 +295,16 @@ static void motion_sensor_init()
             if (rslt != BHY2_OK || version == 0)
             {
                 LOG_ERR("BHI360: Boot verification failed");
+                generic_message_t err_msg;
+                err_msg.sender = SENDER_MOTION_SENSOR;
+                err_msg.type = MSG_TYPE_ERROR_STATUS;
+                err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+                err_msg.data.error_status.is_set = true;
+                if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send error status to Bluetooth module");
+                } else {
+                    LOG_INF("Sent error status to Bluetooth module");
+                }
                 init_failed = true;
             }
             else
@@ -231,6 +321,16 @@ static void motion_sensor_init()
             if (rslt != BHY2_OK)
             {
                 LOG_ERR("Failed to update virtual sensor list: %d", rslt);
+                generic_message_t err_msg;
+                err_msg.sender = SENDER_MOTION_SENSOR;
+                err_msg.type = MSG_TYPE_ERROR_STATUS;
+                err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+                err_msg.data.error_status.is_set = true;
+                if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send error status to Bluetooth module");
+                } else {
+                    LOG_INF("Sent error status to Bluetooth module");
+                }
                 init_failed = true;
             }
         }
@@ -249,6 +349,16 @@ static void motion_sensor_init()
             if (rslt != BHY2_OK)
             {
                 LOG_ERR("Failed to configure quaternion sensor: %d", rslt);
+                generic_message_t err_msg;
+                err_msg.sender = SENDER_MOTION_SENSOR;
+                err_msg.type = MSG_TYPE_ERROR_STATUS;
+                err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+                err_msg.data.error_status.is_set = true;
+                if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send error status to Bluetooth module");
+                } else {
+                    LOG_INF("Sent error status to Bluetooth module");
+                }
                 init_failed = true;
             }
 
@@ -256,6 +366,16 @@ static void motion_sensor_init()
             if (rslt != BHY2_OK)
             {
                 LOG_ERR("Failed to configure linear acceleration sensor: %d", rslt);
+                generic_message_t err_msg;
+                err_msg.sender = SENDER_MOTION_SENSOR;
+                err_msg.type = MSG_TYPE_ERROR_STATUS;
+                err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+                err_msg.data.error_status.is_set = true;
+                if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send error status to Bluetooth module");
+                } else {
+                    LOG_INF("Sent error status to Bluetooth module");
+                }
                 init_failed = true;
             }
 
@@ -263,6 +383,16 @@ static void motion_sensor_init()
             if (rslt != BHY2_OK)
             {
                 LOG_ERR("Failed to configure gyroscope sensor: %d", rslt);
+                generic_message_t err_msg;
+                err_msg.sender = SENDER_MOTION_SENSOR;
+                err_msg.type = MSG_TYPE_ERROR_STATUS;
+                err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+                err_msg.data.error_status.is_set = true;
+                if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send error status to Bluetooth module");
+                } else {
+                    LOG_INF("Sent error status to Bluetooth module");
+                }
                 init_failed = true;
             }
 
@@ -270,6 +400,16 @@ static void motion_sensor_init()
             if (rslt != BHY2_OK)
             {
                 LOG_ERR("Failed to configure step counter sensor: %d", rslt);
+                generic_message_t err_msg;
+                err_msg.sender = SENDER_MOTION_SENSOR;
+                err_msg.type = MSG_TYPE_ERROR_STATUS;
+                err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+                err_msg.data.error_status.is_set = true;
+                if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send error status to Bluetooth module");
+                } else {
+                    LOG_INF("Sent error status to Bluetooth module");
+                }
                 init_failed = true;
             }
         }
@@ -287,6 +427,16 @@ static void motion_sensor_init()
             if (rslt != BHY2_OK)
             {
                 LOG_ERR("Failed to register callbacks: %d", rslt);
+                generic_message_t err_msg;
+                err_msg.sender = SENDER_MOTION_SENSOR;
+                err_msg.type = MSG_TYPE_ERROR_STATUS;
+                err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+                err_msg.data.error_status.is_set = true;
+                if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send error status to Bluetooth module");
+                } else {
+                    LOG_INF("Sent error status to Bluetooth module");
+                }
                 init_failed = true;
             }
         }
@@ -312,7 +462,16 @@ static void motion_sensor_init()
     if (init_failed)
     {
         // Report error to Bluetooth module
-        send_error_to_bluetooth(SENDER_MOTION_SENSOR, err_t::MOTION_ERROR, true);
+        generic_message_t err_msg;
+        err_msg.sender = SENDER_MOTION_SENSOR;
+        err_msg.type = MSG_TYPE_ERROR_STATUS;
+        err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+        err_msg.data.error_status.is_set = true;
+        if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+            LOG_WRN("Failed to send error status to Bluetooth module");
+        } else {
+            LOG_INF("Sent error status to Bluetooth module");
+        }
 
 #if IS_ENABLED(CONFIG_MOTION_SENSOR_OPTIONAL)
         LOG_WRN("Motion sensor initialization failed but continuing (non-critical)");
@@ -347,6 +506,16 @@ void motion_sensor_process(void *, void *, void *)
     if (!bhy2_ptr)
     {
         LOG_ERR("BHY2 pointer is null, cannot process sensor data");
+        generic_message_t err_msg;
+        err_msg.sender = SENDER_MOTION_SENSOR;
+        err_msg.type = MSG_TYPE_ERROR_STATUS;
+        err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+        err_msg.data.error_status.is_set = true;
+        if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+            LOG_WRN("Failed to send error status to Bluetooth module");
+        } else {
+            LOG_INF("Sent error status to Bluetooth module");
+        }
         return;
     }
 
@@ -400,6 +569,16 @@ void motion_sensor_process(void *, void *, void *)
         else if (ret != -EAGAIN)
         {
             LOG_ERR("BHI360: Wait for data error: %d", ret);
+            generic_message_t err_msg;
+            err_msg.sender = SENDER_MOTION_SENSOR;
+            err_msg.type = MSG_TYPE_ERROR_STATUS;
+            err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+            err_msg.data.error_status.is_set = true;
+            if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+                LOG_WRN("Failed to send error status to Bluetooth module");
+            } else {
+                LOG_INF("Sent error status to Bluetooth module");
+            }
         }
     }
 }

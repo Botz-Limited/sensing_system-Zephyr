@@ -106,11 +106,18 @@ K_MSGQ_DEFINE(sensor_data_msgq, MSG_QUEUE_MESSAGE_SIZE, CONFIG_SENSOR_DATA_MSGQ_
 #else
 K_MSGQ_DEFINE(sensor_data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 #endif
+// Legacy queues - to be phased out after full transition
 K_MSGQ_DEFINE(sensor_data_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(realtime_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(analytics_queue, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(activity_metrics_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
-K_MSGQ_DEFINE(sync_pair_msgq, MSG_QUEUE_MESSAGE_SIZE, 10, 4);  // Add this - smaller queue for sync pairs
+K_MSGQ_DEFINE(sync_pair_msgq, MSG_QUEUE_MESSAGE_SIZE, 10, 4);  // Smaller queue for sync pairs
+
+// New central data hub and subscriber queues for refactored architecture
+K_MSGQ_DEFINE(central_data_hub_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH * 2, 4);  // Larger to handle all incoming data
+K_MSGQ_DEFINE(realtime_subscriber_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(activity_subscriber_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+K_MSGQ_DEFINE(analytics_subscriber_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
 K_MSGQ_DEFINE(full_sync_msgq, MSG_QUEUE_MESSAGE_SIZE, 10, 4);  // Full synchronized data queue
 
 // Add other slab definitions here as needed
