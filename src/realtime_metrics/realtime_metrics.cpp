@@ -102,11 +102,47 @@ static struct {
 
 // Forward declarations
 static void realtime_metrics_init(void);
+/**
+ * @brief Main processing thread for real-time metrics, waits for messages and queues work.
+ * @param arg1 Unused.
+ * @param arg2 Unused.
+ * @param arg3 Unused.
+ * @note This function is complete and handles incoming messages for consolidated sensor data and commands.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet on primary device).
+ */
 static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3);
+/**
+ * @brief Calculates real-time metrics for BLE updates and feedback.
+ * @note This function is complete and calculates metrics like cadence, pace, form score, and balance.
+ *       Data Requirements: Motion sensor data (BHI360 for step count and cadence), Foot sensor data (both feet for contact times and balance).
+ */
 static void calculate_realtime_metrics(void);
+/**
+ * @brief Sends real-time metrics updates to Bluetooth for user feedback.
+ * @note This function is complete and sends formatted metrics data to the Bluetooth module.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
+ */
 static void send_ble_update(void);
+/**
+ * @brief Work handler for processing consolidated sensor data.
+ * @param work Pointer to the work item.
+ * @note This function is complete and processes sensor data to calculate real-time metrics.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet on primary device).
+ */
 static void process_consolidated_data_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for processing commands such as start/stop real-time processing.
+ * @param work Pointer to the work item.
+ * @note This function is complete and handles commands to control real-time metrics processing.
+ *       Data Requirements: None directly, but commands trigger processing of sensor data.
+ */
 static void process_command_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for periodic BLE updates of real-time metrics.
+ * @param work Pointer to the work item.
+ * @note This function is complete and triggers BLE updates at 1Hz when processing is active.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
+ */
 static void ble_update_work_handler(struct k_work *work);
 
 // Initialize the realtime metrics module

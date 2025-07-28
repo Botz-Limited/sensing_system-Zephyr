@@ -171,17 +171,17 @@ static void foot_sensor_init() {
   }
 
   if (init_failed) {
-      // Report error to Bluetooth module via message queue
-      generic_message_t err_msg;
-      err_msg.sender = SENDER_FOOT_SENSOR_THREAD;
-      err_msg.type = MSG_TYPE_ERROR_STATUS;
-      err_msg.data.error_status.error_code = err_t::ADC_ERROR;
-      err_msg.data.error_status.is_set = true;
-      if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
-          LOG_WRN("Failed to send error status to Bluetooth module");
-      } else {
-          LOG_INF("Sent error status to Bluetooth module");
-      }
+    // Report error to Bluetooth module via message queue
+    generic_message_t err_msg;
+    err_msg.sender = SENDER_FOOT_SENSOR_THREAD;
+    err_msg.type = MSG_TYPE_ERROR_STATUS;
+    err_msg.data.error_status.error_code = err_t::ADC_ERROR;
+    err_msg.data.error_status.is_set = true;
+    if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
+      LOG_WRN("Failed to send error status to Bluetooth module");
+    } else {
+      LOG_INF("Sent error status to Bluetooth module");
+    }
 
 #if IS_ENABLED(CONFIG_FOOT_SENSOR_OPTIONAL)
     LOG_WRN("Foot sensor initialization failed but continuing (non-critical)");
@@ -212,7 +212,6 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
   // MODIFICATION: Removed 'static uint16_t buf_req_evt_counter = 0;'
   // as it's no longer used for limiting continuous sampling.
 
-
   uint16_t samples_number = 0;
 
   int16_t *raw_adc_data = NULL;
@@ -239,9 +238,9 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
       err_msg.data.error_status.error_code = err_t::ADC_ERROR;
       err_msg.data.error_status.is_set = true;
       if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
-          LOG_WRN("Failed to send error status to Bluetooth module");
+        LOG_WRN("Failed to send error status to Bluetooth module");
       } else {
-          LOG_INF("Sent error status to Bluetooth module");
+        LOG_INF("Sent error status to Bluetooth module");
       }
       // Don't assert - just skip this buffer
     } else {
@@ -302,7 +301,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
       }
     } else // Normal operation after calibration
     {
-      if (atomic_get(&logging_active) == 0) {
+      if (atomic_get(&logging_active) == 1) {
 
         generic_message_t msg;
 
@@ -471,9 +470,9 @@ static err_t init_saadc(void) {
     err_msg.data.error_status.error_code = err_t::ADC_ERROR;
     err_msg.data.error_status.is_set = true;
     if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to send error status to Bluetooth module");
+      LOG_WRN("Failed to send error status to Bluetooth module");
     } else {
-        LOG_INF("Sent error status to Bluetooth module");
+      LOG_INF("Sent error status to Bluetooth module");
     }
     return err_t::ADC_ERROR;
   }
@@ -527,9 +526,9 @@ static err_t init_saadc(void) {
     err_msg.data.error_status.error_code = err_t::ADC_ERROR;
     err_msg.data.error_status.is_set = true;
     if (k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to send error status to Bluetooth module");
+      LOG_WRN("Failed to send error status to Bluetooth module");
     } else {
-        LOG_INF("Sent error status to Bluetooth module");
+      LOG_INF("Sent error status to Bluetooth module");
     }
     return err_t::ADC_ERROR;
   }
@@ -588,57 +587,19 @@ static bool app_event_handler(const struct app_event_header *aeh) {
     return false;
   }
   if (is_foot_sensor_start_activity_event(aeh)) {
-    // Trigger the same logic as auto-start logging
     if (atomic_get(&logging_active) == 0) {
-      generic_message_t cmd_msg = {};
-      cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
-      cmd_msg.type = MSG_TYPE_COMMAND;
-      strncpy(cmd_msg.data.command_str, "START_LOGGING_FOOT_SENSOR",
-              sizeof(cmd_msg.data.command_str) - 1);
-      cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
-      cmd_msg.sampling_frequency = SAADC_SAMPLE_RATE_HZ_NORMAL;
-      strncpy(cmd_msg.fw_version, APP_VERSION_STRING,
-              sizeof(cmd_msg.fw_version) - 1);
-      cmd_msg.fw_version[sizeof(cmd_msg.fw_version) - 1] = '\0';
-
-      // Don't want to log foot sample data at the moment.
-
-      //   int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
-      //  if (cmd_ret == 0)
-      //  {
-      //     LOG_INF("Sent START_LOGGING_FOOT_SENSOR command (via event)");
-      //    atomic_set(&logging_active, 1);
-      //  }
-      //  else
-      //  {
-      //     LOG_ERR("Failed to send START_LOGGING_FOOT_SENSOR command: %d",
-      //     cmd_ret);
-      // }
+      LOG_INF("Received foot_sensor_start_activity_event");
+      atomic_set(&logging_active, 1);
     }
     return false;
   }
   if (is_foot_sensor_stop_activity_event(aeh)) {
-    LOG_INF("Received foot_sensor_stop_activity_event");
     if (atomic_get(&logging_active) == 1) {
-      generic_message_t cmd_msg = {};
-      cmd_msg.sender = SENDER_FOOT_SENSOR_THREAD;
-      cmd_msg.type = MSG_TYPE_COMMAND;
-      strncpy(cmd_msg.data.command_str, "STOP_LOGGING_FOOT_SENSOR",
-              sizeof(cmd_msg.data.command_str) - 1);
-      cmd_msg.data.command_str[sizeof(cmd_msg.data.command_str) - 1] = '\0';
-      // Don't want to log foot sample data at the moment.
-      //  int cmd_ret = k_msgq_put(&data_msgq, &cmd_msg, K_NO_WAIT);
-      //  if (cmd_ret == 0)
-      // {
-      //    LOG_INF("Sent STOP_LOGGING_FOOT_SENSOR command (via event)");
-      //   atomic_set(&logging_active, 0);
-      // }
-      // else
-      // {
-      //    LOG_ERR("Failed to send STOP_LOGGING_FOOT_SENSOR command: %d",
-      //    cmd_ret);
-      // }
+      LOG_INF("Received foot_sensor_stop_activity_event");
+
+      atomic_set(&logging_active, 0);
     }
+
     return false;
   }
 #if defined(CONFIG_WIFI_MODULE)

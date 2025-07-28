@@ -74,11 +74,47 @@ static struct {
 
 // Forward declarations
 static void analytics_init(void);
+/**
+ * @brief Main processing thread for analytics, waits for messages and queues work.
+ * @param arg1 Unused.
+ * @param arg2 Unused.
+ * @param arg3 Unused.
+ * @note This function is complete and handles incoming messages for real-time metrics and commands.
+ *       Data Requirements: Indirectly relies on data from motion and foot sensors via real-time metrics.
+ */
 static void analytics_thread_fn(void *arg1, void *arg2, void *arg3);
+/**
+ * @brief Performs complex analytics calculations for efficiency, fatigue, and injury risk.
+ * @note This function is a placeholder with TODO for actual complex calculations. Currently simulates results.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet for comprehensive analysis).
+ */
 static void perform_complex_analytics(void);
+/**
+ * @brief Establishes baseline metrics during the initial period of activity.
+ * @note This function is a placeholder with TODO for accumulating baseline metrics. Currently logs progress only.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet for baseline metrics).
+ */
 static void establish_baseline(void);
+/**
+ * @brief Work handler for processing real-time metrics data.
+ * @param work Pointer to the work item.
+ * @note This function is complete and processes real-time metrics at a controlled rate, establishing baselines.
+ *       Data Requirements: Indirectly relies on data from motion and foot sensors via real-time metrics.
+ */
 static void process_realtime_metrics_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for processing commands such as start/stop analytics.
+ * @param work Pointer to the work item.
+ * @note This function is complete and handles commands to start or stop analytics processing.
+ *       Data Requirements: None directly, but commands trigger processing of sensor data.
+ */
 static void process_command_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for periodic analytics tasks.
+ * @param work Pointer to the work item.
+ * @note This function is a placeholder with no specific tasks defined yet, just reschedules itself.
+ *       Data Requirements: None currently, but could involve motion and foot sensor data in future implementations.
+ */
 static void analytics_periodic_work_handler(struct k_work *work);
 
 // Initialize the analytics module

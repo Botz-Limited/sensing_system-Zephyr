@@ -1023,7 +1023,7 @@ int d2d_tx_notify_d2d_batch(const d2d_sample_batch_t *batch)
     }
     else
     {
-        LOG_DBG("D2D batch notification sent: count=%u", batch->count);
+        //empty
     }
     return err;
 #else

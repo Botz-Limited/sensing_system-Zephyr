@@ -195,28 +195,167 @@ static struct {
 
 // Forward declarations
 static void activity_metrics_init(void);
+/**
+ * @brief Main processing thread for activity metrics, waits for messages and queues work.
+ * @param arg1 Unused.
+ * @param arg2 Unused.
+ * @param arg3 Unused.
+ * @note This function is complete and handles incoming messages for foot sensor data, BHI360 data, and commands.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet on primary device).
+ */
 static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3);
+/**
+ * @brief Processes foot sensor data to update sensor state and detect steps.
+ * @param data Pointer to foot sensor sample data.
+ * @param foot Foot identifier (0 for left, 1 for right).
+ * @note This function is complete and processes pressure data for step detection and metrics calculation.
+ *       Data Requirements: Foot sensor data (specific to one foot per call).
+ */
 static void process_foot_sensor_data(const foot_samples_t *data, uint8_t foot);
+/**
+ * @brief Processes BHI360 IMU data to update sensor state.
+ * @param msg Pointer to the generic message containing BHI360 data.
+ * @note This function is complete and updates quaternion, acceleration, gyro, and step count data.
+ *       Data Requirements: Motion sensor data (BHI360).
+ */
 static void process_bhi360_data(const generic_message_t *msg);
+/**
+ * @brief Calculates real-time metrics such as cadence and form score.
+ * @note This function is complete and calculates metrics based on current sensor data.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet for comprehensive metrics).
+ */
 static void calculate_realtime_metrics(void);
+/**
+ * @brief Sends periodic activity records to the data module for logging.
+ * @note This function is a placeholder with TODO for proper message structure. Currently logs metrics only.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
+ */
 static void send_periodic_record(void);
+/**
+ * @brief Sends activity metrics updates to Bluetooth for real-time feedback.
+ * @note This function is partially complete with TODO for defining proper message type. It calculates and sends BLE updates.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
+ */
 static void send_ble_update(void);
+/**
+ * @brief Work handler for processing foot sensor data from the queue.
+ * @param work Pointer to the work item.
+ * @note This function is complete and processes foot data safely using double buffering.
+ *       Data Requirements: Foot sensor data (specific to one foot per call).
+ */
 static void process_foot_data_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for processing BHI360 IMU data from the queue.
+ * @param work Pointer to the work item.
+ * @note This function is complete and processes IMU data safely using double buffering.
+ *       Data Requirements: Motion sensor data (BHI360).
+ */
 static void process_bhi360_data_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for processing commands such as start/stop activity.
+ * @param work Pointer to the work item.
+ * @note This function is complete and handles commands for activity session management and weight measurement.
+ *       Data Requirements: None directly, but commands may trigger data processing from both motion and foot sensors.
+ */
 static void process_command_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for periodic updates of metrics and BLE notifications.
+ * @param work Pointer to the work item.
+ * @note This function is complete and performs periodic updates at 1Hz for data logging and BLE.
+ *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
+ */
 static void periodic_update_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for initiating and processing weight measurement.
+ * @param work Pointer to the work item.
+ * @note This function is complete and manages the weight measurement process.
+ *       Data Requirements: Foot sensor data (both feet for accurate measurement).
+ */
 static void weight_measurement_work_handler(struct k_work *work);
+/**
+ * @brief Work handler for weight calibration procedure.
+ * @param work Pointer to the work item.
+ * @note This function is complete and handles weight calibration with user interaction.
+ *       Data Requirements: Foot sensor data (both feet for calibration).
+ */
 static void weight_calibration_work_handler(struct k_work *work);
+/**
+ * @brief Calculates running pace based on cadence.
+ * @param cadence Current cadence in steps per minute.
+ * @return Estimated pace in seconds per kilometer.
+ * @note This function is complete and estimates pace using cadence and height-based stride length.
+ *       Data Requirements: Motion sensor data (BHI360 for cadence).
+ */
 static float calculate_pace_from_cadence(float cadence);
+/**
+ * @brief Calculates balance score between left and right foot contact times.
+ * @return Balance score as a signed integer representing asymmetry percentage.
+ * @note This function is complete and calculates balance based on contact time differences.
+ *       Data Requirements: Foot sensor data (both feet).
+ */
 static int8_t calculate_balance_score(void);
+/**
+ * @brief Calculates overall form score for running technique.
+ * @return Form score as a percentage (0-100).
+ * @note This function is complete and assesses form based on cadence, contact time, balance, and strike pattern.
+ *       Data Requirements: Motion sensor data (BHI360 for cadence), Foot sensor data (both feet for contact and strike).
+ */
 static uint8_t calculate_form_score(void);
+/**
+ * @brief Calculates efficiency score based on contact and flight times.
+ * @param contact_time Ground contact time in milliseconds.
+ * @param flight_time Flight time in milliseconds.
+ * @return Efficiency score as a percentage (0-100).
+ * @note This function is complete and calculates efficiency using duty factor.
+ *       Data Requirements: Foot sensor data (both feet for contact and flight times).
+ */
 static uint8_t calculate_efficiency_score(float contact_time, float flight_time);
+/**
+ * @brief Calculates fatigue level based on changes in contact time.
+ * @return Fatigue level as a percentage (0-100).
+ * @note This function is complete and estimates fatigue from contact time increase compared to baseline.
+ *       Data Requirements: Foot sensor data (both feet for contact time).
+ */
 static uint8_t calculate_fatigue_level(void);
+/**
+ * @brief Initiates the weight measurement process.
+ * @note This function is complete and sets up state for weight measurement.
+ *       Data Requirements: Foot sensor data (both feet).
+ */
 static void start_weight_measurement(void);
+/**
+ * @brief Processes weight measurement data until completion.
+ * @note This function is complete and handles weight calculation during measurement.
+ *       Data Requirements: Foot sensor data (both feet), Motion sensor data (BHI360 for motion detection).
+ */
 static void process_weight_measurement(void);
+/**
+ * @brief Calculates weight from foot pressure data.
+ * @return Calculated weight in kilograms.
+ * @note This function is complete and converts pressure readings to weight using calibration.
+ *       Data Requirements: Foot sensor data (both feet).
+ */
 static float calculate_weight_from_pressure(void);
+/**
+ * @brief Applies calibration to raw weight measurement.
+ * @param raw_weight_kg Raw weight in kilograms.
+ * @return Calibrated weight in kilograms.
+ * @note This function is complete and applies calibration factors to weight measurement.
+ *       Data Requirements: Foot sensor data (both feet for raw weight).
+ */
 static float apply_weight_calibration(float raw_weight_kg);
+/**
+ * @brief Checks if a person is standing still based on motion data.
+ * @return True if person is standing still, false otherwise.
+ * @note This function is complete and uses acceleration and gyro data to detect stillness.
+ *       Data Requirements: Motion sensor data (BHI360 for acceleration and gyro).
+ */
 static bool is_person_standing_still(void);
+/**
+ * @brief Performs weight calibration using measured pressure data.
+ * @note This function is complete and calculates new calibration factors based on known or default weight.
+ *       Data Requirements: Foot sensor data (both feet for pressure readings).
+ */
 static void perform_weight_calibration(void);
 
 // Initialize the activity metrics module
@@ -875,7 +1014,7 @@ static void calculate_realtime_metrics(void)
             session_state.baseline_established = true;
             LOG_INF("Baseline established: contact=%.1fms, form=%f", 
                     (double)session_state.baseline_contact_time, 
-                    session_state.baseline_form_score);
+                    (double)session_state.baseline_form_score);
         }
     }
 }
