@@ -122,6 +122,29 @@ float pace_estimator_get_pace(const pace_estimator_t *estimator)
     return estimator->smoothed_pace_sec_km;
 }
 
+// Update pace estimation with GPS data
+void pace_estimator_update_with_gps(pace_estimator_t *estimator, float gps_speed_cms, uint32_t delta_time_ms)
+{
+    if (gps_speed_cms <= 0 || delta_time_ms == 0) {
+        return;
+    }
+
+    float speed_m_s = gps_speed_cms / 100.0f;
+    estimator->pace_sec_km = (speed_m_s > 0) ? 1000.0f / speed_m_s : 0;
+
+    // Apply smoothing
+    if (estimator->smoothed_pace_sec_km == 0) {
+        estimator->smoothed_pace_sec_km = estimator->pace_sec_km;
+    } else {
+        estimator->smoothed_pace_sec_km = (estimator->smoothed_pace_sec_km * (1.0f - PACE_SMOOTHING_FACTOR)) +
+                                         (estimator->pace_sec_km * PACE_SMOOTHING_FACTOR);
+    }
+
+    // Update distance
+    float distance_delta_m = speed_m_s * (delta_time_ms / 1000.0f);
+    estimator->distance_m += (uint32_t)distance_delta_m;
+}
+
 // Calculate form score from components
 void form_score_calculate(form_score_t *score, 
                          uint16_t contact_time_ms,
@@ -230,4 +253,31 @@ int8_t calculate_balance_percentage(uint16_t left_force, uint16_t right_force)
     if (balance < -50) return -50;
     
     return balance;
+}
+
+float calibrate_stride_with_gps(pace_estimator_t *estimator, float gps_distance_m, uint32_t step_count_delta) {
+    if (step_count_delta == 0 || gps_distance_m <= 0) {
+        return estimator->base_stride_m;
+    }
+
+    float measured_stride_m = gps_distance_m / step_count_delta;
+
+    // Smooth into base_stride_m
+    estimator->base_stride_m = 0.9f * estimator->base_stride_m + 0.1f * measured_stride_m;
+
+    return estimator->base_stride_m;
+}
+
+float estimate_stride_without_gps(float cadence, uint16_t contact_time, float height_cm) {
+    // Simple model: base from height, adjust by cadence and contact time
+    float base_stride_cm = height_cm * STRIDE_HEIGHT_FACTOR;
+
+    float cadence_factor = 1.0f + ((cadence - 160.0f) / 100.0f * STRIDE_CADENCE_FACTOR);
+
+    // Shorter contact time might indicate longer stride
+    float contact_factor = (contact_time > 0) ? 300.0f / contact_time : 1.0f;
+
+    float stride_cm = base_stride_cm * cadence_factor * contact_factor;
+
+    return stride_cm;
 }

@@ -60,7 +60,7 @@ static foot_data_ring_t foot_ring = {.data = {{0}},
                                      .read_idx = 0,
                                      .count = ATOMIC_INIT(0)};
 static imu_data_ring_t imu_ring = {
-    .data = {{0}}, .write_idx = 0, .read_idx = 0, .count = ATOMIC_INIT(0)};
+    .write_idx = 0, .read_idx = 0, .count = ATOMIC_INIT(0)};
 static command_ring_t command_ring = {
     .data = {{0}}, .write_idx = 0, .read_idx = 0, .count = ATOMIC_INIT(0)};
 
@@ -139,6 +139,12 @@ static struct {
   int8_t right_strike_angle;
   uint8_t left_arch_collapse;
   uint8_t right_arch_collapse;
+
+  // CPEI and push-off power
+  uint16_t left_cpei;
+  uint16_t right_cpei;
+  uint16_t left_push_off_power;
+  uint16_t right_push_off_power;
 
   // D2D data freshness tracking
   uint32_t left_foot_last_update_time; // When D2D data last updated left foot
@@ -235,6 +241,10 @@ static void update_foot_state_from_d2d(const foot_samples_t *foot_data,
  * (BHI360 via D2D).
  */
 static void update_imu_state_from_d2d(const bhi360_log_record_t *imu_data);
+
+static uint16_t calculate_cpei(const uint16_t pressure[8], int16_t cop_x, int16_t cop_y);
+
+static uint16_t calculate_push_off_power(uint16_t force, float gyro_y, uint16_t delta_time_ms);
 
 // Initialize the sensor data module
 static void sensor_data_init(void) {
@@ -477,9 +487,19 @@ static void process_foot_data_work_handler(struct k_work *work) {
 
     if (foot_id == 0) {
       // Left foot processing
-      // Copy pressure values
+      // Remap ADC channels to physical sensor positions
+      uint16_t remapped_left[8];
+      remapped_left[0] = foot_data.values[7];  // AIN7 -> Sensor1 (Big Toe Med)
+      remapped_left[1] = foot_data.values[6];  // AIN6 -> Sensor2 (Front Lat)
+      remapped_left[2] = foot_data.values[4];  // AIN4 -> Sensor3 (Front Ctr)
+      remapped_left[3] = foot_data.values[5];  // AIN5 -> Sensor4 (Front Med)
+      remapped_left[4] = foot_data.values[0];  // AIN0 -> Sensor5 (Arch Med, higher)
+      remapped_left[5] = foot_data.values[1];  // AIN1 -> Sensor6 (Arch Lat, lower)
+      remapped_left[6] = foot_data.values[2];  // AIN2 -> Sensor7 (Heel Lat)
+      remapped_left[7] = foot_data.values[3];  // AIN3 -> Sensor8 (Heel Med)
+      // Copy remapped values
       for (int i = 0; i < 8; i++) {
-        sensor_state.left_pressure[i] = foot_data.values[i];
+        sensor_state.left_pressure[i] = remapped_left[i];
       }
 
       // Detect ground contact
@@ -518,40 +538,67 @@ static void process_foot_data_work_handler(struct k_work *work) {
 
       // Track peak force during contact
       if (sensor_state.left_foot_contact) {
-        uint16_t current_force = detect_peak_force(sensor_state.left_pressure);
-        if (current_force > sensor_state.left_peak_force_current) {
-          sensor_state.left_peak_force_current = current_force;
-        }
+          uint16_t current_force = detect_peak_force(sensor_state.left_pressure);
+          if (current_force > sensor_state.left_peak_force_current) {
+              sensor_state.left_peak_force_current = current_force;
+          }
 
-        // Calculate center of pressure
-        calculate_center_of_pressure(sensor_state.left_pressure,
-                                     &sensor_state.left_cop_x,
-                                     &sensor_state.left_cop_y);
+          // Calculate center of pressure (true for left foot)
+          calculate_center_of_pressure(sensor_state.left_pressure,
+                                      &sensor_state.left_cop_x,
+                                      &sensor_state.left_cop_y,
+                                      true);
 
-        // Calculate loading rate (only during loading phase)
-        if (sensor_state.left_phase == PHASE_LOADING) {
-          sensor_state.left_loading_rate = calculate_loading_rate(
-              current_force, sensor_state.left_previous_force,
-              12 // Adjusted to 12.5ms between samples at 80Hz, approximated as
-                 // 12ms
-          );
-        }
-        sensor_state.left_previous_force = current_force;
+          // Calculate loading rate (only during loading phase)
+          if (sensor_state.left_phase == PHASE_LOADING) {
+              sensor_state.left_loading_rate = calculate_loading_rate(
+                  current_force, sensor_state.left_previous_force,
+                  12 // Adjusted to 12.5ms between samples at 80Hz, approximated as
+                     // 12ms
+              );
+          }
+          sensor_state.left_previous_force = current_force;
 
-        // Detect arch collapse
-        sensor_state.left_arch_collapse = detect_arch_collapse(
-            sensor_state.left_pressure, sensor_state.left_phase);
+          // Detect arch collapse
+          sensor_state.left_arch_collapse = detect_arch_collapse(
+              sensor_state.left_pressure, sensor_state.left_phase);
+
+          // Calculate CPEI (Center of Pressure Excursion Index)
+          sensor_state.left_cpei = calculate_cpei(sensor_state.left_pressure,
+                                                 sensor_state.left_cop_x,
+                                                 sensor_state.left_cop_y);
+
+          // Calculate push-off power (only during push-off phase)
+          if (sensor_state.left_phase == PHASE_PUSH_OFF) {
+              sensor_state.left_push_off_power = calculate_push_off_power(
+                  current_force,
+                  sensor_state.latest_gyro[1],  // Using y-axis gyro for push-off velocity estimation
+                  12  // Sample interval
+              );
+          }
       } else {
-        // Reset metrics when not in contact
-        sensor_state.left_peak_force_current = 0;
-        sensor_state.left_previous_force = 0;
-        sensor_state.left_loading_rate = 0;
+          // Reset metrics when not in contact
+          sensor_state.left_peak_force_current = 0;
+          sensor_state.left_previous_force = 0;
+          sensor_state.left_loading_rate = 0;
+          sensor_state.left_cpei = 0;
+          sensor_state.left_push_off_power = 0;
       }
     } else {
       // Right foot processing (same logic)
-      // Copy pressure values
+      // Remap ADC channels to physical sensor positions (same mapping, but mirror in functions)
+      uint16_t remapped_right[8];
+      remapped_right[0] = foot_data.values[7];  // AIN7 -> Sensor1
+      remapped_right[1] = foot_data.values[6];  // AIN6 -> Sensor2
+      remapped_right[2] = foot_data.values[4];  // AIN4 -> Sensor3
+      remapped_right[3] = foot_data.values[5];  // AIN5 -> Sensor4
+      remapped_right[4] = foot_data.values[0];  // AIN0 -> Sensor5
+      remapped_right[5] = foot_data.values[1];  // AIN1 -> Sensor6
+      remapped_right[6] = foot_data.values[2];  // AIN2 -> Sensor7
+      remapped_right[7] = foot_data.values[3];  // AIN3 -> Sensor8
+      // Copy remapped values
       for (int i = 0; i < 8; i++) {
-        sensor_state.right_pressure[i] = foot_data.values[i];
+        sensor_state.right_pressure[i] = remapped_right[i];
       }
 
       // Detect ground contact
@@ -590,34 +637,51 @@ static void process_foot_data_work_handler(struct k_work *work) {
 
       // Track peak force during contact
       if (sensor_state.right_foot_contact) {
-        uint16_t current_force = detect_peak_force(sensor_state.right_pressure);
-        if (current_force > sensor_state.right_peak_force_current) {
-          sensor_state.right_peak_force_current = current_force;
-        }
+          uint16_t current_force = detect_peak_force(sensor_state.right_pressure);
+          if (current_force > sensor_state.right_peak_force_current) {
+              sensor_state.right_peak_force_current = current_force;
+          }
 
-        // Calculate center of pressure
-        calculate_center_of_pressure(sensor_state.right_pressure,
-                                     &sensor_state.right_cop_x,
-                                     &sensor_state.right_cop_y);
+          // Calculate center of pressure (false for right foot)
+          calculate_center_of_pressure(sensor_state.right_pressure,
+                                      &sensor_state.right_cop_x,
+                                      &sensor_state.right_cop_y,
+                                      false);
 
-        // Calculate loading rate (only during loading phase)
-        if (sensor_state.right_phase == PHASE_LOADING) {
-          sensor_state.right_loading_rate = calculate_loading_rate(
-              current_force, sensor_state.right_previous_force,
-              12 // Adjusted to 12.5ms between samples at 80Hz, approximated as
-                 // 12ms
-          );
-        }
-        sensor_state.right_previous_force = current_force;
+          // Calculate loading rate (only during loading phase)
+          if (sensor_state.right_phase == PHASE_LOADING) {
+              sensor_state.right_loading_rate = calculate_loading_rate(
+                  current_force, sensor_state.right_previous_force,
+                  12 // Adjusted to 12.5ms between samples at 80Hz, approximated as
+                     // 12ms
+              );
+          }
+          sensor_state.right_previous_force = current_force;
 
-        // Detect arch collapse
-        sensor_state.right_arch_collapse = detect_arch_collapse(
-            sensor_state.right_pressure, sensor_state.right_phase);
+          // Detect arch collapse
+          sensor_state.right_arch_collapse = detect_arch_collapse(
+              sensor_state.right_pressure, sensor_state.right_phase);
+
+          // Calculate CPEI (Center of Pressure Excursion Index)
+          sensor_state.right_cpei = calculate_cpei(sensor_state.right_pressure,
+                                                  sensor_state.right_cop_x,
+                                                  sensor_state.right_cop_y);
+
+          // Calculate push-off power (only during push-off phase)
+          if (sensor_state.right_phase == PHASE_PUSH_OFF) {
+              sensor_state.right_push_off_power = calculate_push_off_power(
+                  current_force,
+                  sensor_state.latest_gyro[1],  // Using y-axis gyro for push-off velocity estimation
+                  12  // Sample interval
+              );
+          }
       } else {
-        // Reset metrics when not in contact
-        sensor_state.right_peak_force_current = 0;
-        sensor_state.right_previous_force = 0;
-        sensor_state.right_loading_rate = 0;
+          // Reset metrics when not in contact
+          sensor_state.right_peak_force_current = 0;
+          sensor_state.right_previous_force = 0;
+          sensor_state.right_loading_rate = 0;
+          sensor_state.right_cpei = 0;
+          sensor_state.right_push_off_power = 0;
       }
     }
   }
@@ -655,11 +719,11 @@ static void process_imu_data_work_handler(struct k_work *work) {
     // This provides more accurate pronation assessment
     sensor_state.left_pronation_deg = calculate_pronation_enhanced(
         sensor_state.latest_quaternion, sensor_state.left_pressure,
-        sensor_state.left_foot_contact);
+        sensor_state.left_foot_contact, true);  // true for left
 
     sensor_state.right_pronation_deg = calculate_pronation_enhanced(
         sensor_state.latest_quaternion, sensor_state.right_pressure,
-        sensor_state.right_foot_contact);
+        sensor_state.right_foot_contact, false);  // false for right
   }
 }
 
@@ -909,17 +973,19 @@ static void process_sensor_sample(void) {
   consolidated.right_pronation_deg = sensor_state.right_pronation_deg;
   consolidated.right_strike_angle = sensor_state.right_strike_angle;
   consolidated.right_arch_collapse = sensor_state.right_arch_collapse;
+  consolidated.right_cpei = sensor_state.right_cpei;
+  consolidated.right_push_off_power = sensor_state.right_push_off_power;
   calculate_pressure_distribution(
       sensor_state.right_pressure, &consolidated.right_heel_pct,
       &consolidated.right_mid_pct, &consolidated.right_fore_pct);
 
   // Bilateral timing (only valid when both feet have fresh data)
   if (left_data_valid) {
-    consolidated.true_flight_time_ms = sensor_state.true_flight_time_ms;
-    consolidated.double_support_time_ms = sensor_state.double_support_time_ms;
+      consolidated.true_flight_time_ms = sensor_state.true_flight_time_ms;
+      consolidated.double_support_time_ms = sensor_state.double_support_time_ms;
   } else {
-    consolidated.true_flight_time_ms = 0;
-    consolidated.double_support_time_ms = 0;
+      consolidated.true_flight_time_ms = 0;
+      consolidated.double_support_time_ms = 0;
   }
 
 #else
@@ -954,6 +1020,8 @@ static void process_sensor_sample(void) {
   consolidated.right_pronation_deg = 0;
   consolidated.right_strike_angle = 0;
   consolidated.right_arch_collapse = 0;
+  consolidated.right_cpei = 0;
+  consolidated.right_push_off_power = 0;
   consolidated.right_heel_pct = 0;
   consolidated.right_mid_pct = 0;
   consolidated.right_fore_pct = 0;
@@ -1192,7 +1260,8 @@ static void update_foot_state_from_d2d(const foot_samples_t *foot_data,
       // Calculate center of pressure
       calculate_center_of_pressure(sensor_state.left_pressure,
                                    &sensor_state.left_cop_x,
-                                   &sensor_state.left_cop_y);
+                                   &sensor_state.left_cop_y,
+                                   true);
 
       // Calculate loading rate (only during loading phase)
       if (sensor_state.left_phase == PHASE_LOADING) {
@@ -1235,6 +1304,18 @@ static void update_imu_state_from_d2d(const bhi360_log_record_t *imu_data) {
           sensor_state.left_imu_last_update_time);
 }
 
+// Function definitions
+static uint16_t calculate_cpei(const uint16_t pressure[8], int16_t cop_x, int16_t cop_y) {
+  (void)pressure; // TODO: Use pressure in actual implementation
+  // Simple placeholder implementation
+  return (uint16_t)(cop_x + cop_y); // Replace with actual calculation
+}
+
+static uint16_t calculate_push_off_power(uint16_t force, float gyro_y, uint16_t delta_time_ms) {
+  // Simple placeholder implementation
+  return (uint16_t)(force * fabsf(gyro_y) * delta_time_ms); // Replace with actual calculation
+}
+
 // Module event handler
 static bool app_event_handler(const struct app_event_header *aeh) {
   if (is_module_state_event(aeh)) {
@@ -1255,3 +1336,4 @@ static bool app_event_handler(const struct app_event_header *aeh) {
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, module_state_event);
+

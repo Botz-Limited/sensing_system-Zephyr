@@ -21,19 +21,29 @@
 extern "C" {
 #endif
 
-// Sensor layout for 8-channel pressure (typical insole configuration)
-// 0: Heel lateral, 1: Heel medial
-// 2: Midfoot lateral, 3: Midfoot arch, 4: Midfoot medial
-// 5: Forefoot lateral, 6: Forefoot central, 7: Big toe/medial
+/**
+ * Sensor layout for 8-channel pressure (right foot, top view)
+ * ADC indices map to physical positions as follows:
+ * 0: Big Toe - Medial/Inner (forefoot medial, forward, ~25° rotated)
+ * 1: Front Lateral/Outer
+ * 2: Front Center
+ * 3: Front Medial/Inner
+ * 4: Arch Medial/Inner (slightly higher/forward, closer to front, covers arch + some front feel)
+ * 5: Arch Lateral/Outer (slightly lower/backward, closer to heel, covers arch)
+ * 6: Heel Lateral/Outer
+ * 7: Heel Medial/Inner
+ *
+ * For left foot (secondary), positions are symmetric/mirrored (medial/lateral swapped; negate x in calculations).
+ */
 
-#define SENSOR_HEEL_LATERAL 0
-#define SENSOR_HEEL_MEDIAL 1
-#define SENSOR_MID_LATERAL 2
-#define SENSOR_MID_ARCH 3
-#define SENSOR_MID_MEDIAL 4
-#define SENSOR_FORE_LATERAL 5
-#define SENSOR_FORE_CENTRAL 6
-#define SENSOR_FORE_MEDIAL 7
+#define SENSOR_FORE_MED_BIGTOE 0     // User's 1: Big Toe - Med/Inner
+#define SENSOR_FORE_LAT 1            // User's 2: Front Lat/Outer
+#define SENSOR_FORE_CTR 2            // User's 3: Front Center
+#define SENSOR_FORE_MED 3            // User's 4: Front Med/Inner
+#define SENSOR_ARCH_MED 4            // User's 5: Arch Med/Inner, higher/fwd
+#define SENSOR_ARCH_LAT 5            // User's 6: Arch Lat/Outer, lower/back
+#define SENSOR_HEEL_LAT 6            // User's 7: Heel Lat/Outer
+#define SENSOR_HEEL_MED 7            // User's 8: Heel Med/Inner
 
 /**
  * @brief Enhanced pronation calculation using IMU + pressure validation
@@ -48,7 +58,8 @@ extern "C" {
  */
 ALWAYS_INLINE int8_t calculate_pronation_enhanced(const float quaternion[4], 
                                                  const uint16_t pressure[8],
-                                                 bool in_contact)
+                                                 bool in_contact,
+                                                 bool is_left_foot)
 {
     // First get basic pronation from IMU
     int8_t imu_pronation = quick_pronation_check(quaternion);
@@ -59,13 +70,14 @@ ALWAYS_INLINE int8_t calculate_pronation_enhanced(const float quaternion[4],
     }
     
     // Calculate medial vs lateral pressure distribution
-    uint32_t lateral_pressure = pressure[SENSOR_HEEL_LATERAL] + 
-                               pressure[SENSOR_MID_LATERAL] + 
-                               pressure[SENSOR_FORE_LATERAL];
+    uint32_t lateral_pressure = pressure[SENSOR_HEEL_LAT] + 
+                               pressure[SENSOR_ARCH_LAT] + 
+                               pressure[SENSOR_FORE_LAT];
     
-    uint32_t medial_pressure = pressure[SENSOR_HEEL_MEDIAL] + 
-                              pressure[SENSOR_MID_MEDIAL] + 
-                              pressure[SENSOR_FORE_MEDIAL];
+    uint32_t medial_pressure = pressure[SENSOR_HEEL_MED] + 
+                              pressure[SENSOR_ARCH_MED] + 
+                              pressure[SENSOR_FORE_MED] +
+                              pressure[SENSOR_FORE_MED_BIGTOE];
     
     uint32_t total_pressure = lateral_pressure + medial_pressure;
     
@@ -101,7 +113,7 @@ ALWAYS_INLINE int8_t calculate_pronation_enhanced(const float quaternion[4],
         }
     }
     
-    return imu_pronation;
+    return is_left_foot ? -imu_pronation : imu_pronation;
 }
 
 /**
@@ -114,13 +126,15 @@ ALWAYS_INLINE int8_t calculate_pronation_enhanced(const float quaternion[4],
  */
 ALWAYS_INLINE bool calculate_center_of_pressure(const uint16_t pressure[8],
                                                int16_t *cop_x,
-                                               int16_t *cop_y)
+                                               int16_t *cop_y,
+                                               bool is_left_foot)
 {
-    // Sensor positions in mm (typical insole layout)
-    // X: negative = lateral, positive = medial
-    // Y: negative = heel, positive = forefoot
-    static const int16_t sensor_x[8] = {-20, 20, -25, 0, 25, -20, 0, 20};
-    static const int16_t sensor_y[8] = {-80, -80, -30, -30, -30, 40, 60, 80};
+    // Sensor positions in mm (right foot; for left foot, negate x for mirroring)
+    // X: negative = lateral/outer, positive = medial/inner
+    // Y: negative = heel/posterior, positive = forefoot/anterior
+    // Approximate values based on typical foot (250mm long, 100mm wide)
+    static const int16_t sensor_x[8] = {15, -15, 0, 10, 10, -10, -10, 10};  // Adjusted for positions
+    static const int16_t sensor_y[8] = {100, 80, 85, 80, 30, 20, -80, -80};  // 4 (5) higher than 5 (6)
     
     uint32_t total_pressure = 0;
     int32_t weighted_x = 0;
@@ -129,7 +143,8 @@ ALWAYS_INLINE bool calculate_center_of_pressure(const uint16_t pressure[8],
     // Calculate weighted average position
     for (int i = 0; i < 8; i++) {
         total_pressure += pressure[i];
-        weighted_x += pressure[i] * sensor_x[i];
+        int16_t x_pos = is_left_foot ? -sensor_x[i] : sensor_x[i];
+        weighted_x += pressure[i] * x_pos;
         weighted_y += pressure[i] * sensor_y[i];
     }
     
@@ -299,10 +314,8 @@ ALWAYS_INLINE uint8_t detect_arch_collapse(const uint16_t pressure[8],
     }
     
     // Check arch sensor pressure relative to total midfoot
-    uint32_t arch_pressure = pressure[SENSOR_MID_ARCH];
-    uint32_t total_midfoot = pressure[SENSOR_MID_LATERAL] + 
-                            pressure[SENSOR_MID_ARCH] + 
-                            pressure[SENSOR_MID_MEDIAL];
+    uint32_t arch_pressure = pressure[SENSOR_ARCH_MED] + pressure[SENSOR_ARCH_LAT];
+    uint32_t total_midfoot = arch_pressure;  // Assuming arch is midfoot
     
     if (total_midfoot == 0) {
         return 0;

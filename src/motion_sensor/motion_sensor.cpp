@@ -322,7 +322,7 @@ static void motion_sensor_init() {
     }
 
     // Configure sensor rates
-    float motion_sensor_rate = 100.0f;
+    float motion_sensor_rate = 80.0f;
     float step_counter_rate = 20.0f;
     configured_sample_rate = motion_sensor_rate;
     uint32_t report_latency_ms = 0;

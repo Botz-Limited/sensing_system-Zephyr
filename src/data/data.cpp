@@ -337,28 +337,6 @@ static err_t flush_activity_batch()
 }
 
 // Check if any batch needs to be flushed due to age
-static void check_batch_timeouts()
-{
-    uint32_t current_time = k_uptime_get_32();
-
-    // Check foot sensor batch age
-    if (foot_sensor_batch_count > 0 && (current_time - last_foot_sensor_flush_time) > MAX_BATCH_AGE_MS)
-    {
-        flush_foot_sensor_batch();
-    }
-
-    // Check BHI360 batch age
-    if (bhi360_batch_count > 0 && (current_time - last_bhi360_flush_time) > MAX_BATCH_AGE_MS)
-    {
-        flush_bhi360_batch();
-    }
-
-    // Check activity batch age
-    if (activity_batch_count > 0 && (current_time - last_activity_flush_time) > MAX_BATCH_AGE_MS)
-    {
-        flush_activity_batch();
-    }
-}
 
 // --- Sequence number counter for foot sensor log ---
 static uint8_t next_foot_sensor_file_sequence = 0;
@@ -392,11 +370,6 @@ constexpr char dir_path[] = CONFIG_FILE_SYSTEM_MOUNT;
 // Flag to track filesystem availability
 static bool filesystem_available = false;
 
-// Counter for periodic filesystem mount retry
-static uint32_t filesystem_retry_counter = 0;
-
-// Add this new flag to control filesystem checking
-static bool filesystem_check_enabled = true;
 constexpr uint32_t FILESYSTEM_CHECK_TIME_INTERVAL_MS = 10000; // Check every 10 seconds
 
 constexpr uint32_t FILESYSTEM_RETRY_INTERVAL = 60000; // Retry every 60 seconds
@@ -726,8 +699,6 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
     generic_message_t msg;
     int ret;
-
-    static uint64_t last_filesystem_check_ms = 0;
 
     while (true)
     {

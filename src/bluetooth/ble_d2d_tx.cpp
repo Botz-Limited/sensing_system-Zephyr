@@ -362,7 +362,6 @@ static void start_discovery(void)
 }
 
 // Continue discovery for next characteristic
-// Continue discovery for next characteristic
 static void continue_discovery(void)
 {
     int err;
@@ -373,12 +372,11 @@ static void continue_discovery(void)
     }
 
     // Check if we've discovered the essential characteristics and tried weight calibration
-    if (discovery_state > DISCOVER_WEIGHT_CALIBRATION_CHAR && 
+    if (discovery_state > DISCOVER_CONN_PARAM_CONTROL_CHAR && 
         d2d_handles.start_activity_handle != 0 &&
         d2d_handles.stop_activity_handle != 0)
     {
         // We have the essential characteristics, mark as complete
-        LOG_WRN("Weight calibration characteristic not found, but essential characteristics are available");
         discovery_state = DISCOVER_COMPLETE;
         d2d_handles.discovery_complete = true;
         LOG_INF("D2D TX discovery complete with essential characteristics");

@@ -196,6 +196,7 @@ static void analytics_thread_fn(void *arg1, void *arg2, void *arg3)
 // Work handler for processing realtime metrics
 static void process_realtime_metrics_work_handler(struct k_work *work)
 {
+    ARG_UNUSED(work);
     const uint32_t ANALYTICS_INTERVAL_MS = 200; // 5Hz max
     const uint32_t BASELINE_DURATION_MS = 120000; // 2 minutes
     
@@ -229,6 +230,7 @@ static void process_realtime_metrics_work_handler(struct k_work *work)
 // Work handler for processing commands
 static void process_command_work_handler(struct k_work *work)
 {
+    ARG_UNUSED(work);
     LOG_DBG("Processing command: %s", pending_command);
     
     if (strcmp(pending_command, "START_ANALYTICS") == 0) {
@@ -250,6 +252,7 @@ static void process_command_work_handler(struct k_work *work)
 // Work handler for periodic analytics processing
 static void analytics_periodic_work_handler(struct k_work *work)
 {
+    ARG_UNUSED(work);
     // This can be used for any periodic analytics tasks if needed
     // For now, just reschedule
     if (atomic_get(&processing_active) == 1) {
@@ -282,10 +285,9 @@ static void perform_complex_analytics(void)
     }
     
     // Send to session management
-    generic_message_t out_msg = {
-        .sender = SENDER_ANALYTICS,
-        .type = MSG_TYPE_ANALYTICS_RESULTS
-    };
+    generic_message_t out_msg = {};
+    out_msg.sender = SENDER_ANALYTICS;
+    out_msg.type = MSG_TYPE_ANALYTICS_RESULTS;
     
     k_msgq_put(&analytics_queue, &out_msg, K_NO_WAIT);
 }

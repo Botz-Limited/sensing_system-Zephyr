@@ -357,6 +357,8 @@ static bool is_person_standing_still(void);
  *       Data Requirements: Foot sensor data (both feet for pressure readings).
  */
 static void perform_weight_calibration(void);
+static uint32_t calculate_total_distance(void);
+static void update_splits();
 
 // Initialize the activity metrics module
 static void activity_metrics_init(void)
@@ -430,7 +432,8 @@ static void activity_metrics_init(void)
         
         // Request weight calibration data from data module
         LOG_INF("Activity Metrics: Requesting weight calibration data from data module");
-        generic_message_t request_msg = {};
+        generic_message_t request_msg;
+        memset(&request_msg, 0, sizeof(request_msg));
         request_msg.sender = SENDER_ACTIVITY_METRICS;
         request_msg.type = MSG_TYPE_REQUEST_WEIGHT_CALIBRATION;
         
@@ -720,7 +723,8 @@ static void process_command_work_handler(struct k_work *work)
         LOG_INF("Activity session started");
         
         // Send start commands to other modules
-        generic_message_t start_msg = {};
+        generic_message_t start_msg;
+        memset(&start_msg, 0, sizeof(start_msg));
         start_msg.sender = SENDER_ACTIVITY_METRICS;
         start_msg.type = MSG_TYPE_COMMAND;
         
@@ -741,7 +745,8 @@ static void process_command_work_handler(struct k_work *work)
         LOG_INF("Activity session stopped");
         
         // Send stop commands to other modules
-        generic_message_t stop_msg = {};
+        generic_message_t stop_msg;
+        memset(&stop_msg, 0, sizeof(stop_msg));
         stop_msg.sender = SENDER_ACTIVITY_METRICS;
         stop_msg.type = MSG_TYPE_COMMAND;
         
@@ -804,11 +809,16 @@ static void process_command_work_handler(struct k_work *work)
 // Work handler for periodic updates
 static void periodic_update_work_handler(struct k_work *work)
 {
+    ARG_UNUSED(work);
     if (atomic_get(&processing_active) == 1) {
         uint32_t now = k_uptime_get_32();
         
         // Calculate real-time metrics
         calculate_realtime_metrics();
+        
+        // Update total distance and splits
+        session_state.total_distance_cm = calculate_total_distance();
+        update_splits();
         
         // Send periodic record to data module
         if (now - last_periodic_update >= PERIODIC_UPDATE_INTERVAL_MS) {
@@ -830,6 +840,7 @@ static void periodic_update_work_handler(struct k_work *work)
 // Work handler for weight measurement
 static void weight_measurement_work_handler(struct k_work *work)
 {
+    ARG_UNUSED(work);
     start_weight_measurement();
     
     // Continue processing weight measurement until complete
@@ -996,6 +1007,7 @@ static void process_bhi360_data(const generic_message_t *msg)
 }
 
 // Calculate real-time metrics
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static void calculate_realtime_metrics(void)
 {
     // Update baseline if not established
@@ -1018,6 +1030,12 @@ static void calculate_realtime_metrics(void)
         }
     }
 }
+#else
+static void calculate_realtime_metrics(void)
+{
+    // Secondary device: no bilateral metrics
+}
+#endif
 
 // Send periodic record to data module
 static void send_periodic_record(void)
@@ -1031,9 +1049,11 @@ static void send_periodic_record(void)
 }
 
 // Send BLE update
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static void send_ble_update(void)
 {
-    RealtimeMetricsPacket packet = {0};
+    RealtimeMetricsPacket packet;
+    memset(&packet, 0, sizeof(packet));
     
     // Calculate delta time
     uint32_t now = k_uptime_get_32();
@@ -1072,6 +1092,12 @@ static void send_ble_update(void)
     LOG_DBG("BLE update: pace=%d s/km, cadence=%d, form=%d",
             packet.pace_sec_per_km, packet.cadence_x2/2, packet.form_score);
 }
+#else
+static void send_ble_update(void)
+{
+    // Secondary device: no BLE updates for bilateral metrics
+}
+#endif
 
 // Helper functions
 static float calculate_pace_from_cadence(float cadence)
@@ -1097,6 +1123,7 @@ static float calculate_pace_from_cadence(float cadence)
 }
 
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static int8_t calculate_balance_score(void)
 {
     // Get metrics from both feet
@@ -1122,7 +1149,14 @@ static int8_t calculate_balance_score(void)
     
     return 0;
 }
+#else
+static int8_t calculate_balance_score(void)
+{
+    return 0;
+}
+#endif
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static uint8_t calculate_form_score(void)
 {
     uint8_t score = 100;
@@ -1155,7 +1189,14 @@ static uint8_t calculate_form_score(void)
     
     return score;
 }
+#else
+static uint8_t calculate_form_score(void)
+{
+    return 0;
+}
+#endif
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static uint8_t calculate_efficiency_score(float contact_time, float flight_time)
 {
     if (contact_time <= 0 || flight_time <= 0) return 50;
@@ -1172,7 +1213,14 @@ static uint8_t calculate_efficiency_score(float contact_time, float flight_time)
     
     return score;
 }
+#else
+static uint8_t calculate_efficiency_score(float contact_time, float flight_time)
+{
+    return 0;
+}
+#endif
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static uint8_t calculate_fatigue_level(void)
 {
     if (!session_state.baseline_established) {
@@ -1188,6 +1236,12 @@ static uint8_t calculate_fatigue_level(void)
     
     return fatigue;
 }
+#else
+static uint8_t calculate_fatigue_level(void)
+{
+    return 0;
+}
+#endif
 
 // Activity session management functions
 void activity_session_init(void)
@@ -1212,6 +1266,9 @@ void activity_session_start(const SessionHeader* header)
     session_state.total_steps_left = 0;
     session_state.total_steps_right = 0;
     session_state.total_distance_cm = 0;
+    session_state.num_splits = 0;
+    memset(session_state.split_times_sec, 0, sizeof(session_state.split_times_sec));
+    session_state.split_distance_cm = 100000; // 1km
     
     // Reset buffers
     memset(sensor_data.contact_time_buffer, 0, sizeof(sensor_data.contact_time_buffer));
@@ -1301,6 +1358,7 @@ static uint16_t calculate_current_pace(void)
     }
 }
 
+
 void activity_session_process_gps_update(const GPSUpdateCommand* gps_data)
 {
     if (!gps_data || !session_state.session_active) {
@@ -1336,7 +1394,7 @@ void activity_session_process_gps_update(const GPSUpdateCommand* gps_data)
     // Use GPS distance to calibrate stride length
     if (gps_data->distance_m > 0) {
         // Calculate sensor-based distance since last GPS update
-        uint32_t sensor_distance_cm = session_state.total_distance_cm - 
+        uint32_t sensor_distance_cm = session_state.total_distance_cm -
                                      session_state.distance_at_last_gps;
         float sensor_distance_m = sensor_distance_cm / 100.0f;
         
@@ -1347,11 +1405,11 @@ void activity_session_process_gps_update(const GPSUpdateCommand* gps_data)
             // Limit correction to reasonable bounds (±20%)
             if (correction > 0.8f && correction < 1.2f) {
                 // Apply exponential smoothing to correction factor
-                session_state.stride_correction_factor = 
+                session_state.stride_correction_factor =
                     0.9f * session_state.stride_correction_factor + 0.1f * correction;
                 
                 LOG_INF("Stride calibration: GPS=%um, sensor=%.1fm, correction=%.3f",
-                        gps_data->distance_m, (double)sensor_distance_m, 
+                        gps_data->distance_m, (double)sensor_distance_m,
                         (double)session_state.stride_correction_factor);
             } else {
                 LOG_WRN("GPS correction out of bounds: %.2f", (double)correction);
@@ -1359,8 +1417,10 @@ void activity_session_process_gps_update(const GPSUpdateCommand* gps_data)
         }
         
         // Update total distance with GPS-corrected value
-        session_state.total_distance_cm = session_state.distance_at_last_gps + 
+        session_state.total_distance_cm = session_state.distance_at_last_gps +
                                          (gps_data->distance_m * 100);
+        
+        update_splits();
     }
     
     // Store current values for next update
@@ -1370,10 +1430,11 @@ void activity_session_process_gps_update(const GPSUpdateCommand* gps_data)
     // Update elevation if provided
     if (gps_data->elevation_change_m != 0) {
         session_state.total_elevation_gain_cm += gps_data->elevation_change_m * 100;
-        LOG_DBG("Elevation change: %dm, total gain: %dcm", 
+        LOG_DBG("Elevation change: %dm, total gain: %dcm",
                 gps_data->elevation_change_m, session_state.total_elevation_gain_cm);
     }
-}
+
+    }
 
 // Calculate distance without GPS (sensor-only)
 static uint32_t calculate_distance_no_gps(uint32_t steps)
@@ -1407,6 +1468,40 @@ static uint32_t calculate_total_distance(void)
     } else {
         // Fall back to sensor-only calculation
         return calculate_distance_no_gps(total_steps);
+    }
+}
+
+// Elevation gain calculations
+static uint32_t calculate_elevation_gain_no_gps() {
+    return 0; // Cannot estimate without GPS or altimeter
+}
+
+static uint32_t calculate_elevation_gain_with_gps() {
+    return (uint32_t)MAX(0, session_state.total_elevation_gain_cm);
+}
+
+static uint32_t calculate_total_elevation_gain() {
+    if (session_state.last_gps_update_time > 0) {
+        return calculate_elevation_gain_with_gps();
+    } else {
+        return calculate_elevation_gain_no_gps();
+    }
+}
+
+
+// Split times update
+static void update_splits() {
+    if (session_state.split_distance_cm == 0) return;
+    
+    uint32_t current_split = session_state.total_distance_cm / session_state.split_distance_cm;
+    
+    uint32_t now = k_uptime_get_32();
+    uint32_t elapsed_sec = (now - session_state.session_start_time) / 1000;
+    
+    while (session_state.num_splits < current_split && session_state.num_splits < 50) {
+        session_state.num_splits++;
+        session_state.split_times_sec[session_state.num_splits - 1] = elapsed_sec;
+        LOG_INF("Split %d completed at %u seconds", session_state.num_splits, elapsed_sec);
     }
 }
 
@@ -1546,7 +1641,8 @@ static void process_weight_measurement(void)
             (double)raw_weight_kg, (double)calibrated_weight_kg);
             
             // Send calibrated weight to bluetooth module
-            generic_message_t weight_msg = {};
+            generic_message_t weight_msg;
+            memset(&weight_msg, 0, sizeof(weight_msg));
             weight_msg.sender = SENDER_ACTIVITY_METRICS;
             weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
             weight_msg.data.weight_measurement.weight_kg = calibrated_weight_kg;
@@ -1700,7 +1796,8 @@ static void perform_weight_calibration(void)
         LOG_INF("Weight calibration updated! Test with a weight measurement.");
         
         // Save calibration to storage
-        generic_message_t save_msg = {};
+        generic_message_t save_msg;
+        memset(&save_msg, 0, sizeof(save_msg));
         save_msg.sender = SENDER_ACTIVITY_METRICS;
         save_msg.type = MSG_TYPE_SAVE_WEIGHT_CALIBRATION;
         save_msg.data.weight_calibration.scale_factor = weight_cal.scale_factor;

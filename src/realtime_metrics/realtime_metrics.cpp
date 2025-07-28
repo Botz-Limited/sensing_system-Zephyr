@@ -89,6 +89,10 @@ static struct {
     uint32_t last_ble_update;
     uint32_t metrics_count;
     uint32_t current_time_ms;
+
+    // GPS data
+    float latest_gps_speed_cms;
+    uint32_t last_gps_timestamp;
 } metrics_state;
 
 // User configuration (should come from settings)
@@ -224,6 +228,13 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                     pending_command[MAX_COMMAND_STRING_LEN - 1] = '\0';
                     k_work_submit_to_queue(&realtime_metrics_work_q, &process_command_work);
                     break;
+
+                case MSG_TYPE_GPS_UPDATE:
+                    k_mutex_lock(&sensor_data_mutex, K_FOREVER);
+                    metrics_state.latest_gps_speed_cms = msg.data.gps_update.speed_cms;
+                    metrics_state.last_gps_timestamp = metrics_state.current_time_ms;
+                    k_mutex_unlock(&sensor_data_mutex);
+                    break;
                     
                 default:
                     LOG_DBG("Received unsupported message type %d", msg.type);
@@ -285,6 +296,7 @@ static void ble_update_work_handler(struct k_work *work)
 // Calculate real-time metrics
 static void calculate_realtime_metrics(void)
 {
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Copy sensor data with mutex protection
     sensor_data_consolidated_t local_data;
     k_mutex_lock(&sensor_data_mutex, K_FOREVER);
@@ -300,14 +312,12 @@ static void calculate_realtime_metrics(void)
     
     float current_cadence = cadence_tracker_get_current(&metrics_state.cadence_tracker);
     
-    // Update pace estimator
-    pace_estimator_update(&metrics_state.pace_estimator,
-                         current_cadence,
-                         data->delta_time_ms);
-    
-    // Check if GPS correction is available (from activity_metrics)
-    // This would need to be passed via message queue in real implementation
-    // For now, we'll use the sensor-only version
+    // Update pace estimator with GPS if available
+    if (metrics_state.last_gps_timestamp > 0 && (metrics_state.current_time_ms - metrics_state.last_gps_timestamp) < 5000) {
+        pace_estimator_update_with_gps(&metrics_state.pace_estimator, metrics_state.latest_gps_speed_cms, data->delta_time_ms);
+    } else {
+        pace_estimator_update(&metrics_state.pace_estimator, current_cadence, data->delta_time_ms);
+    }
     
     // Track contact times for averaging
     if (data->left_contact_duration_ms > 0) {
@@ -315,7 +325,7 @@ static void calculate_realtime_metrics(void)
         metrics_state.contact_count++;
         
         // Store for variability calculation
-        metrics_state.last_contact_times[metrics_state.variance_index] = 
+        metrics_state.last_contact_times[metrics_state.variance_index] =
             (float)data->left_contact_duration_ms;
         metrics_state.variance_index = (metrics_state.variance_index + 1) % 10;
     }
@@ -346,6 +356,20 @@ static void calculate_realtime_metrics(void)
         uint16_t avg_right_force = metrics_state.right_force_sum / metrics_state.force_count;
         balance = calculate_balance_percentage(avg_left_force, avg_right_force);
     }
+
+    // Calculate vertical oscillation (simple estimation from vertical acceleration)
+    float vertical_oscillation_cm = 0;
+    if (data->linear_acc[2] != 0) {  // Assuming z is vertical
+        // Simplified: integrate acceleration over time (needs proper implementation)
+        vertical_oscillation_cm = fabsf(data->linear_acc[2]) * (data->delta_time_ms / 1000.0f) * 100.0f;  // Convert to cm
+    }
+    metrics_state.current_metrics.vertical_oscillation_cm = (uint8_t)MIN(vertical_oscillation_cm, 255);
+
+    // Calculate vertical ratio (vertical oscillation / stride length)
+    // Note: Stride length would come from analytics, placeholder 100cm
+    float stride_length_cm = 100.0f;
+    float vertical_ratio = (vertical_oscillation_cm / stride_length_cm) * 100.0f;
+    metrics_state.current_metrics.vertical_ratio = (uint8_t)MIN(vertical_ratio, 100);
     // Calculate variability for consistency score
     float variability = 0;
     if (metrics_state.contact_count >= 5) {
@@ -437,6 +461,10 @@ static void calculate_realtime_metrics(void)
         metrics_state.right_force_sum = 0;
         metrics_state.force_count = 0;
     }
+#else
+    // On secondary device, only process local data if needed
+    // For now, skip bilateral calculations
+#endif
 }
 
 // Send BLE update

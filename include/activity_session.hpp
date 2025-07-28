@@ -221,6 +221,9 @@ struct ActivitySessionState {
     uint32_t last_gps_update_time;
     uint32_t distance_at_last_gps;    // Distance at last GPS update (cm)
     int32_t total_elevation_gain_cm;  // Total elevation gain
+    uint32_t split_times_sec[50];     // Time in seconds for each split (up to 50km)
+    uint8_t num_splits;
+    uint32_t split_distance_cm;       // Distance per split, default 100000 cm (1km)
 };
 
 // Function declarations

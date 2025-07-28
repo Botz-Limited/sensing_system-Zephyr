@@ -69,6 +69,12 @@ typedef struct {
     uint16_t true_flight_time_ms;    // Both feet off ground
     uint16_t double_support_time_ms; // Both feet on ground
     
+    // CPEI and push-off power
+    uint16_t left_cpei;
+    uint16_t right_cpei;
+    uint16_t left_push_off_power;
+    uint16_t right_push_off_power;
+    
     // Step count
     uint32_t step_count;
     uint8_t step_count_delta;  // Steps since last sample (usually 0-2)

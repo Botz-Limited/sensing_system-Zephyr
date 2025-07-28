@@ -58,6 +58,7 @@ typedef struct {
     uint8_t pronation_asymmetry;    // Difference between feet
     
     // Efficiency indicators
+    uint8_t vertical_oscillation_cm; // Vertical oscillation in cm
     uint8_t vertical_ratio;         // Vertical oscillation ratio
     uint8_t efficiency_score;       // Running efficiency 0-100
     
@@ -117,6 +118,12 @@ void form_score_calculate(form_score_t *score,
 
 uint8_t calculate_asymmetry_percentage(uint16_t left_value, uint16_t right_value);
 int8_t calculate_balance_percentage(uint16_t left_force, uint16_t right_force);
+
+void pace_estimator_update_with_gps(pace_estimator_t *estimator, float gps_speed_cms, uint32_t delta_time_ms);
+
+float calibrate_stride_with_gps(pace_estimator_t *estimator, float gps_distance_m, uint32_t step_count_delta);
+
+float estimate_stride_without_gps(float cadence, uint16_t contact_time, float height_cm);
 
 #ifdef __cplusplus
 }
