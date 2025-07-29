@@ -1304,11 +1304,31 @@ static void update_imu_state_from_d2d(const bhi360_log_record_t *imu_data) {
           sensor_state.left_imu_last_update_time);
 }
 
-// Function definitions
 static uint16_t calculate_cpei(const uint16_t pressure[8], int16_t cop_x, int16_t cop_y) {
-  (void)pressure; // TODO: Use pressure in actual implementation
-  // Simple placeholder implementation
-  return (uint16_t)(cop_x + cop_y); // Replace with actual calculation
+  // Simplified CPEI calculation based on biomechanical formula: (deviation / width) * 100
+  // This is an approximation using current CoP and pressure distribution.
+  // For full accuracy, track CoP over entire stance phase.
+
+  // Estimate foot width from lateral pressure sensors (arbitrary scaling; calibrate based on hardware)
+  uint16_t estimated_width = (pressure[1] + pressure[5] + pressure[6]) / 3 + 50; // Example: add offset for min width
+  if (estimated_width == 0) {
+    return 0; // Avoid division by zero
+  }
+
+  // Assume progression line along y-axis (x=0) from heel (y=0) to toe (y=100 normalized)
+  // Distal third is at y ~66% of foot length
+  int16_t distal_y = 66; // Normalized value; adjust if foot length is known
+
+  // Calculate deviation 'd' as perpendicular distance (simplified to |cop_x| scaled by cop_y proximity to distal)
+  float y_factor = (cop_y > 0) ? (float)distal_y / cop_y : 1.0f; // Scale if cop_y is near distal
+  int16_t d = (int16_t)(abs(cop_x) * y_factor);
+
+  // Weight by average forefoot pressure (sensors 0,2,3 as example)
+  uint16_t forefoot_pressure = (pressure[0] + pressure[2] + pressure[3]) / 3;
+  d = (int16_t)((float)d * (forefoot_pressure / 100.0f)); // Normalize weighting
+
+  // CPEI = (d / estimated_width) * 100
+  return (uint16_t)((d * 100) / estimated_width);
 }
 
 static uint16_t calculate_push_off_power(uint16_t force, float gyro_y, uint16_t delta_time_ms) {
