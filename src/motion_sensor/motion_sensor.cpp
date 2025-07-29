@@ -530,6 +530,14 @@ void motion_sensor_process(void *, void *, void *) {
     }
 
     // Periodically check and save calibration improvements
+    // Boundary check and rolling mechanism for calibration_check_counter
+    // Risk: Overflows after ~49 days of continuous looping
+    // Strategy: Before increment, check against UINT32_MAX; if near, reset to 0
+    // This preserves the periodic check logic without changing timing
+    if (calibration_check_counter >= UINT32_MAX - 1) {
+        LOG_WRN("calibration_check_counter rolling over - resetting to 0");
+        calibration_check_counter = 0; // Reset to 0 as rolling mechanism
+    }
     if (++calibration_check_counter >= CALIBRATION_CHECK_INTERVAL) {
       calibration_check_counter = 0;
       check_and_save_calibration_updates(bhi360_dev);
@@ -631,9 +639,22 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
       LOG_ERR("Step counter: invalid data size: %d", callback_info->data_size);
       return;
     }
-    latest_step_count =
+    // Boundary check and rolling mechanism for latest_step_count
+    // Risk: Overflows after ~4 billion steps (impractical, but detect sensor wrap)
+    // Strategy: Detect if new count is less than previous (wrap occurred), then add UINT32_MAX + 1 to accumulator
+    // Preserve logic by maintaining a separate accumulator for total steps across wraps
+    static uint32_t previous_step_count = 0;
+    static uint32_t step_accumulator = 0; // Accumulates across wraps
+    uint32_t new_step_count =
         (callback_info->data_ptr[0]) | (callback_info->data_ptr[1] << 8) |
         (callback_info->data_ptr[2] << 16) | (callback_info->data_ptr[3] << 24);
+    if (new_step_count < previous_step_count) {
+        // Wrap detected (sensor counter rolled over)
+        LOG_WRN("latest_step_count wrap detected - accumulating");
+        step_accumulator += UINT32_MAX + 1; // Add full cycle
+    }
+    latest_step_count = step_accumulator + new_step_count; // Effective total
+    previous_step_count = new_step_count; // Update for next check
 
     // Calculate activity step count if activity is active
     if (activity_logging_active) {

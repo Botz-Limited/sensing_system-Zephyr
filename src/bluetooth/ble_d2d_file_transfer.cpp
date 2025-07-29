@@ -268,6 +268,14 @@ static int handle_list_command(void)
             file_entry.name[sizeof(file_entry.name) - 1] = '\0';
             
             // Send entry
+            // Boundary check and rolling mechanism for sequence
+            // Risk: Overflows after 65,535 packets
+            // Strategy: Reset to 0 on overflow; log event; notify receiver if needed
+            if (seq >= UINT16_MAX - 1) {
+                LOG_WRN("sequence rolling over - resetting to 0");
+                seq = 0; // Reset to 0 as rolling mechanism
+                // TODO: Send reset packet to notify receiver
+            }
             packet->sequence = seq++;
             packet->length = sizeof(file_entry);
             memcpy(packet->data, &file_entry, sizeof(file_entry));
@@ -317,6 +325,14 @@ static int handle_read_command(uint8_t file_id, uint8_t file_type)
             break;
         }
         
+        // Boundary check and rolling mechanism for sequence
+        // Risk: Overflows after 65,535 packets
+        // Strategy: Reset to 0 on overflow; log event; notify receiver if needed
+        if (d2d_file_state.sequence >= UINT16_MAX - 1) {
+            LOG_WRN("sequence rolling over - resetting to 0");
+            d2d_file_state.sequence = 0; // Reset to 0 as rolling mechanism
+            // TODO: Send reset packet to notify receiver
+        }
         packet->sequence = d2d_file_state.sequence++;
         packet->length = bytes_read;
         memcpy(packet->data, file_buffer, bytes_read);

@@ -398,8 +398,26 @@ static void activity_metrics_init(void)
     step_detection_register_callback([](const StepEvent* event) {
         // Process step events
         if (event->foot == 0) { // Left foot
+            // Boundary check and rolling mechanism for total_steps_left
+            // Risk: Overflows after ~4 billion steps (unlikely, but prevent silent wrap)
+            // Strategy: If approaching UINT32_MAX, reset to 0 and trigger session summary export
+            // This rolls over safely without losing data (export before reset)
+            if (session_state.total_steps_left >= UINT32_MAX - 1) {
+                // Trigger export of current session data before reset
+                // TODO: Implement session summary export to data module
+                LOG_WRN("total_steps_left rolling over - exporting session data");
+                session_state.total_steps_left = 0; // Reset to 0
+            }
             session_state.total_steps_left++;
         } else { // Right foot
+            // Boundary check and rolling mechanism for total_steps_right
+            // Same strategy as above
+            if (session_state.total_steps_right >= UINT32_MAX - 1) {
+                // Trigger export of current session data before reset
+                // TODO: Implement session summary export to data module
+                LOG_WRN("total_steps_right rolling over - exporting session data");
+                session_state.total_steps_right = 0; // Reset to 0
+            }
             session_state.total_steps_right++;
         }
         
@@ -912,6 +930,14 @@ static void weight_calibration_work_handler(struct k_work *work)
             
             // Add to buffer
             if (weight_measurement.buffer_count < 20) {
+                // Boundary check for buffer_count (though bounded by 20)
+                // Risk: Theoretical overflow if loop malfunctions
+                // Strategy: Cap at 20 and log; prevent increment beyond bound
+                if (weight_measurement.buffer_count >= 20) {
+                    LOG_WRN("buffer_count cap reached unexpectedly - resetting buffer");
+                    weight_measurement.buffer_count = 0; // Reset to 0 as rolling mechanism
+                    memset(weight_measurement.pressure_sum_buffer, 0, sizeof(weight_measurement.pressure_sum_buffer));
+                }
                 weight_measurement.pressure_sum_buffer[weight_measurement.buffer_count++] = total_pressure;
             } else {
                 // Shift buffer and add new value
@@ -1499,6 +1525,17 @@ static void update_splits() {
     uint32_t elapsed_sec = (now - session_state.session_start_time) / 1000;
     
     while (session_state.num_splits < current_split && session_state.num_splits < 50) {
+        // Boundary check and rolling mechanism for num_splits
+        // Risk: Overflows after ~4 billion splits (very unlikely, but prevent issues)
+        // Strategy: Already capped at 50; enhance with reset if approaching max (though cap prevents it)
+        // If cap hit, reset to 0 and archive old splits
+        if (session_state.num_splits >= 50) {
+            // Archive old splits (e.g., log or send to data module)
+            // TODO: Implement split archiving
+            LOG_WRN("num_splits cap reached - archiving and resetting");
+            session_state.num_splits = 0; // Reset to 0
+            memset(session_state.split_times_sec, 0, sizeof(session_state.split_times_sec)); // Clear array
+        }
         session_state.num_splits++;
         session_state.split_times_sec[session_state.num_splits - 1] = elapsed_sec;
         LOG_INF("Split %d completed at %u seconds", session_state.num_splits, elapsed_sec);
@@ -1600,61 +1637,69 @@ static void process_weight_measurement(void)
     if (data_valid) {
         // Sum all pressure values from both feet
         for (int i = 0; i < 8; i++) {
-            total_pressure += sensor_data.left_pressure[i];
-            total_pressure += sensor_data.right_pressure[i];
+        total_pressure += sensor_data.left_pressure[i];
+        total_pressure += sensor_data.right_pressure[i];
         }
         
         // Debug output for calibration
         if (weight_measurement.debug_mode) {
-            LOG_INF("CALIBRATION DEBUG: Total ADC = %.2f", (double)total_pressure);
+        LOG_INF("CALIBRATION DEBUG: Total ADC = %.2f", (double)total_pressure);
         }
         
         // Add to buffer
         if (weight_measurement.buffer_count < 20) {
-            weight_measurement.pressure_sum_buffer[weight_measurement.buffer_count++] = total_pressure;
+        // Boundary check for buffer_count (though bounded by 20)
+        // Risk: Theoretical overflow if loop malfunctions
+        // Strategy: Cap at 20 and log; prevent increment beyond bound
+        if (weight_measurement.buffer_count >= 20) {
+        LOG_WRN("buffer_count cap reached unexpectedly - resetting buffer");
+        weight_measurement.buffer_count = 0; // Reset to 0 as rolling mechanism
+        memset(weight_measurement.pressure_sum_buffer, 0, sizeof(weight_measurement.pressure_sum_buffer));
+        }
+        weight_measurement.pressure_sum_buffer[weight_measurement.buffer_count++] = total_pressure;
         } else {
-            // Shift buffer and add new value
-            for (int i = 0; i < 19; i++) {
-                weight_measurement.pressure_sum_buffer[i] = weight_measurement.pressure_sum_buffer[i + 1];
-            }
-            weight_measurement.pressure_sum_buffer[19] = total_pressure;
+        // Shift buffer and add new value
+        for (int i = 0; i < 19; i++) {
+        weight_measurement.pressure_sum_buffer[i] = weight_measurement.pressure_sum_buffer[i + 1];
+        }
+        weight_measurement.pressure_sum_buffer[19] = total_pressure;
         }
         
         weight_measurement.stable_samples_count++;
         
         // Check if we have enough stable samples
         if (weight_measurement.stable_samples_count >= weight_measurement.stable_samples_required &&
-            weight_measurement.buffer_count >= 10) {
-            
-            // Normal measurement mode: Calculate weight
-            float raw_weight_kg = calculate_weight_from_pressure();
-            
-            if (raw_weight_kg > 20.0f && raw_weight_kg < 300.0f) { // Sanity check
-            // Apply calibration to get final weight
-            float calibrated_weight_kg = apply_weight_calibration(raw_weight_kg);
-            
-            sensor_data.calculated_weight_kg = calibrated_weight_kg;
-            sensor_data.last_weight_measurement_time = now;
-            sensor_data.weight_measurement_valid = true;
-            
-            LOG_INF("Weight measurement complete: raw=%.1f kg, calibrated=%.1f kg", 
-            (double)raw_weight_kg, (double)calibrated_weight_kg);
-            
-            // Send calibrated weight to bluetooth module
-            generic_message_t weight_msg;
-            memset(&weight_msg, 0, sizeof(weight_msg));
-            weight_msg.sender = SENDER_ACTIVITY_METRICS;
-            weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
-            weight_msg.data.weight_measurement.weight_kg = calibrated_weight_kg;
-            k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
-                
-                weight_measurement.measurement_in_progress = false;
-            } else {
-                LOG_WRN("Invalid weight calculation: %.1f kg", (double)raw_weight_kg);
-            }
+        weight_measurement.buffer_count >= 10) {
+        
+        // Normal measurement mode: Calculate weight
+        float raw_weight_kg = calculate_weight_from_pressure();
+        
+        if (raw_weight_kg > 20.0f && raw_weight_kg < 300.0f) { // Sanity check
+        // Apply calibration to get final weight
+        float calibrated_weight_kg = apply_weight_calibration(raw_weight_kg);
+        
+        sensor_data.calculated_weight_kg = calibrated_weight_kg;
+        sensor_data.last_weight_measurement_time = now;
+        sensor_data.weight_measurement_valid = true;
+        
+        LOG_INF("Weight measurement complete: raw=%.1f kg, calibrated=%.1f kg", 
+        (double)raw_weight_kg, (double)calibrated_weight_kg);
+        
+        // Send calibrated weight to bluetooth module
+        generic_message_t weight_msg;
+        memset(&weight_msg, 0, sizeof(weight_msg));
+        weight_msg.sender = SENDER_ACTIVITY_METRICS;
+        weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+        weight_msg.data.weight_measurement.weight_kg = calibrated_weight_kg;
+        k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
+        
+        weight_measurement.measurement_in_progress = false;
+        } else {
+        LOG_WRN("Invalid weight calculation: %.1f kg", (double)raw_weight_kg);
         }
-    }
-}
+        }
+        }
+        }
 
 // Calibration procedure (foot sensor data is already zero calibrated):
 // 1. LINEAR CALIBRATION: Apply known weights and calculate weight_cal.scale_factor

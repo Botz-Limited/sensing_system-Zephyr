@@ -820,6 +820,13 @@ static void periodic_sample_work_handler(struct k_work *work) {
 
   if (atomic_get(&processing_active) == 1) {
     process_sensor_sample();
+    // Boundary check and rolling mechanism for sample_count
+    // Risk: Overflows after 65,535 samples
+    // Strategy: Reset to 0 on overflow; log event; preserves counting logic
+    if (sensor_state.sample_count >= UINT16_MAX - 1) {
+        LOG_WRN("sample_count rolling over - resetting to 0");
+        sensor_state.sample_count = 0; // Reset to 0 as rolling mechanism
+    }
     sensor_state.sample_count++;
 
     // Check if thread priority needs to be adjusted back to normal after
@@ -920,7 +927,25 @@ static void process_sensor_sample(void) {
   // Update D2D connection quality metrics
   if (left_data_valid && sensor_state.d2d_last_good_time > 0) {
     uint32_t latency = current_time - sensor_state.d2d_last_good_time;
-    sensor_state.d2d_latency_sum_ms += latency;
+    // Boundary check and rolling mechanism for d2d_latency_sum_ms
+    // Risk: Overflows after ~49 days of cumulative latency
+    // Strategy: If sum would overflow, reset sum to current latency and count to 1
+    // This restarts averaging without changing logic
+    if (sensor_state.d2d_latency_sum_ms > UINT32_MAX - latency) {
+        LOG_WRN("d2d_latency_sum_ms rolling over - resetting sum and count");
+        sensor_state.d2d_latency_sum_ms = latency; // Reset to current as rolling
+        sensor_state.d2d_latency_count = 1;
+    } else {
+        sensor_state.d2d_latency_sum_ms += latency;
+    }
+    // Boundary check and rolling mechanism for d2d_latency_count
+    // Risk: Overflows after 65,535 samples
+    // Strategy: Reset count to 0 and sum to 0 on overflow; log event
+    if (sensor_state.d2d_latency_count >= UINT16_MAX - 1) {
+        LOG_WRN("d2d_latency_count rolling over - resetting count and sum");
+        sensor_state.d2d_latency_count = 0; // Reset to 0 as rolling
+        sensor_state.d2d_latency_sum_ms = 0;
+    }
     sensor_state.d2d_latency_count++;
     
     // Update average latency
@@ -1164,6 +1189,15 @@ static void process_sensor_sample(void) {
         // Expected packets based on 80Hz sampling from secondary
         sensor_state.d2d_expected_packets = (sensor_state.sample_count * 80) / 100;
         if (sensor_state.d2d_expected_packets > 0) {
+          // Boundary check and rolling mechanism for d2d_packets_received
+          // Risk: Overflows after ~4 billion packets
+          // Strategy: Reset to 0 on overflow; log event; reset expected too for consistency
+          if (sensor_state.d2d_packets_received >= UINT32_MAX - 1) {
+              LOG_WRN("d2d_packets_received rolling over - resetting counters");
+              sensor_state.d2d_packets_received = 0; // Reset to 0 as rolling
+              sensor_state.d2d_expected_packets = 0;
+          }
+          sensor_state.d2d_packets_received++;
           sensor_state.d2d_packet_loss_percent = 
               ((sensor_state.d2d_expected_packets - sensor_state.d2d_packets_received) * 100) 
               / sensor_state.d2d_expected_packets;
@@ -1339,6 +1373,13 @@ static void update_foot_state_from_d2d(const foot_samples_t *foot_data,
     sensor_state.left_foot_last_update_time = current_time;
     
     // Update network core performance metrics
+    // Boundary check and rolling mechanism for d2d_packets_received
+    // Risk: Overflows after ~4 billion packets
+    // Strategy: Reset to 0 on overflow; log event; preserves counting logic
+    if (sensor_state.d2d_packets_received >= UINT32_MAX - 1) {
+        LOG_WRN("d2d_packets_received rolling over - resetting to 0");
+        sensor_state.d2d_packets_received = 0; // Reset to 0 as rolling
+    }
     sensor_state.d2d_packets_received++;
     
     // Track minimum latency (best case performance)
