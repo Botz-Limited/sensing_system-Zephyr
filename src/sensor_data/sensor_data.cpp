@@ -60,6 +60,7 @@ static foot_data_ring_t foot_ring = {.data = {{0}},
                                      .read_idx = 0,
                                      .count = ATOMIC_INIT(0)};
 static imu_data_ring_t imu_ring = {
+    .data = {{0}},
     .write_idx = 0, .read_idx = 0, .count = ATOMIC_INIT(0)};
 static command_ring_t command_ring = {
     .data = {{0}}, .write_idx = 0, .read_idx = 0, .count = ATOMIC_INIT(0)};
@@ -146,10 +147,36 @@ static struct {
   uint16_t left_push_off_power;
   uint16_t right_push_off_power;
 
+  #if CONFIG_LEGACY_BLE_ENABLED
+  float latest_temperature;
+  float latest_gravity[3];
+  float latest_accel[3];
+  float latest_mag[3];
+#endif
   // D2D data freshness tracking
   uint32_t left_foot_last_update_time; // When D2D data last updated left foot
   uint32_t left_imu_last_update_time;  // When D2D IMU data last updated
+  
+  // D2D connection quality tracking
+  uint32_t d2d_latency_sum_ms;
+  uint16_t d2d_latency_count;
+  uint16_t d2d_average_latency_ms;
+  uint16_t d2d_max_latency_ms;
+  uint32_t d2d_last_good_time;
+  
+  // Network core performance metrics
+  uint16_t d2d_min_latency_ms;      // Best case latency seen
+  uint16_t d2d_jitter_ms;           // Latency variation
+  uint8_t d2d_packet_loss_percent;  // Estimated packet loss
+  uint32_t d2d_packets_received;    // Total packets received
+  uint32_t d2d_expected_packets;    // Expected based on timing
 } sensor_state;
+
+// Adaptive D2D timing constants - Optimized for nRF5340 network core
+#define D2D_MIN_FRESHNESS_WINDOW_MS 50    // Reduced from 100ms - network core enables lower latency
+#define D2D_MAX_FRESHNESS_WINDOW_MS 300   // Reduced from 500ms - tighter bounds with better performance
+#define D2D_LATENCY_HISTORY_SIZE 20       // Increased for more accurate averaging with lower latency
+#define D2D_NETCORE_LATENCY_OFFSET 20     // Network core typical IPC + processing overhead
 
 // Forward declarations
 static void sensor_data_init(void);
@@ -712,6 +739,34 @@ static void process_imu_data_work_handler(struct k_work *work) {
     sensor_state.latest_gyro[1] = imu_data.gyro_y;
     sensor_state.latest_gyro[2] = imu_data.gyro_z;
 
+#if CONFIG_LEGACY_BLE_ENABLED
+    sensor_state.latest_temperature = 0.0f;
+    
+    // Calculate gravity from quaternion
+    float gx = 2.0f * (sensor_state.latest_quaternion[1] * sensor_state.latest_quaternion[3] - 
+                       sensor_state.latest_quaternion[0] * sensor_state.latest_quaternion[2]) * 9.81f;
+    float gy = 2.0f * (sensor_state.latest_quaternion[0] * sensor_state.latest_quaternion[1] + 
+                       sensor_state.latest_quaternion[2] * sensor_state.latest_quaternion[3]) * 9.81f;
+    float gz = (sensor_state.latest_quaternion[0] * sensor_state.latest_quaternion[0] - 
+                sensor_state.latest_quaternion[1] * sensor_state.latest_quaternion[1] - 
+                sensor_state.latest_quaternion[2] * sensor_state.latest_quaternion[2] + 
+                sensor_state.latest_quaternion[3] * sensor_state.latest_quaternion[3]) * 9.81f;
+    
+    sensor_state.latest_gravity[0] = gx;
+    sensor_state.latest_gravity[1] = gy;
+    sensor_state.latest_gravity[2] = gz;
+    
+    // Calculate total acceleration by adding gravity to linear acceleration
+    sensor_state.latest_accel[0] = sensor_state.latest_linear_acc[0] + gx;
+    sensor_state.latest_accel[1] = sensor_state.latest_linear_acc[1] + gy;
+    sensor_state.latest_accel[2] = sensor_state.latest_linear_acc[2] + gz;
+    
+    // Magnetometer not available
+    sensor_state.latest_mag[0] = 0.0f;
+    sensor_state.latest_mag[1] = 0.0f;
+    sensor_state.latest_mag[2] = 0.0f;
+#endif
+
     // Update step count
     sensor_state.latest_step_count = imu_data.step_count;
 
@@ -842,11 +897,49 @@ static void process_sensor_sample(void) {
   // PRIMARY DEVICE: Has data from BOTH feet
   // Left foot = from D2D (secondary), Right foot = local
 
-  // Check D2D data freshness for left foot with buffering mechanism
+  // Calculate adaptive D2D freshness window based on connection quality
+  // Optimized for nRF5340 network core with lower base latency
+  uint16_t adaptive_freshness_window = D2D_MIN_FRESHNESS_WINDOW_MS;
+  
+  if (sensor_state.d2d_average_latency_ms > 0) {
+    // Network core optimization: Use 1.5x average + smaller buffer
+    // Network core provides more consistent timing, so we can be more aggressive
+    adaptive_freshness_window = (sensor_state.d2d_average_latency_ms * 3 / 2) + D2D_NETCORE_LATENCY_OFFSET;
+    
+    // Tighter bounds due to network core performance
+    adaptive_freshness_window = MIN(adaptive_freshness_window, D2D_MAX_FRESHNESS_WINDOW_MS);
+    adaptive_freshness_window = MAX(adaptive_freshness_window, D2D_MIN_FRESHNESS_WINDOW_MS);
+  }
+  
+  // Check D2D data freshness for left foot with adaptive window
   uint32_t left_data_age =
       current_time - sensor_state.left_foot_last_update_time;
   bool left_data_valid =
-      (left_data_age < 200); // Extended window to 200ms for buffering
+      (left_data_age < adaptive_freshness_window);
+  
+  // Update D2D connection quality metrics
+  if (left_data_valid && sensor_state.d2d_last_good_time > 0) {
+    uint32_t latency = current_time - sensor_state.d2d_last_good_time;
+    sensor_state.d2d_latency_sum_ms += latency;
+    sensor_state.d2d_latency_count++;
+    
+    // Update average latency
+    if (sensor_state.d2d_latency_count >= D2D_LATENCY_HISTORY_SIZE) {
+      sensor_state.d2d_average_latency_ms = 
+          sensor_state.d2d_latency_sum_ms / sensor_state.d2d_latency_count;
+      sensor_state.d2d_latency_sum_ms = 0;
+      sensor_state.d2d_latency_count = 0;
+    }
+    
+    // Track max latency
+    if (latency > sensor_state.d2d_max_latency_ms) {
+      sensor_state.d2d_max_latency_ms = latency;
+    }
+  }
+  
+  if (left_data_valid) {
+    sensor_state.d2d_last_good_time = current_time;
+  }
 
   // Buffer for primary (right) foot data to wait for secondary (left) data
   static sensor_data_consolidated_t buffered_primary_data = {};
@@ -1055,6 +1148,36 @@ static void process_sensor_sample(void) {
             sensor_state.left_contact_elapsed_ms,
             sensor_state.right_foot_contact ? "Contact" : "Swing",
             sensor_state.right_contact_elapsed_ms);
+            
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Log D2D connection quality with network core metrics
+    if (sensor_state.d2d_average_latency_ms > 0) {
+      LOG_DBG("D2D quality: avg=%ums, max=%ums, min=%ums, jitter=%ums, window=%ums",
+              sensor_state.d2d_average_latency_ms,
+              sensor_state.d2d_max_latency_ms,
+              sensor_state.d2d_min_latency_ms,
+              sensor_state.d2d_jitter_ms,
+              adaptive_freshness_window);
+              
+      // Calculate and log packet loss estimate
+      if (sensor_state.sample_count % 500 == 0) {
+        // Expected packets based on 80Hz sampling from secondary
+        sensor_state.d2d_expected_packets = (sensor_state.sample_count * 80) / 100;
+        if (sensor_state.d2d_expected_packets > 0) {
+          sensor_state.d2d_packet_loss_percent = 
+              ((sensor_state.d2d_expected_packets - sensor_state.d2d_packets_received) * 100) 
+              / sensor_state.d2d_expected_packets;
+          
+          LOG_INF("D2D Network Core Stats: packets=%u/%u, loss=%u%%, latency=%u-%u ms",
+                  sensor_state.d2d_packets_received,
+                  sensor_state.d2d_expected_packets,
+                  sensor_state.d2d_packet_loss_percent,
+                  sensor_state.d2d_min_latency_ms,
+                  sensor_state.d2d_max_latency_ms);
+        }
+      }
+    }
+#endif
   }
 
   // Send consolidated data to other threads
@@ -1212,7 +1335,25 @@ static void update_foot_state_from_d2d(const foot_samples_t *foot_data,
 
   if (foot_id == 0) {
     // Track when we last updated from D2D
-    sensor_state.left_foot_last_update_time = k_uptime_get_32();
+    uint32_t current_time = k_uptime_get_32();
+    sensor_state.left_foot_last_update_time = current_time;
+    
+    // Update network core performance metrics
+    sensor_state.d2d_packets_received++;
+    
+    // Track minimum latency (best case performance)
+    if (sensor_state.d2d_last_good_time > 0) {
+      uint32_t latency = current_time - sensor_state.d2d_last_good_time;
+      if (sensor_state.d2d_min_latency_ms == 0 || latency < sensor_state.d2d_min_latency_ms) {
+        sensor_state.d2d_min_latency_ms = latency;
+      }
+      
+      // Calculate jitter (latency variation)
+      if (sensor_state.d2d_average_latency_ms > 0) {
+        int32_t deviation = (int32_t)latency - (int32_t)sensor_state.d2d_average_latency_ms;
+        sensor_state.d2d_jitter_ms = (uint16_t)abs(deviation);
+      }
+    }
 
     // Update left foot state from D2D data
     for (int i = 0; i < 8; i++) {
@@ -1305,9 +1446,13 @@ static void update_imu_state_from_d2d(const bhi360_log_record_t *imu_data) {
 }
 
 static uint16_t calculate_cpei(const uint16_t pressure[8], int16_t cop_x, int16_t cop_y) {
+  // TODO: Implement full CPEI calculation with CoP path tracking over entire stance phase
+  // Current implementation is simplified and only uses instantaneous values
+  // Should track: 1) CoP trajectory during stance, 2) Calculate path length,
+  // 3) Normalize by foot width, 4) Return as percentage
+  
   // Simplified CPEI calculation based on biomechanical formula: (deviation / width) * 100
   // This is an approximation using current CoP and pressure distribution.
-  // For full accuracy, track CoP over entire stance phase.
 
   // Estimate foot width from lateral pressure sensors (arbitrary scaling; calibrate based on hardware)
   uint16_t estimated_width = (pressure[1] + pressure[5] + pressure[6]) / 3 + 50; // Example: add offset for min width
@@ -1332,8 +1477,13 @@ static uint16_t calculate_cpei(const uint16_t pressure[8], int16_t cop_x, int16_
 }
 
 static uint16_t calculate_push_off_power(uint16_t force, float gyro_y, uint16_t delta_time_ms) {
+  // TODO: Implement proper push-off power calculation using force, velocity, and body mass
+  // Current implementation is a placeholder using simple multiplication
+  // Should calculate: 1) Velocity from gyro integration, 2) Power = Force * Velocity,
+  // 3) Normalize by body weight, 4) Return in Watts
+  
   // Simple placeholder implementation
-  return (uint16_t)(force * fabsf(gyro_y) * delta_time_ms); // Replace with actual calculation
+  return (uint16_t)(force * fabsf(gyro_y) * delta_time_ms);
 }
 
 // Module event handler
@@ -1356,4 +1506,21 @@ static bool app_event_handler(const struct app_event_header *aeh) {
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, module_state_event);
+
+#if CONFIG_LEGACY_BLE_ENABLED
+void get_sensor_snapshot(float quat[4], float accel[3], float lacc[3], float gyro[3], float grav[3], float mag[3], float *temp, uint16_t pressure[8]) {
+  memcpy(quat, sensor_state.latest_quaternion, sizeof(float)*4);
+  memcpy(accel, sensor_state.latest_accel, sizeof(float)*3);
+  memcpy(lacc, sensor_state.latest_linear_acc, sizeof(float)*3);
+  memcpy(gyro, sensor_state.latest_gyro, sizeof(float)*3);
+  memcpy(grav, sensor_state.latest_gravity, sizeof(float)*3);
+  memcpy(mag, sensor_state.latest_mag, sizeof(float)*3);
+  *temp = sensor_state.latest_temperature;
+#if CONFIG_PRIMARY_DEVICE
+  memcpy(pressure, sensor_state.right_pressure, sizeof(uint16_t)*8);
+#else
+  memcpy(pressure, sensor_state.left_pressure, sizeof(uint16_t)*8);
+#endif
+}
+#endif
 

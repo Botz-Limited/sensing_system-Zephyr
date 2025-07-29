@@ -41,11 +41,13 @@ static struct k_work_q realtime_metrics_work_q;
 // Work items for different message types
 static struct k_work process_consolidated_data_work;
 static struct k_work process_command_work;
+static struct k_work process_gps_update_work;
 static struct k_work_delayable ble_update_work;
 
 // Message buffers for different work items
 static char pending_command[MAX_COMMAND_STRING_LEN];
 static sensor_data_consolidated_t latest_sensor_data;
+static GPSUpdateCommand pending_gps_update;
 static bool new_sensor_data_available;
 K_MUTEX_DEFINE(sensor_data_mutex);
 
@@ -148,6 +150,7 @@ static void process_command_work_handler(struct k_work *work);
  *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
  */
 static void ble_update_work_handler(struct k_work *work);
+static void process_gps_update_work_handler(struct k_work *work);
 
 // Initialize the realtime metrics module
 static void realtime_metrics_init(void)
@@ -171,6 +174,7 @@ static void realtime_metrics_init(void)
     // Initialize work items
     k_work_init(&process_consolidated_data_work, process_consolidated_data_work_handler);
     k_work_init(&process_command_work, process_command_work_handler);
+    k_work_init(&process_gps_update_work, process_gps_update_work_handler);
     k_work_init_delayable(&ble_update_work, ble_update_work_handler);
     
     // Create the message processing thread
@@ -230,10 +234,11 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                     break;
 
                 case MSG_TYPE_GPS_UPDATE:
+                    // Copy GPS data and queue processing work
                     k_mutex_lock(&sensor_data_mutex, K_FOREVER);
-                    metrics_state.latest_gps_speed_cms = msg.data.gps_update.speed_cms;
-                    metrics_state.last_gps_timestamp = metrics_state.current_time_ms;
+                    memcpy(&pending_gps_update, &msg.data.gps_update, sizeof(GPSUpdateCommand));
                     k_mutex_unlock(&sensor_data_mutex);
+                    k_work_submit_to_queue(&realtime_metrics_work_q, &process_gps_update_work);
                     break;
                     
                 default:
@@ -291,6 +296,16 @@ static void ble_update_work_handler(struct k_work *work)
     
     // Reschedule for next update (1Hz)
     k_work_schedule_for_queue(&realtime_metrics_work_q, &ble_update_work, K_SECONDS(1));
+}
+
+// Work handler for processing GPS updates
+static void process_gps_update_work_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+    
+    k_mutex_lock(&sensor_data_mutex, K_FOREVER);
+    metrics_state.latest_gps_speed_cms = pending_gps_update.speed_cms;
+    metrics_state.last_gps_timestamp = metrics_state.current_time_ms;
+    k_mutex_unlock(&sensor_data_mutex);
 }
 
 // Calculate real-time metrics
@@ -358,6 +373,9 @@ static void calculate_realtime_metrics(void)
     }
 
     // Calculate vertical oscillation (simple estimation from vertical acceleration)
+    // TODO: Implement proper vertical oscillation using double integration of vertical acceleration
+    // Current implementation is oversimplified - should: 1) Remove gravity component,
+    // 2) Double integrate acceleration to get displacement, 3) Track peak-to-peak displacement
     float vertical_oscillation_cm = 0;
     if (data->linear_acc[2] != 0) {  // Assuming z is vertical
         // Simplified: integrate acceleration over time (needs proper implementation)
@@ -366,8 +384,9 @@ static void calculate_realtime_metrics(void)
     metrics_state.current_metrics.vertical_oscillation_cm = (uint8_t)MIN(vertical_oscillation_cm, 255);
 
     // Calculate vertical ratio (vertical oscillation / stride length)
-    // Note: Stride length would come from analytics, placeholder 100cm
-    float stride_length_cm = 100.0f;
+    // TODO: Get actual stride length from analytics module instead of using 100cm placeholder
+    // Should receive stride length calculation from analytics thread via message queue
+    float stride_length_cm = 100.0f;  // Placeholder - needs integration with analytics
     float vertical_ratio = (vertical_oscillation_cm / stride_length_cm) * 100.0f;
     metrics_state.current_metrics.vertical_ratio = (uint8_t)MIN(vertical_ratio, 100);
     // Calculate variability for consistency score
@@ -421,7 +440,13 @@ static void calculate_realtime_metrics(void)
     metrics_state.current_metrics.avg_pronation_deg = avg_pronation;
     
     // Efficiency indicators (simplified for now)
-    metrics_state.current_metrics.vertical_ratio = 10; // Placeholder
+    // TODO: Implement proper vertical ratio calculation once vertical oscillation is accurate
+    // Should be: (vertical_oscillation / stride_length) * 100
+    metrics_state.current_metrics.vertical_ratio = 10; // Placeholder value
+    
+    // TODO: Implement proper running efficiency calculation based on multiple factors
+    // Currently just using 90% of form score as placeholder
+    // Should include: cadence, vertical oscillation, contact time, duty factor
     metrics_state.current_metrics.efficiency_score = (uint8_t)(metrics_state.form_score.overall_score * 0.9f);
     
     // Check for alerts
@@ -445,10 +470,14 @@ static void calculate_realtime_metrics(void)
                 balance);
     }
     
-    // Send to analytics thread
+    // Send to analytics thread with actual metrics data
     generic_message_t out_msg = {};
     out_msg.sender = SENDER_REALTIME_METRICS;
     out_msg.type = MSG_TYPE_REALTIME_METRICS;
+    
+    // Copy the current metrics to the message
+    memcpy(&out_msg.data.realtime_metrics, &metrics_state.current_metrics, 
+           sizeof(realtime_metrics_t));
     
     k_msgq_put(&realtime_queue, &out_msg, K_NO_WAIT);
     

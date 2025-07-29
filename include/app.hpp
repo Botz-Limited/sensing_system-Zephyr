@@ -19,6 +19,7 @@
 #include <errors.hpp>
 #include <activity_session.hpp>  // For GPSUpdateCommand
 #include "../src/sensor_data/sensor_data_consolidated.hpp"  // For sensor_data_consolidated_t
+#include "../src/realtime_metrics/realtime_metrics.h"  // For realtime_metrics_t
 
 void app_log(const char *fmt, ...);
 
@@ -179,6 +180,17 @@ typedef struct {
     uint8_t sync_quality;  // 0-100%, based on time difference
 } full_synchronized_data_t;
 
+// Analytics results structure for passing complex calculations
+typedef struct {
+    float running_efficiency;    // 0-100%
+    float fatigue_index;        // 0-100
+    float injury_risk;          // 0-100
+    float stride_length;        // meters
+    float pronation_angle;      // degrees
+    float vertical_stiffness;   // N/m
+    uint32_t timestamp_ms;      // When calculated
+} analytics_results_t;
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -211,6 +223,8 @@ typedef struct
         sensor_data_consolidated_t sensor_consolidated;  // Consolidated sensor data
         synchronized_foot_data_t sync_foot_data;  // Add this
         full_synchronized_data_t full_sync_data;  // Full sync data
+        realtime_metrics_t realtime_metrics;  // Real-time metrics data
+        analytics_results_t analytics_results;  // Analytics calculation results
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

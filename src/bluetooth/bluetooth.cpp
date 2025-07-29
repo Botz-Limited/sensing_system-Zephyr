@@ -72,6 +72,10 @@
 #include "activity_metrics_service.h"
 #endif
 
+#if CONFIG_LEGACY_BLE_ENABLED
+#include "legacy/legacy_ble_service.h"
+#endif
+
 // External function declarations
 // Step count functions moved to Activity Metrics Service
 
@@ -1208,7 +1212,14 @@ err_t bt_module_init(void)
     LOG_INF("Information Service UUID: 0c372eaa-27eb-437e-bef4-775aefaf3c97");
 
     // Clear any stale FOTA progress from Information Service
-    fota_progress_msg_t clean_progress = {0};
+    fota_progress_msg_t clean_progress = {
+        .is_active = false,
+        .status = 0,
+        .percent_complete = 0,
+        .bytes_received = 0,
+        .total_size = 0,
+        .error_code = 0
+    };
     jis_fota_progress_notify(&clean_progress);
     LOG_INF("Device Info Service, Control Service, and Information Service are registered via BT_GATT_SERVICE_DEFINE");
 
@@ -1300,6 +1311,10 @@ err_t bt_module_init(void)
     bluetooth_tid =
         k_thread_create(&bluetooth_thread_data, bluetooth_stack_area, K_THREAD_STACK_SIZEOF(bluetooth_stack_area),
                         bluetooth_process, nullptr, nullptr, nullptr, bluetooth_priority, 0, K_NO_WAIT);
+
+#if CONFIG_LEGACY_BLE_ENABLED
+    legacy_ble_init();
+#endif
 
     return err_t::NO_ERROR;
 }

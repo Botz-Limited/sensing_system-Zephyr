@@ -52,6 +52,12 @@ extern struct k_msgq analytics_queue;   // Output to activity_metrics
 static bool module_initialized = false;
 static atomic_t processing_active = ATOMIC_INIT(0);
 
+// Metric history for baseline and trend analysis
+#define METRIC_HISTORY_SIZE 120  // 2 minutes at 1Hz
+static realtime_metrics_t metric_history[METRIC_HISTORY_SIZE];
+static uint8_t history_write_index = 0;
+static uint16_t history_count = 0;
+
 // Analytics state
 static struct {
     // Baseline tracking
@@ -59,6 +65,8 @@ static struct {
     uint32_t baseline_start_time;
     float baseline_contact_time;
     float baseline_efficiency;
+    float baseline_cadence;
+    float baseline_pronation;
     
     // Complex metrics
     float running_efficiency;
@@ -70,10 +78,20 @@ static struct {
     // Processing counters
     uint32_t analytics_count;
     uint32_t last_analytics_time;
+    
+    // Latest metrics from realtime module
+    realtime_metrics_t latest_metrics;
+    bool metrics_updated;
 } analytics_state;
 
 // Forward declarations
 static void analytics_init(void);
+static float calculate_fatigue_index_placeholder(void);
+static float calculate_injury_risk_placeholder(void);
+static float calculate_stride_length_placeholder(void);
+static float calculate_pronation_analysis_placeholder(void);
+static float calculate_vertical_stiffness_placeholder(void);
+static float calculate_recovery_score_placeholder(void);
 /**
  * @brief Main processing thread for analytics, waits for messages and queues work.
  * @param arg1 Unused.
@@ -173,6 +191,19 @@ static void analytics_thread_fn(void *arg1, void *arg2, void *arg3)
             // Queue different work based on message type
             switch (msg.type) {
                 case MSG_TYPE_REALTIME_METRICS:
+                    // Copy the metrics data from the message
+                    memcpy(&analytics_state.latest_metrics, &msg.data.realtime_metrics, 
+                           sizeof(realtime_metrics_t));
+                    analytics_state.metrics_updated = true;
+                    
+                    // Store in history buffer
+                    memcpy(&metric_history[history_write_index], &msg.data.realtime_metrics,
+                           sizeof(realtime_metrics_t));
+                    history_write_index = (history_write_index + 1) % METRIC_HISTORY_SIZE;
+                    if (history_count < METRIC_HISTORY_SIZE) {
+                        history_count++;
+                    }
+                    
                     // Mark that new metrics are available
                     new_metrics_available = true;
                     k_work_submit_to_queue(&analytics_work_q, &process_realtime_metrics_work);
@@ -270,11 +301,27 @@ static void perform_complex_analytics(void)
     // - CPEI path analysis
     // - Stride length estimation with corrections
     
-    // For now, just simulate some calculations
+    // Placeholder implementations - replace with actual algorithms
+    
+    // Running efficiency calculation placeholder
+    // TODO: Should consider: cadence, vertical oscillation, contact time, duty factor
     analytics_state.running_efficiency = 75.0f + (rand() % 10);
-    analytics_state.fatigue_index = fminf(analytics_state.analytics_count * 0.1f, 100.0f);
-    analytics_state.injury_risk = 20.0f + (rand() % 30);
-    analytics_state.stride_length = 1.2f + (rand() % 20) / 100.0f;
+    
+    // Fatigue index calculation placeholder
+    // TODO: Should track: contact time increase, form degradation, asymmetry increase
+    analytics_state.fatigue_index = calculate_fatigue_index_placeholder();
+    
+    // Injury risk assessment placeholder
+    // TODO: Should analyze: loading rate, pronation, asymmetry, fatigue level
+    analytics_state.injury_risk = calculate_injury_risk_placeholder();
+    
+    // Stride length estimation placeholder
+    // TODO: Should use: height, cadence, speed, terrain adjustment
+    analytics_state.stride_length = calculate_stride_length_placeholder();
+    
+    // Pronation analysis placeholder
+    // TODO: Should track: pronation angle trends, left/right differences
+    analytics_state.pronation_angle = calculate_pronation_analysis_placeholder();
     
     // Log periodically
     if (analytics_state.analytics_count % 25 == 0) {
@@ -284,23 +331,60 @@ static void perform_complex_analytics(void)
                 (double)analytics_state.injury_risk);
     }
     
-    // Send to session management
+    // Send to session management with actual analytics data
     generic_message_t out_msg = {};
     out_msg.sender = SENDER_ANALYTICS;
     out_msg.type = MSG_TYPE_ANALYTICS_RESULTS;
+    
+    // Populate analytics results
+    out_msg.data.analytics_results.running_efficiency = analytics_state.running_efficiency;
+    out_msg.data.analytics_results.fatigue_index = analytics_state.fatigue_index;
+    out_msg.data.analytics_results.injury_risk = analytics_state.injury_risk;
+    out_msg.data.analytics_results.stride_length = analytics_state.stride_length;
+    out_msg.data.analytics_results.pronation_angle = analytics_state.pronation_angle;
+    out_msg.data.analytics_results.vertical_stiffness = calculate_vertical_stiffness_placeholder();
+    out_msg.data.analytics_results.timestamp_ms = k_uptime_get_32();
     
     k_msgq_put(&analytics_queue, &out_msg, K_NO_WAIT);
 }
 // Establish baseline metrics
 static void establish_baseline(void)
 {
-    // TODO: Accumulate baseline metrics during first 2 minutes
-    // - Average contact time
-    // - Average efficiency
-    // - Normal pronation range
-    // - Typical stride length
+    // TODO: Implement more sophisticated baseline calculation
+    // For now, calculate simple averages from history
     
-    LOG_DBG("Establishing baseline...");
+    if (history_count < 10) {
+        // Not enough data yet
+        return;
+    }
+    
+    // Calculate baseline averages from history
+    float total_contact_time = 0;
+    float total_cadence = 0;
+    float total_pronation = 0;
+    float total_efficiency = 0;
+    
+    uint16_t samples = MIN(history_count, 60); // Use up to 60 seconds of data
+    uint16_t start_idx = (history_write_index + METRIC_HISTORY_SIZE - samples) % METRIC_HISTORY_SIZE;
+    
+    for (uint16_t i = 0; i < samples; i++) {
+        uint16_t idx = (start_idx + i) % METRIC_HISTORY_SIZE;
+        total_contact_time += metric_history[idx].ground_contact_ms;
+        total_cadence += metric_history[idx].cadence_spm;
+        total_pronation += abs(metric_history[idx].avg_pronation_deg);
+        total_efficiency += metric_history[idx].efficiency_score;
+    }
+    
+    analytics_state.baseline_contact_time = total_contact_time / samples;
+    analytics_state.baseline_cadence = total_cadence / samples;
+    analytics_state.baseline_pronation = total_pronation / samples;
+    analytics_state.baseline_efficiency = total_efficiency / samples;
+    
+    LOG_DBG("Baseline: contact=%.1fms, cadence=%.1f, pronation=%.1f°, efficiency=%.1f%%",
+            (double)analytics_state.baseline_contact_time,
+            (double)analytics_state.baseline_cadence,
+            (double)analytics_state.baseline_pronation,
+            (double)analytics_state.baseline_efficiency);
 }
 
 // Module event handler
@@ -323,3 +407,79 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, module_state_event);
+
+// Placeholder function implementations
+// TODO: Replace these with actual biomechanical algorithms
+
+static float calculate_fatigue_index_placeholder(void)
+{
+    // TODO: Implement actual fatigue detection algorithm
+    // Should track:
+    // - Contact time increase over baseline
+    // - Form score degradation
+    // - Asymmetry increase
+    // - Cadence decrease
+    // For now, simple linear increase based on time
+    return fminf(analytics_state.analytics_count * 0.1f, 100.0f);
+}
+
+static float calculate_injury_risk_placeholder(void)
+{
+    // TODO: Implement actual injury risk assessment
+    // Should analyze:
+    // - Loading rate trends
+    // - Pronation angles (excessive)
+    // - Asymmetry levels
+    // - Fatigue level
+    // - Previous injury history
+    // For now, random value between 20-50%
+    return 20.0f + (rand() % 30);
+}
+
+static float calculate_stride_length_placeholder(void)
+{
+    // TODO: Implement actual stride length calculation
+    // Should use:
+    // - User height
+    // - Current cadence
+    // - Current speed (from GPS or estimated)
+    // - Terrain adjustment factor
+    // - Running style (overstriding detection)
+    // For now, return typical value 1.2-1.4m
+    return 1.2f + (rand() % 20) / 100.0f;
+}
+
+static float calculate_pronation_analysis_placeholder(void)
+{
+    // TODO: Implement pronation trend analysis
+    // Should track:
+    // - Average pronation angle
+    // - Left/right differences
+    // - Changes with fatigue
+    // - Correlation with strike pattern
+    // For now, return normal range value
+    return -5.0f + (rand() % 10);
+}
+
+static float calculate_vertical_stiffness_placeholder(void)
+{
+    // TODO: Implement vertical stiffness calculation
+    // Should calculate:
+    // - Spring-mass model stiffness
+    // - Based on vertical oscillation and ground contact
+    // - Normalized by body weight
+    // For now, return typical value
+    return 200.0f + (rand() % 50);
+}
+
+static float calculate_recovery_score_placeholder(void)
+{
+    // TODO: Implement recovery quality assessment
+    // Should evaluate:
+    // - Heart rate recovery (if available)
+    // - Gait quality post-activity
+    // - Asymmetry resolution
+    // - Return to baseline metrics
+    // For now, return good recovery score
+    return 75.0f + (rand() % 25);
+}

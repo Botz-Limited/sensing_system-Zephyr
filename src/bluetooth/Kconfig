@@ -147,4 +147,11 @@ config D2D_DISCOVERY_RETRY_DELAY_MS
 	help
 	  Delay between D2D service discovery retry attempts.
 
+config LEGACY_BLE_ENABLED
+	bool "Enable legacy BLE services for old app compatibility"
+	default n
+	help
+	  Temporarily enable legacy BLE services to mimic old firmware for mobile app compatibility.
+	  This is isolated and won't affect current BLE functionality.
+
 endif # BLUETOOTH_MODULE

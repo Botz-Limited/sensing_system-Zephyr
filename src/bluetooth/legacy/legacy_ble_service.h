@@ -1,0 +1,10 @@
+#ifndef LEGACY_BLE_SERVICE_H
+#define LEGACY_BLE_SERVICE_H
+
+#if CONFIG_LEGACY_BLE_ENABLED
+
+void legacy_ble_init(void);
+
+#endif // CONFIG_LEGACY_BLE_ENABLED
+
+#endif // LEGACY_BLE_SERVICE_H
