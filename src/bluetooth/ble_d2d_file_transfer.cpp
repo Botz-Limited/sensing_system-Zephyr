@@ -268,7 +268,7 @@ static int handle_list_command(void)
             file_entry.name[sizeof(file_entry.name) - 1] = '\0';
             
             // Send entry
-            // Boundary check and rolling mechanism for sequence
+             // Boundary check and rolling mechanism for sequence
             // Risk: Overflows after 65,535 packets
             // Strategy: Reset to 0 on overflow; log event; notify receiver if needed
             if (seq >= UINT16_MAX - 1) {
