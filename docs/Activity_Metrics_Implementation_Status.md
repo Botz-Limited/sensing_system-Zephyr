@@ -1,7 +1,7 @@
 # Activity Metrics Multi-Thread Implementation Status
 
 **Date:** July 2025  
-**Version:** 1.4  
+**Version:** 1.5  
 **Status:** All modules implemented with thread-safe patterns, GPS support complete
 
 ---
@@ -27,7 +27,7 @@ The multi-thread architecture for activity metrics processing has been successfu
 │                                                               │
 │  ┌─────────────────┐  ┌──────────────────┐                  │
 │  │  Sensor Thread  │  │ Real-time Thread │                  │
-│  │   (100Hz)       │  │    (10-50Hz)     │                  │
+│  │   (80Hz)        │  │    (10-50Hz)     │                  │
 │  │   Priority: 6   │  │   Priority: 5    │                  │
 │  └────────┬────────┘  └────────┬─────────┘                  │
 │           │                     │                             │
@@ -52,14 +52,14 @@ The multi-thread architecture for activity metrics processing has been successfu
 
 ### 1. sensor_data Module ✅ IMPLEMENTED
 
-**Status:** Core processing algorithms implemented and optimized for 100Hz operation
+**Status:** Core processing algorithms implemented and optimized for 80Hz operation
 
 **Location:** `/src/sensor_data/`
 
 **Configuration:**
 - Thread Priority: 6 (High)
 - Stack Size: 4096 bytes
-- Update Rate: 100Hz
+- Update Rate: 80Hz
 - Log Level: INFO
 
 **Implemented:**
@@ -70,9 +70,9 @@ The multi-thread architecture for activity metrics processing has been successfu
   - `process_foot_data_work` - Handles foot sensor data
   - `process_imu_data_work` - Handles BHI360 IMU data
   - `process_command_work` - Handles control commands
-  - `periodic_sample_work` - 100Hz periodic sampling
+  - `periodic_sample_work` - 80Hz periodic sampling
 - [x] Message queue reception (`sensor_data_msgq`)
-- [x] 100Hz timing loop via delayable work
+- [x] 80Hz timing loop via delayable work
 - [x] Module state management
 - [x] Fast processing algorithms (`sensor_data_fast_processing.h`)
 - [x] Ground contact/flight phase detection with hysteresis
@@ -464,7 +464,7 @@ foot_sensor ────┘                                                     
    - Mitigation: Implement core algorithms incrementally
 
 3. **Untested Multi-Thread Timing**
-   - Impact: May miss 100Hz deadline or have timing drift
+   - Impact: May miss 80Hz deadline or have timing drift
    - Mitigation: Implement timing monitoring and testing
 
 ### Medium Priority Risks 🟡
@@ -497,7 +497,7 @@ foot_sensor ────┘                                                     
 2. **Implement Basic Sensor Data Processing** ⏱️ 4 hours
    - Add ground contact detection
    - Add timestamp management
-   - Test 100Hz timing accuracy
+   - Test 80Hz timing accuracy
 
 3. **Implement Basic Realtime Metrics** ⏱️ 4 hours
    - Add cadence calculation
@@ -539,7 +539,7 @@ foot_sensor ────┘                                                     
 
 ### Functional Requirements ✅
 - [x] Four threads created with correct priorities
-- [ ] 100Hz sensor sampling achieved
+- [ ] 80Hz sensor sampling achieved
 - [ ] 1Hz BLE updates delivered
 - [ ] All metrics from specification calculated
 - [ ] Session data logged to files
@@ -636,6 +636,81 @@ The architecture provides a solid foundation for implementing the comprehensive 
 
 ---
 
+## Weight Measurement Architecture
+
+### Overview
+
+The weight measurement system is designed with a centralized approach where only the primary device calculates the total body weight using raw pressure data from both feet.
+
+### Architecture Details
+
+**Primary Device (Right Foot):**
+- Receives left foot pressure data via D2D BLE connection
+- Combines with local right foot pressure data
+- Calculates total weight using all 16 pressure sensors (8 per foot)
+- Applies calibration factor to convert pressure to weight
+
+**Secondary Device (Left Foot):**
+- Sends raw pressure data to primary via D2D
+- Does NOT calculate weight independently
+- `CONFIG_ACTIVITY_METRICS_MODULE=n` (disabled)
+- Focuses on data collection only
+
+### Data Flow
+
+```
+Secondary Device                    Primary Device
+┌─────────────────┐                ┌─────────────────┐
+│ Left Foot       │                │ Right Foot      │
+│ 8 Pressure      │   D2D BLE      │ 8 Pressure      │
+│ Sensors         ├───────────────►│ Sensors         │
+└─────────────────┘  Raw Data      └────────┬────────┘
+                                            │
+                                            ▼
+                                    ┌─────────────────┐
+                                    │ Weight Calc     │
+                                    │ Sum all 16      │
+                                    │ sensors         │
+                                    │ Apply calib     │
+                                    └────────┬────────┘
+                                            │
+                                            ▼
+                                    Total Body Weight
+```
+
+### Implementation Details
+
+**In `activity_metrics.cpp`:**
+```c
+// Calculate total pressure from both feet
+float total_pressure = 0;
+for (int i = 0; i < 8; i++) {
+    total_pressure += sensor_data.left_pressure[i];    // From D2D
+    total_pressure += sensor_data.right_pressure[i];   // Local
+}
+// Apply calibration
+weight_kg = (total_pressure * scale_factor) / 9.81;
+```
+
+### Advantages of This Approach
+
+1. **Single Calibration Point**: Only one set of calibration values to maintain
+2. **Better Accuracy**: Primary has visibility of all sensors simultaneously
+3. **Resource Efficiency**: Secondary device saves memory and CPU
+4. **Simpler Error Handling**: No synchronization issues between two calculations
+5. **Already Working**: Current implementation is functional
+
+### Alternative Approach (Not Implemented)
+
+The system has infrastructure for bilateral weight calculation where each device would calculate its own weight and send via D2D:
+- D2D weight measurement characteristic exists (`0xe160ca8b...`)
+- `ble_d2d_tx_send_weight_measurement()` function available
+- Weight aggregation logic in `bluetooth.cpp`
+
+However, this is intentionally not used in favor of the centralized approach.
+
+---
+
 ## Important Notes
 
 ### GPS Support Status ✅ IMPLEMENTED (December 2024)
@@ -713,3 +788,4 @@ This feature enhances accuracy from ±15-20% (sensor-only) to ±1-3% (with GPS c
 | 1.2 | July 2025 | System | Added comprehensive metrics progress tracking table |
 | 1.3 | July 2025 | System | Updated BLE integration status, added Bluetooth module updates section |
 | 1.4 | December 2024 | System | Updated activity_metrics with thread-safe work item pattern |
+| 1.5 | July 2025 | System | Added Weight Measurement Architecture section, corrected 100Hz to 80Hz |

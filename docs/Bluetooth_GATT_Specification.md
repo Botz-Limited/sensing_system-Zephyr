@@ -1,13 +1,18 @@
 # Bluetooth GATT Specification
 
-**Version:** 2.8  
-**Date:** December 2024  
+**Version:** 2.11  
+**Date:** July 2025  
 **Scope:** Complete Bluetooth GATT services, characteristics, and protocols for mobile app and device integration  
 **Purpose:** Comprehensive reference for BLE integration including fixed-point data formats, service definitions, and implementation examples
 
 ---
 
 ## Changelog
+
+### Version 2.11 (July 2025)
+- Added System Sampling Rates section to clarify actual sensor data rates
+- Corrected documentation to reflect 80Hz foot sensor sampling (not 100Hz)
+- Clarified that sensor_data module processes at 80Hz
 
 ### Version 2.10 (December 2024)
 - Added GPS Update characteristic (`...b68e`) to Control Service
@@ -172,6 +177,15 @@ All sensor data uses fixed-point integers to optimize bandwidth and ensure porta
 | Linear Acceleration | 1,000 | 0.001 m/s² | ±20 m/s² | 9.81 → 9810 |
 | Gyroscope | 10,000 | 0.0001 rad/s | ±2.0 rad/s | 1.5708 → 15708 |
 | Accuracy | 100 | 0.01 | 0-3.0 | 2.5 → 250 |
+
+### System Sampling Rates
+
+| Data Source | Actual Rate | Description |
+|---:|---:|---:|
+| Foot Pressure Sensors | 80Hz | 8-channel ADC sampling |
+| BHI360 Motion Sensor | 50Hz | Quaternion, acceleration, gyroscope |
+| Sensor Data Processing | 80Hz | Consolidated sensor fusion |
+| Real-time Metrics | 1Hz | BLE transmission rate |
 
 ### Bandwidth Comparison
 

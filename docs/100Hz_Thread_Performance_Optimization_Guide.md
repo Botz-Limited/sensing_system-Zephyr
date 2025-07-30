@@ -1,8 +1,10 @@
-# 100Hz Thread Performance Optimization Guide
+# 80Hz Thread Performance Optimization Guide
 
-**Version:** 1.0  
-**Date:** June 2025  
-**Purpose:** Comprehensive guide for optimizing the sensor_data thread to maintain reliable 100Hz operation
+**Version:** 1.1  
+**Date:** July 2025  
+**Purpose:** Comprehensive guide for optimizing the sensor_data thread to maintain reliable 80Hz operation
+
+> **Note:** This guide has been updated to reflect the actual implementation running at 80Hz, not 100Hz as originally designed.
 
 ---
 
@@ -22,13 +24,13 @@
 
 ## Performance Requirements
 
-### 100Hz Thread Constraints
+### 80Hz Thread Constraints
 
 The sensor_data thread must process all sensor data within strict timing constraints:
 
-- **Period**: 10ms (100Hz)
-- **Target Processing Time**: <2ms per cycle
-- **Maximum Processing Time**: 5ms (50% duty cycle)
+- **Period**: 12.5ms (80Hz)
+- **Target Processing Time**: <2.5ms per cycle
+- **Maximum Processing Time**: 6ms (48% duty cycle)
 - **Jitter Tolerance**: ±0.5ms
 - **Stack Usage**: <2KB
 - **Interrupt Latency**: <10μs
@@ -758,14 +760,35 @@ void test_optimization_correctness(void) {
 
 ---
 
+## Implementation Status
+
+> **Note:** As of July 2025, the following optimizations are documented but not yet implemented:
+
+### Not Implemented:
+- **Performance Profiling**: DWT cycle counter setup and `perf_stats_t` structures
+- **CMSIS-DSP Library**: No DSP library usage found in code
+- **Assembly Optimizations**: No assembly code implementations
+- **DSP Intrinsics**: No manual DSP intrinsic usage
+
+### Currently Implemented:
+- **Basic C algorithms** with inline functions
+- **80Hz operation** (not 100Hz as originally planned)
+- **Simple optimizations** like loop unrolling for 8-channel summation
+- **Hardware FPU usage** for float calculations
+
+### Recommendation:
+The current C implementation appears sufficient for 80Hz operation. Advanced optimizations should only be implemented if profiling shows performance bottlenecks.
+
+---
+
 ## Conclusion
 
-The nRF5340 provides excellent hardware capabilities for 100Hz sensor processing:
+The nRF5340 provides excellent hardware capabilities for 80Hz sensor processing:
 
 1. **Use the FPU** for complex calculations - it's fast!
-2. **Use DSP instructions** for parallel operations on sensor arrays
+2. **Use DSP instructions** for parallel operations on sensor arrays (when needed)
 3. **Start with C optimization** - often sufficient
 4. **Profile everything** - measure before optimizing
 5. **Assembly as last resort** - only for proven bottlenecks
 
-The key is to design efficient algorithms from the start, use the hardware features available, and only optimize what actually needs it based on profiling data.
+The key is to design efficient algorithms from the start, use the hardware features available, and only optimize what actually needs it based on profiling data. The current implementation successfully achieves 80Hz operation without requiring the advanced optimizations documented here.

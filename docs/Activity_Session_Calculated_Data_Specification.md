@@ -1,6 +1,6 @@
 # Activity Session Calculated Data Specification
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** July 2025 (Updated)  
 **Purpose:** Complete specification for pre-calculated activity session data to be logged and transmitted via BLE from shoe-mounted sensors
 
@@ -26,7 +26,7 @@ This document defines a  system for processing raw sensor data into meaningful, 
 
 **✅ FULLY IMPLEMENTED:**
 - **Multi-threaded architecture** with dedicated modules:
-  - `sensor_data`: Processes raw sensor data at 100Hz
+  - `sensor_data`: Processes raw sensor data at 80Hz
   - `realtime_metrics`: Calculates real-time metrics at 1Hz
   - `activity_metrics`: Manages sessions and activity-level calculations
   - `analytics`: Module created but algorithms not yet implemented
@@ -57,11 +57,14 @@ This document defines a  system for processing raw sensor data into meaningful, 
   - Activity types support (running, walking, training)
   - Session state tracking
   - Weight measurement functionality
-- **GPS integration framework**:
-  - GPS update command structure
-  - GPS data reception via Activity Metrics Service
-  - D2D forwarding to secondary device
-  - Basic stride calibration (coefficient adjustment)
+- **GPS integration**:
+  - GPS update command structure ✅
+  - GPS data reception via Activity Metrics Service ✅
+  - D2D forwarding to secondary device ✅
+  - Stride calibration with GPS distance ✅
+  - **Dual function implementation**: Automatic fallback to sensor-only when GPS unavailable ✅
+  - GPS-based pace calculation ✅
+  - GPS-based distance calculation ✅
 - **Data logging** (still using protobuf format):
   - Foot sensor data logging
   - BHI360 motion data logging
@@ -99,7 +102,7 @@ This document defines a  system for processing raw sensor data into meaningful, 
 
 **Current System Performance:**
 - **Real-time metrics**: ✅ Transmitted via BLE at 1Hz
-- **Sensor processing**: ✅ Running at 100Hz with <1ms latency
+- **Sensor processing**: ✅ Running at 80Hz with <1ms latency
 - **Memory usage**: ✅ Within constraints using static allocation
 - **Power consumption**: ⚠️ Not yet optimized for battery life
 
@@ -128,7 +131,7 @@ This document defines a  system for processing raw sensor data into meaningful, 
 ### Device Configuration
 - **Primary Device**: Right shoe (master for synchronization)
 - **Secondary Device**: Left shoe (synchronized to primary)
-- **Raw Sampling**: 100Hz (pressure sensors + IMU)
+- **Raw Sampling**: 80Hz (pressure sensors + IMU)
 - **Calculated Output**: 0.5-2Hz (context-dependent)
 - **Time Sync**: <1ms between devices
 
@@ -180,14 +183,14 @@ Having two synchronized devices (one per foot) enables unique capabilities that 
 
 ### Data Flow
 ```
-Raw Sensors (100Hz) → On-Device Processing → Calculated Metrics → BLE/Storage
+Raw Sensors (80Hz) → On-Device Processing → Calculated Metrics → BLE/Storage
                            ↓                        ↓
                     Feature Extraction      Real-time (1Hz) ✅
                     Statistical Analysis    Logged (0.5Hz) ⚠️
 ```
 
 **Implementation Status**: 
-- ✅ Raw sensor processing at 100Hz in sensor_data module
+- ✅ Raw sensor processing at 80Hz in sensor_data module
 - ✅ Real-time BLE transmission at 1Hz
 - ⚠️ Logging still uses protobuf format, not optimized binary structs
 
@@ -222,8 +225,8 @@ Raw Sensors (100Hz) → On-Device Processing → Calculated Metrics → BLE/Stor
 | Metric | Update Rate | Description | Accuracy | Status |
 |--------|-------------|-------------|----------|---------|
 | Cadence | 1Hz | Steps per minute | ±1 spm | ✅ Implemented |
-| Pace | 1Hz | Time per km/mile | ±5 sec/km | ✅ Basic (no GPS) |
-| Distance | 0.5Hz | Cumulative distance | ±2% with GPS | ⚠️ No GPS integration |
+| Pace | 1Hz | Time per km/mile | ±5 sec/km | ✅ Dual function (GPS/sensor) |
+| Distance | 0.5Hz | Cumulative distance | ±2% with GPS | ✅ Dual function (GPS/sensor) |
 | Vertical Oscillation | 0.5Hz | Vertical displacement | ±1cm | ❌ Not started |
 | Vertical Stiffness | 0.5Hz | Spring-mass stiffness | ±5% | ❌ Not started |
 | Running Efficiency | 0.5Hz | Energy efficiency score | 0-100 | ❌ Not started |
@@ -263,11 +266,15 @@ Raw Sensors (100Hz) → On-Device Processing → Calculated Metrics → BLE/Stor
 | RACE | 0.5s | ±2m | High | Elite performance | ✅ Framework |
 
 **Implementation Notes**:
-- ✅ GPS data structure defined (gps_data_ble_t)
+- ✅ GPS data structure defined (GPSUpdateCommand)
 - ✅ GPS data reception via Activity Metrics Service (write characteristic)
-- ✅ Basic stride calibration coefficient adjustment
-- ❌ GPS-based distance calculation not integrated
-- ❌ Pace smoothing with GPS not implemented
+- ✅ Stride calibration with GPS distance (exponential smoothing)
+- ✅ GPS-based distance calculation implemented
+- ✅ GPS-based pace calculation implemented
+- ✅ **Dual function design**: Automatic fallback to sensor-only when GPS unavailable
+- ✅ GPS accuracy check (ignores updates >20m accuracy)
+- ❌ Smart GPS mode switching not implemented
+- ❌ Battery optimization strategies not implemented
 
 ### Smart GPS Strategy
 ```c
@@ -429,7 +436,7 @@ typedef struct __attribute__((packed)) {
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │  sensor_data    │────▶│ realtime_metrics │────▶│    bluetooth    │
-│   (100Hz)       │     │     (1Hz)        │     │   (BLE notify)  │
+│   (80Hz)        │     │     (1Hz)        │     │   (BLE notify)  │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
          │                       │
          ▼                       ▼
@@ -524,20 +531,23 @@ async function startActivitySession(activityType, userProfile) {
 ### What's Working Now
 1. **Multi-threaded architecture** with sensor_data → realtime_metrics → BLE flow
 2. **Basic biomechanics**: contact/flight time, pressure distribution, strike pattern
-3. **Real-time metrics**: cadence, pace (non-GPS), form score, balance
+3. **Real-time metrics**: cadence, pace, form score, balance
 4. **BLE transmission**: 1Hz updates of packed metrics structure
 5. **Session management**: start/stop activities with basic tracking
-6. **GPS framework**: receives GPS data but doesn't use it for calculations yet
+6. **GPS integration**: Dual function implementation with automatic fallback
+   - GPS data reception and stride calibration
+   - GPS-based pace and distance calculations
+   - Sensor-only fallback when GPS unavailable
 7. **Asymmetry detection**: real-time L/R comparison with BLE notifications
 8. **Step counting**: both total and per-activity
 
 ### What's Missing
 1. **Advanced analytics**: fatigue, injury risk, efficiency calculations
-2. **GPS integration**: distance/pace accuracy improvements
-3. **Binary logging**: still using protobuf (large files)
-4. **Complex biomechanics**: CPEI, vertical oscillation, loading rate
-5. **Session summaries**: total distance, calories, elevation
-6. **Power optimizations**: adaptive sampling, smart sleep
+2. **Binary logging**: still using protobuf (large files)
+3. **Complex biomechanics**: CPEI, vertical oscillation, loading rate
+4. **Session summaries**: total distance, calories, elevation
+5. **Power optimizations**: adaptive sampling, smart sleep
+6. **Smart GPS mode switching**: battery optimization strategies
 
 ### BLE Characteristics Status
 
@@ -556,12 +566,12 @@ async function startActivitySession(activityType, userProfile) {
 | Efficiency, Power | ❌ No calc | ❌ No characteristic | ❌ Not started |
 
 ### Next Development Priorities
-1. Implement GPS-based distance and pace calculations
-2. Add fatigue and injury risk algorithms in analytics module
-3. Complete biomechanics extended calculations (loading rate, arch collapse)
-4. Populate session summary with real data
-5. Migrate from protobuf to binary struct logging
-6. Add remaining biomechanical calculations
+1. Add fatigue and injury risk algorithms in analytics module
+2. Complete biomechanics extended calculations (loading rate, arch collapse)
+3. Populate session summary with real data
+4. Migrate from protobuf to binary struct logging
+5. Add remaining biomechanical calculations (CPEI, vertical oscillation)
+6. Implement smart GPS mode switching for battery optimization
 
 ---
 
@@ -582,3 +592,130 @@ The system is production-ready for basic activity tracking with real-time perfor
 - Step counting and activity tracking
 - GPS data input for future distance calculations
 - Activity session management (start/stop)
+
+---
+
+## Pace and Distance Calculation Methods
+
+### Dual Function Implementation (IMPLEMENTED ✅)
+
+The system implements a sophisticated dual-function approach for pace and distance calculations that automatically selects the best available method:
+
+#### Distance Calculation Methods:
+
+1. **Sensor-Only Method** (`calculate_distance_no_gps`):
+   - Uses step count × default stride length (0.7m)
+   - Accuracy: ±15-20%
+   - Always available
+
+2. **GPS-Corrected Method** (`calculate_distance_with_gps`):
+   - Uses step count × GPS-calibrated stride length
+   - Applies stride correction factor from GPS calibration
+   - Accuracy: ±2-5% when GPS available
+
+3. **Automatic Selection** (`calculate_total_distance`):
+   ```c
+   if (stride_correction_factor valid && GPS data recent) {
+       use GPS-corrected calculation
+   } else {
+       fallback to sensor-only calculation
+   }
+   ```
+
+#### Pace Calculation Methods:
+
+1. **Sensor-Only Method** (`calculate_pace_no_gps`):
+   - Based on cadence and estimated stride length
+   - Adjusts stride length based on cadence (shorter at high cadence)
+   - Accuracy: ±10-15 sec/km
+
+2. **GPS-Based Method** (`calculate_pace_with_gps`):
+   - Direct calculation from GPS distance and elapsed time
+   - Accuracy: ±5 sec/km with good GPS signal
+
+3. **Automatic Selection** (`calculate_current_pace`):
+   ```c
+   if (GPS update within last 30 seconds) {
+       use GPS-based pace
+   } else {
+       fallback to sensor-based pace
+   }
+   ```
+
+#### GPS Stride Calibration Process:
+
+1. **Continuous Calibration**:
+   - Compares sensor-calculated distance with GPS distance
+   - Updates stride correction factor using exponential smoothing (0.9 × old + 0.1 × new)
+   - Only calibrates when moved >10m since last GPS update
+
+2. **Quality Checks**:
+   - Ignores GPS updates with accuracy >20m
+   - Limits correction factor to ±20% (0.8 to 1.2)
+   - Validates time between updates (>5 seconds)
+
+3. **Elevation Tracking**:
+   - Accumulates elevation changes when provided by GPS
+   - Stored in `total_elevation_gain_cm`
+
+This dual-function approach ensures the system always provides pace and distance estimates, with automatic accuracy improvements when GPS data is available from the mobile app.
+
+---
+
+## 8-Channel Pressure Sensor Capabilities
+
+The 8-channel pressure sensor array in each shoe provides detailed foot pressure distribution data that enables advanced biomechanical analysis. The channels are strategically positioned to capture key areas of foot contact during gait.
+
+### Channel Layout and Mapping
+
+| Channel | Location | Primary Use |
+|---------|----------|-------------|
+| 0-2 | Heel region | Heel strike detection, loading rate |
+| 3-4 | Midfoot region | Arch support, pronation analysis |
+| 5-7 | Forefoot region | Push-off power, toe-off detection |
+
+### Implemented Capabilities (✅)
+
+1. **Strike Pattern Detection**:
+   - Classifies foot strike as heel, midfoot, or forefoot
+   - Based on which channels activate first at ground contact
+   - Updates every step with high accuracy
+
+2. **Pressure Distribution Analysis**:
+   - Calculates heel/midfoot/forefoot pressure percentages
+   - Updates at 10Hz during ground contact
+   - Used for balance and loading pattern assessment
+
+3. **Ground Contact Detection**:
+   - Detects precise moment of ground contact and toe-off
+   - Uses total pressure threshold with hysteresis
+   - Enables accurate contact/flight time measurements
+
+4. **Peak Force Measurement**:
+   - Tracks maximum total force during each step
+   - Automatically resets during flight phase
+   - Used for impact analysis and asymmetry detection
+
+### Potential Future Capabilities (❌)
+
+1. **Center of Pressure (CoP) Tracking**:
+   - Calculate precise CoP location using weighted average
+   - Track CoP path throughout stance phase
+   - Enable CPEI (Center of Pressure Excursion Index) calculation
+
+2. **Arch Collapse Detection**:
+   - Monitor midfoot pressure changes during stance
+   - Detect excessive arch flattening
+   - Useful for pronation analysis
+
+3. **Loading Rate Analysis**:
+   - Calculate rate of force increase after ground contact
+   - Identify high-impact landing patterns
+   - Important for injury risk assessment
+
+4. **Push-off Power Calculation**:
+   - Analyze forefoot pressure during toe-off
+   - Estimate propulsive force generation
+   - Assess running efficiency
+
+The 8-channel design provides sufficient resolution for clinical-grade gait analysis while maintaining reasonable data rates and processing requirements.

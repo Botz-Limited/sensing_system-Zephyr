@@ -25,7 +25,7 @@ This guide provides comprehensive information about implementing Firmware Over-T
 │  Primary Device │
 │   (SMP Proxy)   │
 └────────┬────────┘
-         │ UART
+         │ BLE (D2D)
          │ SMP Protocol
 ┌────────▼────────┐
 │Secondary Device │
@@ -36,8 +36,8 @@ This guide provides comprehensive information about implementing Firmware Over-T
 ## BLE Service Details
 
 ### SMP Proxy Service
-- **Service UUID**: `14387800-130c-49e7-b877-2881c89cb258`
-- **Characteristic UUID**: `14387802-130c-49e7-b877-2881c89cb258`
+- **Service UUID**: `8D53DC1E-1DB7-4CD3-868B-8A527460AA84`
+- **Characteristic UUID**: `DA2E7828-FBCE-4E01-AE9E-261174997C48`
 - **Properties**: Write Without Response, Notify
 
 This single service handles all MCUmgr operations including:

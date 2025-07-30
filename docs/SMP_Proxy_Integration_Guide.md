@@ -39,7 +39,7 @@ sequenceDiagram
     App->>Primary: Write Target = 0x01
     App->>Primary: Standard SMP command
     Primary->>Primary: Check target
-    Primary->>Secondary: Forward SMP via D2D
+    Primary->>Secondary: Forward SMP via BLE (D2D)
     Secondary->>Secondary: Process SMP
     Secondary-->>Primary: SMP Response
     Primary-->>App: Forward Response
@@ -108,7 +108,7 @@ sequenceDiagram
     
     Note over App,Secondary: Step 2: Verify D2D Connection
     App->>Primary: SMP: Echo Request
-    Primary->>Secondary: Forward SMP via UART
+    Primary->>Secondary: Forward SMP via BLE (D2D)
     Secondary-->>Primary: SMP: Echo Response
     Primary-->>App: Forward Response
     
@@ -124,9 +124,9 @@ sequenceDiagram
     Secondary-->>Primary: Upload Response (offset=0)
     Primary-->>App: Forward Response
     
-    loop Upload Chunks (slower due to UART)
+    loop Upload Chunks (slower due to D2D)
         App->>Primary: SMP: Image Upload Data<br/>(offset, data[256 bytes max])
-        Primary->>Secondary: Forward via UART
+        Primary->>Secondary: Forward via BLE (D2D)
         Secondary-->>Primary: Upload Response
         Primary-->>App: Forward Response
     end
@@ -158,7 +158,7 @@ sequenceDiagram
 |--------|----------------|------------------|
 | Target Value | 0x00 | 0x01 |
 | Chunk Size | Up to 512 bytes | 256 bytes recommended |
-| Transfer Speed | Fast (BLE direct) | Slower (BLE→UART→Device) |
+| Transfer Speed | Fast (BLE direct) | Slower (BLE→D2D→Device) |
 | Connection Check | Not needed | Echo test recommended |
 | Typical Time | 30-60 seconds | 2-5 minutes |
 | Error Recovery | BLE retransmit | May need full restart |
@@ -224,7 +224,7 @@ sequenceDiagram
     
     loop While offset < len (slower)
         App->>Primary: SMP: FS Download Request<br/>(name, offset)
-        Primary->>Secondary: Forward via UART
+        Primary->>Secondary: Forward via BLE (D2D)
         Secondary-->>Primary: FS Download Response
         Primary-->>App: Forward Response
     end
@@ -265,7 +265,7 @@ sequenceDiagram
     
     loop Until complete (slower)
         App->>Primary: SMP: FS Upload Request<br/>(offset, data[256])
-        Primary->>Secondary: Forward via UART
+        Primary->>Secondary: Forward via BLE (D2D)
         Secondary-->>Primary: FS Upload Response
         Primary-->>App: Forward Response
     end
@@ -602,9 +602,9 @@ def get_optimal_chunk_size(target, connection_quality):
         else:
             return 256  # Conservative
     else:
-        # Secondary via UART
+        # Secondary via D2D BLE
         if connection_quality == "excellent":
-            return 256  # UART limited
+            return 256  # D2D BLE bandwidth limited
         else:
             return 128  # Very conservative
 ```

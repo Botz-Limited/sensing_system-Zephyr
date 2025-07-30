@@ -15,13 +15,13 @@ LOG_MODULE_REGISTER(data_dispatcher, CONFIG_APP_LOG_LEVEL);
 
 // Thread configuration
 static constexpr int dispatcher_stack_size = 2048;
-static constexpr int dispatcher_priority = 5; // Lower priority than sensor_data (100Hz)
+static constexpr int dispatcher_priority = 4; // Lower priority than sensor_data (100Hz)
 K_THREAD_STACK_DEFINE(dispatcher_stack_area, dispatcher_stack_size);
 static struct k_thread dispatcher_thread_data;
 static k_tid_t dispatcher_tid;
 
 // Work queue configuration
-static constexpr int dispatcher_workq_stack_size = 1024;
+static constexpr int dispatcher_workq_stack_size = 2048;
 K_THREAD_STACK_DEFINE(dispatcher_workq_stack, dispatcher_workq_stack_size);
 static struct k_work_q dispatcher_work_q;
 
