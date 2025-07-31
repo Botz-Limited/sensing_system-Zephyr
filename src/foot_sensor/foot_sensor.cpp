@@ -486,7 +486,7 @@ static err_t init_saadc(void) {
 
   // 3. Populate the configuration for each SAADC channel into the array.
   for (int i = 0; i < SAADC_CHANNEL_COUNT; i++) {
-    all_nrfx_channels[i].channel_config = {.gain = NRF_SAADC_GAIN1_6,
+    all_nrfx_channels[i].channel_config = {.gain = NRF_SAADC_GAIN1,
                                            .reference =
                                                NRF_SAADC_REFERENCE_INTERNAL,
                                            .acq_time = NRF_SAADC_ACQTIME_10US,
