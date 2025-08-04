@@ -9,6 +9,7 @@
     chosen {
         nordic,pm-ext-flash = &mx25r64;
         zephyr,settings-partition = &lfs1;
+        zephyr,console = &uart2;
     };
 
     aliases {
@@ -88,8 +89,14 @@
     status = "okay";
 };
 
+/* Enable UART2 for console/logging */
 &uart2 {
-	status = "disabled";
+    compatible = "nordic,nrf-uarte";
+    status = "okay";
+    current-speed = <115200>;
+    pinctrl-0 = <&uart2_default_pcb>;
+    pinctrl-1 = <&uart2_sleep_pcb>;
+    pinctrl-names = "default", "sleep";
 };
 
 
@@ -203,12 +210,20 @@
 		};
 	};
 
-	uart2_default_alt: uart2_default_alt {
-		group1 {
-			psels = <NRF_PSEL(UART_TX, 1, 11)>,
-				<NRF_PSEL(UART_RX, 1, 10)>;
-		};
-	};
+	uart2_default_pcb: uart2_default_pcb {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 0, 22)>,  /* TX on P0.22 */
+                    <NRF_PSEL(UART_RX, 0, 20)>;  /* RX on P0.20 */
+        };
+    };
+
+    uart2_sleep_pcb: uart2_sleep_pcb {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 0, 22)>,
+                    <NRF_PSEL(UART_RX, 0, 20)>;
+            low-power-enable;
+        };
+    };
 };
 
 

@@ -64,6 +64,8 @@ extern "C" {
 #include <foot_sensor.hpp>
 #include <status_codes.h>
 
+#include <zephyr/drivers/sensor.h>
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL); // NOLINT
 
 static constexpr uint32_t US_PER_SECOND = 1000000UL;
@@ -91,6 +93,9 @@ static constexpr uint16_t SAMPLING_ITERATIONS =
 
 static constexpr uint8_t TIMER_INSTANCE_ID = 0;
 
+//Init temperature sensor
+const struct device *temp_dev = DEVICE_DT_GET_ANY(nordic_nrf_temp);
+
 // Forward declarations
 static void saadc_event_handler(nrfx_saadc_evt_t const *p_event);
 static void timer_handler(nrf_timer_event_t event_type, void *p_context);
@@ -99,6 +104,7 @@ static void init_timer(void);
 static void calibrate_saadc_channels(void);
 void init_dppi(void);
 void TIMER0_IRQHandler(void);
+int read_nrf_temperature(struct device *temp_dev);
 
 // Use atomic for thread-safe access to logging state
 static atomic_t logging_active = ATOMIC_INIT(0);
@@ -153,11 +159,16 @@ void foot_sensor_initializing_entry() {
   return;
 }
 
+
 static void foot_sensor_init() {
   bool init_failed = false;
   err_t result = err_t::NO_ERROR;
 
-  foot_sensor_initializing_entry(); // This function is currently empty
+if (!device_is_ready(temp_dev)) {
+        LOG_ERR("Temperature sensor not ready");
+    }
+
+  foot_sensor_initializing_entry();
 
   // All hardware initialization (SAADC, Timer, DPPI) should be done here
   init_dppi();
@@ -573,8 +584,25 @@ void TIMER0_IRQHandler(void) {
   }
 }
 
-// Return type dictates if event is consumed. False = Not Consumed, True =
-// Consumed.
+int read_nrf_temperature(struct device *temp_dev) {
+
+    struct sensor_value temp_val;
+    int rc = sensor_sample_fetch(temp_dev);
+    if (rc != 0) {
+        LOG_ERR("Failed to fetch temperature sample");
+        return rc;
+    }
+
+    rc = sensor_channel_get(temp_dev, SENSOR_CHAN_DIE_TEMP, &temp_val);
+    if (rc < 0) {
+        LOG_ERR("Failed to get temperature value");
+        return rc;
+    }
+
+    LOG_INF("Temperature: %d.%06d °C\n", temp_val.val1, temp_val.val2);
+    return 0;
+}
+
 
 static bool app_event_handler(const struct app_event_header *aeh) {
   if (is_module_state_event(aeh)) {
