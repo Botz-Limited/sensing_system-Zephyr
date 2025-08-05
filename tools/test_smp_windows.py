@@ -104,7 +104,7 @@ class SimpleSMPProxy:
         """Handle notifications from SMP characteristic"""
         logger.info(f"Notification from {sender}: {data.hex()}")
 
-async def scan_for_device(name_prefix="SensingGR", timeout=10):
+async def scan_for_device(name_prefix="BotzRightSh", timeout=10):
     """Scan for primary device"""
     logger.info(f"Scanning for devices with name starting with '{name_prefix}'...")
     logger.info(f"Make sure your device is advertising and not connected to anything else")

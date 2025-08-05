@@ -103,7 +103,7 @@ The system SHALL consist of:
 - FUNC-022: The system SHALL implement BLE GATT services
 - FUNC-023: The system SHALL encrypt all BLE communications
 - FUNC-024: The system SHALL support bonding with mobile devices
-- FUNC-025: The system SHALL advertise as "SensingGR" (primary) or "SensingGL" (secondary)
+- FUNC-025: The system SHALL advertise as "BotzRightSh" (primary) or "BotzLeftSh" (secondary)
 
 #### 3.3.2 Device-to-Device
 - FUNC-026: Primary device SHALL connect to secondary device

@@ -232,7 +232,7 @@ class FileProxyClient:
             logger.error("Failed to read file")
             return None
 
-async def scan_for_device(name_prefix="SensingGR"):
+async def scan_for_device(name_prefix="BotzRightSh"):
     """Scan for primary device"""
     logger.info(f"Scanning for devices with name starting with '{name_prefix}'...")
     

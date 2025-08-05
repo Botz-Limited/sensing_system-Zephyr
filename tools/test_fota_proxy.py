@@ -166,7 +166,7 @@ class FOTAProxyClient:
         logger.info("Aborting FOTA update...")
         await self.client.write_gatt_char(COMMAND_CHAR, bytes([CMD_ABORT]))
 
-async def scan_for_device(name_prefix="SensingGR"):
+async def scan_for_device(name_prefix="BotzRightSh"):
     """Scan for primary device"""
     logger.info(f"Scanning for devices with name starting with '{name_prefix}'...")
     
@@ -183,7 +183,7 @@ async def main():
     """Main test function"""
     if len(sys.argv) < 2:
         print("Usage: python test_fota_proxy.py <firmware_file> [device_address]")
-        print("If device_address is not provided, will scan for 'SensingGR'")
+        print("If device_address is not provided, will scan for 'BotzRightSh'")
         sys.exit(1)
         
     firmware_file = sys.argv[1]

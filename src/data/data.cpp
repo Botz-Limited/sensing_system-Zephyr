@@ -1382,7 +1382,24 @@ void proccess_data(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
 err_t mount_file_system(struct fs_mount_t *mount)
 {
-    const struct device *flash_device = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
+
+     const struct device *flash_device = NULL;
+     // Try PCB flash first
+    #if DT_NODE_EXISTS(DT_NODELABEL(w25q128))
+     flash_device = DEVICE_DT_GET(DT_NODELABEL(w25q128));
+    if (device_is_ready(flash_device)) {
+        LOG_INF("Using Winbond W25Q128 flash (PCB)");
+    } else
+    #endif
+    {
+        // Fall back to DK flash
+        #if DT_NODE_EXISTS(DT_NODELABEL(mx25r64))
+        flash_device = DEVICE_DT_GET(DT_NODELABEL(mx25r64));
+        if (device_is_ready(flash_device)) {
+            LOG_INF("Using Macronix MX25R64 flash (DK)");
+        }
+        #endif
+    }
 
     if (!device_is_ready(flash_device))
     {

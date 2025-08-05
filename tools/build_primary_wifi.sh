@@ -7,7 +7,7 @@ echo "Building PRIMARY device firmware (Right foot) with WiFi..."
 echo "This device will:"
 echo "  - Accept connections from phones"
 echo "  - Accept connections from secondary device"
-echo "  - Advertise as 'SensingGR'"
+echo "  - Advertise as 'BotzRightSh'"
 echo "  - Have WiFi enabled"
 
 # Clean previous build

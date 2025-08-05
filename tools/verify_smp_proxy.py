@@ -81,15 +81,15 @@ async def verify_smp_proxy(address):
 
 async def scan_and_verify():
     """Scan for device and verify SMP proxy"""
-    logger.info("Scanning for SensingGR device...")
+    logger.info("Scanning for BotzRightSh device...")
     
     devices = await BleakScanner.discover()
     for device in devices:
-        if device.name and device.name.startswith("SensingGR"):
+        if device.name and device.name.startswith("BotzRightSh"):
             logger.info(f"Found device: {device.name} ({device.address})")
             return await verify_smp_proxy(device.address)
             
-    logger.error("No SensingGR device found!")
+    logger.error("No BotzRightSh device found!")
     return False
 
 async def main():

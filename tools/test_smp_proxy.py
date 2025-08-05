@@ -202,7 +202,7 @@ class UnifiedSMPClient:
         logger.info(f"Download complete: {len(data)} bytes")
         return bytes(data)
 
-async def scan_for_device(name_prefix="SensingGR"):
+async def scan_for_device(name_prefix="BotzRightSh"):
     """Scan for primary device"""
     logger.info(f"Scanning for devices with name starting with '{name_prefix}'...")
     

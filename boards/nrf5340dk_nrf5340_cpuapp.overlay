@@ -9,6 +9,8 @@
     chosen {
         nordic,pm-ext-flash = &mx25r64;
         zephyr,settings-partition = &lfs1;
+           zephyr,console = &uart2;
+        zephyr,shell-uart = &uart2;
     };
 
     aliases {

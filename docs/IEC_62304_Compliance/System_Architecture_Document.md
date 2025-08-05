@@ -136,7 +136,7 @@ The system uses a **Multi-Threaded Event-Driven Architecture** with **Message Qu
 
 ### 4.1 Hardware Components
 
-#### Primary Device (Right Foot) - "SensingGR"
+#### Primary Device (Right Foot) - "BotzRightSh"
 - **MCU**: nRF5340 
   - Application Core: Cortex-M33 @ 128MHz, 1MB Flash, 512KB RAM
   - Network Core: Cortex-M33 @ 64MHz (BLE stack)
@@ -149,7 +149,7 @@ The system uses a **Multi-Threaded Event-Driven Architecture** with **Message Qu
   - USB-C charging with BQ25180
 - **Debug**: SWD interface, SEGGER RTT
 
-#### Secondary Device (Left Foot) - "SensingGL"
+#### Secondary Device (Left Foot) - "BotzLeftSh"
 - Identical hardware to primary
 - Different firmware configuration (CONFIG_PRIMARY_DEVICE=n)
 
@@ -625,7 +625,7 @@ west build -b nrf5340dk_nrf5340_cpuapp -- -DCONFIG_PRIMARY_DEVICE=n
 ```ini
 # Device identification
 CONFIG_PRIMARY_DEVICE=y
-CONFIG_BT_DEVICE_NAME="SensingGR"
+CONFIG_BT_DEVICE_NAME="BotzRightSh"
 
 # Enable D2D central role
 CONFIG_BT_CENTRAL=y
@@ -640,7 +640,7 @@ CONFIG_MCUMGR_GRP_IMG_CLIENT=y
 ```ini
 # Device identification
 CONFIG_PRIMARY_DEVICE=n
-CONFIG_BT_DEVICE_NAME="SensingGL"
+CONFIG_BT_DEVICE_NAME="BotzLeftSh"
 
 # Disable features not needed
 CONFIG_SENSOR_DATA_MODULE=n

@@ -373,7 +373,7 @@ static const struct bt_le_conn_param conn_param = {
 };
 
 // Target device name to look for
-static const char target_device_name[] = "SensingGR";
+static const char target_device_name[] = "BotzRightSh";
 
 // Target service UUID: 5cb36a14-ca69-4d97-89a8-001ffc9ec8cd
 static const uint8_t target_service_uuid[16] = {0x5c, 0xb3, 0x6a, 0x14, 0xca, 0x69, 0x4d, 0x97,
@@ -469,11 +469,11 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, st
     {
         if (has_name && has_uuid)
         {
-            LOG_INF("[SCAN] Perfect match! Found 'SensingGR' with correct UUID at %s (scan response)", addr_str);
+            LOG_INF("[SCAN] Perfect match! Found 'BotzRightSh' with correct UUID at %s (scan response)", addr_str);
         }
         else if (has_name)
         {
-            LOG_INF("[SCAN] Found device with matching name 'SensingGR' at %s (scan response)", addr_str);
+            LOG_INF("[SCAN] Found device with matching name 'BotzRightSh' at %s (scan response)", addr_str);
         }
         else if (has_uuid)
         {
@@ -1107,7 +1107,7 @@ __attribute__((unused)) static void ble_set_power_off()
 int set_bluetooth_name()
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    const char *name = "SensingGR";
+    const char *name = "BotzRightSh";
     int err = bt_set_name(name);
     if (err == 0)
     {
@@ -1118,7 +1118,7 @@ int set_bluetooth_name()
         LOG_ERR("Failed to set Bluetooth device name to %s, error: %d", name, err);
     }
 #else
-    const char *name = "SensingGL";
+    const char *name = "BotzLeftSh";
     int err = bt_set_name(name);
     if (err == 0)
     {
@@ -1296,7 +1296,7 @@ err_t bt_module_init(void)
 #endif
 
     // ADD: Start advertising so phones can discover the secondary device
-    LOG_INF("Secondary device starting advertising as 'SensingGL'");
+    LOG_INF("Secondary device starting advertising as 'BotzLeftSh'");
     int adv_err = bt_le_adv_start(BT_LE_ADV_CONN_NAME, ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
     if (adv_err) {
         LOG_ERR("Failed to start advertising: %d", adv_err);

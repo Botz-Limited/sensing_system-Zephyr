@@ -19,7 +19,7 @@ SMP_CHAR_UUID = "DA2E7828-FBCE-4E01-AE9E-261174997C48"
 TARGET_SELECT_UUID = "DA2E7829-FBCE-4E01-AE9E-261174997C48"
 
 # Device name
-PRIMARY_DEVICE_NAME = "SensingGR"
+PRIMARY_DEVICE_NAME = "BotzRightSh"
 
 class SwitchableSMPTest:
     def __init__(self, address=None):
@@ -133,12 +133,12 @@ async def main():
         print("\n=== How to Update Both Devices ===")
         print("\n1. For SECONDARY device (default):")
         print("   - Just upload firmware normally in Nordic Device Manager")
-        print("   - Or: mcumgr --conntype ble --connstring peer_name='SensingGR' image upload secondary.bin")
+        print("   - Or: mcumgr --conntype ble --connstring peer_name='BotzRightSh' image upload secondary.bin")
         
         print("\n2. For PRIMARY device:")
         print("   - First: Write 'PRIMARY' to Target Select characteristic")
         print("   - Then: Upload firmware in Nordic Device Manager")
-        print("   - Or: mcumgr --conntype ble --connstring peer_name='SensingGR' image upload primary.bin")
+        print("   - Or: mcumgr --conntype ble --connstring peer_name='BotzRightSh' image upload primary.bin")
         print("   - Finally: Write 'SECONDARY' to switch back")
         
         print("\n✓ Both devices can now be updated via BLE!")

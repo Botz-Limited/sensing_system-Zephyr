@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "lastModified": "2025-01-27T10:00:00.000Z",
-  "name": "SensingGR Primary Device",
-  "description": "Complete BLE GATT configuration for SensingGR primary device - includes all services and characteristics for mobile phone communication",
+  "name": "BotzRightSh Primary Device",
+  "description": "Complete BLE GATT configuration for BotzRightSh primary device - includes all services and characteristics for mobile phone communication",
   "version": "2.8.0",
   "author": "Botz Innovation",
   "services": [
@@ -28,7 +28,7 @@
           "descriptors": [],
           "value": {
             "format": "utf8s",
-            "value": "SensingGR"
+            "value": "BotzRightSh"
           }
         },
         {
@@ -1212,7 +1212,7 @@
     }
   ],
   "notes": [
-    "This configuration covers all BLE services and characteristics exposed by the SensingGR primary device to mobile phones.",
+    "This configuration covers all BLE services and characteristics exposed by the BotzRightSh primary device to mobile phones.",
     "",
     "Key Services:",
     "• Information Service: Raw sensor data, device status, file management, secondary device info",
@@ -1238,7 +1238,7 @@
     "• BACKGROUND: 50-100ms interval, reduced rates",
     "• BACKGROUND_IDLE: 200-500ms interval, minimal data",
     "",
-    "Device Name: SensingGR",
+    "Device Name: BotzRightSh",
     "Pairing: Required with encryption for all characteristics",
     "MTU: Request 247 bytes for optimal throughput"
   ]

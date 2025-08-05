@@ -125,17 +125,14 @@ This device implements a  set of Bluetooth Low Energy (BLE) GATT services for:
 - **Real-time activity metrics** for running and sports applications
 - **Packed data structures** for efficient multi-field transmission
 
-DrawFlowchart(
-  Syntax(
-    "APP[Mobile Phone<br/>BLE Client] -->|BLE| PRIM[Primary Device<br/>GATT Services]",
-    "PRIM --> CONV[Fixed-Point<br/>Converter]",
-    "CONV --> D2DC[D2D Central]",
-    "D2DC -->|BLE D2D| D2DP[Secondary Device<br/>D2D Peripheral]",
-    "D2DP --> SENS[Sensor Data]"
-  ),
-  "TB",
-  "default"
-)
+```mermaid
+flowchart TB
+    APP[Mobile Phone<br/>BLE Client] -->|BLE| PRIM[Primary Device<br/>GATT Services]
+    PRIM --> CONV[Fixed-Point<br/>Converter]
+    CONV --> D2DC[D2D Central]
+    D2DC -->|BLE D2D| D2DP[Secondary Device<br/>D2D Peripheral]
+    D2DP --> SENS[Sensor Data]
+```
 
 ---
 
@@ -143,21 +140,18 @@ DrawFlowchart(
 
 ### Device Roles
 
-DrawFlowchart(
-  Syntax(
-    "PHONE[Mobile App] -->|Direct BLE| P1[Primary Device<br/>Phone Services]",
-    "P1 --> P3[Proxy Services]",
-    "P3 -->|Relay| P2[D2D Central]",
-    "P2 -->|D2D BLE| S1[Secondary Device<br/>D2D Peripheral]",
-    "S1 --> S2[Sensor Services]"
-  ),
-  "LR",
-  "default"
-)
+```mermaid
+flowchart LR
+    PHONE[Mobile App] -->|Direct BLE| P1[Primary Device<br/>Phone Services]
+    P1 --> P3[Proxy Services]
+    P3 -->|Relay| P2[D2D Central]
+    P2 -->|D2D BLE| S1[Secondary Device<br/>D2D Peripheral]
+    S1 --> S2[Sensor Services]
+```
 
 | Feature | Primary Device | Secondary Device |
 |---:|:---:|:---:|
-| Device Name | "SensingGR" | "SensingGL" |
+| Device Name | "BotzRightSh" | "BotzLeftSh" |
 | BLE Role | Peripheral + Central | Peripheral only |
 | Phone Connection | Yes | No |
 | D2D Connection | Central (initiates) | Peripheral (accepts) |
@@ -189,15 +183,12 @@ All sensor data uses fixed-point integers to optimize bandwidth and ensure porta
 
 ### Bandwidth Comparison
 
-DrawFlowchart(
-  Syntax(
-    "F1[Float Format<br/>28 bytes<br/>3D Mapping] -->|-46%| X1[Fixed-Point<br/>15 bytes<br/>3D Mapping]",
-    "F2[Float Format<br/>12 bytes<br/>Linear Accel] -->|-50%| X2[Fixed-Point<br/>6 bytes<br/>Linear Accel]",
-    "F3[Float Format<br/>40 bytes/update<br/>@ 50Hz = 2000 B/s] -->|-48%| X3[Fixed-Point<br/>21 bytes/update<br/>@ 50Hz = 1050 B/s]"
-  ),
-  "LR",
-  "default"
-)
+```mermaid
+flowchart LR
+    F1[Float Format<br/>28 bytes<br/>3D Mapping] -->|-46%| X1[Fixed-Point<br/>15 bytes<br/>3D Mapping]
+    F2[Float Format<br/>12 bytes<br/>Linear Accel] -->|-50%| X2[Fixed-Point<br/>6 bytes<br/>Linear Accel]
+    F3[Float Format<br/>40 bytes/update<br/>@ 50Hz = 2000 B/s] -->|-48%| X3[Fixed-Point<br/>21 bytes/update<br/>@ 50Hz = 1050 B/s]
+```
 
 ### Conversion Functions
 
@@ -345,22 +336,20 @@ The weight measurement feature calculates a person's total weight using all 16 p
 
 #### Usage Flow
 
-DrawSequenceDiagram(
-  Syntax(
-    "participant App",
-    "participant Control Service",
-    "participant Activity Metrics",
-    "participant Info Service",
-    "App->>Control Service: Write 0x01 to Weight Trigger",
-    "Control Service->>Activity Metrics: MEASURE_WEIGHT command",
-    "Activity Metrics->>Activity Metrics: Check motion (must be still)",
-    "Activity Metrics->>Activity Metrics: Collect samples (3 seconds)",
-    "Activity Metrics->>Activity Metrics: Calculate weight",
-    "Activity Metrics->>Info Service: Weight result",
-    "Info Service-->>App: Notify weight (uint16_t)"
-  ),
-  "default"
-)
+```mermaid
+sequenceDiagram
+    participant App
+    participant Control Service
+    participant Activity Metrics
+    participant Info Service
+    App->>Control Service: Write 0x01 to Weight Trigger
+    Control Service->>Activity Metrics: MEASURE_WEIGHT command
+    Activity Metrics->>Activity Metrics: Check motion (must be still)
+    Activity Metrics->>Activity Metrics: Collect samples (3 seconds)
+    Activity Metrics->>Activity Metrics: Calculate weight
+    Activity Metrics->>Info Service: Weight result
+    Info Service-->>App: Notify weight (uint16_t)
+```
 
 #### Weight Data Format
 
@@ -388,25 +377,23 @@ The weight calibration feature allows the system to learn the relationship betwe
 
 #### Calibration Process
 
-DrawSequenceDiagram(
-  Syntax(
-    "participant App",
-    "participant Control Service",
-    "participant Activity Metrics",
-    "participant Data Module",
-    "App->>Control Service: Write calibration data",
-    "Note right of App: weight_calibration_step_t<br/>with known weight",
-    "Control Service->>Activity Metrics: CALIBRATE_WEIGHT command",
-    "Activity Metrics->>Activity Metrics: Check motion (must be still)",
-    "Activity Metrics->>Activity Metrics: Collect pressure samples",
-    "Activity Metrics->>Activity Metrics: Calculate calibration coefficients",
-    "Activity Metrics->>Data Module: Save calibration data",
-    "Data Module-->>Activity Metrics: Confirm saved",
-    "Activity Metrics-->>Control Service: Calibration complete",
-    "Control Service-->>App: Notify success"
-  ),
-  "default"
-)
+```mermaid
+sequenceDiagram
+    participant App
+    participant Control Service
+    participant Activity Metrics
+    participant Data Module
+    App->>Control Service: Write calibration data
+    Note right of App: weight_calibration_step_t<br/>with known weight
+    Control Service->>Activity Metrics: CALIBRATE_WEIGHT command
+    Activity Metrics->>Activity Metrics: Check motion (must be still)
+    Activity Metrics->>Activity Metrics: Collect pressure samples
+    Activity Metrics->>Activity Metrics: Calculate calibration coefficients
+    Activity Metrics->>Data Module: Save calibration data
+    Data Module-->>Activity Metrics: Confirm saved
+    Activity Metrics-->>Control Service: Calibration complete
+    Control Service-->>App: Notify success
+```
 
 #### Calibration Data Structure
 
@@ -538,21 +525,19 @@ typedef struct {
 
 #### GPS Update Flow
 
-DrawSequenceDiagram(
-  Syntax(
-    "participant App",
-    "participant Control Service",
-    "participant Activity Metrics",
-    "participant Secondary",
-    "App->>Control Service: Write GPS Update",
-    "Control Service->>Activity Metrics: Process GPS data",
-    "Activity Metrics->>Activity Metrics: Validate accuracy",
-    "Activity Metrics->>Activity Metrics: Calculate stride correction",
-    "Control Service->>Secondary: Forward GPS via D2D",
-    "Secondary->>Secondary: Apply GPS correction"
-  ),
-  "default"
-)
+```mermaid
+sequenceDiagram
+    participant App
+    participant Control Service
+    participant Activity Metrics
+    participant Secondary
+    App->>Control Service: Write GPS Update
+    Control Service->>Activity Metrics: Process GPS data
+    Activity Metrics->>Activity Metrics: Validate accuracy
+    Activity Metrics->>Activity Metrics: Calculate stride correction
+    Control Service->>Secondary: Forward GPS via D2D
+    Secondary->>Secondary: Apply GPS correction
+```
 
 #### GPS Usage Guidelines
 
@@ -584,20 +569,18 @@ func sendGPSUpdate(location: CLLocation, distanceDelta: Double) {
 
 ### Command Flow
 
-DrawSequenceDiagram(
-  Syntax(
-    "participant App",
-    "participant Primary",
-    "participant Secondary",
-    "App->>Primary: Write Command",
-    "Primary->>Primary: Process locally",
-    "Primary->>Secondary: Forward via D2D",
-    "Secondary->>Secondary: Execute command",
-    "Secondary-->>Primary: Acknowledge",
-    "Primary-->>App: Notify status"
-  ),
-  "dark"
-)
+```mermaid
+sequenceDiagram
+    participant App
+    participant Primary
+    participant Secondary
+    App->>Primary: Write Command
+    Primary->>Primary: Process locally
+    Primary->>Secondary: Forward via D2D
+    Secondary->>Secondary: Execute command
+    Secondary-->>Primary: Acknowledge
+    Primary-->>App: Notify status
+```
 
 ---
 
@@ -615,18 +598,15 @@ The Connection Parameter Control characteristic enables dynamic optimization for
 
 ### 7.2 Profile Behavior
 
-DrawFlowchart(
-  Syntax(
-    "APP[Mobile App] -->|Write Profile| CTRL[Control Service]",
-    "CTRL --> CONN[BLE Stack]",
-    "CONN --> PARAMS[Update Parameters]",
-    "PARAMS --> SENSORS[Adjust Sensor Rates]",
-    "SENSORS --> AGG[Enable Aggregation]",
-    "AGG --> PWR[Optimize Power]"
-  ),
-  "LR",
-  "default"
-)
+```mermaid
+flowchart LR
+    APP[Mobile App] -->|Write Profile| CTRL[Control Service]
+    CTRL --> CONN[BLE Stack]
+    CONN --> PARAMS[Update Parameters]
+    PARAMS --> SENSORS[Adjust Sensor Rates]
+    SENSORS --> AGG[Enable Aggregation]
+    AGG --> PWR[Optimize Power]
+```
 
 ### 7.3 Data Rate Adaptation
 
@@ -846,27 +826,25 @@ typedef struct __attribute__((packed)) {
 
 #### FOTA Flow
 
-DrawSequenceDiagram(
-  Syntax(
-    "participant App",
-    "participant Primary",
-    "participant Secondary",
-    "App->>Primary: Set Target = Secondary",
-    "App->>Primary: Start + Size",
-    "Primary->>Secondary: Init FOTA",
-    "loop Firmware Chunks",
-    "App->>Primary: Data Chunk",
-    "Primary->>Secondary: Forward Data",
-    "Secondary-->>Primary: ACK",
-    "Primary-->>App: Progress Update",
-    "end",
-    "App->>Primary: End Command",
-    "Primary->>Secondary: Finalize",
-    "Secondary->>Secondary: Reboot",
-    "Primary-->>App: Complete"
-  ),
-  "dark"
-)
+```mermaid
+sequenceDiagram
+    participant App
+    participant Primary
+    participant Secondary
+    App->>Primary: Set Target = Secondary
+    App->>Primary: Start + Size
+    Primary->>Secondary: Init FOTA
+    loop Firmware Chunks
+        App->>Primary: Data Chunk
+        Primary->>Secondary: Forward Data
+        Secondary-->>Primary: ACK
+        Primary-->>App: Progress Update
+    end
+    App->>Primary: End Command
+    Primary->>Secondary: Finalize
+    Secondary->>Secondary: Reboot
+    Primary-->>App: Complete
+```
 
 ### 10.2 3D Orientation Service
 
@@ -931,6 +909,28 @@ func handle3DOrientation(_ data: Data) {
     
     // Update 3D models
     updateShoeModel(left: leftQuat, right: rightQuat)
+}
+```
+
+```kotlin
+// Android Kotlin
+fun parse3DMapping(data: ByteArray): BHI360Data {
+    val buffer = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN)
+    
+    return BHI360Data(
+        quaternion = Quaternion(
+            buffer.getShort().toFloat() / QUAT_SCALE,
+            buffer.getShort().toFloat() / QUAT_SCALE,
+            buffer.getShort().toFloat() / QUAT_SCALE,
+            buffer.getShort().toFloat() / QUAT_SCALE
+        ),
+        gyroscope = Vector3(
+            buffer.getShort().toFloat() / QUAT_SCALE,
+            buffer.getShort().toFloat() / QUAT_SCALE,
+            buffer.getShort().toFloat() / QUAT_SCALE
+        ),
+        accuracy = buffer.get().toFloat() / 100f
+    )
 }
 ```
 
@@ -1225,20 +1225,18 @@ func detectPacketLoss(lastSeq: UInt8, currentSeq: UInt8) -> UInt8 {
 
 When packet loss is detected, the mobile app can request retransmission of recent packets:
 
-DrawSequenceDiagram(
-  Syntax(
-    "participant App",
-    "participant Device",
-    "App->>Device: Data packet (seq=10)",
-    "Note over App: Missing seq 11-14",
-    "App->>Device: Data packet (seq=15)",
-    "App->>App: Detect gap",
-    "App->>Device: Recovery Request<br/>(start=11, end=14)",
-    "Device->>App: Recovery Response<br/>(4 packets)",
-    "Device->>App: Retransmit seq 11-14"
-  ),
-  "default"
-)
+```mermaid
+sequenceDiagram
+    participant App
+    participant Device
+    App->>Device: Data packet (seq=10)
+    Note over App: Missing seq 11-14
+    App->>Device: Data packet (seq=15)
+    App->>App: Detect gap
+    App->>Device: Recovery Request<br/>(start=11, end=14)
+    Device->>App: Recovery Response<br/>(4 packets)
+    Device->>App: Retransmit seq 11-14
+```
 
 ### Recovery Limitations
 
@@ -1605,21 +1603,18 @@ fun parseDeviceStatus(statusValue: Int): List<String> {
 
 ### Troubleshooting Guide
 
-DrawFlowchart(
-  Syntax(
-    "A[Connection Issues?] -->|Yes| B[Check Bonding]",
-    "A -->|No| C[Data Issues?]",
-    "B --> D[Clear bonds and re-pair]",
-    "C -->|Yes| E[Check Format]",
-    "C -->|No| F[Performance Issues?]",
-    "E --> G[Verify fixed-point scaling]",
-    "F -->|Yes| H[Optimize Parameters]",
-    "F -->|No| I[Check Logs]",
-    "H --> J[Reduce notification rate<br/>Increase connection interval]"
-  ),
-  "TD",
-  "default"
-)
+```mermaid
+flowchart TD
+    A[Connection Issues?] -->|Yes| B[Check Bonding]
+    A -->|No| C[Data Issues?]
+    B --> D[Clear bonds and re-pair]
+    C -->|Yes| E[Check Format]
+    C -->|No| F[Performance Issues?]
+    E --> G[Verify fixed-point scaling]
+    F -->|Yes| H[Optimize Parameters]
+    F -->|No| I[Check Logs]
+    H --> J[Reduce notification rate<br/>Increase connection interval]
+```
 
 ### Security Considerations
 
@@ -1769,3 +1764,79 @@ The BHI360 performs sensor fusion at high internal rates regardless of output ra
 ---
 
 **End of Specification**
+## Legacy Bluetooth Characteristics
+
+This section details the legacy Bluetooth characteristics implemented to ensure compatibility with older firmware versions and mobile applications, as well as the new characteristic added for secondary device data transmission.
+
+### Legacy Service and Characteristics
+
+The following details the Bluetooth characteristics implemented to maintain compatibility with older firmware versions found in `Legacy firmware/nimBLE_left_shoe/src/ble/`. The comparison highlights how the current implementation aligns with or extends the legacy functionality.
+
+- **Legacy Insole Service UUID**: `91bad492-b950-4226-aa2b-4ede9fa42f59`
+  - This service replicates the structure used in older firmware to maintain compatibility with existing mobile applications.
+  - **Comparison with Older Firmware**: Matches the `INSOLE_SERVICE_UUID` used in the legacy firmware for insole data transmission.
+
+- **Primary Device Characteristic UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
+  - **Purpose**: Transmits 107-byte data packets from the primary device to the mobile phone.
+  - **Properties**: Notify
+  - **Format**: The data is packed into a 107-byte format identical to the old legacy firmware, including:
+    - Timestamp (6 bytes: year, month, day, hour, minute, second)
+    - Insole pressure data (16 bytes: 8x uint16_t)
+    - Quaternion (16 bytes: 4x float, w, z, y, x)
+    - Orientation/Euler angles (12 bytes: 3x float, z, y, x)
+    - Accelerometer data (12 bytes: 3x float, x, y, z)
+    - Linear acceleration (12 bytes: 3x float, x, y, z)
+    - Gravity (12 bytes: 3x float, x, y, z)
+    - Magnetometer data (12 bytes: 3x float, z, y, x)
+    - Temperature (4 bytes: float, hardcoded to 30.0)
+    - Battery level (4 bytes: float, hardcoded to 50.0)
+    - Checksum (1 byte: XOR of all previous bytes)
+  - **Compatibility**: This characteristic mirrors the exact data structure and transmission behavior of the old legacy firmware, ensuring seamless integration with mobile apps expecting this format.
+  - **Comparison with Older Firmware**: Corresponds to `INSOLE_CHAR_UUID` in the legacy firmware, which transmitted insole data along with BNO055 sensor data in a combined 107-byte packet as seen in `combined_ble.cpp`.
+
+- **Secondary Device Characteristic UUID**: `cba1d467-344c-4be3-ab3f-189f80dd7518`
+  - **Purpose**: Transmits 107-byte data packets from the secondary device to the mobile phone via the primary device.
+  - **Properties**: Notify
+  - **Availability**: Only available on the primary device under conditional compilation flags `CONFIG_LEGACY_BLE_ENABLED` and `CONFIG_PRIMARY_DEVICE`.
+  - **Data Source**: The data originates from the secondary device and is received by the primary through the D2D (device-to-device) interface. The primary's D2D RX client subscribes to notifications from the secondary device's characteristics (`d2d_foot_sensor_uuid` and `d2d_bhi360_data1_uuid`), processes the incoming foot sensor and IMU data via notification handlers, and updates the legacy BLE service buffers using the `legacy_ble_update_secondary_data` function.
+  - **Format**: The data is packed into the same 107-byte format as the primary device's characteristic, ensuring consistency with the legacy firmware structure. This includes timestamp, pressure data, quaternion, orientation, acceleration, and other fields as described above, with hardcoded values for temperature and battery.
+  - **Compatibility**: This new characteristic allows the mobile app to receive data from both primary and secondary devices in the same legacy format, enabling simultaneous monitoring without requiring app modifications.
+  - **Comparison with Older Firmware**: This is an extension not present in the legacy firmware, which did not explicitly handle secondary device data transmission to the phone via the primary. It builds on the legacy format to support dual-device setups.
+
+- **Legacy Configuration Characteristic UUID**: `cba1d468-344c-4be3-ab3f-189f80dd7518`
+  - **Purpose**: Allows receiving control commands from the mobile app to manage data streaming or other functionalities.
+  - **Properties**: Write, Notify
+  - **Availability**: Implemented under conditional compilation flag `CONFIG_LEGACY_BLE_ENABLED`.
+  - **Format**: Expected to handle commands similar to those in the legacy firmware (e.g., "I1" for raw insole data, "I3" for step count).
+  - **Compatibility**: Restores the control functionality present in the older firmware, ensuring mobile apps can send commands as they did with legacy systems.
+  - **Comparison with Older Firmware**: Corresponds to `CONFIG_CHAR_UUID` in the legacy firmware, used for receiving commands like "I1", "I2", and "I3" as seen in `insole_ble.cpp`.
+
+- **Legacy BNO055 Service UUID**: `91bad493-b950-4226-aa2b-4ede9fa42f59`
+  - **Purpose**: Separate service for BNO055 sensor data transmission, restored for compatibility with older firmware.
+  - **Availability**: Implemented under conditional compilation flag `CONFIG_LEGACY_BLE_ENABLED`.
+  - **Comparison with Older Firmware**: Matches the `BNO_SERVICE_UUID` used in the legacy firmware for BNO055 sensor data as seen in `bno055_ble.cpp`.
+
+- **Legacy BNO055 Characteristic UUID**: `cba1d469-344c-4be3-ab3f-189f80dd7518`
+  - **Purpose**: Transmits quaternion data from the BNO055 sensor (or equivalent IMU) to the mobile app.
+  - **Properties**: Notify
+  - **Availability**: Implemented under conditional compilation flag `CONFIG_LEGACY_BLE_ENABLED`.
+  - **Format**: 16-byte packet containing 4 floats for quaternion (w, x, y, z).
+  - **Compatibility**: Provides a separate data stream for IMU data, aligning with the legacy firmware's approach of having a dedicated characteristic for BNO055 data.
+  - **Comparison with Older Firmware**: Corresponds to `BNO_CHAR_UUID` in the legacy firmware, used to notify quaternion data as seen in `bno055_ble.cpp`.
+
+### Implementation Details
+
+- **Isolation**: All legacy features are isolated using conditional compilation flags (`CONFIG_LEGACY_BLE_ENABLED` and `CONFIG_PRIMARY_DEVICE`) to prevent any impact on the main firmware or non-legacy implementations.
+- **Data Flow for Secondary Device**: The secondary device's data is transmitted to the primary via the D2D interface. The primary processes this data through notification handlers in `src/bluetooth/ble_d2d_rx_client.cpp`, updates the legacy BLE service, and then packs and sends it to the mobile phone using the secondary characteristic. This ensures the mobile app receives separate data streams for primary and secondary devices, each in the expected 107-byte format.
+- **Current Implementation Status**:
+  - Primary Device Characteristic (`...d466`): ✅ Fully functional, sends 107-byte packets
+  - Secondary Device Characteristic (`...d467`): ✅ Fully functional, forwards D2D data in 107-byte format
+  - Configuration Characteristic (`...d468`): ⚠️ Write handler implemented but command processing not yet functional
+  - BNO055 Service and Characteristic: ⚠️ Service defined but quaternion-only data stream not yet active
+- **Purpose**: The addition of the secondary characteristic ensures that mobile applications compatible with the legacy firmware can now receive and process data from both devices independently, maintaining backward compatibility while extending functionality.
+
+### Known Limitations
+
+1. **Configuration Commands**: The configuration characteristic accepts writes but does not yet process legacy commands like "I1", "I2", "I3".
+2. **BNO055 Quaternion Stream**: While the BNO055 service is defined, the separate quaternion-only notification stream is not yet active. Quaternion data is currently only available within the 107-byte packed format.
+3. **Fixed Values**: Temperature is hardcoded to 30.0°C and battery level to 50.0% as the BHI360 does not have temperature sensing and battery monitoring is handled separately.

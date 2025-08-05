@@ -11,7 +11,7 @@ rm -rf build_secondary
 
 # Base west command
 WEST_CMD="west build --build-dir /home/ee/sensing_fw/build_secondary /home/ee/sensing_fw/ --board nrf5340dk/nrf5340/cpuapp --sysbuild -- -DCONFIG_PRIMARY_DEVICE=n -Dipc_radio_EXTRA_CONF_FILE=/home/ee/sensing_fw/sysbuild/ipc_radio/prj_secondary.conf"
-
+WEST_CMD+=" -Dmcuboot_DTC_OVERLAY_FILE=/home/ee/sensing_fw/sysbuild/mcuboot/boards/nrf5340dk_nrf5340_cpuapp.overlay"
 # Check for --with-wifi flag
 if [[ "$*" == *"--with-wifi"* ]]; then
     echo "Including Wi-Fi configuration..."
@@ -32,7 +32,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "Application core configuration:"
     echo "  - PRIMARY_DEVICE=n (secondary device)"
-    echo "  - Device name: SensingGL"
+    echo "  - Device name: BotzLeftSh"
     echo ""
     echo "Firmware files:"
     echo "  - build_secondary/merged.hex (application core)"

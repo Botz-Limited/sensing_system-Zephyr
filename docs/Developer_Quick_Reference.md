@@ -161,8 +161,8 @@ MSG_TYPE_NEW_ACTIVITY_LOG_FILE      // New activity log file notification
 ### Check Device Role
 ```bash
 # Look for device name in logs
-"SensingGR" = Primary (Right)
-"SensingGL" = Secondary (Left)
+"BotzRightSh" = Primary (Right)
+"BotzLeftSh" = Secondary (Left)
 ```
 
 ### Monitor D2D Communication
@@ -204,7 +204,7 @@ MSG_TYPE_NEW_ACTIVITY_LOG_FILE      // New activity log file notification
 ## 8. Testing Checklist
 
 ### Basic Connectivity
-- [ ] Primary advertises as "SensingGR"
+- [ ] Primary advertises as "BotzRightSh"
 - [ ] Secondary scans and connects
 - [ ] D2D service discovery completes
 - [ ] Both directions work (TX/RX)

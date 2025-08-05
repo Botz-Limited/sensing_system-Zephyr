@@ -345,7 +345,7 @@ void update_calibration_from_known_weight(float known_weight_kg) {
 ```
 Calibration Report
 Date: 2024-01-15
-Device: SensingGR-001
+Device: BotzRightSh-001
 Temperature: 25°C
 
 Zero Offset: 1024.0 ADC units
