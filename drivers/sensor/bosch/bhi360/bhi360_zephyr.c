@@ -65,20 +65,18 @@ static int bhi360_init(const struct device *dev)
     /* Configure reset GPIO if available */
 #if DT_INST_NODE_HAS_PROP(0, reset_gpios)
     if (gpio_is_ready_dt(&config->reset_gpio)) {
-        ret = gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_ACTIVE);
+        ret = gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_INACTIVE);
         if (ret < 0) {
             LOG_ERR("Failed to configure reset GPIO: %d", ret);
             return ret;
         }
         
         /* Perform hardware reset */
-        gpio_pin_set_dt(&config->reset_gpio, 1);
-        k_msleep(1);
-        gpio_pin_set_dt(&config->reset_gpio, 0);
-        k_msleep(10);
-        gpio_pin_set_dt(&config->reset_gpio, 1);
-        k_msleep(10);
-        LOG_DBG("Hardware reset performed");
+        gpio_pin_set_dt(&config->reset_gpio, 1); // Assert reset (active low)
+        k_msleep(10); // Hold reset for 10ms
+        gpio_pin_set_dt(&config->reset_gpio, 0); // Deassert reset
+        k_msleep(100); // Wait 100ms for device to boot, increased to ensure readiness
+        LOG_DBG("Hardware reset performed with extended wait time");
     }
 #endif
     
@@ -126,17 +124,29 @@ static int bhi360_init(const struct device *dev)
         return -EIO;
     }
     
-    /* Soft reset the device */
-    rslt = bhy2_soft_reset(&data->bhy2_dev);
+    /* Soft reset the device with retry mechanism */
+    int retry_count = 0;
+    int max_retries = 3;
+    do {
+        rslt = bhy2_soft_reset(&data->bhy2_dev);
+        if (rslt != BHY2_OK) {
+            LOG_ERR("BHY2 soft reset attempt %d failed: %d", retry_count + 1, rslt);
+            LOG_ERR("Possible communication error during soft reset. Check SPI configuration and timing.");
+            k_msleep(50); // Wait before retry
+            retry_count++;
+        }
+    } while (rslt != BHY2_OK && retry_count < max_retries);
+
     if (rslt != BHY2_OK) {
-        LOG_ERR("BHY2 soft reset failed: %d", rslt);
+        LOG_ERR("BHY2 soft reset failed after %d attempts", max_retries);
         return -EIO;
     }
+    LOG_INF("BHY2 soft reset successful after %d attempt(s)", retry_count + 1);
     
     /* Wait for device to be ready and verify product ID */
     uint8_t product_id = 0;
-    int retry_count = 0;
-    const int max_retries = 20;
+    retry_count = 0;
+    max_retries = 20;
     
     do {
         k_msleep(10);

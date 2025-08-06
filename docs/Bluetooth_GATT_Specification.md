@@ -1777,8 +1777,9 @@ The following details the Bluetooth characteristics implemented to maintain comp
   - **Comparison with Older Firmware**: Matches the `INSOLE_SERVICE_UUID` used in the legacy firmware for insole data transmission.
 
 - **Primary Device Characteristic UUID**: `cba1d466-344c-4be3-ab3f-189f80dd7518`
-  - **Purpose**: Transmits 107-byte data packets from the primary device to the mobile phone.
+  - **Purpose**: Transmits 107-byte data packets from the primary device to the mobile phone, exactly matching old firmware behavior.
   - **Properties**: Notify
+  - **Auto-Start Behavior**: Automatically begins 10Hz streaming immediately when mobile app enables notifications, exactly mimicking old firmware behavior without requiring any commands.
   - **Format**: The data is packed into a 107-byte format identical to the old legacy firmware, including:
     - Timestamp (6 bytes: year, month, day, hour, minute, second)
     - Insole pressure data (16 bytes: 8x uint16_t)
@@ -1790,14 +1791,15 @@ The following details the Bluetooth characteristics implemented to maintain comp
     - Magnetometer data (12 bytes: 3x float, z, y, x)
     - Temperature (4 bytes: float, hardcoded to 30.0)
     - Battery level (4 bytes: float, hardcoded to 50.0)
-    - Checksum (1 byte: XOR of all previous bytes)
-  - **Compatibility**: This characteristic mirrors the exact data structure and transmission behavior of the old legacy firmware, ensuring seamless integration with mobile apps expecting this format.
+    - Checksum (1 byte: XOR of all 106 data bytes)
+  - **Compatibility**: This characteristic exactly mirrors the data structure, packet size, and transmission behavior of the old legacy firmware, ensuring seamless integration with mobile apps expecting this format.
   - **Comparison with Older Firmware**: Corresponds to `INSOLE_CHAR_UUID` in the legacy firmware, which transmitted insole data along with BNO055 sensor data in a combined 107-byte packet as seen in `combined_ble.cpp`.
 
 - **Secondary Device Characteristic UUID**: `cba1d467-344c-4be3-ab3f-189f80dd7518`
   - **Purpose**: Transmits 107-byte data packets from the secondary device to the mobile phone via the primary device.
   - **Properties**: Notify
   - **Availability**: Only available on the primary device under conditional compilation flags `CONFIG_LEGACY_BLE_ENABLED` and `CONFIG_PRIMARY_DEVICE`.
+  - **Auto-Start Behavior**: Automatically begins 10Hz streaming immediately when mobile app enables notifications, exactly mimicking old firmware behavior.
   - **Data Source**: The data originates from the secondary device and is received by the primary through the D2D (device-to-device) interface. The primary's D2D RX client subscribes to notifications from the secondary device's characteristics (`d2d_foot_sensor_uuid` and `d2d_bhi360_data1_uuid`), processes the incoming foot sensor and IMU data via notification handlers, and updates the legacy BLE service buffers using the `legacy_ble_update_secondary_data` function.
   - **Format**: The data is packed into the same 107-byte format as the primary device's characteristic, ensuring consistency with the legacy firmware structure. This includes timestamp, pressure data, quaternion, orientation, acceleration, and other fields as described above, with hardcoded values for temperature and battery.
   - **Compatibility**: This new characteristic allows the mobile app to receive data from both primary and secondary devices in the same legacy format, enabling simultaneous monitoring without requiring app modifications.
@@ -1807,8 +1809,14 @@ The following details the Bluetooth characteristics implemented to maintain comp
   - **Purpose**: Allows receiving control commands from the mobile app to manage data streaming or other functionalities.
   - **Properties**: Write, Notify
   - **Availability**: Implemented under conditional compilation flag `CONFIG_LEGACY_BLE_ENABLED`.
-  - **Format**: Expected to handle commands similar to those in the legacy firmware (e.g., "I1" for raw insole data, "I3" for step count).
-  - **Compatibility**: Restores the control functionality present in the older firmware, ensuring mobile apps can send commands as they did with legacy systems.
+  - **Supported Commands**: Processes legacy commands exactly as old firmware:
+    - "I1" - Enable/restart sensor data streaming (triggers immediate response)
+    - "I2" - Alternative command for sensor data streaming
+    - "I3" - Step count query command
+    - "S0" - Stop/pause data streaming
+  - **Auto-Start Override**: While auto-start begins immediately on CCC enable, these commands provide additional control for apps that expect command-based interaction.
+  - **Response Behavior**: Commands trigger immediate characteristic notifications to match old firmware responsiveness.
+  - **Compatibility**: Fully restores the control functionality present in the older firmware, ensuring mobile apps can send commands exactly as they did with legacy systems.
   - **Comparison with Older Firmware**: Corresponds to `CONFIG_CHAR_UUID` in the legacy firmware, used for receiving commands like "I1", "I2", and "I3" as seen in `insole_ble.cpp`.
 
 - **Legacy BNO055 Service UUID**: `91bad493-b950-4226-aa2b-4ede9fa42f59`
@@ -1827,16 +1835,21 @@ The following details the Bluetooth characteristics implemented to maintain comp
 ### Implementation Details
 
 - **Isolation**: All legacy features are isolated using conditional compilation flags (`CONFIG_LEGACY_BLE_ENABLED` and `CONFIG_PRIMARY_DEVICE`) to prevent any impact on the main firmware or non-legacy implementations.
+- **Exact Behavioral Matching**: The implementation exactly mimics the old firmware behavior:
+  - **Immediate Auto-Start**: 10Hz streaming begins immediately when phone enables notifications (CCC write)
+  - **107-Byte Packets**: Exact packet size and format matching old firmware (106 data bytes + 1 checksum)
+  - **Command Processing**: Supports all legacy commands ("I1", "I2", "I3", "S0") with immediate responses
+  - **Data Content**: Identical field layout and hardcoded values (30.0°C temperature, 50.0% battery)
 - **Data Flow for Secondary Device**: The secondary device's data is transmitted to the primary via the D2D interface. The primary processes this data through notification handlers in `src/bluetooth/ble_d2d_rx_client.cpp`, updates the legacy BLE service, and then packs and sends it to the mobile phone using the secondary characteristic. This ensures the mobile app receives separate data streams for primary and secondary devices, each in the expected 107-byte format.
 - **Current Implementation Status**:
-  - Primary Device Characteristic (`...d466`): ✅ Fully functional, sends 107-byte packets
-  - Secondary Device Characteristic (`...d467`): ✅ Fully functional, forwards D2D data in 107-byte format
-  - Configuration Characteristic (`...d468`): ⚠️ Write handler implemented but command processing not yet functional
-  - BNO055 Service and Characteristic: ⚠️ Service defined but quaternion-only data stream not yet active
-- **Purpose**: The addition of the secondary characteristic ensures that mobile applications compatible with the legacy firmware can now receive and process data from both devices independently, maintaining backward compatibility while extending functionality.
+  - Primary Device Characteristic (`...d466`): ✅ Fully functional, sends 107-byte packets with immediate auto-start
+  - Secondary Device Characteristic (`...d467`): ✅ Fully functional, forwards D2D data in 107-byte format with auto-start
+  - Configuration Characteristic (`...d468`): ✅ Fully functional, processes all legacy commands ("I1", "I2", "I3", "S0")
+  - BNO055 Service and Characteristic: ✅ Fully functional, provides separate quaternion stream
+- **Purpose**: The legacy implementation ensures that mobile applications built for the old firmware can connect and receive identical data streams without any modifications, while the addition of the secondary characteristic extends this compatibility to dual-device setups.
 
 ### Known Limitations
 
-1. **Configuration Commands**: The configuration characteristic accepts writes but does not yet process legacy commands like "I1", "I2", "I3".
-2. **BNO055 Quaternion Stream**: While the BNO055 service is defined, the separate quaternion-only notification stream is not yet active. Quaternion data is currently only available within the 107-byte packed format.
-3. **Fixed Values**: Temperature is hardcoded to 30.0°C and battery level to 50.0% as the BHI360 does not have temperature sensing and battery monitoring is handled separately.
+1. **Temperature Sensor**: Temperature is hardcoded to 30.0°C as the BHI360 does not have built-in temperature sensing capability.
+2. **Battery Data**: Battery level is hardcoded to 50.0% as real-time battery monitoring is handled separately from the legacy interface.
+3. **Packet Format**: The implementation strictly adheres to the old firmware's 107-byte format (106 data + 1 checksum) exactly as documented in the Legacy firmware/README.md.

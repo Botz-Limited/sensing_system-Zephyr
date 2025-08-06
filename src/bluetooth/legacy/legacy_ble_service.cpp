@@ -13,6 +13,8 @@
 #include <app.hpp>
 #include "../../src/bluetooth/ble_d2d_rx_client.hpp" // Include for D2D data types
 #include <time.h>
+#include "../../include/events/foot_sensor_event.h"
+#include "../../include/events/motion_sensor_event.h"
 #include <math.h>
 #include <string.h>
 #include <errno.h>
@@ -26,6 +28,7 @@ static size_t pack_legacy_data(uint8_t *buffer);
 static size_t pack_zeroed_data(uint8_t *buffer);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static size_t pack_secondary_data(uint8_t *buffer);
+static void send_zero_filled_secondary_packet(void);
 #endif
 static size_t pack_bno_data(uint8_t *buffer);
 static ssize_t config_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
@@ -54,24 +57,66 @@ static uint8_t insole_secondary_notify_enabled;
 static uint8_t bno_notify_enabled;
 static uint8_t config_notify_enabled;
 
+// Legacy streaming control variables
+static bool legacy_streaming_enabled = false;
+static uint8_t legacy_mode = 0; // 0=off, 1=I1, 2=I2, 3=I3
+
 extern "C" void insole_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {
     ARG_UNUSED(attr);
     insole_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Legacy BLE notifications %s", insole_notify_enabled ? "enabled" : "disabled");
+    
+    // Auto-start streaming immediately when notifications are enabled (exactly like old firmware)
+    if (insole_notify_enabled) {
+        // Start streaming immediately in I2 mode (combined data) like old firmware
+        legacy_mode = 2;
+        legacy_streaming_enabled = true;
+        LOG_INF("Auto-starting legacy streaming (mimicking old firmware behavior)");
+        
+        // Automatically start sensor activity to ensure sensors provide data
+        // This mimics the old firmware where sensors were always active
+        struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+        
+        struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+        
+        LOG_INF("Started sensor activity for legacy BLE compatibility");
+    } else {
+        // Stop streaming when notifications are disabled
+        legacy_streaming_enabled = false;
+        legacy_mode = 0;
+        LOG_INF("Stopping legacy streaming");
+        
+        // Stop sensor activity when legacy client disconnects
+        struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+        
+        struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+        
+        LOG_INF("Stopped sensor activity for legacy BLE");
+    }
 }
 
 extern "C" void insole_secondary_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {
     ARG_UNUSED(attr);
     insole_secondary_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Legacy BLE secondary notifications %s", insole_secondary_notify_enabled ? "enabled" : "disabled");
+    
+    // Secondary device notifications don't auto-start streaming - they follow primary
 }
 
 extern "C" void bno_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {
     ARG_UNUSED(attr);
     bno_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Legacy BNO notifications %s", bno_notify_enabled ? "enabled" : "disabled");
 }
 
 extern "C" void config_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {
     ARG_UNUSED(attr);
     config_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Legacy config notifications %s", config_notify_enabled ? "enabled" : "disabled");
 }
 
 
@@ -186,7 +231,6 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
         return;
     }
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-
     if (!insole_secondary_data_attr) {
         LOG_ERR("Failed to find secondary insole data characteristic attribute");
         return;
@@ -201,70 +245,66 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
     }
 #endif
     
-    LOG_INF("Legacy BLE streaming enabled");
+    LOG_INF("Legacy BLE periodic transmission started (10Hz)");
 
     while (true) {
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        // Handle primary data
-        if (insole_notify_enabled && insole_data_attr) {
-            uint8_t buffer[107];
-            size_t len;
-            // Always send primary's own data, regardless of secondary connection status
-            len = pack_legacy_data(buffer);
-            
-            // Only send notifications if there are subscribers
-            int err = bt_gatt_notify(NULL, insole_data_attr, buffer, len);
-            if (err == -ENOTCONN) {
-                // No connections, this is normal
-                LOG_DBG("No BLE connections for legacy notifications");
-            } else if (err < 0 && err != -ENOTCONN) {
-                LOG_WRN("Legacy BLE notify error: %d", err);
-            }
-        }
-
-        // Handle secondary data on primary
-        if (insole_secondary_notify_enabled && insole_secondary_data_attr && d2d_connected && secondary_data_updated) {
-            uint8_t buffer[107];
-            size_t len = pack_secondary_data(buffer);
-            
-            // Only send notifications if there are subscribers
-            int err = bt_gatt_notify(NULL, insole_secondary_data_attr, buffer, len);
-            if (err == -ENOTCONN) {
-                // No connections, this is normal
-                LOG_DBG("No BLE connections for secondary legacy notifications");
-            } else if (err < 0 && err != -ENOTCONN) {
-                LOG_WRN("Secondary Legacy BLE notify error: %d", err);
-            }
-        }
-
-        // Handle BNO data notifications
-        if (bno_notify_enabled && bno_data_attr) {
-            uint8_t bno_buffer[16]; // 4 floats for quaternion
-            size_t bno_len = pack_bno_data(bno_buffer);
-            
-            int err = bt_gatt_notify(NULL, bno_data_attr, bno_buffer, bno_len);
-            if (err == -ENOTCONN) {
-                LOG_DBG("No BLE connections for BNO notifications");
-            } else if (err < 0 && err != -ENOTCONN) {
-                LOG_WRN("BNO BLE notify error: %d", err);
-            }
-        }
-#else
-        if (insole_notify_enabled && insole_data_attr) {
-            uint8_t buffer[107];
-            size_t len = pack_legacy_data(buffer);
-            
-            // Only send notifications if there are subscribers
-            int err = bt_gatt_notify(NULL, insole_data_attr, buffer, len);
-            if (err == -ENOTCONN) {
-                // No connections, this is normal
-                LOG_DBG("No BLE connections for legacy notifications");
-            } else if (err < 0 && err != -ENOTCONN) {
-                LOG_WRN("Legacy BLE notify error: %d", err);
-            }
-        }
-#endif
+        // Sleep first for 10Hz transmission rate (like old firmware)
         k_sleep(K_MSEC(100));
+        
+        // Only transmit if streaming is enabled and notifications are enabled
+        if (legacy_streaming_enabled) {
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            // Handle primary data
+            if (insole_notify_enabled && insole_data_attr) {
+                uint8_t buffer[107]; // Match old firmware: 106 + checksum
+                size_t len = pack_legacy_data(buffer);
+                
+                int err = bt_gatt_notify(NULL, insole_data_attr, buffer, len);
+                if (err < 0 && err != -ENOTCONN) {
+                    LOG_WRN("Legacy BLE notify error: %d", err);
+                }
+            }
+
+            // Handle secondary data on primary
+            if (insole_secondary_notify_enabled && insole_secondary_data_attr) {
+                if (d2d_connected && secondary_data_updated) {
+                    // Send actual secondary data
+                    uint8_t buffer[107]; // Match old firmware: 106 + checksum
+                    size_t len = pack_secondary_data(buffer);
+                    
+                    int err = bt_gatt_notify(NULL, insole_secondary_data_attr, buffer, len);
+                    if (err < 0 && err != -ENOTCONN) {
+                        LOG_WRN("Secondary Legacy BLE notify error: %d", err);
+                    }
+                } else {
+                    // Send zero-filled packet when secondary is disconnected
+                    send_zero_filled_secondary_packet();
+                }
+            }
+
+            // Handle BNO data notifications
+            if (bno_notify_enabled && bno_data_attr) {
+                uint8_t bno_buffer[16]; // 4 floats for quaternion
+                size_t bno_len = pack_bno_data(bno_buffer);
+                
+                int err = bt_gatt_notify(NULL, bno_data_attr, bno_buffer, bno_len);
+                if (err < 0 && err != -ENOTCONN) {
+                    LOG_WRN("BNO BLE notify error: %d", err);
+                }
+            }
+#else
+            // Secondary device - only send its own data
+            if (insole_notify_enabled && insole_data_attr) {
+                uint8_t buffer[107]; // Match old firmware: 106 + checksum
+                size_t len = pack_legacy_data(buffer);
+                
+                int err = bt_gatt_notify(NULL, insole_data_attr, buffer, len);
+                if (err < 0 && err != -ENOTCONN) {
+                    LOG_WRN("Legacy BLE notify error: %d", err);
+                }
+            }
+#endif
+        }
     }
 }
 
@@ -292,6 +332,17 @@ static size_t pack_legacy_data(uint8_t *buffer) {
     float quat[4], accel[3], lacc[3], gyro[3], grav[3], mag[3], temp;
     uint16_t pressure[8];
     get_sensor_snapshot(quat, accel, lacc, gyro, grav, mag, &temp, pressure);
+
+    // Debug: Log pressure values to see if they're actually being read
+    LOG_INF("Legacy BLE pressure values: [%d, %d, %d, %d, %d, %d, %d, %d]",
+            pressure[0], pressure[1], pressure[2], pressure[3],
+            pressure[4], pressure[5], pressure[6], pressure[7]);
+    
+    // Debug: Log other sensor values too
+    LOG_INF("Legacy BLE quat values: [%.3f, %.3f, %.3f, %.3f]", 
+            (double)quat[0], (double)quat[1], (double)quat[2], (double)quat[3]);
+    LOG_INF("Legacy BLE accel values: [%.3f, %.3f, %.3f]", 
+            (double)accel[0], (double)accel[1], (double)accel[2]);
 
     // 2. Insole data (16 bytes: 8x uint16_t, MSB first)
     for (int i = 0; i < 8; i++) {
@@ -349,24 +400,24 @@ static size_t pack_legacy_data(uint8_t *buffer) {
         index += sizeof(float);
     }
 
-    // 9. Temperature (4 bytes: float)
+    // 9. Temperature (4 bytes: float) - matches old firmware exactly
     float hardcoded_temp = 30.0f;
     memcpy(&buffer[index], &hardcoded_temp, sizeof(float));
     index += sizeof(float);
 
-    // 10. Battery level (4 bytes: float percentage)
-    float battery = 50.0f;
-    memcpy(&buffer[index], &battery, sizeof(float));
+    // 10. Battery level (4 bytes: float) - hardcoded as in old firmware
+    float hardcoded_battery = 50.0f;
+    memcpy(&buffer[index], &hardcoded_battery, sizeof(float));
     index += sizeof(float);
 
-    // 11. Checksum (1 byte: XOR of all previous bytes)
+    // 11. Checksum (1 byte: XOR of all previous bytes) - exactly like old firmware
     uint8_t checksum = 0;
     for (size_t i = 0; i < index; i++) {
         checksum ^= buffer[i];
     }
     buffer[index++] = checksum;
 
-    return index;
+    return index; // Should be 107 bytes total (106 + checksum)
 }
 
 // Function to pack secondary data into legacy format on primary device
@@ -448,24 +499,24 @@ static size_t pack_secondary_data(uint8_t *buffer) {
         index += sizeof(float);
     }
 
-    // 9. Temperature (4 bytes: float)
+    // 9. Temperature (4 bytes: float) - matches old firmware
     float hardcoded_temp = 30.0f;
     memcpy(&buffer[index], &hardcoded_temp, sizeof(float));
     index += sizeof(float);
 
-    // 10. Battery level (4 bytes: float percentage)
-    float battery = 50.0f;
-    memcpy(&buffer[index], &battery, sizeof(float));
+    // 10. Battery level (4 bytes: float) - hardcoded as in old firmware
+    float hardcoded_battery = 50.0f;
+    memcpy(&buffer[index], &hardcoded_battery, sizeof(float));
     index += sizeof(float);
 
-    // 11. Checksum (1 byte: XOR of all previous bytes)
+    // 11. Checksum (1 byte: XOR of all previous bytes) - exactly like old firmware
     uint8_t checksum = 0;
     for (size_t i = 0; i < index; i++) {
         checksum ^= buffer[i];
     }
     buffer[index++] = checksum;
 
-    return index;
+    return index; // Should be 107 bytes total (106 + checksum)
 }
 #endif // IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 
@@ -510,7 +561,7 @@ static size_t pack_zeroed_data(uint8_t *buffer) {
     buffer[index++] = minute;
     buffer[index++] = second;
 
-    // Zero out the rest of the data fields
+    // Zero out the rest of the data fields (matches old firmware: 6 bytes timestamp + 100 bytes data)
     for (size_t i = index; i < 106; i++) {
         buffer[i] = 0;
     }
@@ -523,12 +574,88 @@ static size_t pack_zeroed_data(uint8_t *buffer) {
     }
     buffer[index++] = checksum;
 
-    return index;
+    return index; // Should be 107 bytes total (106 + checksum)
 }
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+// Function to send zero-filled packet for disconnected secondary device
+static void send_zero_filled_secondary_packet(void) {
+    uint8_t zero_buffer[107] = {0}; // Match old firmware size: 106 + checksum
+    time_t current_time = time(NULL);
+    struct tm *tm = gmtime(&current_time);
+    
+    // Set timestamp (6 bytes)
+    zero_buffer[0] = tm->tm_year - 100;
+    zero_buffer[1] = tm->tm_mon + 1;
+    zero_buffer[2] = tm->tm_mday;
+    zero_buffer[3] = tm->tm_hour;
+    zero_buffer[4] = tm->tm_min;
+    zero_buffer[5] = tm->tm_sec;
+    
+    // All other fields remain zero (100 bytes of sensor data)
+    
+    // Calculate checksum (at index 106)
+    uint8_t checksum = 0;
+    for (int i = 0; i < 106; i++) {
+        checksum ^= zero_buffer[i];
+    }
+    zero_buffer[106] = checksum;
+    
+    // Send notification
+    if (insole_secondary_data_attr) {
+        int err = bt_gatt_notify(NULL, insole_secondary_data_attr, zero_buffer, sizeof(zero_buffer));
+        if (err < 0 && err != -ENOTCONN) {
+            LOG_WRN("Zero-filled secondary packet notify error: %d", err);
+        }
+    }
+}
+#endif
+
 static ssize_t config_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len, uint16_t offset, uint8_t flags) {
-    LOG_INF("Config write: len=%u offset=%u", len, offset);
-    // TODO: Handle config write if needed
+    LOG_INF("Legacy config write received: %d bytes", len);
+    
+    if (len >= 2) {
+        const char *cmd = (const char *)buf;
+        
+        // Check for legacy commands
+        if (cmd[0] == 'I') {
+            switch (cmd[1]) {
+                case '1':
+                    LOG_INF("Legacy mode I1: Start streaming insole data");
+                    legacy_mode = 1;
+                    legacy_streaming_enabled = true;
+                    break;
+                    
+                case '2':
+                    LOG_INF("Legacy mode I2: Start streaming combined data");
+                    legacy_mode = 2;
+                    legacy_streaming_enabled = true;
+                    break;
+                    
+                case '3':
+                    LOG_INF("Legacy mode I3: Start streaming step count");
+                    legacy_mode = 3;
+                    legacy_streaming_enabled = true;
+                    break;
+                    
+                default:
+                    LOG_WRN("Unknown legacy command: I%c", cmd[1]);
+                    break;
+            }
+        } else if (cmd[0] == 'S' && cmd[1] == '0') {
+            LOG_INF("Legacy mode S0: Stop streaming");
+            legacy_streaming_enabled = false;
+            legacy_mode = 0;
+        } else {
+            LOG_WRN("Unknown legacy command: %.*s", len, (char*)buf);
+        }
+        
+        // Send notification to confirm command
+        if (config_notify_enabled && config_attr) {
+            bt_gatt_notify(conn, attr, buf, len);
+        }
+    }
+    
     return len;
 }
 

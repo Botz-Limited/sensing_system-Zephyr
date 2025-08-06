@@ -119,6 +119,8 @@
     compatible = "nordic,nrf-uarte";
     status = "okay";
     current-speed = <115200>;
+    parity= "none";
+    stop-bits = "1";
     pinctrl-0 = <&uart2_default_pcb>;
     pinctrl-1 = <&uart2_sleep_pcb>;
     pinctrl-names = "default", "sleep";
@@ -164,15 +166,15 @@
     pinctrl-0 = <&spi1_default_alt>;
     pinctrl-1 = <&spi1_sleep_alt>;
     pinctrl-names = "default", "sleep";
-    cs-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>; // CS on P1.6
+    cs-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>; // CS on P1.15
 
     bhi360: bhi360@0 {
         compatible = "bosch,bhi360";
         status = "okay";
         reg = <0>;
         spi-max-frequency = <8000000>;
-        int-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;   // INT on P1.2
-        reset-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;  // Optional: RESET on P1.3
+        int-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;   // INT on P1.10
+        reset-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;  // Optional: RESET on P1.11
         label = "BHI360";
     };
 };
@@ -237,15 +239,15 @@
 
 	uart2_default_pcb: uart2_default_pcb {
         group1 {
-            psels = <NRF_PSEL(UART_TX, 0, 22)>,  /* TX on P0.22 */
-                    <NRF_PSEL(UART_RX, 0, 20)>;  /* RX on P0.20 */
+            psels = <NRF_PSEL(UART_TX, 0, 20)>,  /* TX on P0.20 */
+                    <NRF_PSEL(UART_RX, 0, 22)>;  /* RX on P0.22 */
         };
     };
 
     uart2_sleep_pcb: uart2_sleep_pcb {
         group1 {
-            psels = <NRF_PSEL(UART_TX, 0, 22)>,
-                    <NRF_PSEL(UART_RX, 0, 20)>;
+            psels = <NRF_PSEL(UART_TX, 0, 20)>,
+                    <NRF_PSEL(UART_RX, 0, 22)>;
             low-power-enable;
         };
     };

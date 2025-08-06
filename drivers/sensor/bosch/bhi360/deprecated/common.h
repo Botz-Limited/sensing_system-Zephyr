@@ -57,7 +57,7 @@ typedef struct {
     bool initialized;
     char name[32];  // Friendly name for logging
 } imu_device_t;
-
+suca
 // GPIO pin definitions for SPI bus
 #define BSP_SPI_MISO   NRF_GPIO_PIN_MAP(1, 7)  
 #define BSP_SPI_MOSI   NRF_GPIO_PIN_MAP(1, 8)  
