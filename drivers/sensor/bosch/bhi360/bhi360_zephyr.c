@@ -49,6 +49,7 @@ static int bhi360_init(const struct device *dev)
     int ret;
     
     LOG_INF("Initializing BHI360 sensor driver");
+
     
     /* Initialize semaphore for interrupt handling */
     k_sem_init(&data->data_ready_sem, 0, 1);
@@ -126,12 +127,11 @@ static int bhi360_init(const struct device *dev)
     
     /* Soft reset the device with retry mechanism */
     int retry_count = 0;
-    int max_retries = 3;
+    int max_retries = 2;
     do {
         rslt = bhy2_soft_reset(&data->bhy2_dev);
         if (rslt != BHY2_OK) {
             LOG_ERR("BHY2 soft reset attempt %d failed: %d", retry_count + 1, rslt);
-            LOG_ERR("Possible communication error during soft reset. Check SPI configuration and timing.");
             k_msleep(50); // Wait before retry
             retry_count++;
         }

@@ -7,6 +7,8 @@
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/random/random.h>
+
 
 #include "ccc_callback_fix.hpp"
 #include "../sensor_data/sensor_data.h"
@@ -276,6 +278,7 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
                     if (err < 0 && err != -ENOTCONN) {
                         LOG_WRN("Secondary Legacy BLE notify error: %d", err);
                     }
+                    secondary_data_updated = false;
                 } else {
                     // Send zero-filled packet when secondary is disconnected
                     send_zero_filled_secondary_packet();
@@ -332,6 +335,31 @@ static size_t pack_legacy_data(uint8_t *buffer) {
     float quat[4], accel[3], lacc[3], gyro[3], grav[3], mag[3], temp;
     uint16_t pressure[8];
     get_sensor_snapshot(quat, accel, lacc, gyro, grav, mag, &temp, pressure);
+
+    // For testing: If all pressure values are 0 (sensors not connected), simulate random values
+    bool sensors_connected = false;
+    for (int i = 0; i < 8; i++) {
+        if (pressure[i] != 0) {
+            sensors_connected = true;
+            break;
+        }
+    }
+    if (!sensors_connected) {
+        for (int i = 0; i < 8; i++) {
+            pressure[i] = sys_rand32_get() % 1024; // Random 0-1023
+        }
+        for (int i = 0; i < 4; i++) {
+            quat[i] = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f; // Random -1.0 to 1.0
+        }
+        for (int i = 0; i < 3; i++) {
+            accel[i] = (float)(sys_rand32_get() % 400) / 100.0f - 2.0f; // Random -2.0 to 2.0
+            lacc[i] = accel[i];
+            gyro[i] = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f; // Random -2.0 to 2.0
+            grav[i] = (float)(sys_rand32_get() % 2000) / 1000.0f - 1.0f; // Random -1.0 to 1.0
+            mag[i] = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f; // Random -1.0 to 1.0
+        }
+        temp = (float)(sys_rand32_get() % 5000) / 100.0f + 20.0f; // Random 20.0 to 70.0
+    }
 
     // Debug: Log pressure values to see if they're actually being read
     LOG_INF("Legacy BLE pressure values: [%d, %d, %d, %d, %d, %d, %d, %d]",
@@ -442,12 +470,40 @@ static size_t pack_secondary_data(uint8_t *buffer) {
     buffer[index++] = second;
 
     // 2. Insole data from secondary (16 bytes: 8x uint16_t, MSB first)
+    // For testing: If all values are 0 (no data), simulate random
+    bool has_foot_data = false;
+    for (int i = 0; i < 8; i++) {
+        if (secondary_foot_data.values[i] != 0) {
+            has_foot_data = true;
+            break;
+        }
+    }
+    if (!has_foot_data) {
+        for (int i = 0; i < 8; i++) {
+            secondary_foot_data.values[i] = sys_rand32_get() % 1024; // Random 0-1023
+        }
+    }
     for (int i = 0; i < 8; i++) {
         buffer[index++] = (secondary_foot_data.values[i] >> 8) & 0xFF;
         buffer[index++] = secondary_foot_data.values[i] & 0xFF;
     }
 
     // 3. Quaternion from secondary IMU data (16 bytes: 4x float w, z, y, x)
+    // 3. Quaternion from secondary IMU data (16 bytes: 4x float w, z, y, x)
+    // For testing: If all zero, simulate random
+    bool has_imu_data = (secondary_imu_data.quat_w != 0.0f || secondary_imu_data.accel_x != 0.0f ||
+                         secondary_imu_data.accel_y != 0.0f || secondary_imu_data.accel_z != 0.0f ||
+                         secondary_imu_data.gyro_x != 0.0f || secondary_imu_data.gyro_y != 0.0f ||
+                         secondary_imu_data.gyro_z != 0.0f);
+    if (!has_imu_data) {
+        secondary_imu_data.quat_w = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
+        secondary_imu_data.accel_x = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
+        secondary_imu_data.accel_y = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
+        secondary_imu_data.accel_z = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
+        secondary_imu_data.gyro_x = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f;
+        secondary_imu_data.gyro_y = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f;
+        secondary_imu_data.gyro_z = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f;
+    }
     float q[4] = {secondary_imu_data.quat_w, secondary_imu_data.accel_z, secondary_imu_data.accel_y, secondary_imu_data.accel_x};
     for (int i = 0; i < 4; i++) {
         memcpy(&buffer[index], &q[i], sizeof(float));
@@ -473,7 +529,7 @@ static size_t pack_secondary_data(uint8_t *buffer) {
     }
 
     // 5. Accelerometer from secondary IMU (12 bytes: 3x float x, y, z)
-    float accel[3] = {secondary_imu_data.gyro_x, secondary_imu_data.gyro_y, secondary_imu_data.gyro_z};
+    float accel[3] = {0.0f, 0.0f, 0.0f};
     for (int i = 0; i < 3; i++) {
         memcpy(&buffer[index], &accel[i], sizeof(float));
         index += sizeof(float);
@@ -580,32 +636,71 @@ static size_t pack_zeroed_data(uint8_t *buffer) {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 // Function to send zero-filled packet for disconnected secondary device
 static void send_zero_filled_secondary_packet(void) {
-    uint8_t zero_buffer[107] = {0}; // Match old firmware size: 106 + checksum
+    uint8_t sim_buffer[107];
     time_t current_time = time(NULL);
     struct tm *tm = gmtime(&current_time);
     
     // Set timestamp (6 bytes)
-    zero_buffer[0] = tm->tm_year - 100;
-    zero_buffer[1] = tm->tm_mon + 1;
-    zero_buffer[2] = tm->tm_mday;
-    zero_buffer[3] = tm->tm_hour;
-    zero_buffer[4] = tm->tm_min;
-    zero_buffer[5] = tm->tm_sec;
+    sim_buffer[0] = tm->tm_year - 100;
+    sim_buffer[1] = tm->tm_mon + 1;
+    sim_buffer[2] = tm->tm_mday;
+    sim_buffer[3] = tm->tm_hour;
+    sim_buffer[4] = tm->tm_min;
+    sim_buffer[5] = tm->tm_sec;
     
-    // All other fields remain zero (100 bytes of sensor data)
+    size_t index = 6;
     
-    // Calculate checksum (at index 106)
-    uint8_t checksum = 0;
-    for (int i = 0; i < 106; i++) {
-        checksum ^= zero_buffer[i];
+    // Simulate random insole data (16 bytes: 8x uint16_t)
+    for (int i = 0; i < 8; i++) {
+        uint16_t val = sys_rand32_get() % 1024;
+        sim_buffer[index++] = (val >> 8) & 0xFF;
+        sim_buffer[index++] = val & 0xFF;
     }
-    zero_buffer[106] = checksum;
+    
+    // Simulate random quaternion (16 bytes: 4x float)
+    for (int i = 0; i < 4; i++) {
+        float val = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
+        memcpy(&sim_buffer[index], &val, sizeof(float));
+        index += sizeof(float);
+    }
+    
+    // Simulate random euler (12 bytes: 3x float)
+    for (int i = 0; i < 3; i++) {
+        float val = (float)(sys_rand32_get() % 36000) / 100.0f - 180.0f;
+        memcpy(&sim_buffer[index], &val, sizeof(float));
+        index += sizeof(float);
+    }
+    
+    // Simulate random accel, lacc, grav, mag (12 bytes each)
+    for (int j = 0; j < 4; j++) { // 4 sections
+        for (int i = 0; i < 3; i++) {
+            float val = (float)(sys_rand32_get() % 400) / 100.0f - 2.0f;
+            memcpy(&sim_buffer[index], &val, sizeof(float));
+            index += sizeof(float);
+        }
+    }
+    
+    // Temperature and battery (4 bytes each, random)
+    float temp = (float)(sys_rand32_get() % 5000) / 100.0f + 20.0f;
+    memcpy(&sim_buffer[index], &temp, sizeof(float));
+    index += sizeof(float);
+    
+    float battery = (float)(sys_rand32_get() % 10000) / 100.0f;
+    memcpy(&sim_buffer[index], &battery, sizeof(float));
+    index += sizeof(float);
+    
+    // Checksum
+    uint8_t checksum = 0;
+    for (size_t i = 0; i < 106; i++) {
+        checksum ^= sim_buffer[i];
+    }
+    sim_buffer[106] = checksum;
     
     // Send notification
     if (insole_secondary_data_attr) {
-        int err = bt_gatt_notify(NULL, insole_secondary_data_attr, zero_buffer, sizeof(zero_buffer));
+        int err = bt_gatt_notify(NULL, insole_secondary_data_attr, sim_buffer, sizeof(sim_buffer));
         if (err < 0 && err != -ENOTCONN) {
-            LOG_WRN("Zero-filled secondary packet notify error: %d", err);
+            LOG_WRN("Simulated secondary packet notify error: %d", err);
         }
     }
 }
@@ -660,10 +755,12 @@ static ssize_t config_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 }
 
 void legacy_ble_init(void) {
+    #if CONFIG_LEGACY_BLE_ENABLED
     k_thread_create(&legacy_thread_data, legacy_stack, LEGACY_THREAD_STACK_SIZE,
                     legacy_thread_func, NULL, NULL, NULL,
                     LEGACY_THREAD_PRIORITY, 0, K_NO_WAIT);
     LOG_INF("Legacy BLE service initialized");
+    #endif
 }
 
 #endif // CONFIG_LEGACY_BLE_ENABLED

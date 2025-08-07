@@ -1853,3 +1853,117 @@ The following details the Bluetooth characteristics implemented to maintain comp
 1. **Temperature Sensor**: Temperature is hardcoded to 30.0°C as the BHI360 does not have built-in temperature sensing capability.
 2. **Battery Data**: Battery level is hardcoded to 50.0% as real-time battery monitoring is handled separately from the legacy interface.
 3. **Packet Format**: The implementation strictly adheres to the old firmware's 107-byte format (106 data + 1 checksum) exactly as documented in the Legacy firmware/README.md.
+
+## Activity Session Calculated Data Characteristics
+
+This section details the Bluetooth characteristics for the calculated metrics described in [`docs/Activity_Session_Calculated_Data_Specification.md`](docs/Activity_Session_Calculated_Data_Specification.md). These are part of the Activity Metrics Service (UUID: `4fd5b690-9d89-4061-92aa-319ca786baae`).
+
+Following the restructuring to individual characteristics, each metric now has its own dedicated GATT characteristic with a unique UUID. This allows clients to subscribe to or read specific metrics independently, improving modularity and efficiency. Legacy packed structures are retained for reference but are no longer used in the primary implementation.
+
+### Characteristics Table
+
+| Characteristic Name | UUID Suffix | Properties | Data Type | Description | Update Rate | Status |
+|---------------------|-------------|------------|-----------|-------------|-------------|--------|
+| Cadence SPM | `...b691` | Read, Notify | uint16_t | Steps per minute | 1Hz | Fully implemented |
+| Pace Sec/Km | `...b698` | Read, Notify | uint16_t | Seconds per kilometer | 1Hz | Fully implemented |
+| Distance M | `...b699` | Read, Notify | uint32_t | Distance in meters | 1Hz | Fully implemented |
+| Form Score | `...b69a` | Read, Notify | uint8_t | Form score 0-100 | 1Hz | Fully implemented |
+| Balance L/R Pct | `...b69b` | Read, Notify | int8_t | Balance -50 to +50 | 1Hz | Fully implemented |
+| Ground Contact MS | `...b69c` | Read, Notify | uint16_t | Average ground contact time (ms) | 1Hz | Fully implemented |
+| Flight Time MS | `...b69d` | Read, Notify | uint16_t | Average flight time (ms) | 1Hz | Fully implemented |
+| Efficiency Score | `...b69e` | Read, Notify | uint8_t | Efficiency 0-100 | 1Hz | Fully implemented |
+| Alerts | `...b69f` | Read, Notify | uint8_t | Alert flags | 1Hz | Fully implemented |
+| Contact Time Asym | `...b6a0` | Read, Notify | uint8_t | Contact time asymmetry % | 1Hz | Fully implemented |
+| Flight Time Asym | `...b6a1` | Read, Notify | uint8_t | Flight time asymmetry % | 1Hz | Fully implemented |
+| Force Asym | `...b6a2` | Read, Notify | uint8_t | Force asymmetry % | 1Hz | Fully implemented |
+| Pronation Asym | `...b6a3` | Read, Notify | uint8_t | Pronation asymmetry % | 1Hz | Fully implemented |
+| Strike Left | `...b6a4` | Read, Notify | uint8_t | Left strike pattern (0=heel,1=mid,2=fore) | 1Hz | Fully implemented |
+| Strike Right | `...b6a5` | Read, Notify | uint8_t | Right strike pattern | 1Hz | Fully implemented |
+| Pronation Left | `...b6a6` | Read, Notify | int8_t | Left pronation degrees | On demand | Partially implemented |
+| Pronation Right | `...b6a7` | Read, Notify | int8_t | Right pronation degrees | On demand | Partially implemented |
+| Loading Rate Left | `...b6a8` | Read, Notify | uint16_t | Left loading rate N/s | On demand | Partially implemented |
+| Loading Rate Right | `...b6a9` | Read, Notify | uint16_t | Right loading rate N/s | On demand | Partially implemented |
+| Arch Collapse Left | `...b6aa` | Read, Notify | uint8_t | Left arch collapse 0-100 | On demand | Partially implemented |
+| Arch Collapse Right | `...b6ab` | Read, Notify | uint8_t | Right arch collapse 0-100 | On demand | Partially implemented |
+| Total Distance M | `...b6ac` | Read, Notify | uint32_t | Total distance meters | End of session | Fully implemented |
+| Avg Pace Sec/Km | `...b6ad` | Read, Notify | uint16_t | Average pace sec/km | End of session | Fully implemented |
+| Avg Cadence SPM | `...b6ae` | Read, Notify | uint16_t | Average cadence spm | End of session | Fully implemented |
+| Total Steps | `...b6af` | Read, Notify | uint32_t | Total steps | End of session | Fully implemented |
+| Calories Kcal | `...b6b0` | Read, Notify | uint16_t | Calories burned kcal | End of session | Fully implemented |
+| Avg Form Score | `...b6b1` | Read, Notify | uint8_t | Average form score 0-100 | End of session | Fully implemented |
+| Duration Sec | `...b6b2` | Read, Notify | uint32_t | Session duration seconds | End of session | Fully implemented |
+| GPS Data | `...b695` | Write | gps_data_ble_t | GPS data from mobile (16 bytes packed) | As needed | Fully implemented |
+| Total Step Count | `...b696` | Read, Notify | bhi360_step_count_fixed_t | Aggregated total steps | On change | Fully implemented |
+| Activity Step Count | `...b697` | Read, Notify | bhi360_step_count_fixed_t | Activity-specific steps | On change | Fully implemented |
+
+### Legacy Packed Structures (For Reference)
+These structures were used in previous grouped implementations and are retained for backward compatibility or reference:
+
+```c
+typedef struct __attribute__((packed)) {
+    uint16_t cadence_spm;        // Steps per minute
+    uint16_t pace_sec_km;        // Seconds per kilometer
+    uint32_t distance_m;         // Distance in meters
+    uint8_t  form_score;         // Form score 0-100
+    int8_t   balance_lr_pct;     // Balance -50 to +50
+    uint16_t ground_contact_ms;  // Average ground contact time
+    uint16_t flight_time_ms;     // Average flight time
+    uint8_t  efficiency_score;   // Efficiency 0-100
+    uint8_t  alerts;             // Alert flags
+    uint32_t reserved;           // Reserved
+} realtime_metrics_ble_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t contact_time_asym;   // Contact time asymmetry %
+    uint8_t flight_time_asym;    // Flight time asymmetry %
+    uint8_t force_asym;          // Force asymmetry %
+    uint8_t pronation_asym;      // Pronation asymmetry %
+    uint8_t strike_left;         // Left strike pattern
+    uint8_t strike_right;        // Right strike pattern
+    uint16_t reserved;           // Reserved
+} asymmetry_metrics_ble_t;
+
+typedef struct __attribute__((packed)) {
+    int8_t pronation_left;       // Left pronation degrees
+    int8_t pronation_right;      // Right pronation degrees
+    uint16_t loading_rate_left;  // Left loading rate N/s
+    uint16_t loading_rate_right; // Right loading rate N/s
+    uint8_t arch_collapse_left;  // Left arch collapse 0-100
+    uint8_t arch_collapse_right; // Right arch collapse 0-100
+} biomechanics_extended_ble_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t total_distance_m;   // Total distance meters
+    uint16_t avg_pace_sec_km;    // Average pace sec/km
+    uint16_t avg_cadence_spm;    // Average cadence spm
+    uint32_t total_steps;        // Total steps
+    uint16_t calories_kcal;      // Calories burned kcal
+    uint8_t  avg_form_score;     // Average form score 0-100
+    uint32_t duration_sec;       // Session duration seconds
+} session_summary_ble_t;
+
+typedef struct __attribute__((packed)) {
+    int32_t  latitude_e7;        // Latitude * 10^7
+    int32_t  longitude_e7;       // Longitude * 10^7
+    uint16_t distance_delta_m;   // Distance since last update
+    uint8_t  accuracy_m;         // GPS accuracy in meters
+    int16_t  elevation_change_m; // Elevation change
+    uint8_t  gps_mode;           // GPS mode
+    uint16_t reserved;           // Reserved
+} gps_data_ble_t;
+
+typedef struct {
+    uint32_t step_count;
+    uint32_t activity_duration_s;  // DEPRECATED - always 0
+} __packed bhi360_step_count_fixed_t;
+```
+
+### Update and Notification Behavior
+- **Real-time Metrics**: Updated at 1Hz during active sessions.
+- **Asymmetry Metrics**: Updated at 1Hz during active sessions.
+- **Biomechanics Extended**: Updated on demand or at lower rates (e.g., 0.1Hz).
+- **Session Summary**: Notified once at the end of a session.
+- **Step Counts**: Updated on change, typically 0.1-1Hz during activity.
+- **GPS Data**: Write-only from mobile app, no notifications.
+
+Note: Advanced metrics like Vertical Oscillation or CPEI are not yet fully implemented but can be added as individual characteristics in future updates. Refer to the code in [`src/bluetooth/activity_metrics_service.cpp`](src/bluetooth/activity_metrics_service.cpp) for implementation details.
