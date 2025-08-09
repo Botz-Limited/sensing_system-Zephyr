@@ -2,7 +2,7 @@
  * @file battery.cpp
  * @brief Battery monitoring
  * @version 1.0.0
- * @date 2025-05-12
+ * @date June 2025
  * @copyright Botz Innovation 2025
  */
 
@@ -13,6 +13,7 @@
 #include <battery.hpp>
 #include <errors.hpp>
 
+#include <app.hpp>
 #include <app_event_manager.h>
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
@@ -36,19 +37,31 @@
 LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_MODULE_LOG_LEVEL); // NOLINT
 
 #define BATTERY_UPDATE_INTERVAL_MS 10000 // 10 seconds
-#define SAADC_VDD_CHANNEL 7              // Virtual channel for VDD measurement
 
 // --- PERIODIC BATTERY UPDATE ---
 static struct k_work_delayable battery_update_work;
 
 // Currently unused - kept for future battery monitoring implementation
-__attribute__((unused))
 static void battery_update_work_handler(struct k_work *work)
 {
     (void)work;         // Silence unused parameter warning
-    uint8_t level = 80; // this module is in development so at the moment just hardoce a value;
-    bt_bas_set_battery_level(level);
-    k_work_reschedule(&battery_update_work, K_MSEC(10000));
+    uint8_t level = 80; // This module is in development, so at the moment just hardcode a value
+    bt_bas_set_battery_level(level); // Update standard BLE Battery Service
+    #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    generic_message_t msg;
+    msg.sender = SENDER_BATTTERY;
+    msg.type = MSG_TYPE_BATTERY_LEVEL_PRIMARY;
+    msg.data.battery_level = (battery_level_msg_t){ .level = level }; // Use the new battery_level_msg_t structure
+    k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT); // Send to Bluetooth module via message queue on secondary
+    #else
+    generic_message_t msg;
+    msg.sender = SENDER_BATTTERY;
+    msg.type = MSG_TYPE_BATTERY_LEVEL_SECONDARY;
+    msg.data.battery_level = (battery_level_msg_t){ .level = level }; // Use the new battery_level_msg_t structure
+    k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT); // Send to Bluetooth module via message queue on secondary
+    #endif
+    LOG_DBG("Battery level updated: %d%%", level);
+    k_work_reschedule(&battery_update_work, K_MSEC(BATTERY_UPDATE_INTERVAL_MS));
 }
 
 void battery_monitor_init(void)

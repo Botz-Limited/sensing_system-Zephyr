@@ -2,7 +2,7 @@
  * @file motion_sensor_refactored.cpp
  * @brief Refactored motion sensor module using BHI360 driver
  * @version 2.0.0
- * @date 2024-12-19
+ * @date July 2025
  *
  * This is a refactored version showing integration with the new BHI360 driver.
  * Changes marked with // DRIVER_INTEGRATION:
@@ -442,7 +442,7 @@ static void motion_sensor_init() {
         LOG_ERR("Failed to request calibration data from data module");
       }
     }
-  }
+  } 
 
   // Handle initialization failure
   if (init_failed) {
@@ -1129,6 +1129,7 @@ check_and_save_calibration_updates(const struct device *bhi360_dev) {
 
   last_status = current_status;
 }
+
 
 static bool app_event_handler(const struct app_event_header *aeh) {
   if (is_module_state_event(aeh)) {

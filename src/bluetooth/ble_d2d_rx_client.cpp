@@ -30,6 +30,9 @@ LOG_MODULE_REGISTER(d2d_rx_client, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 
+
+extern void jis_update_secondary_battery(uint8_t level);
+
 // Timing constants for discovery and subscription process
 static constexpr uint8_t DISCOVERY_INITIAL_DELAY_MS = 10;    // Delay before starting discovery
 static constexpr uint8_t SUBSCRIPTION_INITIAL_DELAY_MS = 20; // Delay before starting subscriptions
@@ -98,6 +101,10 @@ static struct bt_uuid_128 d2d_weight_measurement_uuid =
 static struct bt_uuid_128 d2d_batch_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e8, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+// Battery level UUID
+static struct bt_uuid_128 d2d_battery_level_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e9, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection handle
 static struct bt_conn *secondary_conn = NULL;
 
@@ -125,6 +132,7 @@ static uint16_t activity_log_path_handle = 0;
 static uint16_t activity_step_count_handle = 0;
 static uint16_t weight_measurement_handle = 0;
 static uint16_t d2d_batch_handle = 0;
+static uint16_t battery_level_handle = 0;
 
 // Discovery state
 enum discover_state
@@ -181,10 +189,13 @@ static uint8_t activity_log_path_notify_handler(struct bt_conn *conn, struct bt_
 static uint8_t activity_step_count_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                                   const void *data, uint16_t length);
 static uint8_t weight_measurement_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
-                                                 const void *data, uint16_t length);
+                                                  const void *data, uint16_t length);
 
 static uint8_t d2d_batch_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params, const void *data,
-                                        uint16_t length);
+                                         uint16_t length);
+
+static uint8_t battery_level_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+                                            const void *data, uint16_t length);
 
 // Work items for deferred subscription
 static void subscribe_work_handler(struct k_work *work);
@@ -355,7 +366,8 @@ static void perform_subscriptions(void)
             device_info_handle, fota_progress_handle);
     LOG_INF("         foot_path:%u, bhi_path:%u, act_log:%u, act_path:%u", foot_log_path_handle, bhi360_log_path_handle,
             activity_log_available_handle, activity_log_path_handle);
-    LOG_INF("         act_step:%u, weight:%u", activity_step_count_handle, weight_measurement_handle);
+    LOG_INF("         act_step:%u, weight:%u, battery:%u", activity_step_count_handle, weight_measurement_handle,
+            battery_level_handle);
 
     // Clear all subscribe params before starting
     memset(subscribe_params, 0, sizeof(subscribe_params));
@@ -504,6 +516,16 @@ static void perform_subscriptions(void)
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = d2d_batch_handle;
         subscribe_work_items[work_index].notify_func = d2d_batch_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+
+    // Add battery level subscription
+    if (battery_level_handle && work_index < WORK_INDEX_MX)
+    {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = battery_level_handle;
+        subscribe_work_items[work_index].notify_func = battery_level_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
@@ -1255,6 +1277,47 @@ static uint8_t weight_measurement_notify_handler(struct bt_conn *conn, struct bt
     return BT_GATT_ITER_CONTINUE;
 }
 
+static uint8_t battery_level_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+                                            const void *data, uint16_t length)
+{
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn)
+    {
+        LOG_WRN("Battery level notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0)
+    {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (!data)
+    {
+        LOG_WRN("Battery level unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (length != sizeof(uint8_t))
+    {
+        LOG_WRN("Invalid battery level length: %u (expected %u)", length, sizeof(uint8_t));
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    const uint8_t battery_level = *(const uint8_t *)data;
+
+    LOG_INF("=== RECEIVED BATTERY LEVEL FROM SECONDARY ===");
+    LOG_INF("  Battery Level: %u%%", battery_level);
+
+    // Send battery level to bluetooth module for aggregation
+    jis_update_secondary_battery(battery_level);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
 // Alternative subscription method using write to CCC
 static void write_ccc_alternative(struct bt_conn *conn, uint16_t handle, uint16_t ccc_handle)
 {
@@ -1873,6 +1936,12 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             LOG_INF("Found D2D batch characteristic, handle: %u", d2d_batch_handle);
             characteristics_found++;
         }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_battery_level_uuid.uuid) == 0)
+        {
+            battery_level_handle = chrc->value_handle;
+            LOG_INF("Found battery level characteristic, handle: %u", battery_level_handle);
+            characteristics_found++;
+        }
     }
     else if (discovery_state == DISCOVER_DIS)
     {
@@ -2031,6 +2100,7 @@ void d2d_rx_client_start_discovery(struct bt_conn *conn)
     activity_log_path_handle = 0;
     activity_step_count_handle = 0;
     d2d_batch_handle = 0;
+    battery_level_handle = 0;
 
     // Clear all subscribe params to ensure clean state
     memset(subscribe_params, 0, sizeof(subscribe_params));
@@ -2114,6 +2184,7 @@ void d2d_rx_client_disconnected(void)
     activity_log_path_handle = 0;
     activity_step_count_handle = 0;
     d2d_batch_handle = 0;
+    battery_level_handle = 0;
 
     // Clear subscribe params
     memset(subscribe_params, 0, sizeof(subscribe_params));
@@ -2135,6 +2206,9 @@ void d2d_rx_client_disconnected(void)
 
     // Clear secondary device info in information service
     jis_clear_secondary_device_info();
+
+    // Set secondary battery level to 0 on disconnection
+    jis_update_secondary_battery(0);
 
     LOG_INF("D2D RX client disconnected");
 }

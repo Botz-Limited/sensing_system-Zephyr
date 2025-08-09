@@ -25,6 +25,7 @@ extern "C" {
 void jis_set_err_status_notify(err_t new_device_status);
 void jis_clear_err_status_notify(err_t new_device_status);
 void jis_charge_status_notify(uint8_t new_charge_status);
+void jis_battery_levels_notify(uint8_t primary_level, uint8_t secondary_level);
 void jis_foot_sensor_notify(const foot_samples_t *samples_data);
 void jis_foot_sensor_log_available_notify(uint8_t log_id);
 void jis_foot_sensor_req_id_path_notify(const char *file_path);

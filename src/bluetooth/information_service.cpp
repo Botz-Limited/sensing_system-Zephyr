@@ -53,6 +53,7 @@ static file_notification_packed_t file_notification_packed = {0};
 static bool file_notification_packed_subscribed = false;
 
 static uint8_t charge_status = 0;
+static uint8_t battery_levels[2] = {80, 79}; // [0] = primary, [1] = secondary (0 = unknown)
 static foot_samples_t foot_sensor_char_value = {0};
 
 static bool status_subscribed = true;
@@ -227,6 +228,11 @@ static ssize_t jis_secondary_bhi360_log_available_read(struct bt_conn* conn, con
 static void jis_secondary_bhi360_log_available_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 void jis_secondary_bhi360_log_available_notify(uint8_t log_id);
 
+static ssize_t jis_battery_levels_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
+                                       uint16_t offset);
+static void jis_battery_levels_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+void jis_battery_levels_notify(uint8_t primary_level, uint8_t secondary_level);
+
 static ssize_t jis_secondary_bhi360_log_path_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
 static void jis_secondary_bhi360_log_path_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 void jis_secondary_bhi360_log_path_notify(const char* path);
@@ -255,6 +261,9 @@ static struct bt_uuid_128 foot_sensor_log_available_uuid =
 static struct bt_uuid_128 CHARGE_STATUS_UUID =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ead, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
+// New UUID for packed battery levels characteristic
+static struct bt_uuid_128 BATTERY_LEVELS_UUID =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec8, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 // Foot Sensor Request ID/Path UUID (renamed from req_id_meta_uuid)
 static struct bt_uuid_128 foot_sensor_req_id_path_uuid =
@@ -363,7 +372,7 @@ BT_GATT_SERVICE_DEFINE(
                 static_cast<void *>(&foot_sensor_log_available)),
     BT_GATT_CCC(jis_foot_sensor_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
-    // Battery Status Characteristic
+     // Battery Status Characteristic
     BT_GATT_CHARACTERISTIC(&CHARGE_STATUS_UUID.uuid,
                             BT_GATT_CHRC_READ,
                             BT_GATT_PERM_READ_ENCRYPT,
@@ -371,10 +380,16 @@ BT_GATT_SERVICE_DEFINE(
                             static_cast<void *>(&charge_status)),
     BT_GATT_CCC(jis_charge_status_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 
-
+    // New characteristic for packed battery levels (primary and secondary)
+    BT_GATT_CHARACTERISTIC(&BATTERY_LEVELS_UUID.uuid,
+                            BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                            BT_GATT_PERM_READ_ENCRYPT,
+                            jis_battery_levels_read, nullptr,
+                            static_cast<void *>(&battery_levels)),
+    BT_GATT_CCC(jis_battery_levels_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
 // Foot Sensor Request ID/Path Characteristic
      BT_GATT_CHARACTERISTIC(&foot_sensor_req_id_path_uuid.uuid,
-                     BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY, // Added NOTIFY to this characteristic as it might be useful
+                     BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY, 
                   BT_GATT_PERM_READ_ENCRYPT,
                    jis_foot_sensor_req_id_read, nullptr,
                   foot_sensor_req_id_path),
@@ -937,10 +952,78 @@ void cts_notify(void)
 }
 
 /**
- * @brief
+ * @brief Update battery levels for both primary and secondary devices
+ *
+ * @param primary_level Primary device battery level (0-100%)
+ * @param secondary_level Secondary device battery level (0-100%, 0 = unknown/disconnected)
+ */
+void jis_battery_levels_notify(uint8_t primary_level, uint8_t secondary_level)
+{
+    LOG_DBG("Battery levels - Primary: %d%%, Secondary: %d%%", primary_level, secondary_level);
+
+    battery_levels[0] = primary_level;
+    battery_levels[1] = secondary_level;
+
+    if (info_service.attrs && info_service.attr_count > 0) {
+        // Find the battery characteristic and notify
+        auto *battery_gatt = bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &BATTERY_LEVELS_UUID.uuid);
+        if (battery_gatt) {
+            bt_gatt_notify(nullptr, battery_gatt, static_cast<void *>(&battery_levels), sizeof(battery_levels));
+        }
+    } else {
+        LOG_WRN("Information service not ready for battery levels notification");
+    }
+}
+
+/**
+ * @brief Read callback for battery levels characteristic
+ */
+static ssize_t jis_battery_levels_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
+                                       uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, static_cast<void *>(&battery_levels), sizeof(battery_levels));
+}
+
+/**
+ * @brief CCC change callback for battery levels characteristic
+ */
+static void jis_battery_levels_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr) {
+        LOG_ERR("jis_battery_levels_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    LOG_DBG("Battery Levels CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+}
+
+/**
+ * @brief Update primary battery level
+ *
+ * @param level Primary device battery level (0-100%)
+ */
+extern "C" void jis_update_primary_battery(uint8_t level)
+{
+    LOG_DBG("Updating primary battery level: %d%%", level);
+    battery_levels[0] = level;
+    jis_battery_levels_notify(battery_levels[0], battery_levels[1]);
+}
+
+/**
+ * @brief Update secondary battery level
+ *
+ * @param level Secondary device battery level (0-100%, 0 = unknown/disconnected)
+ */
+void jis_update_secondary_battery(uint8_t level)
+{
+    LOG_DBG("Updating secondary battery level: %d%%", level);
+    battery_levels[1] = level;
+    jis_battery_levels_notify(battery_levels[0], battery_levels[1]);
+}
+
+/**
+ * @brief Legacy function for charge status (kept for compatibility)
  *
  * @param new_charge_status
- *
  */
 void jis_charge_status_notify(uint8_t new_charge_status)
 {
@@ -955,6 +1038,7 @@ void jis_charge_status_notify(uint8_t new_charge_status)
         LOG_WRN("Information service not ready for charge status notification");
     }
 }
+
 
 /**
  * @brief
@@ -1798,7 +1882,7 @@ extern "C" void jis_device_status_packed_notify(void)
 {
     // Update the packed structure with current values
     device_status_packed.status_bitfield = device_status_bitfield;
-    device_status_packed.battery_percent = 0; // TODO: Get from battery module
+    device_status_packed.battery_percent = battery_levels[0]; // Primary battery level
     device_status_packed.charge_status = charge_status;
     device_status_packed.temperature_c = 25; // TODO: Get from temperature sensor
     device_status_packed.activity_state = (device_status_bitfield & STATUS_LOGGING_ACTIVE) ? 1 : 0;

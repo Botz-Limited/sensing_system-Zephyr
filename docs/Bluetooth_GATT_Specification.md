@@ -9,6 +9,27 @@
 
 ## Changelog
 
+### Version 2.13 (August 2025)
+- **Battery Service Enhancement**:
+  - Modified Battery Status characteristic to report both primary and secondary battery levels
+  - Changed from single uint8_t to array of 2 uint8_t values
+  - Primary device battery level at index 0, secondary at index 1
+  - Secondary battery level is 0 when device not connected
+  - Implemented D2D battery level sharing from secondary to primary
+  - Added D2D Battery Level characteristic (`76ad68e9-...`) for secondary device
+- This allows mobile apps to monitor both shoe battery levels from single connection
+
+### Version 2.12 (August 2025)
+- **Complete Category 1 Metrics Implementation** from colleague's proposal:
+  - Added Stride Duration MS characteristic (`...b6b3`) - 1Hz updates
+  - Added Stride Duration Asymmetry characteristic (`...b6b4`) - 1Hz updates
+  - Added Stride Length CM characteristic (`...b6b5`) - 1Hz updates
+  - Added Stride Length Asymmetry characteristic (`...b6b6`) - 1Hz updates
+  - All stride metrics fully calculated in realtime_metrics module
+  - BLE notifications implemented in activity_metrics_service
+- Verified all Category 1 metrics are now complete and functional
+- Updated characteristics table to reflect fully implemented status
+
 ### Version 2.11 (July 2025)
 - Added System Sampling Rates section to clarify actual sensor data rates
 - Corrected documentation to reflect 80Hz foot sensor sampling (not 100Hz)
@@ -232,7 +253,9 @@ float decode_acceleration(int16_t fixed) {
 
 | Characteristic | UUID | Properties | Data Type | Description |
 |---:|---:|---:|---:|---:|
-| Battery Level | 0x2A19 | Read, Notify | uint8_t | 0-100% |
+| Battery Level | 0x2A19 | Read, Notify | uint8_t | 0-100% (Secondary device only) |
+
+**Note:** The standard Battery Service is only used on secondary devices for compatibility. Primary devices report both battery levels through the Information Service Battery Status characteristic.
 
 ### Current Time Service (CTS)
 **UUID:** `00001805-0000-1000-8000-00805F9B34FB`
@@ -256,7 +279,7 @@ float decode_acceleration(int16_t fixed) {
 | Status | `...eab` | Read, Notify | uint32_t | Status bitfield |
 | Foot Sensor Samples | `...eaf` | Read, Notify | foot_samples_t | 16 ADC channels |
 | Foot Log Available | `...eac` | Read, Notify | uint8_t | Latest log ID |
-| Charge Status | `...ead` | Read, Notify | uint8_t | 0-100% |
+| **Battery Status** | `...ead` | Read, Notify | uint8_t[2] | **[0]=Primary 0-100%, [1]=Secondary 0-100%** |
 | Foot Log Path | `...eae` | Read, Notify | char[] | UTF-8 path |
 | BHI360 Log Available | `...eb0` | Read, Notify | uint8_t | Latest log ID |
 | BHI360 Log Path | `...eb1` | Read, Notify | char[] | UTF-8 path |
@@ -329,6 +352,38 @@ typedef struct __attribute__((packed)) {
 ### Step Count Note
 
 **Important**: As of version 2.7, the aggregated step count characteristics (Total Step Count and Activity Step Count) have been moved to the Activity Metrics Service. The BHI360 Step Count characteristic remains in the Information Service for backward compatibility but is deprecated and should not be used by mobile applications.
+
+### Battery Status Details
+
+The Battery Status characteristic has been enhanced to report both primary and secondary device battery levels in a single characteristic:
+
+- **Data Format**: Array of 2 uint8_t values
+- **Index 0**: Primary device battery level (0-100%)
+- **Index 1**: Secondary device battery level (0-100%, 0 when not connected)
+- **Update Rate**: Every 10 seconds or on significant change
+- **D2D Integration**: Secondary device sends its battery level via D2D notification
+
+#### Usage Example
+
+```swift
+// iOS - Parse battery levels
+func parseBatteryLevels(_ data: Data) -> (primary: Int, secondary: Int?) {
+    guard data.count >= 2 else { return (0, nil) }
+    let primary = Int(data[0])
+    let secondary = data[1] > 0 ? Int(data[1]) : nil
+    return (primary, secondary)
+}
+```
+
+```kotlin
+// Android - Parse battery levels
+fun parseBatteryLevels(data: ByteArray): Pair<Int, Int?> {
+    if (data.size < 2) return Pair(0, null)
+    val primary = data[0].toInt() and 0xFF
+    val secondary = if (data[1] > 0) data[1].toInt() and 0xFF else null
+    return Pair(primary, secondary)
+}
+```
 
 ### Weight Measurement
 
@@ -1892,6 +1947,10 @@ Following the restructuring to individual characteristics, each metric now has i
 | Calories Kcal | `...b6b0` | Read, Notify | uint16_t | Calories burned kcal | End of session | Fully implemented |
 | Avg Form Score | `...b6b1` | Read, Notify | uint8_t | Average form score 0-100 | End of session | Fully implemented |
 | Duration Sec | `...b6b2` | Read, Notify | uint32_t | Session duration seconds | End of session | Fully implemented |
+| **Stride Duration MS** | `...b6b3` | Read, Notify | uint16_t | Average stride duration in milliseconds | 1Hz | **Fully implemented** |
+| **Stride Duration Asymmetry** | `...b6b4` | Read, Notify | uint8_t | Stride duration asymmetry percentage (0-100%) | 1Hz | **Fully implemented** |
+| **Stride Length CM** | `...b6b5` | Read, Notify | uint16_t | Average stride length in centimeters | 1Hz | **Fully implemented** |
+| **Stride Length Asymmetry** | `...b6b6` | Read, Notify | uint8_t | Stride length asymmetry percentage (0-100%) | 1Hz | **Fully implemented** |
 | GPS Data | `...b695` | Write | gps_data_ble_t | GPS data from mobile (16 bytes packed) | As needed | Fully implemented |
 | Total Step Count | `...b696` | Read, Notify | bhi360_step_count_fixed_t | Aggregated total steps | On change | Fully implemented |
 | Activity Step Count | `...b697` | Read, Notify | bhi360_step_count_fixed_t | Activity-specific steps | On change | Fully implemented |

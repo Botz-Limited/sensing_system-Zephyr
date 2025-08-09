@@ -20,9 +20,9 @@ This document defines a  system for processing raw sensor data into meaningful, 
 
 **Important Note**: The system uses delta timestamps throughout - each data packet contains the time elapsed since the previous packet rather than absolute timestamps. This approach minimizes data size and simplifies synchronization.
 
-### ⚠️ Implementation Status (Updated July 2025)
+### ⚠️ Implementation Status (Updated August 2025)
 
-**This document describes a comprehensive activity metrics system. Core components are IMPLEMENTED with ongoing development.**
+**This document describes a comprehensive activity metrics system. Core components are IMPLEMENTED with ALL Category 1 metrics from colleague's proposal COMPLETE.**
 
 **✅ FULLY IMPLEMENTED:**
 - **Multi-threaded architecture** with dedicated modules:
@@ -32,10 +32,11 @@ This document defines a  system for processing raw sensor data into meaningful, 
   - `analytics`: Module created but algorithms not yet implemented
 - **Thread-safe communication** using work queues and message passing
 - **BLE Activity Metrics Service** (`4fd5b690-9d89-4061-92aa-319ca786baae`) with:
-  - Real-time metrics characteristic (1Hz updates)
-  - Asymmetry metrics characteristic (0.5Hz updates)
-  - Total and activity step counts
-  - GPS data input characteristic
+  - Real-time metrics characteristic (1Hz updates) ✅
+  - Asymmetry metrics characteristic (0.5Hz updates) ✅
+  - Stride metrics characteristics (1Hz updates) ✅ **NEW**
+  - Total and activity step counts ✅
+  - GPS data input characteristic ✅
   - Biomechanics extended characteristic (structure only)
   - Session summary characteristic (structure only)
 - **Core sensor processing**:
@@ -45,13 +46,30 @@ This document defines a  system for processing raw sensor data into meaningful, 
   - Pressure distribution (heel/midfoot/forefoot %)
   - Basic pronation detection
   - Strike pattern classification
-- **Real-time metrics**:
-  - Cadence calculation (steps/min × 2)
-  - Pace estimation (sec/km, without GPS)
-  - Form score (0-100)
-  - Left/right balance ratio
-  - Step length asymmetry
-  - Contact time asymmetry
+- **Real-time metrics (ALL CATEGORY 1 COMPLETE)**:
+  - Cadence calculation (steps/min) ✅
+  - Pace estimation (sec/km, with GPS dual function) ✅
+  - Distance tracking (meters) ✅
+  - Form score (0-100) ✅
+  - Left/right balance ratio ✅
+  - Ground contact time ✅
+  - Flight time ✅
+  - Efficiency score ✅
+  - Alert system ✅
+- **Asymmetry metrics (ALL CATEGORY 1 COMPLETE)**:
+  - Contact time asymmetry ✅
+  - Flight time asymmetry ✅
+  - Force asymmetry ✅
+  - Pronation asymmetry ✅
+  - Strike pattern L/R ✅
+- **Stride metrics (ALL CATEGORY 1 COMPLETE)** ✅ **NEW**:
+  - Stride duration (ms) ✅
+  - Stride duration asymmetry (%) ✅
+  - Stride length (cm) ✅
+  - Stride length asymmetry (%) ✅
+- **Vertical metrics (CATEGORY 1 COMPLETE)**:
+  - Vertical oscillation (simplified) ✅
+  - Vertical ratio ✅
 - **Session management**:
   - Start/stop activity commands via Control Service
   - Activity types support (running, walking, training)
@@ -226,11 +244,13 @@ Raw Sensors (80Hz) → On-Device Processing → Calculated Metrics → BLE/Stora
 |--------|-------------|-------------|----------|---------|
 | Cadence | 1Hz | Steps per minute | ±1 spm | ✅ Implemented |
 | Pace | 1Hz | Time per km/mile | ±5 sec/km | ✅ Dual function (GPS/sensor) |
-| Distance | 0.5Hz | Cumulative distance | ±2% with GPS | ✅ Dual function (GPS/sensor) |
-| Vertical Oscillation | 0.5Hz | Vertical displacement | ±1cm | ❌ Not started |
-| Vertical Stiffness | 0.5Hz | Spring-mass stiffness | ±5% | ❌ Not started |
-| Running Efficiency | 0.5Hz | Energy efficiency score | 0-100 | ❌ Not started |
+| Distance | 1Hz | Cumulative distance | ±2% with GPS | ✅ Dual function (GPS/sensor) |
+| Vertical Oscillation | 1Hz | Vertical displacement | ±2cm | ✅ Simplified implementation |
+| Vertical Ratio | 1Hz | Oscillation/stride ratio | 0-100 | ✅ Implemented |
+| Running Efficiency | 1Hz | Energy efficiency score | 0-100 | ✅ Simplified implementation |
 | Form Score | 1Hz | Composite technique score | 0-100 | ✅ Implemented |
+| Stride Duration | 1Hz | Average stride time | ±10ms | ✅ Implemented |
+| Stride Length | 1Hz | Average stride distance | ±5cm | ✅ Implemented |
 
 ### Asymmetry Metrics - Implementation Status
 
@@ -549,21 +569,26 @@ async function startActivitySession(activityType, userProfile) {
 5. **Power optimizations**: adaptive sampling, smart sleep
 6. **Smart GPS mode switching**: battery optimization strategies
 
-### BLE Characteristics Status
+### BLE Characteristics Status (All Category 1 Complete ✅)
 
 | Feature | Calculation | BLE Characteristic | Data Flow |
 |---------|-------------|-------------------|-----------|
-| Cadence, Pace, Form Score | ✅ Working | ✅ Real-time metrics (1Hz) | ✅ Complete |
-| Contact Time, Peak Force | ✅ Working | ✅ Real-time metrics (1Hz) | ✅ Complete |
-| L/R Asymmetry | ✅ Working | ✅ Asymmetry metrics (0.5Hz) | ✅ Complete |
+| Cadence, Pace, Distance | ✅ Working | ✅ Individual characteristics (1Hz) | ✅ Complete |
+| Form Score, Efficiency | ✅ Working | ✅ Individual characteristics (1Hz) | ✅ Complete |
+| Ground Contact, Flight Time | ✅ Working | ✅ Individual characteristics (1Hz) | ✅ Complete |
+| Balance L/R | ✅ Working | ✅ Individual characteristic (1Hz) | ✅ Complete |
+| Contact/Flight Asymmetry | ✅ Working | ✅ Individual characteristics (1Hz) | ✅ Complete |
+| Force/Pronation Asymmetry | ✅ Working | ✅ Individual characteristics (1Hz) | ✅ Complete |
+| Strike Pattern L/R | ✅ Working | ✅ Individual characteristics (1Hz) | ✅ Complete |
+| Stride Duration/Length | ✅ Working | ✅ Individual characteristics (1Hz) | ✅ Complete |
+| Stride Asymmetries | ✅ Working | ✅ Individual characteristics (1Hz) | ✅ Complete |
+| Vertical Oscillation/Ratio | ✅ Working | ✅ In realtime metrics | ✅ Complete |
 | Step Counting | ✅ Working | ✅ Two characteristics | ✅ Complete |
 | GPS Reception | N/A | ✅ Write characteristic | ✅ Complete |
-| Basic Pronation | ✅ Working | ⚠️ Biomech extended | ⚠️ No updates |
+| Basic Pronation | ✅ Working | ⚠️ Biomech extended | ⚠️ Structure only |
 | Loading Rate | ❌ No calc | ⚠️ Biomech extended | ❌ No data |
 | Session Summary | ❌ No calc | ⚠️ Characteristic exists | ❌ No data |
-| Vertical Oscillation | ❌ No calc | ❌ No characteristic | ❌ Not started |
-| CPEI, Strike Angle | ❌ No calc | ❌ No characteristic | ❌ Not started |
-| Efficiency, Power | ❌ No calc | ❌ No characteristic | ❌ Not started |
+| CPEI, Strike Angle | ❌ No calc | ❌ No characteristic | ❌ Not planned |
 
 ### Next Development Priorities
 1. Add fatigue and injury risk algorithms in analytics module

@@ -64,6 +64,10 @@ typedef struct {
     
     // Alerts/warnings (bit flags)
     uint8_t alerts;                 // Bit 0: High asymmetry, Bit 1: Poor form, etc.
+  uint16_t stride_duration_ms;   // Average stride time in ms
+  uint16_t stride_length_cm;     // Average stride length in cm
+  uint8_t stride_duration_asymmetry;  // % difference L/R in stride duration
+  uint8_t stride_length_asymmetry;  // % difference L/R in stride length
 } realtime_metrics_t;
 
 // Cadence tracking structure

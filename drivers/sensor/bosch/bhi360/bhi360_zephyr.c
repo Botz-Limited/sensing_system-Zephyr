@@ -44,13 +44,13 @@ static void bhi360_int_handler(const struct device *dev, struct gpio_callback *c
 
 static int bhi360_init(const struct device *dev)
 {
+
     const struct bhi360_config *config = dev->config;
     struct bhi360_data *data = dev->data;
     int ret;
     
     LOG_INF("Initializing BHI360 sensor driver");
 
-    
     /* Initialize semaphore for interrupt handling */
     k_sem_init(&data->data_ready_sem, 0, 1);
     

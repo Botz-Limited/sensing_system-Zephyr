@@ -11,11 +11,13 @@
         zephyr,settings-partition = &lfs1;
         zephyr,console = &uart2;
         zephyr,shell-uart = &uart2;
+        nordic,nrf-spim= &spi1;
     };
 
     aliases {
         rtc0 = &rtc0;
         wifi0 = &nrf7002;
+        spi1 = &spi1;
     };
 
 };
@@ -171,6 +173,7 @@
     pinctrl-1 = <&spi1_sleep_alt>;
     pinctrl-names = "default", "sleep";
     cs-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>; // CS on P1.15
+    label = "spi1";
 
     bhi360: bhi360@0 {
         compatible = "bosch,bhi360";

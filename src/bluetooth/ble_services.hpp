@@ -34,6 +34,7 @@ void jis_bhi360_data3_notify(const bhi360_linear_accel_t* data);
 void jis_fota_progress_notify(const fota_progress_msg_t* progress);
 void jis_activity_log_available_notify(uint8_t log_id);
 void jis_activity_log_path_notify(const char *file_path);
+void jis_update_secondary_battery(uint8_t level);
 void cts_notify(void);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -50,6 +51,7 @@ void jis_secondary_bhi360_log_available_notify(uint8_t log_id);
 void jis_secondary_bhi360_log_path_notify(const char* path);
 void jis_secondary_activity_log_available_notify(uint8_t log_id);
 void jis_secondary_activity_log_path_notify(const char* path);
+void jis_update_primary_battery(uint8_t level);
 #endif
 
 // CTS functions

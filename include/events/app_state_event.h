@@ -78,6 +78,8 @@ typedef enum
     MSG_TYPE_GPS_UPDATE, // GPS update from mobile app
     MSG_TYPE_FULL_SYNC_DATA,
     MSG_TYPE_SYNC_FOOT_DATA,
+    MSG_TYPE_BATTERY_LEVEL_PRIMARY, // Battery level notification
+    MSG_TYPE_BATTERY_LEVEL_SECONDARY, // Battery level notification
 } msg_type_t;
 
 // Define sender types
@@ -95,6 +97,7 @@ typedef enum
     SENDER_SENSOR_DATA, // Sensor data consolidation module
     SENDER_REALTIME_METRICS, // Real-time metrics module
     SENDER_ANALYTICS, // Analytics module
+    SENDER_BATTTERY, // Analytics module
 } sender_type_t;
 #ifdef __cplusplus
 }

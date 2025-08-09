@@ -79,6 +79,10 @@ static struct bt_uuid_128 d2d_weight_measurement_uuid =
 static struct bt_uuid_128 d2d_batch_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e8, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+// Battery level UUID
+static struct bt_uuid_128 d2d_battery_level_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e9, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection tracking
 static struct bt_conn *primary_conn = NULL;
 
@@ -100,6 +104,7 @@ static bool activity_log_path_notify_enabled = false;
 static bool activity_step_count_notify_enabled = false;
 static bool weight_measurement_notify_enabled = false;
 static bool d2d_batch_notify_enabled = false;
+static bool battery_level_notify_enabled = false;
 static foot_samples_t foot_sensor_char_value = {0};
 
 // Data buffers - using fixed-point versions for BLE transmission
@@ -119,6 +124,7 @@ static uint8_t activity_log_available = 0;
 static char activity_log_path[256] = {0};
 static bhi360_step_count_fixed_t activity_step_count_fixed = {0, 0};
 static uint16_t weight_kg_x10 = 0; // Weight in kg * 10 (for 0.1kg precision)
+static uint8_t battery_level = 0; // Battery level percentage (0-100)
 
 // CCC changed callbacks
 static void foot_sensor_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
@@ -319,6 +325,17 @@ static void d2d_batch_ccc_changed(const struct bt_gatt_attr *attr, uint16_t valu
     d2d_batch_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("D2D batch notifications %s", d2d_batch_notify_enabled ? "enabled" : "disabled");
 }
+
+static void battery_level_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("battery_level_ccc_changed: attr is NULL");
+        return;
+    }
+    battery_level_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("Battery level notifications %s", battery_level_notify_enabled ? "enabled" : "disabled");
+}
 // Read callback for D2D batch characteristic
 static ssize_t read_d2d_batch(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                               uint16_t offset)
@@ -419,7 +436,11 @@ BT_GATT_SERVICE_DEFINE(
     // D2D batch (notify)
     BT_GATT_CHARACTERISTIC(&d2d_batch_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_READ,
                            read_d2d_batch, NULL, NULL),
-    BT_GATT_CCC(d2d_batch_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
+    BT_GATT_CCC(d2d_batch_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    
+    // Battery level (notify)
+    BT_GATT_CHARACTERISTIC(&d2d_battery_level_uuid.uuid, BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_NONE, NULL, NULL, NULL),
+    BT_GATT_CCC(battery_level_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
 #endif // !CONFIG_PRIMARY_DEVICE
 
 
@@ -1001,6 +1022,7 @@ void d2d_tx_service_set_connection(struct bt_conn *conn)
         activity_step_count_notify_enabled = false;
         weight_measurement_notify_enabled = false;
         d2d_batch_notify_enabled = false;
+        battery_level_notify_enabled = false;
     }
 }
 // Send D2D batch notification
@@ -1029,6 +1051,33 @@ int d2d_tx_notify_d2d_batch(const d2d_sample_batch_t *batch)
 #else
     return -ENOTSUP;
 #endif
+}
+
+int d2d_tx_notify_battery_level(uint8_t level)
+{
+    LOG_INF("D2D TX: Battery level notify called - level=%u%%", level);
+
+    if (!primary_conn || !battery_level_notify_enabled)
+    {
+        LOG_WRN("D2D TX: Cannot send battery level - no connection or notifications disabled");
+        return -ENOTCONN;
+    }
+
+    battery_level = level;
+
+    // Battery level characteristic is at index 51 (after D2D batch + CCC)
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[51];
+    int err = bt_gatt_notify(primary_conn, char_attr, &battery_level, sizeof(battery_level));
+    if (err)
+    {
+        LOG_ERR("Failed to send battery level notification: %d", err);
+    }
+    else
+    {
+        LOG_INF("D2D battery level sent: %u%%", level);
+    }
+
+    return err;
 }
 
 void d2d_tx_service_init(void)

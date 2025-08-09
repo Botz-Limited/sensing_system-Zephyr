@@ -159,6 +159,13 @@ int d2d_tx_notify_activity_step_count(const bhi360_step_count_t *data);
  */
 int d2d_tx_notify_weight_measurement(float weight_kg);
 
+/**
+ * @brief Send battery level notification to primary device
+ * @param level Battery level percentage (0-100)
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_battery_level(uint8_t level);
+
 #ifdef __cplusplus
 }
 #endif

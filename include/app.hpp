@@ -142,6 +142,11 @@ typedef struct {
     uint32_t timestamp;
 } weight_measurement_msg_t;
 
+// Battery level message
+typedef struct {
+    uint8_t level;  // Battery level percentage (0-100)
+} battery_level_msg_t;
+
 // Synchronized foot data structure
 typedef struct {
     foot_samples_t left;   // Secondary device (left foot)
@@ -225,6 +230,7 @@ typedef struct
         full_synchronized_data_t full_sync_data;  // Full sync data
         realtime_metrics_t realtime_metrics;  // Real-time metrics data
         analytics_results_t analytics_results;  // Analytics calculation results
+        battery_level_msg_t battery_level;  // Battery level from secondary device
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

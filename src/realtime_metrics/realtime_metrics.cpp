@@ -95,6 +95,15 @@ static struct {
     // GPS data
     float latest_gps_speed_cms;
     uint32_t last_gps_timestamp;
+    
+    uint32_t last_left_strike_time;
+    uint32_t last_right_strike_time;
+    uint16_t left_stride_duration;
+    uint16_t right_stride_duration;
+    float left_stride_length;
+    float right_stride_length;
+    bool last_left_contact;
+    bool last_right_contact;
 } metrics_state;
 
 // User configuration (should come from settings)
@@ -371,6 +380,47 @@ static void calculate_realtime_metrics(void)
         uint16_t avg_right_force = metrics_state.right_force_sum / metrics_state.force_count;
         balance = calculate_balance_percentage(avg_left_force, avg_right_force);
     }
+
+    // Calculate stride duration for left foot
+    if (data->left_in_contact && !metrics_state.last_left_contact) {
+        uint32_t now = k_uptime_get_32();
+        if (metrics_state.last_left_strike_time > 0) {
+            metrics_state.left_stride_duration = now - metrics_state.last_left_strike_time;
+        }
+        metrics_state.last_left_strike_time = now;
+    }
+    metrics_state.last_left_contact = data->left_in_contact;
+
+    // Similar for right foot
+    if (data->right_in_contact && !metrics_state.last_right_contact) {
+        uint32_t now = k_uptime_get_32();
+        if (metrics_state.last_right_strike_time > 0) {
+            metrics_state.right_stride_duration = now - metrics_state.last_right_strike_time;
+        }
+        metrics_state.last_right_strike_time = now;
+    }
+    metrics_state.last_right_contact = data->right_in_contact;
+
+    // Average stride duration
+    metrics_state.current_metrics.stride_duration_ms = (metrics_state.left_stride_duration + metrics_state.right_stride_duration) / 2;
+
+    // Stride duration asymmetry
+    metrics_state.current_metrics.stride_duration_asymmetry = calculate_asymmetry_percentage(
+        metrics_state.left_stride_duration,
+        metrics_state.right_stride_duration
+    );
+
+    // Estimate stride length (simple model: speed * stride time)
+    float speed_ms = 1000.0f / metrics_state.current_metrics.pace_sec_km; // m/s
+    metrics_state.left_stride_length = speed_ms * (metrics_state.left_stride_duration / 1000.0f);
+    metrics_state.right_stride_length = speed_ms * (metrics_state.right_stride_duration / 1000.0f);
+    metrics_state.current_metrics.stride_length_cm = (uint16_t)(((metrics_state.left_stride_length + metrics_state.right_stride_length) / 2) * 100);
+
+    // Stride length asymmetry
+    metrics_state.current_metrics.stride_length_asymmetry = calculate_asymmetry_percentage(
+        (uint16_t)(metrics_state.left_stride_length * 100),
+        (uint16_t)(metrics_state.right_stride_length * 100)
+    );
 
     // Calculate vertical oscillation (simple estimation from vertical acceleration)
     // TODO: Implement proper vertical oscillation using double integration of vertical acceleration
