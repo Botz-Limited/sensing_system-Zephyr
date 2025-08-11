@@ -406,20 +406,22 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type,
 
   // If we find a device with matching UUID in scan response, remember it
   if (has_uuid && (type == BT_GAP_ADV_TYPE_SCAN_RSP)) {
-      LOG_INF("[SCAN] Found device with matching UUID in scan response from %s", addr_str);
-  
-      // Remember this device
-      memcpy(&target_addr, addr, sizeof(bt_addr_le_t));
-      target_found = true;
-      return;
+    LOG_INF("[SCAN] Found device with matching UUID in scan response from %s",
+            addr_str);
+
+    // Remember this device
+    memcpy(&target_addr, addr, sizeof(bt_addr_le_t));
+    target_found = true;
+    return;
   }
 
   // Check if this is a connectable advertisement from our target device
   if (target_found && bt_addr_le_cmp(addr, &target_addr) == 0) {
-      LOG_INF("[SCAN] Found advertisement from target device %s, type %u", addr_str, type);
-      if (type == BT_GAP_ADV_TYPE_ADV_IND ||
-          type == BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
-          LOG_INF("[SCAN] Found connectable advertisement from target device!");
+    LOG_INF("[SCAN] Found advertisement from target device %s, type %u",
+            addr_str, type);
+    if (type == BT_GAP_ADV_TYPE_ADV_IND ||
+        type == BT_GAP_ADV_TYPE_ADV_DIRECT_IND) {
+      LOG_INF("[SCAN] Found connectable advertisement from target device!");
 
       // Check if we already have a connection object
       if (conn) {
@@ -1783,8 +1785,8 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/,
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Handle primary battery level updates
         battery_level_msg_t battery_level = msg.data.battery_level;
-        LOG_DBG("Received primary battery level: %d%% from %s", battery_level.level,
-                get_sender_name(msg.sender));
+        LOG_DBG("Received primary battery level: %d%% from %s",
+                battery_level.level, get_sender_name(msg.sender));
         // Update the custom battery levels characteristic
         jis_update_primary_battery(battery_level.level);
 #endif // CONFIG_PRIMARY_DEVICE
@@ -1795,8 +1797,8 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/,
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Handle secondary battery level updates
         battery_level_msg_t battery_level = msg.data.battery_level;
-        LOG_DBG("Received secondary battery level: %d%% from %s", battery_level.level,
-                get_sender_name(msg.sender));
+        LOG_DBG("Received secondary battery level: %d%% from %s",
+                battery_level.level, get_sender_name(msg.sender));
         d2d_tx_notify_battery_level(battery_level.level);
 #endif // !CONFIG_PRIMARY_DEVICE
         break;

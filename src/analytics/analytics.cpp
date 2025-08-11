@@ -264,13 +264,13 @@ static void process_command_work_handler(struct k_work *work)
     ARG_UNUSED(work);
     LOG_DBG("Processing command: %s", pending_command);
     
-    if (strcmp(pending_command, "START_ANALYTICS") == 0) {
+    if (strcmp(pending_command, "START_SENSOR_PROCESSING") == 0) {
         atomic_set(&processing_active, 1);
         analytics_state.baseline_start_time = k_uptime_get_32();
         LOG_INF("Analytics processing started");
         // Start periodic work
         k_work_schedule_for_queue(&analytics_work_q, &analytics_periodic_work, K_MSEC(200));
-    } else if (strcmp(pending_command, "STOP_ANALYTICS") == 0) {
+    } else if (strcmp(pending_command, "STOP_REALTIME_PROCESSING") == 0) {
         atomic_set(&processing_active, 0);
         LOG_INF("Analytics processing stopped");
         // Cancel periodic work

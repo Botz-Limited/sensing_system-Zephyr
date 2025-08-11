@@ -51,11 +51,9 @@ static struct k_work_q activity_metrics_work_q;
 /**
  * THREAD-SAFE WORK ITEM PATTERN
  * 
- * Problem: The original code used global variables (pending_foot_data, pending_command, etc.)
- * to pass data from the message thread to work handlers. This created race conditions where
- * new messages could overwrite the data before the work handler processed it.
+
  * 
- * Solution: Each work item now contains its own copy of the data. We use double buffering
+ * Each work item now contains its own copy of the data. We use double buffering
  * to allow one work item to be processed while another is being prepared.
  * 
  * How it works:
@@ -713,7 +711,7 @@ static void process_command_work_handler(struct k_work *work)
     // Get the containing work item structure
     struct command_work *work_item = CONTAINER_OF(work, struct command_work, work);
     
-    LOG_DBG("Processing command: %s", work_item->command);
+    LOG_INF("Processing command: %s", work_item->command);
     
     if (strcmp(work_item->command, "START_ACTIVITY") == 0) {
         // Start new activity session
@@ -1542,53 +1540,6 @@ static void update_splits() {
     }
 }
 
-// Module event handler
-static bool app_event_handler(const struct app_event_header *aeh)
-{
-    if (is_module_state_event(aeh)) {
-        const struct module_state_event *event = cast_module_state_event(aeh);
-        
-        // Wait for both motion sensor and foot sensor to be ready
-        if (check_state(event, MODULE_ID(motion_sensor), MODULE_STATE_READY) &&
-            check_state(event, MODULE_ID(foot_sensor), MODULE_STATE_READY)) {
-            if (!module_initialized) {
-                activity_metrics_init();
-            }
-        }
-        return false;
-    }
-    
-    // Handle activity start/stop events
-    if (is_motion_sensor_start_activity_event(aeh) || 
-        is_foot_sensor_start_activity_event(aeh)) {
-        if (!session_state.session_active) {
-            // Send start command to our thread
-            generic_message_t msg = {
-                .sender = SENDER_NONE,
-                .type = MSG_TYPE_COMMAND,
-            };
-            strcpy(msg.data.command_str, "START_ACTIVITY");
-            k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT);
-        }
-        return false;
-    }
-    
-    if (is_motion_sensor_stop_activity_event(aeh) ||
-        is_foot_sensor_stop_activity_event(aeh)) {
-        if (session_state.session_active) {
-            // Send stop command to our thread
-            generic_message_t msg = {
-                .sender = SENDER_NONE,
-                .type = MSG_TYPE_COMMAND,
-            };
-            strcpy(msg.data.command_str, "STOP_ACTIVITY");
-            k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT);
-        }
-        return false;
-    }
-    
-    return false;
-}
 
 // Weight measurement functions
 static void start_weight_measurement(void)
@@ -1864,10 +1815,55 @@ static void perform_weight_calibration(void)
     }
 }
 
+// Module event handler
+static bool app_event_handler(const struct app_event_header *aeh)
+{
+    if (is_module_state_event(aeh)) {
+        auto *event = cast_module_state_event(aeh);
+        if (
+            check_state(event, MODULE_ID(foot_sensor), MODULE_STATE_READY)) {
+            if (!module_initialized) {
+                activity_metrics_init();
+            }
+        }
+        return false;
+    }
+    
+    // Handle activity start/stop events
+    if (is_foot_sensor_start_activity_event(aeh)) {
+            // Send start command to our thread
+            generic_message_t msg = {
+                .sender = SENDER_NONE,
+                .type = MSG_TYPE_COMMAND,
+            };
+            strcpy(msg.data.command_str, "START_ACTIVITY");
+            k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT);
+        return false;
+    }
+    
+    if (is_motion_sensor_stop_activity_event(aeh) ||
+        is_foot_sensor_stop_activity_event(aeh)) {
+
+            // Send stop command to our thread
+            generic_message_t msg = {
+                .sender = SENDER_NONE,
+                .type = MSG_TYPE_COMMAND,
+            };
+            strcpy(msg.data.command_str, "STOP_ACTIVITY");
+            k_msgq_put(&activity_metrics_msgq, &msg, K_NO_WAIT);
+
+        return false;
+    }
+    
+    return false;
+}
+
+
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, module_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
+APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_start_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_stop_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_start_activity_event);

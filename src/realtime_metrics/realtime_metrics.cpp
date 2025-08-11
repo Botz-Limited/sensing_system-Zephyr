@@ -219,7 +219,7 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
     
     while (true) {
         // Wait for sensor data
-        int ret = k_msgq_get(&sensor_data_queue, &msg, K_FOREVER);
+        int ret = k_msgq_get(&realtime_queue, &msg, K_FOREVER);
         
         if (ret == 0) {
             // Queue different work based on message type
@@ -549,7 +549,7 @@ static void calculate_realtime_metrics(void)
 // Send BLE update
 static void send_ble_update(void)
 {
-    LOG_DBG("Sending BLE update: cadence=%d spm, pace=%d s/km, form=%d%%", 
+    LOG_INF("Sending BLE update: cadence=%d spm, pace=%d s/km, form=%d%%", 
             metrics_state.current_metrics.cadence_spm,
             metrics_state.current_metrics.pace_sec_km,
             metrics_state.current_metrics.form_score);
@@ -595,11 +595,12 @@ static void send_ble_update(void)
 static bool app_event_handler(const struct app_event_header *aeh)
 {
     if (is_module_state_event(aeh)) {
-        const struct module_state_event *event = cast_module_state_event(aeh);
+         auto *event = cast_module_state_event(aeh);
         
         // Wait for sensor_data module to be ready
-        if (check_state(event, MODULE_ID(sensor_data), MODULE_STATE_READY)) {
+        if (check_state(event, MODULE_ID(foot_sensor), MODULE_STATE_READY)) {
             if (!module_initialized) {
+                LOG_INF("Got realtime metric Init");
                 realtime_metrics_init();
             }
         }
@@ -611,3 +612,9 @@ static bool app_event_handler(const struct app_event_header *aeh)
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, module_state_event);
+APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
+APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_state_event);
+APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_start_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_stop_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_start_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_stop_activity_event);

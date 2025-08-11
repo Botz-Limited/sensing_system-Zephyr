@@ -511,7 +511,6 @@ static err_t data_init()
         }
     }
 
-    // Always create the data thread - it's needed for message handling even without filesystem
     data_tid = k_thread_create(&data_thread_data, data_stack_area, K_THREAD_STACK_SIZEOF(data_stack_area),
                                proccess_data, nullptr, nullptr, nullptr, data_priority, 0, K_NO_WAIT);
 
@@ -3176,50 +3175,6 @@ int delete_all_files_in_directory(const char *dir_path)
     return deleted_count;
 }
 
-static bool app_event_handler(const struct app_event_header *aeh)
-{
-    if (is_module_state_event(aeh))
-    {
-        const struct module_state_event *event = cast_module_state_event(aeh);
-
-        if (check_state(event, MODULE_ID(app), MODULE_STATE_READY))
-        {
-            if (data_init() == err_t::NO_ERROR)
-            {
-                LOG_DBG("Data module initialization successful.");
-            }
-            else
-            {
-                LOG_ERR("Data module initialization failed.");
-            }
-        }
-        return false;
-    }
-    else if (is_app_state_event(aeh)) // Check for app state events
-    {
-        const struct app_state_event *event = cast_app_state_event(aeh);
-        // Assuming APP_STATE_SHUTDOWN_PREPARING is a state defined in events/app_state_event.h
-        // This state should be sent by your main application logic before a system shutdown/reboot.
-        if (event->state == APP_STATE_SHUTDOWN_PREPARING)
-        {
-            LOG_INF("Received APP_STATE_SHUTDOWN_PREPARING event. Attempting to close log files.");
-            // Call the end logging functions to flush and close files
-            err_t foot_close_status = end_foot_sensor_logging();
-            if (foot_close_status != err_t::NO_ERROR)
-            {
-                LOG_ERR("Error closing foot sensor log during shutdown: %d", (int)foot_close_status);
-            }
-
-            err_t bhi360_close_status = end_bhi360_logging();
-            if (bhi360_close_status != err_t::NO_ERROR)
-            {
-                LOG_ERR("Error closing BHI360 log during shutdown: %d", (int)bhi360_close_status);
-            }
-        }
-        return false;
-    }
-    return false;
-}
 
 /**
  * @brief Save BHI360 calibration data to file
@@ -3694,6 +3649,51 @@ err_t load_weight_calibration_data(void)
 
     LOG_INF("Weight calibration data loaded and sent to activity metrics module");
     return err_t::NO_ERROR;
+}
+
+static bool app_event_handler(const struct app_event_header *aeh)
+{
+    if (is_module_state_event(aeh))
+    {
+        const struct module_state_event *event = cast_module_state_event(aeh);
+
+        if (check_state(event, MODULE_ID(app), MODULE_STATE_READY))
+        {
+            if (data_init() == err_t::NO_ERROR)
+            {
+                LOG_DBG("Data module initialization successful.");
+            }
+            else
+            {
+                LOG_ERR("Data module initialization failed.");
+            }
+        }
+        return false;
+    }
+    else if (is_app_state_event(aeh)) // Check for app state events
+    {
+        const struct app_state_event *event = cast_app_state_event(aeh);
+        // Assuming APP_STATE_SHUTDOWN_PREPARING is a state defined in events/app_state_event.h
+        // This state should be sent by your main application logic before a system shutdown/reboot.
+        if (event->state == APP_STATE_SHUTDOWN_PREPARING)
+        {
+            LOG_INF("Received APP_STATE_SHUTDOWN_PREPARING event. Attempting to close log files.");
+            // Call the end logging functions to flush and close files
+            err_t foot_close_status = end_foot_sensor_logging();
+            if (foot_close_status != err_t::NO_ERROR)
+            {
+                LOG_ERR("Error closing foot sensor log during shutdown: %d", (int)foot_close_status);
+            }
+
+            err_t bhi360_close_status = end_bhi360_logging();
+            if (bhi360_close_status != err_t::NO_ERROR)
+            {
+                LOG_ERR("Error closing BHI360 log during shutdown: %d", (int)bhi360_close_status);
+            }
+        }
+        return false;
+    }
+    return false;
 }
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);

@@ -344,6 +344,7 @@ static size_t pack_legacy_data(uint8_t *buffer) {
             break;
         }
     }
+    #if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR)   //This is for testing only!!!!!!
     if (!sensors_connected) {
         for (int i = 0; i < 8; i++) {
             pressure[i] = sys_rand32_get() % 1024; // Random 0-1023
@@ -360,17 +361,8 @@ static size_t pack_legacy_data(uint8_t *buffer) {
         }
         temp = (float)(sys_rand32_get() % 5000) / 100.0f + 20.0f; // Random 20.0 to 70.0
     }
+    #endif
 
-    // Debug: Log pressure values to see if they're actually being read
-    LOG_INF("Legacy BLE pressure values: [%d, %d, %d, %d, %d, %d, %d, %d]",
-            pressure[0], pressure[1], pressure[2], pressure[3],
-            pressure[4], pressure[5], pressure[6], pressure[7]);
-    
-    // Debug: Log other sensor values too
-    LOG_INF("Legacy BLE quat values: [%.3f, %.3f, %.3f, %.3f]", 
-            (double)quat[0], (double)quat[1], (double)quat[2], (double)quat[3]);
-    LOG_INF("Legacy BLE accel values: [%.3f, %.3f, %.3f]", 
-            (double)accel[0], (double)accel[1], (double)accel[2]);
 
     // 2. Insole data (16 bytes: 8x uint16_t, MSB first)
     for (int i = 0; i < 8; i++) {
@@ -478,11 +470,13 @@ static size_t pack_secondary_data(uint8_t *buffer) {
             break;
         }
     }
+    #if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR)   //This is for testing only!!!!!!
     if (!has_foot_data) {
         for (int i = 0; i < 8; i++) {
             secondary_foot_data.values[i] = sys_rand32_get() % 1024; // Random 0-1023
         }
     }
+    #endif
     for (int i = 0; i < 8; i++) {
         buffer[index++] = (secondary_foot_data.values[i] >> 8) & 0xFF;
         buffer[index++] = secondary_foot_data.values[i] & 0xFF;
@@ -495,6 +489,7 @@ static size_t pack_secondary_data(uint8_t *buffer) {
                          secondary_imu_data.accel_y != 0.0f || secondary_imu_data.accel_z != 0.0f ||
                          secondary_imu_data.gyro_x != 0.0f || secondary_imu_data.gyro_y != 0.0f ||
                          secondary_imu_data.gyro_z != 0.0f);
+                         #if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR)   //This is for testing only!!!!!!
     if (!has_imu_data) {
         secondary_imu_data.quat_w = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
         secondary_imu_data.accel_x = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
@@ -504,6 +499,7 @@ static size_t pack_secondary_data(uint8_t *buffer) {
         secondary_imu_data.gyro_y = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f;
         secondary_imu_data.gyro_z = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f;
     }
+    #endif
     float q[4] = {secondary_imu_data.quat_w, secondary_imu_data.accel_z, secondary_imu_data.accel_y, secondary_imu_data.accel_x};
     for (int i = 0; i < 4; i++) {
         memcpy(&buffer[index], &q[i], sizeof(float));
@@ -649,7 +645,7 @@ static void send_zero_filled_secondary_packet(void) {
     sim_buffer[5] = tm->tm_sec;
     
     size_t index = 6;
-    
+    #if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR)   //This is for testing only!!!!!!
     // Simulate random insole data (16 bytes: 8x uint16_t)
     for (int i = 0; i < 8; i++) {
         uint16_t val = sys_rand32_get() % 1024;
@@ -688,6 +684,9 @@ static void send_zero_filled_secondary_packet(void) {
     float battery = (float)(sys_rand32_get() % 10000) / 100.0f;
     memcpy(&sim_buffer[index], &battery, sizeof(float));
     index += sizeof(float);
+    
+
+    #endif // CONFIG_TEST_RANDOM_GENERATOR
     
     // Checksum
     uint8_t checksum = 0;

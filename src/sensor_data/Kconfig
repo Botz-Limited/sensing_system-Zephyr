@@ -33,7 +33,7 @@ config SENSOR_DATA_MODULE_PRIORITY
 
 config SENSOR_DATA_MSGQ_SIZE
     int "Sensor data message queue size"
-    default 32
+    default 64
     range 16 128
     help
       Size of the sensor data message queue. Increase this if you see

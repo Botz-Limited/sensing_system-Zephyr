@@ -506,7 +506,7 @@ void motion_sensor_process(void *, void *, void *) {
 
   while (true) {
     // Check for messages with a short timeout
-    int msg_ret = k_msgq_get(&motion_sensor_msgq, &msg, K_MSEC(10));
+    int msg_ret = k_msgq_get(&motion_sensor_msgq, &msg, K_FOREVER);
     if (msg_ret == 0) {
       // Handle messages
       switch (msg.type) {

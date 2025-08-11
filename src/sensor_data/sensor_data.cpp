@@ -1530,10 +1530,9 @@ static uint16_t calculate_push_off_power(uint16_t force, float gyro_y, uint16_t 
 // Module event handler
 static bool app_event_handler(const struct app_event_header *aeh) {
   if (is_module_state_event(aeh)) {
-    const struct module_state_event *event = cast_module_state_event(aeh);
-
+    auto *event = cast_module_state_event(aeh);
     // Wait for motion sensor and foot sensor to be ready
-    if (check_state(event, MODULE_ID(motion_sensor), MODULE_STATE_READY) &&
+    if (
         check_state(event, MODULE_ID(foot_sensor), MODULE_STATE_READY)) {
       if (!module_initialized) {
         sensor_data_init();

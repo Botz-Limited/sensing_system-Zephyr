@@ -19,14 +19,14 @@ config ANALYTICS_MODULE_LOG_LEVEL
 
 config ANALYTICS_MODULE_STACK_SIZE
 	int "Analytics module thread stack size"
-	default 12288
+	default 4096
 	depends on ANALYTICS_MODULE
 	help
 	  Stack size for analytics processing thread
 
 config ANALYTICS_MODULE_PRIORITY
 	int "Analytics module thread priority"
-	default 10
+	default 7
 	depends on ANALYTICS_MODULE
 	help
 	  Priority for analytics processing thread (lower number = higher priority)
