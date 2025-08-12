@@ -268,12 +268,6 @@ int d2d_data_handler_process_file_path(uint8_t log_id, uint8_t file_type, const 
     
     // Forward to Information Service based on file type
     switch (file_type) {
-        case 0: // Foot sensor log
-            jis_secondary_foot_log_path_notify(path);
-            break;
-        case 1: // BHI360 log
-            jis_secondary_bhi360_log_path_notify(path);
-            break;
         case 2: // Activity log
             // NOTE: Not forwarding activity logs - each device maintains its own
             LOG_DBG("Secondary activity log path received but not forwarded (separate logs)");
@@ -299,12 +293,6 @@ int d2d_data_handler_process_log_available(uint8_t log_id, uint8_t file_type)
     
     // Forward to Information Service based on file type
     switch (file_type) {
-        case 0: // Foot sensor log
-            jis_secondary_foot_log_available_notify(log_id);
-            break;
-        case 1: // BHI360 log
-            jis_secondary_bhi360_log_available_notify(log_id);
-            break;
         case 2: // Activity log
             // NOTE: Not forwarding activity logs - each device maintains its own
             LOG_DBG("Secondary activity log available but not forwarded (separate logs)");

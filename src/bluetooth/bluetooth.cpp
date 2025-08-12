@@ -1326,40 +1326,6 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/,
         break;
       }
 
-      case MSG_TYPE_NEW_FOOT_SENSOR_LOG_FILE: {
-        // Access the new_hardware_log_file data from the union
-        new_log_info_msg_t *log_info = &msg.data.new_hardware_log_file;
-        LOG_INF("Received NEW FOOT LOG FILE notification from %s:",
-                get_sender_name(msg.sender));
-        LOG_INF("  File Path: %s", log_info->file_path);
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        jis_foot_sensor_log_available_notify(log_info->file_sequence_id);
-        jis_foot_sensor_req_id_path_notify(log_info->file_path);
-#else
-        // Secondary device: Send to primary via D2D
-        ble_d2d_tx_send_foot_sensor_log_available(log_info->file_sequence_id);
-        ble_d2d_tx_send_foot_sensor_req_id_path(log_info->file_path);
-#endif
-        break;
-      }
-
-      case MSG_TYPE_NEW_BHI360_LOG_FILE: {
-        // Access the new_hardware_log_file data from the union
-        new_log_info_msg_t *log_info = &msg.data.new_hardware_log_file;
-        LOG_INF("Received NEW BH360 LOG FILE notification from %s:",
-                get_sender_name(msg.sender));
-        LOG_INF("  File Path: %s", log_info->file_path);
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        jis_bhi360_log_available_notify(log_info->file_sequence_id);
-        jis_bhi360_req_id_path_notify(log_info->file_path);
-#else
-        // Secondary device: Send to primary via D2D
-        ble_d2d_tx_send_bhi360_log_available(log_info->file_sequence_id);
-        ble_d2d_tx_send_bhi360_req_id_path(log_info->file_path);
-#endif
-        break;
-      }
-
       case MSG_TYPE_COMMAND: {
         // If you send commands via char arrays in the union
         char *command_str = msg.data.command_str;

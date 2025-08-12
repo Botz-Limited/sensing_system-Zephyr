@@ -55,6 +55,7 @@ K_MUTEX_DEFINE(sensor_data_mutex);
 extern struct k_msgq sensor_data_queue;  // Input from sensor_data
 extern struct k_msgq realtime_queue;     // Output to analytics
 extern struct k_msgq bluetooth_msgq;     // Output to bluetooth
+extern struct k_msgq data_msgq;          // Output to data
 
 // Module state
 static bool module_initialized = false;
@@ -571,6 +572,23 @@ static void send_ble_update(void)
     int ret = k_msgq_put(&bluetooth_msgq, &ble_msg, K_NO_WAIT);
     if (ret != 0) {
         LOG_WRN("Failed to send metrics to bluetooth queue: %d", ret);
+    }
+
+    // Create message for data module
+    generic_message_t data_msg = {};
+    data_msg.sender = SENDER_REALTIME_METRICS;
+    data_msg.type = MSG_TYPE_REALTIME_METRICS_DATA;  // You may need to define this in your message types
+    
+    // Copy metrics data to message
+    memcpy(&data_msg.data, &metrics_state.current_metrics,
+           sizeof(metrics_state.current_metrics) > sizeof(data_msg.data) ?
+           sizeof(data_msg.data) : sizeof(metrics_state.current_metrics));
+    
+    
+    // Send to data module
+    ret = k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT);
+    if (ret != 0) {
+        LOG_WRN("Failed to send metrics to data queue: %d", ret);
     }
     
     // Log alerts if any

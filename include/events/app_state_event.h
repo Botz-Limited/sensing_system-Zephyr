@@ -80,6 +80,7 @@ typedef enum
     MSG_TYPE_SYNC_FOOT_DATA,
     MSG_TYPE_BATTERY_LEVEL_PRIMARY, // Battery level notification
     MSG_TYPE_BATTERY_LEVEL_SECONDARY, // Battery level notification
+    MSG_TYPE_REALTIME_METRICS_DATA, // Real-time metrics data
 } msg_type_t;
 
 // Define sender types

@@ -737,8 +737,6 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
       msg.sender = SENDER_BHI360_THREAD;
       msg.type = MSG_TYPE_BHI360_LOG_RECORD;
       msg.data.bhi360_log_record = record;
-      // Don't log bhi360 data anymore at the moment
-      // k_msgq_put(&data_msgq, &msg, K_NO_WAIT);
 
 // Send to sensor data module (new multi-thread architecture)
 #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)

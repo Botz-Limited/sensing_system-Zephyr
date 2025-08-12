@@ -10,7 +10,7 @@ echo "  - Accept connections from secondary device"
 echo "  - Advertise as 'BotzRightSh'"
 
 # Clean previous build
-rm -rf build_primary
+#rm -rf build_primary
 
 # Base west command
 WEST_CMD="west build --build-dir /home/ee/sensing_fw/build_primary /home/ee/sensing_fw/ --board nrf5340dk/nrf5340/cpuapp --sysbuild -- -DCONFIG_PRIMARY_DEVICE=y -Dipc_radio_EXTRA_CONF_FILE=/home/ee/sensing_fw/sysbuild/ipc_radio/prj_primary.conf"

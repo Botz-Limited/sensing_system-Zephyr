@@ -37,6 +37,10 @@
 #include <app.hpp>
 #include <app_version.h>
 
+#include <app_event_manager.h>
+#include <events/foot_sensor_event.h>
+#include <events/motion_sensor_event.h>
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_tx.hpp"
 #include "ble_d2d_tx_queue.hpp"
@@ -85,52 +89,12 @@ static ssize_t write_set_time_control_vnd(struct bt_conn *conn,
                                           const void *buf, uint16_t len,
                                           uint16_t offset, uint8_t flags);
 
-// For foot log deletion characteristic
-ssize_t read_delete_foot_log_command_vnd(struct bt_conn *conn,
-                                         const struct bt_gatt_attr *attr,
-                                         void *buf, uint16_t len,
-                                         uint16_t offset);
-ssize_t write_delete_foot_log_command_vnd(struct bt_conn *conn,
-                                          const struct bt_gatt_attr *attr,
-                                          const void *buf, uint16_t len,
-                                          uint16_t offset, uint8_t flags);
-static void cs_delete_foot_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                               uint16_t value);
-
-// For BHI360 log deletion characteristic
-ssize_t read_delete_bhi360_log_command_vnd(struct bt_conn *conn,
-                                           const struct bt_gatt_attr *attr,
-                                           void *buf, uint16_t len,
-                                           uint16_t offset);
-ssize_t write_delete_bhi360_log_command_vnd(struct bt_conn *conn,
-                                            const struct bt_gatt_attr *attr,
-                                            const void *buf, uint16_t len,
-                                            uint16_t offset, uint8_t flags);
-static void
-cs_delete_bhi360_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                     uint16_t value);
-
-/**
- * @file
- * @brief Bluetooth GATT Service and Characteristic UUIDs
- */
-
 /**
  * @brief UUID for the control service. This UUID identifies the control service
  * used for handling various commands over Bluetooth communication.
  */
 static struct bt_uuid_128 control_service_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x4fd5b67f, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
-
-// --- New: UUID for the delete foot log command characteristic. ---
-static struct bt_uuid_128 delete_foot_log_command_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b682, 0x9d89, 0x4061, 0x92aa,
-                       0x319ca786baae)); // Incrementing from old meta uuid
-
-// --- New: UUID for the delete BHI360 log command characteristic. ---
-static struct bt_uuid_128 delete_bhi360_log_command_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b683, 0x9d89, 0x4061, 0x92aa,
-                       0x319ca786baae)); // Incrementing further
 
 // --- New: UUID for the start activity characteristic. ---
 static struct bt_uuid_128 start_activity_command_uuid = BT_UUID_INIT_128(
@@ -148,13 +112,6 @@ static struct bt_uuid_128 trigger_bhi360_calibration_uuid = BT_UUID_INIT_128(
 static struct bt_uuid_128 delete_activity_log_command_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x4fd5b687, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
-// --- Secondary device delete commands ---
-static struct bt_uuid_128 delete_secondary_foot_log_command_uuid =
-    BT_UUID_INIT_128(
-        BT_UUID_128_ENCODE(0x4fd5b688, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
-static struct bt_uuid_128 delete_secondary_bhi360_log_command_uuid =
-    BT_UUID_INIT_128(
-        BT_UUID_128_ENCODE(0x4fd5b689, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 static struct bt_uuid_128 delete_secondary_activity_log_command_uuid =
     BT_UUID_INIT_128(
         BT_UUID_128_ENCODE(0x4fd5b68a, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
@@ -198,18 +155,7 @@ cs_delete_activity_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
                                        uint16_t value);
 
 // Secondary device delete command handlers
-static ssize_t write_delete_secondary_foot_log_command_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags);
-static void
-cs_delete_secondary_foot_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                             uint16_t value);
-static ssize_t write_delete_secondary_bhi360_log_command_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags);
-static void
-cs_delete_secondary_bhi360_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                               uint16_t value);
+
 static ssize_t write_delete_secondary_activity_log_command_vnd(
     struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
     uint16_t len, uint16_t offset, uint8_t flags);
@@ -273,37 +219,11 @@ BT_GATT_SERVICE_DEFINE(
                            write_set_time_control_vnd,
                            static_cast<void *>(&set_time_control)),
 
-    BT_GATT_CHARACTERISTIC(
-        &delete_foot_log_command_uuid.uuid,
-        BT_GATT_CHRC_READ |
-            BT_GATT_CHRC_WRITE, // Added NOTIFY for status feedback
-        BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
-        read_delete_foot_log_command_vnd, // Read callback for current deletion
-                                          // ID
-        write_delete_foot_log_command_vnd,
-        static_cast<void *>(nullptr)), // No specific data pointer needed if id
-                                       // is read from buffer
-    BT_GATT_CCC(cs_delete_foot_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-
-    // New: Delete BHI360 Log Characteristic
-    BT_GATT_CHARACTERISTIC(
-        &delete_bhi360_log_command_uuid.uuid,
-        BT_GATT_CHRC_READ |
-            BT_GATT_CHRC_WRITE, // Added NOTIFY for status feedback
-        BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
-        read_delete_bhi360_log_command_vnd, // Read callback for current
-                                            // deletion ID
-        write_delete_bhi360_log_command_vnd,
-        static_cast<void *>(nullptr)), // No specific data pointer needed if id
-                                       // is read from buffer
-    BT_GATT_CCC(cs_delete_bhi360_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // New: Start Activity Characteristic
     BT_GATT_CHARACTERISTIC(&start_activity_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
-                           nullptr, write_start_activity_command_vnd, nullptr),
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, nullptr,
+                           write_start_activity_command_vnd, nullptr),
     BT_GATT_CCC(cs_start_activity_ccc_cfg_changed,
                 BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
@@ -324,32 +244,16 @@ BT_GATT_SERVICE_DEFINE(
 
     // New: Delete Activity Log Characteristic
     BT_GATT_CHARACTERISTIC(&delete_activity_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
-                           nullptr, write_delete_activity_log_command_vnd,
-                           nullptr),
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, nullptr,
+                           write_delete_activity_log_command_vnd, nullptr),
     BT_GATT_CCC(cs_delete_activity_log_ccc_cfg_changed,
                 BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary device delete commands - only on primary
-    BT_GATT_CHARACTERISTIC(&delete_secondary_foot_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
-                           nullptr, write_delete_secondary_foot_log_command_vnd,
-                           nullptr),
-    BT_GATT_CCC(cs_delete_secondary_foot_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-
-    BT_GATT_CHARACTERISTIC(&delete_secondary_bhi360_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
-                           nullptr,
-                           write_delete_secondary_bhi360_log_command_vnd,
-                           nullptr),
-    BT_GATT_CCC(cs_delete_secondary_bhi360_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     BT_GATT_CHARACTERISTIC(&delete_secondary_activity_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
-                           nullptr,
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, nullptr,
                            write_delete_secondary_activity_log_command_vnd,
                            nullptr),
     BT_GATT_CCC(cs_delete_secondary_activity_log_ccc_cfg_changed,
@@ -357,10 +261,11 @@ BT_GATT_SERVICE_DEFINE(
 #endif
 
     // Connection Parameter Control Characteristic
-    BT_GATT_CHARACTERISTIC(
-        &conn_param_control_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-        BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
-        read_conn_param_control_vnd, write_conn_param_control_vnd, nullptr),
+    BT_GATT_CHARACTERISTIC(&conn_param_control_uuid.uuid,
+                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+                           read_conn_param_control_vnd,
+                           write_conn_param_control_vnd, nullptr),
 
     // Weight Calibration Trigger Characteristic
     BT_GATT_CHARACTERISTIC(&weight_calibration_uuid.uuid,
@@ -372,8 +277,8 @@ BT_GATT_SERVICE_DEFINE(
 
     // GPS Update Characteristic
     BT_GATT_CHARACTERISTIC(&gps_update_uuid.uuid, BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE, nullptr,
-                           write_gps_update_vnd, nullptr));
+                           BT_GATT_PERM_WRITE, nullptr, write_gps_update_vnd,
+                           nullptr));
 
 /**
  * @brief Notifies subscribed devices about the metadata log deletion command.
@@ -382,143 +287,10 @@ BT_GATT_SERVICE_DEFINE(
  *
  * @param stu The metadata log deletion command value.
  */
-ssize_t read_delete_foot_log_command_vnd(struct bt_conn *conn,
-                                         const struct bt_gatt_attr *attr,
-                                         void *buf, uint16_t len,
-                                         uint16_t offset) {
-  // This could return the ID of the last requested deletion or a status.
-  // For now, let's return a dummy value or a flag indicating readiness.
-  // If you want to return the last ID, you'd need a static variable to store
-  // it.
-  uint8_t current_id = 0; // Replace with actual state if tracking
-  return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_id,
-                           sizeof(current_id));
-}
 
-/**
- * @brief Write callback for Delete Foot Log Command Characteristic.
- * Receives the ID of the foot sensor log file to delete and sends a message to
- * the data module.
- */
-ssize_t write_delete_foot_log_command_vnd(struct bt_conn *conn,
-                                          const struct bt_gatt_attr *attr,
-                                          const void *buf, uint16_t len,
-                                          uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(flags);
 
-  if (len != sizeof(uint8_t) || offset != 0) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
 
-  uint8_t id_to_delete;
-  memcpy(&id_to_delete, buf, sizeof(uint8_t));
 
-  generic_message_t delete_msg;
-  delete_msg.sender = SENDER_BTH;
-  delete_msg.type = MSG_TYPE_DELETE_FOOT_LOG; // New specific message type
-  delete_msg.data.delete_cmd.type =
-      RECORD_HARDWARE_FOOT_SENSOR;              // Specify record type
-  delete_msg.data.delete_cmd.id = id_to_delete; // The ID of the log file
-
-  LOG_INF("Delete foot log message for ID %u sent to data_msgq.", id_to_delete);
-
-  if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
-    LOG_ERR("Failed to send delete foot log message for ID %u.", id_to_delete);
-    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-  }
-
-  // Note: This only deletes from primary device storage
-  // Use delete_secondary_foot_log_command to delete from secondary
-
-  return len; // Indicate successful write
-}
-
-/**
- * @brief Callback for CCC configuration change of delete foot log command
- * characteristic.
- */
-static void cs_delete_foot_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                               uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_delete_foot_log_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  status_subscribed =
-      value == BT_GATT_CCC_NOTIFY; // Assuming a common status_subscribed flag
-  LOG_DBG("Delete Foot Log CCC changed: %u", value);
-}
-
-/**
- * @brief Read callback for Delete BHI360 Log Command Characteristic.
- * Returns the last requested deletion ID for the BHI360 sensor.
- */
-ssize_t read_delete_bhi360_log_command_vnd(struct bt_conn *conn,
-                                           const struct bt_gatt_attr *attr,
-                                           void *buf, uint16_t len,
-                                           uint16_t offset) {
-  uint8_t current_id = 0; // Replace with actual state if tracking
-  return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_id,
-                           sizeof(current_id));
-}
-
-/**
- * @brief Write callback for Delete BHI360 Log Command Characteristic.
- * Receives the ID of the BHI360 log file to delete and sends a message to the
- * data module.
- */
-ssize_t write_delete_bhi360_log_command_vnd(struct bt_conn *conn,
-                                            const struct bt_gatt_attr *attr,
-                                            const void *buf, uint16_t len,
-                                            uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(flags);
-
-  if (len != sizeof(uint8_t) || offset != 0) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
-
-  uint8_t id_to_delete;
-  memcpy(&id_to_delete, buf, sizeof(uint8_t));
-
-  generic_message_t delete_msg;
-  delete_msg.sender = SENDER_BTH;
-  delete_msg.type = MSG_TYPE_DELETE_BHI360_LOG; // New specific message type
-  delete_msg.data.delete_cmd.type =
-      RECORD_HARDWARE_BHI360;                   // Specify record type
-  delete_msg.data.delete_cmd.id = id_to_delete; // The ID of the log file
-
-  LOG_INF("Delete BHI360 log message for ID %u sent to data_msgq.",
-          id_to_delete);
-
-  if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
-    LOG_ERR("Failed to send delete BHI360 log message for ID %u.",
-            id_to_delete);
-    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-  }
-
-  // Note: This only deletes from primary device storage
-  // Use delete_secondary_bhi360_log_command to delete from secondary
-
-  return len; // Indicate successful write
-}
-
-/**
- * @brief Callback for CCC configuration change of delete BHI360 log command
- * characteristic.
- */
-static void
-cs_delete_bhi360_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                     uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_delete_bhi360_log_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  status_subscribed = value == BT_GATT_CCC_NOTIFY;
-  LOG_DBG("Delete BHI360 Log CCC changed: %u", value);
-}
 
 /**
  * @brief Converts a 32-bit value from big endian to little endian.
@@ -537,9 +309,7 @@ static uint32_t swap_to_little_endian(uint32_t value) {
 static bool start_activity_status_subscribed = false;
 static bool stop_activity_status_subscribed = false;
 
-#include <app_event_manager.h>
-#include <events/foot_sensor_event.h>
-#include <events/motion_sensor_event.h>
+
 
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
                                                 const struct bt_gatt_attr *attr,
@@ -813,73 +583,8 @@ static ssize_t write_conn_param_control_vnd(struct bt_conn *conn,
  * @brief Write callback for Delete Secondary Foot Log Command Characteristic.
  * Only forwards the command to secondary device via D2D.
  */
-static ssize_t write_delete_secondary_foot_log_command_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
 
-  if (len != sizeof(uint8_t)) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
 
-  uint8_t id_to_delete;
-  memcpy(&id_to_delete, buf, sizeof(uint8_t));
-
-  // Only forward to secondary device
-  FORWARD_D2D_COMMAND(ble_d2d_tx_send_delete_foot_log_command,
-                      D2D_TX_CMD_DELETE_FOOT_LOG, id_to_delete,
-                      "delete foot log command");
-  return len;
-}
-
-static void
-cs_delete_secondary_foot_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                             uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_delete_secondary_foot_log_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  LOG_DBG("Delete Secondary Foot Log CCC changed: %u", value);
-}
-
-/**
- * @brief Write callback for Delete Secondary BHI360 Log Command Characteristic.
- * Only forwards the command to secondary device via D2D.
- */
-static ssize_t write_delete_secondary_bhi360_log_command_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
-
-  if (len != sizeof(uint8_t)) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
-
-  uint8_t id_to_delete;
-  memcpy(&id_to_delete, buf, sizeof(uint8_t));
-
-  // Only forward to secondary device
-  FORWARD_D2D_COMMAND(ble_d2d_tx_send_delete_bhi360_log_command,
-                      D2D_TX_CMD_DELETE_BHI360_LOG, id_to_delete,
-                      "delete BHI360 log command");
-  return len;
-}
-
-static void
-cs_delete_secondary_bhi360_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                               uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_delete_secondary_bhi360_log_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  LOG_DBG("Delete Secondary BHI360 Log CCC changed: %u", value);
-}
 
 /**
  * @brief Write callback for Delete Secondary Activity Log Command
@@ -1071,14 +776,13 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
                         "stop activity command");
 #endif
 
- // Stop  Logging Activity file
+    // Stop  Logging Activity file
     generic_message_t stop_logging_msg = {};
 
     stop_logging_msg.sender = SENDER_BTH;
     stop_logging_msg.type = MSG_TYPE_COMMAND;
     strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING_ACTIVITY",
             sizeof(stop_logging_msg.data.command_str) - 1);
-            
 
     // Start logging Activity file
     if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {
