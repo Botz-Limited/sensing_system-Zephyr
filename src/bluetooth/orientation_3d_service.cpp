@@ -96,11 +96,11 @@ BT_GATT_SERVICE_DEFINE(
     // 3D Orientation Characteristic (Read + Notify)
     BT_GATT_CHARACTERISTIC(&ORIENTATION_3D_CHAR_UUID.uuid,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                          BT_GATT_PERM_READ_ENCRYPT,
+                          BT_GATT_PERM_READ,
                           orientation_3d_read, nullptr,
                           &orientation_packet),
     BT_GATT_CCC(orientation_3d_ccc_cfg_changed, 
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
 );
 
 /**

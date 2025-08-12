@@ -243,54 +243,54 @@ BT_GATT_SERVICE_DEFINE(
     // Cadence SPM - Index 1-3
     BT_GATT_CHARACTERISTIC(&cadence_spm_uuid.uuid,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                          BT_GATT_PERM_READ_ENCRYPT, ams_cadence_spm_read,
+                          BT_GATT_PERM_READ, ams_cadence_spm_read,
                           nullptr, static_cast<void *>(&cadence_spm_value)),
     BT_GATT_CCC(ams_cadence_spm_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
     
     // Ground Contact MS - Index 16-18
     BT_GATT_CHARACTERISTIC(&ground_contact_ms_uuid.uuid,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                          BT_GATT_PERM_READ_ENCRYPT,
+                          BT_GATT_PERM_READ,
                           ams_ground_contact_ms_read, nullptr,
                           static_cast<void *>(&ground_contact_ms_value)),
     BT_GATT_CCC(ams_ground_contact_ms_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
     
     // Flight Time MS - Index 19-21
     BT_GATT_CHARACTERISTIC(&flight_time_ms_uuid.uuid,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                          BT_GATT_PERM_READ_ENCRYPT, ams_flight_time_ms_read,
+                          BT_GATT_PERM_READ, ams_flight_time_ms_read,
                           nullptr, static_cast<void *>(&flight_time_ms_value)),
     BT_GATT_CCC(ams_flight_time_ms_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
     
     // Contact Time Asymmetry - Index 28-30
     BT_GATT_CHARACTERISTIC(&contact_time_asym_uuid.uuid,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                          BT_GATT_PERM_READ_ENCRYPT,
+                          BT_GATT_PERM_READ,
                           ams_contact_time_asym_read, nullptr,
                           static_cast<void *>(&contact_time_asym_value)),
     BT_GATT_CCC(ams_contact_time_asym_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
     
     // Stride Duration Asymmetry - Index 88-90
     BT_GATT_CHARACTERISTIC(&stride_duration_asym_uuid.uuid,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                          BT_GATT_PERM_READ_ENCRYPT,
+                          BT_GATT_PERM_READ,
                           ams_stride_duration_asym_read, nullptr,
                           static_cast<void *>(&stride_duration_asym_value)),
     BT_GATT_CCC(ams_stride_duration_asym_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
     
     // Stride Length Asymmetry - Index 94-96
     BT_GATT_CHARACTERISTIC(&stride_length_asym_uuid.uuid,
                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                          BT_GATT_PERM_READ_ENCRYPT,
+                          BT_GATT_PERM_READ,
                           ams_stride_length_asym_read, nullptr,
                           static_cast<void *>(&stride_length_asym_value)),
     BT_GATT_CCC(ams_stride_length_asym_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
 );
 ```
 

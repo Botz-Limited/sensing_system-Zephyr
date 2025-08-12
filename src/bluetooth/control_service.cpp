@@ -269,7 +269,7 @@ BT_GATT_SERVICE_DEFINE(
     // time characteristics
     BT_GATT_CHARACTERISTIC(&set_time_command_uuid.uuid,
                            BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE_ENCRYPT, nullptr,
+                           BT_GATT_PERM_WRITE, nullptr,
                            write_set_time_control_vnd,
                            static_cast<void *>(&set_time_control)),
 
@@ -277,102 +277,102 @@ BT_GATT_SERVICE_DEFINE(
         &delete_foot_log_command_uuid.uuid,
         BT_GATT_CHRC_READ |
             BT_GATT_CHRC_WRITE, // Added NOTIFY for status feedback
-        BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
+        BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
         read_delete_foot_log_command_vnd, // Read callback for current deletion
                                           // ID
         write_delete_foot_log_command_vnd,
         static_cast<void *>(nullptr)), // No specific data pointer needed if id
                                        // is read from buffer
     BT_GATT_CCC(cs_delete_foot_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // New: Delete BHI360 Log Characteristic
     BT_GATT_CHARACTERISTIC(
         &delete_bhi360_log_command_uuid.uuid,
         BT_GATT_CHRC_READ |
             BT_GATT_CHRC_WRITE, // Added NOTIFY for status feedback
-        BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
+        BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
         read_delete_bhi360_log_command_vnd, // Read callback for current
                                             // deletion ID
         write_delete_bhi360_log_command_vnd,
         static_cast<void *>(nullptr)), // No specific data pointer needed if id
                                        // is read from buffer
     BT_GATT_CCC(cs_delete_bhi360_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // New: Start Activity Characteristic
     BT_GATT_CHARACTERISTIC(&start_activity_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE_ENCRYPT,
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
                            nullptr, write_start_activity_command_vnd, nullptr),
     BT_GATT_CCC(cs_start_activity_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // New: Stop Activity Characteristic
     BT_GATT_CHARACTERISTIC(&stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE_ENCRYPT, nullptr,
+                           BT_GATT_PERM_WRITE, nullptr,
                            write_stop_activity_command_vnd, nullptr),
     BT_GATT_CCC(cs_stop_activity_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // New: Trigger BHI360 Calibration Characteristic
     BT_GATT_CHARACTERISTIC(&trigger_bhi360_calibration_uuid.uuid,
                            BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
-                           BT_GATT_PERM_WRITE_ENCRYPT, nullptr,
+                           BT_GATT_PERM_WRITE, nullptr,
                            write_trigger_bhi360_calibration_vnd, nullptr),
     BT_GATT_CCC(cs_trigger_bhi360_calibration_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // New: Delete Activity Log Characteristic
     BT_GATT_CHARACTERISTIC(&delete_activity_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE_ENCRYPT,
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
                            nullptr, write_delete_activity_log_command_vnd,
                            nullptr),
     BT_GATT_CCC(cs_delete_activity_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary device delete commands - only on primary
     BT_GATT_CHARACTERISTIC(&delete_secondary_foot_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE_ENCRYPT,
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
                            nullptr, write_delete_secondary_foot_log_command_vnd,
                            nullptr),
     BT_GATT_CCC(cs_delete_secondary_foot_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     BT_GATT_CHARACTERISTIC(&delete_secondary_bhi360_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE_ENCRYPT,
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
                            nullptr,
                            write_delete_secondary_bhi360_log_command_vnd,
                            nullptr),
     BT_GATT_CCC(cs_delete_secondary_bhi360_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     BT_GATT_CHARACTERISTIC(&delete_secondary_activity_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE_ENCRYPT,
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
                            nullptr,
                            write_delete_secondary_activity_log_command_vnd,
                            nullptr),
     BT_GATT_CCC(cs_delete_secondary_activity_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 #endif
 
     // Connection Parameter Control Characteristic
     BT_GATT_CHARACTERISTIC(
         &conn_param_control_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-        BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT,
+        BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
         read_conn_param_control_vnd, write_conn_param_control_vnd, nullptr),
 
     // Weight Calibration Trigger Characteristic
     BT_GATT_CHARACTERISTIC(&weight_calibration_uuid.uuid,
                            BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
-                           BT_GATT_PERM_WRITE_ENCRYPT, nullptr,
+                           BT_GATT_PERM_WRITE, nullptr,
                            write_weight_calibration_trigger_vnd, nullptr),
     BT_GATT_CCC(cs_weight_calibration_trigger_ccc_cfg_changed,
-                BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // GPS Update Characteristic
     BT_GATT_CHARACTERISTIC(&gps_update_uuid.uuid, BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE_ENCRYPT, nullptr,
+                           BT_GATT_PERM_WRITE, nullptr,
                            write_gps_update_vnd, nullptr));
 
 /**

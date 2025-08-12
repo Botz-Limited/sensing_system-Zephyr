@@ -64,7 +64,7 @@ BT_GATT_SERVICE_DEFINE(
     (
         BT_UUID_DIS_MANUFACTURER_NAME,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         read_str, nullptr, dis_manuf
     ),
 
@@ -72,7 +72,7 @@ BT_GATT_SERVICE_DEFINE(
     (
         BT_UUID_DIS_MODEL_NUMBER,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         read_str, nullptr, dis_model
     ),
 
@@ -80,7 +80,7 @@ BT_GATT_SERVICE_DEFINE(
     (
         BT_UUID_DIS_HARDWARE_REVISION,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         read_str, nullptr, dis_hw_rev
     ),
 
@@ -88,7 +88,7 @@ BT_GATT_SERVICE_DEFINE(
     (
         BT_UUID_DIS_FIRMWARE_REVISION,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         read_str, nullptr, dis_fw_rev
     ),
 
@@ -96,7 +96,7 @@ BT_GATT_SERVICE_DEFINE(
     (
         BT_UUID_DIS_SERIAL_NUMBER,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         read_str, nullptr, dis_serial
     )
 

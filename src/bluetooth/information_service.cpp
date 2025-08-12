@@ -350,229 +350,229 @@ BT_GATT_SERVICE_DEFINE(
     // Current Ttime Characteristic
     BT_GATT_CHARACTERISTIC(BT_UUID_CTS_CURRENT_TIME,
                             BT_GATT_CHRC_READ,
-                            BT_GATT_PERM_READ_ENCRYPT,
+                            BT_GATT_PERM_READ,
                             jis_read_current_time, NULL,
                             ct),
-    BT_GATT_CCC(jis_current_time_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_current_time_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Status Characteristic
     BT_GATT_CHARACTERISTIC(&STATUS_UUID.uuid,
                             BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                            BT_GATT_PERM_READ_ENCRYPT,
+                            BT_GATT_PERM_READ,
                             jis_status_read, nullptr,
                             static_cast<void *>(&device_status_bitfield)),
-    BT_GATT_CCC(jis_status_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_status_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Foot Sensor samples Characteristic
     BT_GATT_CHARACTERISTIC(&foot_sensor_samples.uuid,
                             BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                            BT_GATT_PERM_READ_ENCRYPT,
+                            BT_GATT_PERM_READ,
                             jis_foot_sensor_read, nullptr,
                             static_cast<void *>(&foot_sensor_char_value)),
-    BT_GATT_CCC(jis_foot_sensor_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_foot_sensor_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
 
 // Foot Sensor Logs available Characteristic 
     BT_GATT_CHARACTERISTIC(&foot_sensor_log_available_uuid.uuid,
                     BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                     BT_GATT_PERM_READ_ENCRYPT,
+                     BT_GATT_PERM_READ,
                      jis_foot_sensor_log_available_read, nullptr,
                 static_cast<void *>(&foot_sensor_log_available)),
-    BT_GATT_CCC(jis_foot_sensor_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_foot_sensor_log_available_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
      // Battery Status Characteristic
     BT_GATT_CHARACTERISTIC(&CHARGE_STATUS_UUID.uuid,
                             BT_GATT_CHRC_READ,
-                            BT_GATT_PERM_READ_ENCRYPT,
+                            BT_GATT_PERM_READ,
                             jis_charge_status_read, nullptr,
                             static_cast<void *>(&charge_status)),
-    BT_GATT_CCC(jis_charge_status_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_charge_status_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // New characteristic for packed battery levels (primary and secondary)
     BT_GATT_CHARACTERISTIC(&BATTERY_LEVELS_UUID.uuid,
                             BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                            BT_GATT_PERM_READ_ENCRYPT,
+                            BT_GATT_PERM_READ,
                             jis_battery_levels_read, nullptr,
                             static_cast<void *>(&battery_levels)),
-    BT_GATT_CCC(jis_battery_levels_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_battery_levels_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 // Foot Sensor Request ID/Path Characteristic
      BT_GATT_CHARACTERISTIC(&foot_sensor_req_id_path_uuid.uuid,
                      BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY, 
-                  BT_GATT_PERM_READ_ENCRYPT,
+                  BT_GATT_PERM_READ,
                    jis_foot_sensor_req_id_read, nullptr,
                   foot_sensor_req_id_path),
-        BT_GATT_CCC(jis_foot_sensor_req_id_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+        BT_GATT_CCC(jis_foot_sensor_req_id_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // BHI360 Logs available Characteristic
             BT_GATT_CHARACTERISTIC(&bhi360_log_available_uuid.uuid,
                             BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                            BT_GATT_PERM_READ_ENCRYPT,
+                            BT_GATT_PERM_READ,
                             jis_bhi360_log_available_read, nullptr,
                             static_cast<void *>(&bhi360_log_available)),
-    BT_GATT_CCC(jis_bhi360_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_bhi360_log_available_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // BHI360 Request ID/Path Characteristic
     BT_GATT_CHARACTERISTIC(&bhi360_req_id_path_uuid.uuid,
                             BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                            BT_GATT_PERM_READ_ENCRYPT,
+                            BT_GATT_PERM_READ,
                             jis_bhi360_req_id_read, nullptr,
                             bhi360_req_id_path),
-    BT_GATT_CCC(jis_bhi360_req_id_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_bhi360_req_id_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // --- BHI360 Data Set Characteristics ---
     BT_GATT_CHARACTERISTIC(&bhi360_data1_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_bhi360_data1_read, nullptr,
         static_cast<void *>(&bhi360_data1_value_fixed)),
-    BT_GATT_CCC(jis_bhi360_data1_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_bhi360_data1_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Individual foot step count characteristic - DEPRECATED
     // Only aggregated step counts (total and activity) should be used by mobile apps
     BT_GATT_CHARACTERISTIC(&bhi360_data2_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_bhi360_data2_read, nullptr,
         static_cast<void *>(&bhi360_data2_value_fixed)),
-    BT_GATT_CCC(jis_bhi360_data2_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_bhi360_data2_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     BT_GATT_CHARACTERISTIC(&bhi360_data3_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_bhi360_data3_read, nullptr,
         static_cast<void *>(&bhi360_data3_value_fixed)),
-    BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Step count characteristics moved to Activity Metrics Service
 
     // Weight Measurement Characteristic
     BT_GATT_CHARACTERISTIC(&weight_measurement_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_weight_measurement_read, nullptr,
         static_cast<void *>(&weight_kg_x10)),
-    BT_GATT_CCC(jis_weight_measurement_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_weight_measurement_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
 
     // Packed Device Status Characteristic (new - combines multiple status fields)
     BT_GATT_CHARACTERISTIC(&device_status_packed_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_device_status_packed_read, nullptr,
         static_cast<void *>(&device_status_packed)),
-    BT_GATT_CCC(jis_device_status_packed_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_device_status_packed_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // FOTA Progress Characteristic
     BT_GATT_CHARACTERISTIC(&fota_progress_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_fota_progress_read, nullptr,
         static_cast<void *>(&fota_progress_value)),
-    BT_GATT_CCC(jis_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Activity Log Available Characteristic
     BT_GATT_CHARACTERISTIC(&activity_log_available_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_activity_log_available_read, nullptr,
         static_cast<void *>(&activity_log_available)),
-    BT_GATT_CCC(jis_activity_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_activity_log_available_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Activity Log Path Characteristic
     BT_GATT_CHARACTERISTIC(&activity_log_path_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_activity_log_path_read, nullptr,
         activity_log_path),
-    BT_GATT_CCC(jis_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary Device Information Characteristics
     BT_GATT_CHARACTERISTIC(&secondary_manufacturer_uuid.uuid,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_info_read, nullptr,
         secondary_manufacturer),
 
     BT_GATT_CHARACTERISTIC(&secondary_model_uuid.uuid,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_info_read, nullptr,
         secondary_model),
 
     BT_GATT_CHARACTERISTIC(&secondary_serial_uuid.uuid,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_info_read, nullptr,
         secondary_serial),
 
     BT_GATT_CHARACTERISTIC(&secondary_hw_rev_uuid.uuid,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_info_read, nullptr,
         secondary_hw_rev),
 
     BT_GATT_CHARACTERISTIC(&secondary_fw_rev_uuid.uuid,
         BT_GATT_CHRC_READ,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_info_read, nullptr,
         secondary_fw_rev),
 
     // Secondary FOTA Progress Characteristic
     BT_GATT_CHARACTERISTIC(&secondary_fota_progress_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_fota_progress_read, nullptr,
         static_cast<void *>(&secondary_fota_progress_value)),
-    BT_GATT_CCC(jis_secondary_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_secondary_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Secondary Foot Log Available
     BT_GATT_CHARACTERISTIC(&secondary_foot_log_available_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_foot_log_available_read, nullptr,
         static_cast<void *>(&secondary_foot_log_available)),
-    BT_GATT_CCC(jis_secondary_foot_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_secondary_foot_log_available_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Secondary Foot Log Path
     BT_GATT_CHARACTERISTIC(&secondary_foot_log_path_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_foot_log_path_read, nullptr,
         secondary_foot_log_path),
-    BT_GATT_CCC(jis_secondary_foot_log_path_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_secondary_foot_log_path_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Secondary BHI360 Log Available
     BT_GATT_CHARACTERISTIC(&secondary_bhi360_log_available_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_bhi360_log_available_read, nullptr,
         static_cast<void *>(&secondary_bhi360_log_available)),
-    BT_GATT_CCC(jis_secondary_bhi360_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_secondary_bhi360_log_available_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Secondary BHI360 Log Path
     BT_GATT_CHARACTERISTIC(&secondary_bhi360_log_path_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_bhi360_log_path_read, nullptr,
         secondary_bhi360_log_path),
-    BT_GATT_CCC(jis_secondary_bhi360_log_path_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_secondary_bhi360_log_path_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Secondary Activity Log Available
     BT_GATT_CHARACTERISTIC(&secondary_activity_log_available_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_activity_log_available_read, nullptr,
         static_cast<void *>(&secondary_activity_log_available)),
-    BT_GATT_CCC(jis_secondary_activity_log_available_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+    BT_GATT_CCC(jis_secondary_activity_log_available_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Secondary Activity Log Path
     BT_GATT_CHARACTERISTIC(&secondary_activity_log_path_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ_ENCRYPT,
+        BT_GATT_PERM_READ,
         jis_secondary_activity_log_path_read, nullptr,
         secondary_activity_log_path),
-    BT_GATT_CCC(jis_secondary_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT)
+    BT_GATT_CCC(jis_secondary_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
 #endif
     );
 

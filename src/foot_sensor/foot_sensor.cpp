@@ -331,11 +331,6 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
           LOG_WRN("Failed to send foot sensor data to bluetooth module");
         }
 
-        // Don't log foot sample to data module, commented out for now/
-        //    if (k_msgq_put(&data_msgq, &msg, K_NO_WAIT) != 0)
-        //   {
-        //      LOG_WRN("Failed to send foot sensor data to data module");
-        //   }
 
 // Send to sensor data module (new multi-thread architecture)
 #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)

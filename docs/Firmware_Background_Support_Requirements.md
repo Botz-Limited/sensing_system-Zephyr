@@ -117,7 +117,7 @@ static ssize_t conn_param_control_write(struct bt_conn *conn,
 // Add to service definition
 BT_GATT_CHARACTERISTIC(&conn_param_control_uuid.uuid,
                       BT_GATT_CHRC_WRITE,
-                      BT_GATT_PERM_WRITE_ENCRYPT,
+                      BT_GATT_PERM_WRITE,
                       NULL, conn_param_control_write, NULL),
 ```
 

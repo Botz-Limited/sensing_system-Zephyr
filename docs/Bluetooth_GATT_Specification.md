@@ -1673,7 +1673,7 @@ flowchart TD
 
 ### Security Considerations
 
-1. **All services require encryption** (BT_GATT_PERM_READ_ENCRYPT)
+1. **All services require encryption** (BT_GATT_PERM_READ)
 2. **Bonding required** before accessing characteristics
 3. **Pairing process** must complete successfully
 4. **Fixed PIN** or numeric comparison for pairing
