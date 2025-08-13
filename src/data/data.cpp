@@ -92,10 +92,15 @@ static struct k_work process_command_work;
 static struct k_work process_calibration_work;
 static struct k_work_delayable periodic_flush_work;
 
-// Message Buffers
+// Message Buffers (protected by mutexes for thread safety)
 static generic_message_t pending_sensor_data_msg;
-static char pending_command[MAX_COMMAND_STRING_LEN];
+static generic_message_t pending_command_msg;  // Store full message for commands
 static bhi360_calibration_data_t pending_calibration_data;
+
+// Mutexes for work item message buffers
+K_MUTEX_DEFINE(sensor_data_msg_mutex);
+K_MUTEX_DEFINE(command_msg_mutex);
+K_MUTEX_DEFINE(calibration_msg_mutex);
 
 // File System State
 static struct fs_file_t activity_log_file;
@@ -324,24 +329,40 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3) {
       // Queue different work based on message type
       switch (msg.type) {
       case MSG_TYPE_REALTIME_METRICS_DATA:
-        // Copy entire message for processing
-        memcpy(&pending_sensor_data_msg, &msg, sizeof(generic_message_t));
-        k_work_submit_to_queue(&data_work_q, &process_sensor_data_work);
+        // Check if work is already pending to avoid buffer overwrite
+        if (!k_work_is_pending(&process_sensor_data_work)) {
+          k_mutex_lock(&sensor_data_msg_mutex, K_FOREVER);
+          memcpy(&pending_sensor_data_msg, &msg, sizeof(generic_message_t));
+          k_mutex_unlock(&sensor_data_msg_mutex);
+          k_work_submit_to_queue(&data_work_q, &process_sensor_data_work);
+        } else {
+          LOG_WRN("Sensor data work already pending, dropping message");
+        }
         break;
 
       case MSG_TYPE_COMMAND:
-        // Copy command for processing
-        strncpy(pending_command, msg.data.command_str,
-                MAX_COMMAND_STRING_LEN - 1);
-        pending_command[MAX_COMMAND_STRING_LEN - 1] = '\0';
-        k_work_submit_to_queue(&data_work_q, &process_command_work);
+        // Check if work is already pending
+        if (!k_work_is_pending(&process_command_work)) {
+          k_mutex_lock(&command_msg_mutex, K_FOREVER);
+          memcpy(&pending_command_msg, &msg, sizeof(generic_message_t));
+          k_mutex_unlock(&command_msg_mutex);
+          k_work_submit_to_queue(&data_work_q, &process_command_work);
+        } else {
+          LOG_WRN("Command work already pending, dropping message");
+        }
         break;
 
       case MSG_TYPE_SAVE_BHI360_CALIBRATION:
-        // Copy calibration data for processing
-        memcpy(&pending_calibration_data, &msg.data.bhi360_calibration,
-               sizeof(bhi360_calibration_data_t));
-        k_work_submit_to_queue(&data_work_q, &process_calibration_work);
+        // Check if work is already pending
+        if (!k_work_is_pending(&process_calibration_work)) {
+          k_mutex_lock(&calibration_msg_mutex, K_FOREVER);
+          memcpy(&pending_calibration_data, &msg.data.bhi360_calibration,
+                 sizeof(bhi360_calibration_data_t));
+          k_mutex_unlock(&calibration_msg_mutex);
+          k_work_submit_to_queue(&data_work_q, &process_calibration_work);
+        } else {
+          LOG_WRN("Calibration work already pending, dropping message");
+        }
         break;
 
       default:
@@ -355,10 +376,14 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3) {
 // Work handler for processing sensor data
 static void process_sensor_data_work_handler(struct k_work *work) {
   ARG_UNUSED(work);
+  
+  // Make a local copy of the message under mutex protection
+  k_mutex_lock(&sensor_data_msg_mutex, K_FOREVER);
+  generic_message_t local_msg = pending_sensor_data_msg;
+  k_mutex_unlock(&sensor_data_msg_mutex);
 
   if (atomic_get(&logging_activity_active)) {
-    const realtime_metrics_t *metrics =
-        &pending_sensor_data_msg.data.realtime_metrics;
+    const realtime_metrics_t *metrics = &local_msg.data.realtime_metrics;
 
 
         LOG_INF("Writing Activity data metrics %d", metrics->timestamp_ms);
@@ -429,19 +454,25 @@ static void process_sensor_data_work_handler(struct k_work *work) {
 // Work handler for processing commands
 static void process_command_work_handler(struct k_work *work) {
   ARG_UNUSED(work);
+  
+  // Make a local copy of the message under mutex protection
+  k_mutex_lock(&command_msg_mutex, K_FOREVER);
+  generic_message_t local_msg = pending_command_msg;
+  k_mutex_unlock(&command_msg_mutex);
 
-  LOG_DBG("Processing command: %s", pending_command);
+  const char *command_str = local_msg.data.command_str;
+  LOG_DBG("Processing command: %s", command_str);
 
-  if (strcmp(pending_command, "START_LOGGING_ACTIVITY") == 0) {
+  if (strcmp(command_str, "START_LOGGING_ACTIVITY") == 0) {
     if (atomic_get(&logging_activity_active) == 0) {
       if (!filesystem_available) {
         LOG_WRN("Cannot start activity logging - filesystem not available");
       } else {
         LOG_INF("Starting activity logging");
-        // Use values from the original message
+        // Use values from the command message's metadata fields
         err_t activity_status =
-            start_activity_logging(pending_sensor_data_msg.sampling_frequency,
-                                   pending_sensor_data_msg.fw_version);
+            start_activity_logging(local_msg.sampling_frequency,
+                                   local_msg.fw_version);
         if (activity_status == err_t::NO_ERROR) {
           atomic_set(&logging_activity_active, 1);
         } else {
@@ -449,7 +480,7 @@ static void process_command_work_handler(struct k_work *work) {
         }
       }
     }
-  } else if (strcmp(pending_command, "STOP_LOGGING_ACTIVITY") == 0) {
+  } else if (strcmp(command_str, "STOP_LOGGING_ACTIVITY") == 0) {
     if (atomic_get(&logging_activity_active) == 1) {
       LOG_INF("Stopping activity logging");
       atomic_set(&logging_activity_active, 0);
@@ -462,7 +493,7 @@ static void process_command_work_handler(struct k_work *work) {
         k_msleep(10);
       }
     }
-  } else if (strcmp(pending_command, "STOP_LOGGING") == 0) {
+  } else if (strcmp(command_str, "STOP_LOGGING") == 0) {
     LOG_INF("Stopping all logging");
     if (atomic_get(&logging_activity_active) == 1) {
       atomic_set(&logging_activity_active, 0);
@@ -474,23 +505,28 @@ static void process_command_work_handler(struct k_work *work) {
       }
     }
   } else {
-    LOG_WRN("Unknown command: %s", pending_command);
+    LOG_WRN("Unknown command: %s", command_str);
   }
 }
 
 // Work handler for processing calibration data
 static void process_calibration_work_handler(struct k_work *work) {
   ARG_UNUSED(work);
+  
+  // Make a local copy of the calibration data under mutex protection
+  k_mutex_lock(&calibration_msg_mutex, K_FOREVER);
+  bhi360_calibration_data_t local_calib_data = pending_calibration_data;
+  k_mutex_unlock(&calibration_msg_mutex);
 
   LOG_INF("Processing BHI360 calibration data for sensor type: %u",
-          pending_calibration_data.sensor_type);
+          local_calib_data.sensor_type);
 
   if (!filesystem_available) {
     LOG_WRN("Cannot save calibration - filesystem not available");
     return;
   }
 
-  err_t save_status = save_bhi360_calibration_data(&pending_calibration_data);
+  err_t save_status = save_bhi360_calibration_data(&local_calib_data);
   if (save_status != err_t::NO_ERROR) {
     LOG_ERR("Failed to save BHI360 calibration data: %d", (int)save_status);
   } else {

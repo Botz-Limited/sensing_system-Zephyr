@@ -72,6 +72,9 @@ LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // External function declarations
 extern "C" void set_current_time_from_epoch(uint32_t new_epoch_time_s);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE) 
+extern err_t ble_reset_bonds(void);
+#endif
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 static constexpr uint8_t is_little_endian = 1;
@@ -127,6 +130,10 @@ static struct bt_uuid_128 weight_calibration_uuid = BT_UUID_INIT_128(
 // --- New: UUID for GPS update characteristic ---
 static struct bt_uuid_128 gps_update_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x4fd5b68e, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
+// --- New: UUID for reset bonds characteristic ---
+static struct bt_uuid_128 reset_bonds_uuid = BT_UUID_INIT_128(
+    BT_UUID_128_ENCODE(0x4fd5b68f, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // Forward declarations for start/stop activity handlers
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
@@ -185,6 +192,12 @@ static ssize_t write_gps_update_vnd(struct bt_conn *conn,
                                     const struct bt_gatt_attr *attr,
                                     const void *buf, uint16_t len,
                                     uint16_t offset, uint8_t flags);
+
+// Reset bonds handlers
+static ssize_t write_reset_bonds_vnd(struct bt_conn *conn,
+                                     const struct bt_gatt_attr *attr,
+                                     const void *buf, uint16_t len,
+                                     uint16_t offset, uint8_t flags);
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -278,6 +291,11 @@ BT_GATT_SERVICE_DEFINE(
     // GPS Update Characteristic
     BT_GATT_CHARACTERISTIC(&gps_update_uuid.uuid, BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_WRITE, nullptr, write_gps_update_vnd,
+                           nullptr),
+
+    // Reset Bonds Characteristic
+    BT_GATT_CHARACTERISTIC(&reset_bonds_uuid.uuid, BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_WRITE, nullptr, write_reset_bonds_vnd,
                            nullptr));
 
 /**
@@ -415,6 +433,49 @@ static ssize_t write_gps_update_vnd(struct bt_conn *conn,
 
   return len;
 }
+
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE) 
+// --- Reset Bonds Handler ---
+static ssize_t write_reset_bonds_vnd(struct bt_conn *conn,
+                                     const struct bt_gatt_attr *attr,
+                                     const void *buf, uint16_t len,
+                                     uint16_t offset, uint8_t flags) {
+  ARG_UNUSED(conn);
+  ARG_UNUSED(attr);
+  ARG_UNUSED(offset);
+  ARG_UNUSED(flags);
+
+  if (len != sizeof(uint8_t)) {
+    LOG_ERR("Reset bonds characteristic write: invalid length %u (expected %u)",
+            len, sizeof(uint8_t));
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+
+  uint8_t value = *((const uint8_t *)buf);
+
+  if (value == 1) {
+    LOG_INF("Reset bonds command received, resetting all BLE bonds");
+    
+    // Call the ble_reset_bonds function
+    err_t err = ble_reset_bonds();
+    if (err != err_t::NO_ERROR) {
+      LOG_ERR("Failed to reset BLE bonds: %d", (int)err);
+      return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
+    
+    LOG_INF("Successfully reset all BLE bonds");
+
+
+  } else {
+    LOG_WRN("Reset bonds characteristic write ignored (value=%u, expected 1)",
+            value);
+  }
+
+  return len;
+}
+
+#endif // CONFIG_PRIMARY_DEVICE
 
 // --- Weight Calibration Trigger Handler ---
 static bool weight_calibration_trigger_subscribed = false;

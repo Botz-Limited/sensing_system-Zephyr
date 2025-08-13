@@ -65,6 +65,7 @@ void jis_update_secondary_device_info(const char *manufacturer, const char *mode
                                      const char *serial, const char *hw_rev, const char *fw_rev);
 void jis_clear_secondary_device_info(void);
 void jis_secondary_weight_measurement_notify(float weight_kg);
+err_t ble_reset_bonds(void);
 #endif
 
 void cs_log_data_notify(uint8_t stu);
