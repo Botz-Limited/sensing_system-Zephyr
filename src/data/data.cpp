@@ -832,7 +832,6 @@ err_t end_activity_logging() {
       uint32_t packet_count;  // Total packets processed
       uint32_t file_crc;      // CRC-32 placeholder
       battery_info_t battery; // Battery at session end
-      uint8_t checksum;       // Footer checksum
     } ActivityFileFooterV2;
 
     ActivityFileFooterV2 footer = {
@@ -840,14 +839,8 @@ err_t end_activity_logging() {
         .record_count = activity_batch_count,
         .packet_count = activity_packet_counter,
         .file_crc = 0, // Would be calculated in full implementation
-        .battery = battery_end,
-        .checksum = 0};
+        .battery = battery_end};
 
-    // 4. Calculate checksum (XOR of all footer bytes except checksum)
-    uint8_t *footer_bytes = (uint8_t *)&footer;
-    for (size_t i = 0; i < sizeof(footer) - 1; i++) {
-      footer.checksum ^= footer_bytes[i];
-    }
 
     // 5. Write footer
     if (activity_write_buffer_pos + sizeof(footer) >
