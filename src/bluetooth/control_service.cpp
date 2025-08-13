@@ -135,6 +135,10 @@ static struct bt_uuid_128 gps_update_uuid = BT_UUID_INIT_128(
 static struct bt_uuid_128 reset_bonds_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x4fd5b68f, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
+// --- New: UUID for user info characteristic ---
+static struct bt_uuid_128 user_info_uuid = BT_UUID_INIT_128(
+    BT_UUID_128_ENCODE(0x4fd5b690, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
 // Forward declarations for start/stop activity handlers
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
                                                 const struct bt_gatt_attr *attr,
@@ -198,6 +202,23 @@ static ssize_t write_reset_bonds_vnd(struct bt_conn *conn,
                                      const struct bt_gatt_attr *attr,
                                      const void *buf, uint16_t len,
                                      uint16_t offset, uint8_t flags);
+
+// User info handlers
+static ssize_t write_user_info_vnd(struct bt_conn *conn,
+                                   const struct bt_gatt_attr *attr,
+                                   const void *buf, uint16_t len,
+                                   uint16_t offset, uint8_t flags);
+
+/**
+ * @brief Structure for user information data
+ * Age in years (1 byte), Gender (1 byte), Height in mm (2 bytes), Weight in decigrams (2 bytes)
+ */
+struct __attribute__((packed)) UserInfoData {
+    uint8_t age_years;       // Age in years
+    uint8_t gender;          // Gender identifier
+    uint16_t height_mm;      // Height in millimeters
+    uint16_t weight_dg;      // Weight in decigrams (1 dg = 0.1 g = 0.0001 kg)
+};
 
 /**
  * @brief UUID for the set time command characteristic.
@@ -296,7 +317,15 @@ BT_GATT_SERVICE_DEFINE(
     // Reset Bonds Characteristic
     BT_GATT_CHARACTERISTIC(&reset_bonds_uuid.uuid, BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_WRITE, nullptr, write_reset_bonds_vnd,
-                           nullptr));
+                           nullptr),
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // User Info Characteristic (primary device only)
+    BT_GATT_CHARACTERISTIC(&user_info_uuid.uuid, BT_GATT_CHRC_WRITE,
+                           BT_GATT_PERM_WRITE, nullptr, write_user_info_vnd,
+                           nullptr)
+#endif
+    );
 
 /**
  * @brief Notifies subscribed devices about the metadata log deletion command.
@@ -433,6 +462,50 @@ static ssize_t write_gps_update_vnd(struct bt_conn *conn,
 
   return len;
 }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+// --- User Info Handler ---
+static ssize_t write_user_info_vnd(struct bt_conn *conn,
+                                   const struct bt_gatt_attr *attr,
+                                   const void *buf, uint16_t len,
+                                   uint16_t offset, uint8_t flags) {
+  ARG_UNUSED(conn);
+  ARG_UNUSED(attr);
+  ARG_UNUSED(offset);
+  ARG_UNUSED(flags);
+
+  // Check if we received the correct size for UserInfoData
+  if (len != sizeof(UserInfoData)) {
+    LOG_ERR("User info characteristic write: invalid length %u (expected %u)",
+            len, sizeof(UserInfoData));
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+
+  UserInfoData user_info;
+  memcpy(&user_info, buf, sizeof(UserInfoData));
+
+  // Convert weight from decigrams to kilograms for logging
+  float weight_kg = user_info.weight_dg / 100.0f;
+  
+  // Convert height from millimeters to centimeters for logging
+  float height_cm = user_info.height_mm / 10.0f;
+  
+  // Log the received user information
+  LOG_INF("User info received:");
+  LOG_INF("  Age: %u years", user_info.age_years);
+  LOG_INF("  Gender: %u", user_info.gender);
+  LOG_INF("  Height: %u mm (%.1f cm)", user_info.height_mm, (double)height_cm);
+  LOG_INF("  Weight: %u dg (%.1f kg)", user_info.weight_dg, (double)weight_kg);
+
+  // TODO: Forward user info to secondary device if needed
+  // Currently just logging as requested - implementation of data usage to follow
+  
+  // TODO: Store user info in persistent storage or send to relevant modules
+  // This will be implemented based on future requirements
+  
+  return len;
+}
+#endif // CONFIG_PRIMARY_DEVICE
 
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE) 
