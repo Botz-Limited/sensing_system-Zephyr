@@ -71,22 +71,32 @@ static struct {
     // Current metrics
     realtime_metrics_t current_metrics;
     
-    // Contact time tracking (moving averages)
+    // Contact time tracking (moving averages) with overflow protection
     uint32_t left_contact_sum_ms;
     uint32_t right_contact_sum_ms;
     uint32_t left_flight_sum_ms;
     uint32_t right_flight_sum_ms;
     uint16_t contact_count;
+    uint16_t avg_left_contact_ms;  // Cached average for overflow handling
+    uint16_t avg_right_contact_ms; // Cached average for overflow handling
     
-    // Force tracking
+    // Force tracking with overflow protection
     uint32_t left_force_sum;
     uint32_t right_force_sum;
     uint16_t force_count;
+    uint16_t avg_left_force;  // Cached average for overflow handling
+    uint16_t avg_right_force; // Cached average for overflow handling
     
     // Variability tracking for consistency score
     float contact_time_variance;
     float last_contact_times[10];
     uint8_t variance_index;
+    
+    // Stride length buffer for averaging (10 samples)
+    #define STRIDE_LENGTH_BUFFER_SIZE 10
+    float stride_lengths[STRIDE_LENGTH_BUFFER_SIZE];
+    uint8_t stride_length_index;
+    uint8_t stride_length_count;  // Track how many valid samples we have
     
     // BLE update timing
     uint32_t last_ble_update;
@@ -344,7 +354,7 @@ static void calculate_realtime_metrics(void)
         pace_estimator_update(&metrics_state.pace_estimator, current_cadence, data->delta_time_ms);
     }
     
-    // Track contact times for averaging
+    // Track contact times for averaging with overflow protection
     if (data->left_contact_duration_ms > 0) {
         metrics_state.left_contact_sum_ms += data->left_contact_duration_ms;
         metrics_state.contact_count++;
@@ -353,34 +363,64 @@ static void calculate_realtime_metrics(void)
         metrics_state.last_contact_times[metrics_state.variance_index] =
             (float)data->left_contact_duration_ms;
         metrics_state.variance_index = (metrics_state.variance_index + 1) % 10;
+        
+        // Check for overflow and reset with running average
+        if (metrics_state.contact_count >= 1000) {
+            // Calculate current averages before reset
+            metrics_state.avg_left_contact_ms = metrics_state.left_contact_sum_ms / metrics_state.contact_count;
+            metrics_state.avg_right_contact_ms = metrics_state.right_contact_sum_ms / metrics_state.contact_count;
+            
+            // Reset with seed values to maintain continuity
+            metrics_state.left_contact_sum_ms = metrics_state.avg_left_contact_ms * 100;
+            metrics_state.right_contact_sum_ms = metrics_state.avg_right_contact_ms * 100;
+            metrics_state.contact_count = 100;
+            
+            LOG_DBG("Contact time accumulators reset after 1000 samples");
+        }
     }
     
     if (data->right_contact_duration_ms > 0) {
         metrics_state.right_contact_sum_ms += data->right_contact_duration_ms;
     }
     
-    // Track forces for balance calculation
+    // Track forces for balance calculation with overflow protection
     if (data->left_in_contact || data->right_in_contact) {
         metrics_state.left_force_sum += data->left_peak_force;
         metrics_state.right_force_sum += data->right_peak_force;
         metrics_state.force_count++;
+        
+        // Check for overflow and reset with running average
+        if (metrics_state.force_count >= 1000) {
+            // Calculate current averages before reset
+            metrics_state.avg_left_force = metrics_state.left_force_sum / metrics_state.force_count;
+            metrics_state.avg_right_force = metrics_state.right_force_sum / metrics_state.force_count;
+            
+            // Reset with seed values to maintain continuity
+            metrics_state.left_force_sum = metrics_state.avg_left_force * 100;
+            metrics_state.right_force_sum = metrics_state.avg_right_force * 100;
+            metrics_state.force_count = 100;
+            
+            LOG_DBG("Force accumulators reset after 1000 samples");
+        }
     }
     
-    // Calculate averages
-    uint16_t avg_left_contact = 0;
-    uint16_t avg_right_contact = 0;
+    // Calculate averages using cached values if available
+    uint16_t avg_left_contact = metrics_state.avg_left_contact_ms;
+    uint16_t avg_right_contact = metrics_state.avg_right_contact_ms;
     if (metrics_state.contact_count > 0) {
         avg_left_contact = metrics_state.left_contact_sum_ms / metrics_state.contact_count;
         avg_right_contact = metrics_state.right_contact_sum_ms / metrics_state.contact_count;
     }
     
-    // Calculate balance
+    // Calculate balance using cached values if available
     int8_t balance = 0;
+    uint16_t avg_left_force = metrics_state.avg_left_force;
+    uint16_t avg_right_force = metrics_state.avg_right_force;
     if (metrics_state.force_count > 0) {
-        uint16_t avg_left_force = metrics_state.left_force_sum / metrics_state.force_count;
-        uint16_t avg_right_force = metrics_state.right_force_sum / metrics_state.force_count;
-        balance = calculate_balance_percentage(avg_left_force, avg_right_force);
+        avg_left_force = metrics_state.left_force_sum / metrics_state.force_count;
+        avg_right_force = metrics_state.right_force_sum / metrics_state.force_count;
     }
+    balance = calculate_balance_percentage(avg_left_force, avg_right_force);
 
     // Calculate stride duration for left foot
     if (data->left_in_contact && !metrics_state.last_left_contact) {
@@ -415,7 +455,34 @@ static void calculate_realtime_metrics(void)
     float speed_ms = 1000.0f / metrics_state.current_metrics.pace_sec_km; // m/s
     metrics_state.left_stride_length = speed_ms * (metrics_state.left_stride_duration / 1000.0f);
     metrics_state.right_stride_length = speed_ms * (metrics_state.right_stride_duration / 1000.0f);
-    metrics_state.current_metrics.stride_length_cm = (uint16_t)(((metrics_state.left_stride_length + metrics_state.right_stride_length) / 2) * 100);
+    
+    // Add to stride length buffer for averaging
+    float current_stride_length = (metrics_state.left_stride_length + metrics_state.right_stride_length) / 2;
+    if (current_stride_length > 0) {
+        metrics_state.stride_lengths[metrics_state.stride_length_index] = current_stride_length;
+        metrics_state.stride_length_index = (metrics_state.stride_length_index + 1) % STRIDE_LENGTH_BUFFER_SIZE;
+        
+        // Track how many valid samples we have
+        if (metrics_state.stride_length_count < STRIDE_LENGTH_BUFFER_SIZE) {
+            metrics_state.stride_length_count++;
+        }
+        
+        // Calculate average from buffer
+        float stride_sum = 0;
+        for (uint8_t i = 0; i < metrics_state.stride_length_count; i++) {
+            stride_sum += metrics_state.stride_lengths[i];
+        }
+        float avg_stride_length = stride_sum / metrics_state.stride_length_count;
+        
+        // Update metric with averaged value
+        metrics_state.current_metrics.stride_length_cm = (uint16_t)(avg_stride_length * 100);
+        
+        LOG_DBG("Stride length: current=%.2fm, avg=%.2fm (n=%d)",
+                current_stride_length, avg_stride_length, metrics_state.stride_length_count);
+    } else {
+        // No valid stride, use last known value
+        metrics_state.current_metrics.stride_length_cm = metrics_state.current_metrics.stride_length_cm;
+    }
 
     // Stride length asymmetry
     metrics_state.current_metrics.stride_length_asymmetry = calculate_asymmetry_percentage(
@@ -423,22 +490,50 @@ static void calculate_realtime_metrics(void)
         (uint16_t)(metrics_state.right_stride_length * 100)
     );
 
-    // Calculate vertical oscillation (simple estimation from vertical acceleration)
-    // TODO: Implement proper vertical oscillation using double integration of vertical acceleration
-    // Current implementation is oversimplified - should: 1) Remove gravity component,
-    // 2) Double integrate acceleration to get displacement, 3) Track peak-to-peak displacement
-    float vertical_oscillation_cm = 0;
-    if (data->linear_acc[2] != 0) {  // Assuming z is vertical
-        // Simplified: integrate acceleration over time (needs proper implementation)
-        vertical_oscillation_cm = fabsf(data->linear_acc[2]) * (data->delta_time_ms / 1000.0f) * 100.0f;  // Convert to cm
+    // Calculate vertical oscillation using proper integration
+    // TODO: Further improve with Kalman filtering for better drift correction
+    // Note: linear_acc already has gravity removed by BHI360
+    static float vertical_velocity = 0;
+    static float vertical_position = 0;
+    static float max_vertical_pos = 0;
+    static float min_vertical_pos = 0;
+    static uint32_t last_reset_time = 0;
+    
+    float dt = data->delta_time_ms / 1000.0f;
+    
+    // Integrate acceleration to get velocity
+    vertical_velocity += data->linear_acc[2] * dt;
+    
+    // Integrate velocity to get position
+    vertical_position += vertical_velocity * dt;
+    
+    // Track min/max over a stride
+    if (vertical_position > max_vertical_pos) max_vertical_pos = vertical_position;
+    if (vertical_position < min_vertical_pos) min_vertical_pos = vertical_position;
+    
+    // Reset tracking every ~1 second or on foot strike
+    if (metrics_state.current_time_ms - last_reset_time > 1000 ||
+        (data->left_in_contact && !metrics_state.last_left_contact)) {
+        float vertical_oscillation_m = max_vertical_pos - min_vertical_pos;
+        metrics_state.current_metrics.vertical_oscillation_cm = (uint8_t)MIN(vertical_oscillation_m * 100.0f, 255);
+        
+        // Reset for next stride
+        max_vertical_pos = vertical_position;
+        min_vertical_pos = vertical_position;
+        last_reset_time = metrics_state.current_time_ms;
+        
+        // Apply high-pass filter to remove drift
+        vertical_position *= 0.95f;
+        vertical_velocity *= 0.95f;
     }
-    metrics_state.current_metrics.vertical_oscillation_cm = (uint8_t)MIN(vertical_oscillation_cm, 255);
 
-    // Calculate vertical ratio (vertical oscillation / stride length)
-    // TODO: Get actual stride length from analytics module instead of using 100cm placeholder
-    // Should receive stride length calculation from analytics thread via message queue
-    float stride_length_cm = 100.0f;  // Placeholder - needs integration with analytics
-    float vertical_ratio = (vertical_oscillation_cm / stride_length_cm) * 100.0f;
+    // Calculate vertical ratio using actual stride length
+    // TODO: Consider terrain adjustment factor for uphill/downhill running
+    float vertical_ratio = 0;
+    if (metrics_state.current_metrics.stride_length_cm > 0) {
+        vertical_ratio = ((float)metrics_state.current_metrics.vertical_oscillation_cm /
+                         (float)metrics_state.current_metrics.stride_length_cm) * 100.0f;
+    }
     metrics_state.current_metrics.vertical_ratio = (uint8_t)MIN(vertical_ratio, 100);
     // Calculate variability for consistency score
     float variability = 0;
@@ -466,7 +561,7 @@ static void calculate_realtime_metrics(void)
     metrics_state.current_metrics.timestamp_ms = metrics_state.current_time_ms;
     metrics_state.current_metrics.cadence_spm = (uint16_t)current_cadence;
     metrics_state.current_metrics.pace_sec_km = (uint16_t)pace_estimator_get_pace(&metrics_state.pace_estimator);
-    metrics_state.current_metrics.distance_m = (uint16_t)metrics_state.pace_estimator.distance_m;
+    metrics_state.current_metrics.distance_m = metrics_state.pace_estimator.distance_m;  // No cast needed, both are uint32_t now
     
     metrics_state.current_metrics.form_score = (uint8_t)metrics_state.form_score.overall_score;
     metrics_state.current_metrics.balance_lr_pct = balance;
@@ -490,15 +585,35 @@ static void calculate_realtime_metrics(void)
     // Pronation
     metrics_state.current_metrics.avg_pronation_deg = avg_pronation;
     
-    // Efficiency indicators (simplified for now)
-    // TODO: Implement proper vertical ratio calculation once vertical oscillation is accurate
-    // Should be: (vertical_oscillation / stride_length) * 100
-    metrics_state.current_metrics.vertical_ratio = 10; // Placeholder value
+    // Calculate running efficiency based on multiple factors
+    // TODO: Add user-specific calibration for optimal values
+    // TODO: Consider pace-dependent adjustments for efficiency calculation
+    uint8_t efficiency_score = 100;
     
-    // TODO: Implement proper running efficiency calculation based on multiple factors
-    // Currently just using 90% of form score as placeholder
-    // Should include: cadence, vertical oscillation, contact time, duty factor
-    metrics_state.current_metrics.efficiency_score = (uint8_t)(metrics_state.form_score.overall_score * 0.9f);
+    // Factor 1: Duty factor (contact time / stride time) - optimal is around 35%
+    float duty_factor = 0;
+    if (metrics_state.current_metrics.stride_duration_ms > 0) {
+        duty_factor = (float)metrics_state.current_metrics.ground_contact_ms /
+                     (float)metrics_state.current_metrics.stride_duration_ms;
+        float duty_factor_penalty = fabsf(duty_factor - 0.35f) * 100.0f;
+        efficiency_score -= MIN(duty_factor_penalty, 20); // Max 20 point penalty
+    }
+    
+    // Factor 2: Vertical ratio - lower is better (typical 8-10%)
+    if (metrics_state.current_metrics.vertical_ratio > 10) {
+        efficiency_score -= MIN((metrics_state.current_metrics.vertical_ratio - 10) * 2, 20);
+    }
+    
+    // Factor 3: Cadence - optimal range 170-180 spm
+    if (current_cadence < 170 || current_cadence > 180) {
+        float cadence_penalty = fabsf(current_cadence - 175.0f) / 5.0f;
+        efficiency_score -= MIN(cadence_penalty, 15);
+    }
+    
+    // Factor 4: Form score contribution
+    efficiency_score = (efficiency_score * 0.7f) + (metrics_state.form_score.overall_score * 0.3f);
+    
+    metrics_state.current_metrics.efficiency_score = (uint8_t)MIN(efficiency_score, 100);
     
     // Check for alerts
     metrics_state.current_metrics.alerts = 0;
@@ -532,15 +647,8 @@ static void calculate_realtime_metrics(void)
     
     k_msgq_put(&realtime_queue, &out_msg, K_NO_WAIT);
     
-    // Reset accumulators periodically (every 100 samples)
-    if (metrics_state.metrics_count % 100 == 0) {
-        metrics_state.left_contact_sum_ms = 0;
-        metrics_state.right_contact_sum_ms = 0;
-        metrics_state.contact_count = 0;
-        metrics_state.left_force_sum = 0;
-        metrics_state.right_force_sum = 0;
-        metrics_state.force_count = 0;
-    }
+    // No longer need periodic reset - overflow protection handles it
+    // Removed the periodic reset code that was here
 #else
     // On secondary device, only process local data if needed
     // For now, skip bilateral calculations

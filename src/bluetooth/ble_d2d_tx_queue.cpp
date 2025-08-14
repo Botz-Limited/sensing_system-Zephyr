@@ -33,6 +33,7 @@ int ble_d2d_tx_queue_command(enum d2d_tx_cmd_type type, const void *data)
     case D2D_TX_CMD_DELETE_ACTIVITY_LOG:
     case D2D_TX_CMD_START_ACTIVITY:
     case D2D_TX_CMD_STOP_ACTIVITY:
+    case D2D_TX_CMD_ERASE_FLASH:
     case D2D_TX_CMD_TRIGGER_CALIBRATION:
     case D2D_TX_CMD_REQUEST_DEVICE_INFO:
     case D2D_TX_CMD_WEIGHT_CALIBRATION_TRIGGER:
@@ -94,7 +95,12 @@ void ble_d2d_tx_process_queued_commands(void)
             LOG_INF("Executing queued stop activity command: %u", cmd.data.byte_value);
             err = ble_d2d_tx_send_stop_activity_command(cmd.data.byte_value);
             break;
-            
+
+        case D2D_TX_CMD_ERASE_FLASH:
+            LOG_INF("Executing queued erase flash command: %u", cmd.data.byte_value);
+            err = ble_d2d_tx_send_erase_flash_command(cmd.data.byte_value);
+            break;
+
         case D2D_TX_CMD_TRIGGER_CALIBRATION:
             LOG_INF("Executing queued trigger calibration command: %u", cmd.data.byte_value);
             err = ble_d2d_tx_send_trigger_bhi360_calibration_command(cmd.data.byte_value);

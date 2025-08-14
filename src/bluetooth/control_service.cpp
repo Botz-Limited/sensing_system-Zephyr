@@ -1008,6 +1008,13 @@ static ssize_t write_erase_external_flash_vnd(struct bt_conn *conn,
             &external_flash_erase_status, sizeof(external_flash_erase_status));
       }
       
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+      // Forward the command to secondary device
+      FORWARD_D2D_COMMAND(ble_d2d_tx_send_erase_flash_command,
+                          D2D_TX_CMD_ERASE_FLASH, value,
+                          "erase flash");
+#endif
+      
     } else {
       LOG_WRN("Erase external flash already in progress (status=%u)",
               external_flash_erase_status);

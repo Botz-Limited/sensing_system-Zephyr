@@ -16,6 +16,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include <climits>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/flash.h>
@@ -441,6 +442,12 @@ static void process_sensor_data_work_handler(struct k_work *work)
             uint8_t alerts;
         } __attribute__((packed)) activity_metrics_binary_t;
 
+        // Reset counter if approaching maximum to prevent overflow
+        if (activity_packet_counter >= (UINT32_MAX - 100)) {
+            LOG_INF("Resetting activity packet counter to prevent overflow (was %u)", activity_packet_counter);
+            activity_packet_counter = 0;
+        }
+        
         activity_metrics_binary_t binary_metrics = {.packet_number = activity_packet_counter++,
                                                     .timestamp_ms = metrics->timestamp_ms,
                                                     .cadence_spm = metrics->cadence_spm,
@@ -624,46 +631,24 @@ static void process_erase_flash_work_handler(struct k_work *work)
         activity_log_file.filep = nullptr;
     }
 
-    // Unmount filesystem before erasing
-    if (filesystem_available)
-    {
-        LOG_INF("Unmounting filesystem before erase");
-        int ret = fs_unmount(&lfs_ext_storage_mnt);
-        if (ret != 0)
-        {
-            LOG_ERR("Failed to unmount filesystem: %d", ret);
-        }
-        filesystem_available = false;
-    }
 
     // Erase the flash
-    LOG_WRN("Erasing external flash - this may take a while...");
-    err_t erase_status = littlefs_flash_erase((uintptr_t)lfs_ext_storage_mnt.storage_dev);
+    LOG_WRN("Delete external flash - this may take a while...");
+ 
 
-    if (erase_status != err_t::NO_ERROR)
+    int erase_status = delete_all_files_in_directory(hardware_dir_path);
+    
+
+    if (erase_status < 0)
     {
         LOG_ERR("Failed to erase external flash: %d", (int)erase_status);
     }
     else
     {
         LOG_INF("External flash erased successfully");
-    }
-
-    // Remount the filesystem
-    LOG_INF("Remounting filesystem after erase");
-    err_t mount_status = mount_file_system(&lfs_ext_storage_mnt);
-    if (mount_status != err_t::NO_ERROR)
-    {
-        LOG_ERR("Failed to remount filesystem after erase: %d", (int)mount_status);
-        filesystem_available = false;
-    }
-    else
-    {
-        filesystem_available = true;
-        LOG_INF("Filesystem remounted successfully");
-
-        // Reset sequence numbers
+                // Reset sequence numbers
         next_activity_file_sequence = 0;
+  
     }
 
     // Send completion notification to bluetooth module
@@ -1445,6 +1430,10 @@ int delete_all_files_in_directory(const char *dir_path)
     {
         LOG_ERR("Failed to open directory %s: %d", dir_path, res);
         return res;
+    }
+    else
+    {
+        LOG_INF("Opened directory %s successfully", dir_path);
     }
 
     while (true)

@@ -223,7 +223,7 @@ static bool run_speed_cms_notify_enabled = false;
 // Real-time Metrics individual variables
 static uint16_t cadence_spm_value = 0;       // Steps per minute
 static uint16_t pace_sec_km_value = 0;       // Seconds per kilometer
-static uint32_t distance_m_value = 0;        // Distance in meters
+static uint32_t distance_m_value = 0;        // Distance in meters - uint32_t matches realtime_metrics_t
 static uint8_t form_score_value = 0;         // Form score 0-100
 static int8_t balance_lr_pct_value = 0;      // Balance -50 to +50
 static uint16_t ground_contact_ms_value = 0; // Average ground contact time
@@ -1600,7 +1600,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
   pace_sec_km_value =
       (uint32_t)(180 + (sys_rand32_get() % 1321)); // 180 to 1500 (inclusive)
   distance_m_value =
-      (uint32_t)(2000 + (sys_rand32_get() % 3001));             // 2000–5000m)
+      (uint32_t)(2000 + (sys_rand32_get() % 3001));             // 2000–5000m) - Already uint32_t
   form_score_value = (uint8_t)((sys_rand32_get() % 101));       // 0 to 100
   balance_lr_pct_value = (uint8_t)((sys_rand32_get() % 101));   // 0 to 100
   efficiency_score_value = (uint8_t)((sys_rand32_get() % 101)); // 0 to 100

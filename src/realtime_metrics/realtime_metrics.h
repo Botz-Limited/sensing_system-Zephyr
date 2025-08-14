@@ -36,7 +36,7 @@ typedef struct {
     // Basic metrics
     uint16_t cadence_spm;           // Steps per minute
     uint16_t pace_sec_km;           // Seconds per kilometer
-    uint16_t distance_m;            // Distance in meters (without GPS)
+    uint32_t distance_m;            // Distance in meters (without GPS) - uint32_t to prevent overflow after 65km
     
     // Form metrics
     uint8_t form_score;             // 0-100 overall form score

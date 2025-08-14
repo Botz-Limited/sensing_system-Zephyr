@@ -31,6 +31,7 @@ int ble_d2d_tx_send_delete_activity_log_command(uint8_t log_id);
 int ble_d2d_tx_send_start_activity_command(uint8_t value);
 int ble_d2d_tx_send_stop_activity_command(uint8_t value);
 int ble_d2d_tx_send_trigger_bhi360_calibration_command(uint8_t value);
+int ble_d2d_tx_send_erase_flash_command(uint8_t value);
 
 // Send function for FOTA completion status (secondary -> primary)
 int ble_d2d_tx_send_fota_complete(void);
