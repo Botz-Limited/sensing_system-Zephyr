@@ -19,9 +19,22 @@
 LOG_MODULE_REGISTER(ble_d2d_tx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 /*
- * D2D TX Module - Used by both Primary and Secondary devices
- * - Secondary: Sends sensor data to primary
- * - Primary: Sends control commands to secondary
+ * D2D TX Module - Device-to-Device Transmit Service
+ *
+ * DEVICE ROLES:
+ * - PRIMARY DEVICE (Right shoe):
+ *   - Acts as GATT client for D2D RX service on secondary
+ *   - Sends control commands to secondary: start/stop activity, set time, calibration
+ *   - Ensures both devices operate in sync
+ *   - Commands are queued if D2D connection is not ready
+ *
+ * - SECONDARY DEVICE (Left shoe):
+ *   - Acts as GATT server providing D2D TX service
+ *   - Sends sensor data to primary: foot sensor samples, BHI360 data, status
+ *   - Notifies primary of log availability and device status
+ *
+ * This architecture ensures the primary device (right shoe) maintains control
+ * while the secondary device (left shoe) follows commands and reports data.
  */
 
 // D2D TX Service UUID: 75ad68d6-200c-437d-98b5-061862076c5f

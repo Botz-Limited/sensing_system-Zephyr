@@ -78,6 +78,7 @@ void cs_set_time_control_command_notify(uint32_t stu);
 void cs_factory_reset_command_notify(uint8_t *stu);
 void cs_delete_log_hw_control_command_notify(uint32_t stu);
 void cs_delete_log_meta_control_command_notify(uint32_t stu);
+extern "C" void cs_external_flash_erase_complete_notify(void);
 void set_current_time_from_epoch(uint32_t new_epoch_time_s);
 uint32_t get_current_epoch_time(void);
 int init_rtc_time();

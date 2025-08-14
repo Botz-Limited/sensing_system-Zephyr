@@ -60,6 +60,22 @@ static void
 ams_stride_length_asym_ccc_cfg_changed(const struct bt_gatt_attr *attr,
                                        uint16_t value);
 
+static ssize_t ams_stride_length_avg_mm_read(struct bt_conn *conn,
+                                             const struct bt_gatt_attr *attr,
+                                             void *buf, uint16_t len,
+                                             uint16_t offset);
+static void
+ams_stride_length_avg_mm_ccc_cfg_changed(const struct bt_gatt_attr *attr,
+                                         uint16_t value);
+
+static ssize_t ams_run_speed_cms_read(struct bt_conn *conn,
+                                      const struct bt_gatt_attr *attr,
+                                      void *buf, uint16_t len,
+                                      uint16_t offset);
+static void
+ams_run_speed_cms_ccc_cfg_changed(const struct bt_gatt_attr *attr,
+                                  uint16_t value);
+
 // Service UUID: 4fd5b690-9d89-4061-92aa-319ca786baae
 static struct bt_uuid_128 ACTIVITY_METRICS_SERVICE_UUID = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x4fd5b690, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
@@ -139,6 +155,12 @@ static struct bt_uuid_128 stride_length_cm_uuid = BT_UUID_INIT_128(
 static struct bt_uuid_128 stride_length_asym_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x4fd5b6b6, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
+// New stride metrics - Stride Length Average and Run Speed
+static struct bt_uuid_128 stride_length_avg_mm_uuid = BT_UUID_INIT_128(
+    BT_UUID_128_ENCODE(0x4fd5b6b7, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 run_speed_cms_uuid = BT_UUID_INIT_128(
+    BT_UUID_128_ENCODE(0x4fd5b6b8, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
 // GPS Data (Write): ...b695
 static struct bt_uuid_128 gps_data_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x4fd5b695, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
@@ -186,12 +208,16 @@ static uint16_t stride_duration_ms_value = 0;
 static uint8_t stride_duration_asym_value = 0;
 static uint16_t stride_length_cm_value = 0;
 static uint8_t stride_length_asym_value = 0;
+static uint16_t stride_length_avg_mm_value = 0; // Average stride length in millimeters
+static uint16_t run_speed_cms_value = 0; // Run speed in cm/s (m/s × 100)
 
 // CCC for stride metrics
 static bool stride_duration_ms_notify_enabled = false;
 static bool stride_duration_asym_notify_enabled = false;
 static bool stride_length_cm_notify_enabled = false;
 static bool stride_length_asym_notify_enabled = false;
+static bool stride_length_avg_mm_notify_enabled = false;
+static bool run_speed_cms_notify_enabled = false;
 
 // Individual metric variables for BLE characteristics
 // Real-time Metrics individual variables
@@ -761,6 +787,24 @@ BT_GATT_SERVICE_DEFINE(
                            ams_stride_length_asym_read, nullptr,
                            static_cast<void *>(&stride_length_asym_value)),
     BT_GATT_CCC(ams_stride_length_asym_ccc_cfg_changed,
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
+    // Stride Length Average (mm)
+    BT_GATT_CHARACTERISTIC(&stride_length_avg_mm_uuid.uuid,
+                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                           BT_GATT_PERM_READ,
+                           ams_stride_length_avg_mm_read, nullptr,
+                           static_cast<void *>(&stride_length_avg_mm_value)),
+    BT_GATT_CCC(ams_stride_length_avg_mm_ccc_cfg_changed,
+                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
+    // Run Speed (cm/s = m/s × 100)
+    BT_GATT_CHARACTERISTIC(&run_speed_cms_uuid.uuid,
+                           BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+                           BT_GATT_PERM_READ,
+                           ams_run_speed_cms_read, nullptr,
+                           static_cast<void *>(&run_speed_cms_value)),
+    BT_GATT_CCC(ams_run_speed_cms_ccc_cfg_changed,
                 BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Total Step Count Characteristic (aggregated from both feet)
@@ -1347,6 +1391,50 @@ static ssize_t ams_stride_length_asym_read(struct bt_conn *conn,
                            sizeof(stride_length_asym_value));
 }
 
+// --- Stride Length Average Handler ---
+static void
+ams_stride_length_avg_mm_ccc_cfg_changed(const struct bt_gatt_attr *attr,
+                                         uint16_t value) {
+  if (!attr) {
+    LOG_ERR("ams_stride_length_avg_mm_ccc_cfg_changed: attr is NULL");
+    return;
+  }
+  stride_length_avg_mm_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+  LOG_INF("Stride Length Average MM notifications %s",
+          stride_length_avg_mm_notify_enabled ? "enabled" : "disabled");
+}
+
+static ssize_t ams_stride_length_avg_mm_read(struct bt_conn *conn,
+                                             const struct bt_gatt_attr *attr,
+                                             void *buf, uint16_t len,
+                                             uint16_t offset) {
+  return bt_gatt_attr_read(conn, attr, buf, len, offset,
+                           &stride_length_avg_mm_value,
+                           sizeof(stride_length_avg_mm_value));
+}
+
+// --- Run Speed Handler ---
+static void
+ams_run_speed_cms_ccc_cfg_changed(const struct bt_gatt_attr *attr,
+                                  uint16_t value) {
+  if (!attr) {
+    LOG_ERR("ams_run_speed_cms_ccc_cfg_changed: attr is NULL");
+    return;
+  }
+  run_speed_cms_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+  LOG_INF("Run Speed CMS notifications %s",
+          run_speed_cms_notify_enabled ? "enabled" : "disabled");
+}
+
+static ssize_t ams_run_speed_cms_read(struct bt_conn *conn,
+                                      const struct bt_gatt_attr *attr,
+                                      void *buf, uint16_t len,
+                                      uint16_t offset) {
+  return bt_gatt_attr_read(conn, attr, buf, len, offset,
+                           &run_speed_cms_value,
+                           sizeof(run_speed_cms_value));
+}
+
 static ssize_t ams_total_steps_read(struct bt_conn *conn,
                                     const struct bt_gatt_attr *attr, void *buf,
                                     uint16_t len, uint16_t offset) {
@@ -1517,6 +1605,14 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
   balance_lr_pct_value = (uint8_t)((sys_rand32_get() % 101));   // 0 to 100
   efficiency_score_value = (uint8_t)((sys_rand32_get() % 101)); // 0 to 100
   alerts_value = (uint8_t)((sys_rand32_get() % 101));           // 0 to 100
+  
+  // New metrics for testing
+  stride_length_avg_mm_value = (uint16_t)(1200 + (sys_rand32_get() % 801)); // 1200-2000mm (1.2-2.0m)
+  // Calculate run speed based on cadence and stride length
+  // Formula: speed = cadence(spm) * stride_length(m) / 120
+  // Convert to cm/s: multiply by 100
+  uint32_t speed_calc = (cadence_spm_value * stride_length_avg_mm_value) / 1200; // Result in cm/s
+  run_speed_cms_value = (uint16_t)(speed_calc > 65535 ? 65535 : speed_calc); // Cap at uint16_t max
 
   if (current_conn) {
     if (cadence_spm_notify_enabled) {
@@ -1654,6 +1750,26 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                                sizeof(alerts_value));
       if (err)
         LOG_WRN("Failed to send Alerts notification: %d", err);
+    }
+
+    if (stride_length_avg_mm_notify_enabled) {
+      auto *status_gatt = bt_gatt_find_by_uuid(
+          activity_metrics_service.attrs, activity_metrics_service.attr_count,
+          &stride_length_avg_mm_uuid.uuid);
+      int err = bt_gatt_notify(current_conn, status_gatt, &stride_length_avg_mm_value,
+                               sizeof(stride_length_avg_mm_value));
+      if (err)
+        LOG_WRN("Failed to send Stride Length Average MM notification: %d", err);
+    }
+
+    if (run_speed_cms_notify_enabled) {
+      auto *status_gatt = bt_gatt_find_by_uuid(
+          activity_metrics_service.attrs, activity_metrics_service.attr_count,
+          &run_speed_cms_uuid.uuid);
+      int err = bt_gatt_notify(current_conn, status_gatt, &run_speed_cms_value,
+                               sizeof(run_speed_cms_value));
+      if (err)
+        LOG_WRN("Failed to send Run Speed CMS notification: %d", err);
     }
   }
 
@@ -1837,6 +1953,15 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
   stride_duration_asym_value = metrics->stride_duration_asymmetry;
   stride_length_cm_value = metrics->stride_length_cm;
   stride_length_asym_value = metrics->stride_length_asymmetry;
+  
+  // Calculate stride length average in mm (mean of left and right)
+  // Assuming stride_length_cm is already the average, convert to mm
+  stride_length_avg_mm_value = metrics->stride_length_cm * 10;
+  
+  // Calculate run speed: speed = cadence(spm) * stride_length(m) / 120
+  // Result in cm/s (m/s × 100)
+  uint32_t speed_calc = (metrics->cadence_spm * stride_length_avg_mm_value) / 1200;
+  run_speed_cms_value = (uint16_t)(speed_calc > 65535 ? 65535 : speed_calc);
 
   // Send notifications for stride metrics if enabled and connected
   if (current_conn) {
@@ -1883,6 +2008,26 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                          sizeof(stride_length_asym_value));
       if (err)
         LOG_WRN("Failed to send Stride Length Asymmetry notification: %d", err);
+    }
+
+    if (stride_length_avg_mm_notify_enabled) {
+      auto *status_gatt = bt_gatt_find_by_uuid(
+          activity_metrics_service.attrs, activity_metrics_service.attr_count,
+          &stride_length_avg_mm_uuid.uuid);
+      int err = bt_gatt_notify(current_conn, status_gatt, &stride_length_avg_mm_value,
+                               sizeof(stride_length_avg_mm_value));
+      if (err)
+        LOG_WRN("Failed to send Stride Length Average MM notification: %d", err);
+    }
+
+    if (run_speed_cms_notify_enabled) {
+      auto *status_gatt = bt_gatt_find_by_uuid(
+          activity_metrics_service.attrs, activity_metrics_service.attr_count,
+          &run_speed_cms_uuid.uuid);
+      int err = bt_gatt_notify(current_conn, status_gatt, &run_speed_cms_value,
+                               sizeof(run_speed_cms_value));
+      if (err)
+        LOG_WRN("Failed to send Run Speed CMS notification: %d", err);
     }
   }
 #endif
@@ -2126,6 +2271,8 @@ void ams_set_connection(struct bt_conn *conn) {
     stride_duration_asym_notify_enabled = false;
     stride_length_cm_notify_enabled = false;
     stride_length_asym_notify_enabled = false;
+    stride_length_avg_mm_notify_enabled = false;
+    run_speed_cms_notify_enabled = false;
   }
 }
 

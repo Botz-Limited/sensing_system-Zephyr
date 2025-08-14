@@ -84,6 +84,7 @@ static constexpr uint8_t is_little_endian = 0;
 
 static uint32_t set_time_control = 0;
 static bool status_subscribed = false;
+static uint8_t external_flash_erase_status = 0; // 0=idle, 1=erasing, 2=complete
 
 static uint32_t swap_to_little_endian(uint32_t value);
 
@@ -138,6 +139,10 @@ static struct bt_uuid_128 reset_bonds_uuid = BT_UUID_INIT_128(
 // --- New: UUID for user info characteristic ---
 static struct bt_uuid_128 user_info_uuid = BT_UUID_INIT_128(
     BT_UUID_128_ENCODE(0x4fd5b690, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+
+// --- New: UUID for erase external flash characteristic ---
+static struct bt_uuid_128 erase_external_flash_uuid = BT_UUID_INIT_128(
+    BT_UUID_128_ENCODE(0x4fd5b691, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // Forward declarations for start/stop activity handlers
 static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
@@ -208,6 +213,16 @@ static ssize_t write_user_info_vnd(struct bt_conn *conn,
                                    const struct bt_gatt_attr *attr,
                                    const void *buf, uint16_t len,
                                    uint16_t offset, uint8_t flags);
+
+// Erase external flash handlers
+static ssize_t write_erase_external_flash_vnd(struct bt_conn *conn,
+                                              const struct bt_gatt_attr *attr,
+                                              const void *buf, uint16_t len,
+                                              uint16_t offset, uint8_t flags);
+static ssize_t read_erase_external_flash_vnd(struct bt_conn *conn,
+                                             const struct bt_gatt_attr *attr,
+                                             void *buf, uint16_t len,
+                                             uint16_t offset);
 
 /**
  * @brief Structure for user information data
@@ -323,8 +338,17 @@ BT_GATT_SERVICE_DEFINE(
     // User Info Characteristic (primary device only)
     BT_GATT_CHARACTERISTIC(&user_info_uuid.uuid, BT_GATT_CHRC_WRITE,
                            BT_GATT_PERM_WRITE, nullptr, write_user_info_vnd,
-                           nullptr)
+                           nullptr),
 #endif
+
+    // Erase External Flash Characteristic
+    BT_GATT_CHARACTERISTIC(&erase_external_flash_uuid.uuid,
+                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
+                           BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+                           read_erase_external_flash_vnd,
+                           write_erase_external_flash_vnd,
+                           &external_flash_erase_status),
+    BT_GATT_CCC(NULL, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
     );
 
 /**
@@ -933,6 +957,95 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
 
   return len;
 }
+
+// --- Erase External Flash Handlers ---
+// Store the attribute pointer for notifications
+static const struct bt_gatt_attr *erase_flash_attr = NULL;
+
+static ssize_t write_erase_external_flash_vnd(struct bt_conn *conn,
+                                              const struct bt_gatt_attr *attr,
+                                              const void *buf, uint16_t len,
+                                              uint16_t offset, uint8_t flags) {
+  ARG_UNUSED(conn);
+  ARG_UNUSED(offset);
+  ARG_UNUSED(flags);
+
+  // Save the attribute pointer for notifications
+  erase_flash_attr = attr;
+
+  if (len != sizeof(uint8_t)) {
+    LOG_ERR("Erase external flash characteristic write: invalid length %u (expected %u)",
+            len, sizeof(uint8_t));
+    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+  }
+
+  uint8_t value = *((const uint8_t *)buf);
+
+  if (value == 1) {
+    // Only proceed if not already erasing
+    if (external_flash_erase_status == 0) {
+      LOG_INF("Erase external flash command received, sending to data module");
+      
+      // Update status to erasing
+      external_flash_erase_status = 1;
+      
+      // Send message to data module to trigger erase
+      generic_message_t erase_msg = {};
+      erase_msg.sender = SENDER_BTH;
+      erase_msg.type = MSG_TYPE_ERASE_EXTERNAL_FLASH;
+      
+      if (k_msgq_put(&data_msgq, &erase_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send erase external flash command to DATA module");
+        external_flash_erase_status = 0; // Reset status on failure
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+      }
+      
+      LOG_INF("Sent ERASE_EXTERNAL_FLASH command to DATA module");
+      
+      // Notify that erasing has started
+      if (erase_flash_attr) {
+        bt_gatt_notify(NULL, erase_flash_attr,
+            &external_flash_erase_status, sizeof(external_flash_erase_status));
+      }
+      
+    } else {
+      LOG_WRN("Erase external flash already in progress (status=%u)",
+              external_flash_erase_status);
+    }
+  } else {
+    LOG_WRN("Erase external flash characteristic write ignored (value=%u, expected 1)",
+            value);
+  }
+
+  return len;
+}
+
+static ssize_t read_erase_external_flash_vnd(struct bt_conn *conn,
+                                             const struct bt_gatt_attr *attr,
+                                             void *buf, uint16_t len,
+                                             uint16_t offset) {
+  return bt_gatt_attr_read(conn, attr, buf, len, offset,
+                           &external_flash_erase_status,
+                           sizeof(external_flash_erase_status));
+}
+
+// Function to be called by data module when erase is complete
+void cs_external_flash_erase_complete_notify(void) {
+  external_flash_erase_status = 2; // Set status to complete
+  
+  // Notify using the saved attribute pointer
+  if (erase_flash_attr) {
+    bt_gatt_notify(NULL, erase_flash_attr,
+        &external_flash_erase_status, sizeof(external_flash_erase_status));
+    LOG_INF("External flash erase complete notification sent (status=2)");
+  } else {
+    LOG_WRN("Cannot send erase complete notification - attribute not initialized");
+  }
+  
+  // Note: Status remains at 2 until next erase operation
+  // Client can read the characteristic to check status at any time
+}
+
 
 static void cs_stop_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr,
                                              uint16_t value) {

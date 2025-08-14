@@ -11,9 +11,17 @@
 LOG_MODULE_REGISTER(ble_d2d_rx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 /*
- * D2D RX Module - Used by both Primary and Secondary devices
- * - Primary: Receives sensor data from secondary
- * - Secondary: Receives control commands from primary
+ * D2D RX Module - Device-to-Device Receive Service
+ *
+ * DEVICE ROLES:
+ * - PRIMARY DEVICE (Right shoe):
+ *   - Receives sensor data from secondary via D2D TX service
+ *   - This service receives status updates and sensor data
+ *
+ * - SECONDARY DEVICE (Left shoe):
+ *   - Receives control commands from primary via this D2D RX service
+ *   - Handles commands like: start/stop activity, set time, trigger calibration
+ *   - Ensures secondary device mirrors primary device behavior
  */
 
 // D2D RX Service UUID: e060ca1f-3115-4ad6-9709-8c5ff3bf558b
@@ -152,6 +160,7 @@ static ssize_t d2d_delete_bhi360_log_write(struct bt_conn *conn, const struct bt
 }
 
 // Start Activity Command Handler - mirrors control_service.cpp implementation
+// Role: SECONDARY DEVICE - Receives activity start commands from primary device
 static ssize_t d2d_start_activity_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
                                         uint16_t len, uint16_t offset, uint8_t flags)
 {
@@ -172,13 +181,27 @@ static ssize_t d2d_start_activity_write(struct bt_conn *conn, const struct bt_ga
 
     if (value == 1)
     {
+        // Start sensor events (same as primary device)
         struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
         APP_EVENT_SUBMIT(foot_evt);
 
         struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
         APP_EVENT_SUBMIT(motion_evt);
 
-        LOG_INF("D2D RX: Start Activity Command - submitted foot and motion sensor events");
+        // Start Logging Activity file (mirrors primary device behavior from control_service.cpp)
+        generic_message_t start_logging_msg = {};
+        start_logging_msg.sender = SENDER_BTH;
+        start_logging_msg.type = MSG_TYPE_COMMAND;
+        strncpy(start_logging_msg.data.command_str, "START_LOGGING_ACTIVITY",
+                sizeof(start_logging_msg.data.command_str) - 1);
+
+        if (k_msgq_put(&data_msgq, &start_logging_msg, K_NO_WAIT) != 0) {
+            LOG_WRN("Failed to send START_LOGGING_ACTIVITY command to DATA module");
+        } else {
+            LOG_INF("Sent START_LOGGING_ACTIVITY command to DATA module");
+        }
+
+        LOG_INF("D2D RX: Start Activity Command - submitted foot and motion sensor events, started activity logging");
     }
     else
     {
@@ -189,6 +212,7 @@ static ssize_t d2d_start_activity_write(struct bt_conn *conn, const struct bt_ga
 }
 
 // Stop Activity Command Handler - mirrors control_service.cpp implementation
+// Role: SECONDARY DEVICE - Receives activity stop commands from primary device
 static ssize_t d2d_stop_activity_write(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
                                        uint16_t len, uint16_t offset, uint8_t flags)
 {
@@ -206,13 +230,27 @@ static ssize_t d2d_stop_activity_write(struct bt_conn *conn, const struct bt_gat
 
     if (value == 1)
     {
+        // Stop sensor events (same as primary device)
         struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
         APP_EVENT_SUBMIT(foot_evt);
 
         struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
         APP_EVENT_SUBMIT(motion_evt);
 
-        LOG_INF("D2D RX: Stop Activity Command - submitted events");
+        // Stop Logging Activity file (mirrors primary device behavior from control_service.cpp)
+        generic_message_t stop_logging_msg = {};
+        stop_logging_msg.sender = SENDER_BTH;
+        stop_logging_msg.type = MSG_TYPE_COMMAND;
+        strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING_ACTIVITY",
+                sizeof(stop_logging_msg.data.command_str) - 1);
+
+        if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {
+            LOG_WRN("Failed to send STOP_LOGGING_ACTIVITY command to DATA module");
+        } else {
+            LOG_INF("Sent STOP_LOGGING_ACTIVITY command to DATA module");
+        }
+
+        LOG_INF("D2D RX: Stop Activity Command - submitted events and stopped activity logging");
     }
     else
     {

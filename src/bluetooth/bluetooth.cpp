@@ -81,6 +81,8 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
+extern void cs_external_flash_erase_complete_notify(void);
+
 // Constants
 #define BLE_ADVERTISING_TIMEOUT_MS 30000                   // 30 seconds advertising timeout
 static constexpr uint32_t DISCOVERY_INITIAL_DELAY_MS = 10; // Delay before starting discovery
@@ -1490,6 +1492,17 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_battery_secondary_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
                     k_work_submit_to_queue(&bluetooth_work_q, &battery_level_secondary_work);
+                    break;
+
+                case MSG_TYPE_EXTERNAL_FLASH_ERASE_COMPLETE:
+                    LOG_INF("Received external flash erase complete notification");
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Only primary device needs to notify via BLE characteristic
+                    cs_external_flash_erase_complete_notify();
+#else
+                    // Secondary device: flash erase complete, no BLE notification needed
+                    LOG_INF("Secondary device: Flash erase complete (no BLE notification)");
+#endif
                     break;
 
                 default:
