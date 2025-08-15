@@ -343,8 +343,7 @@ BT_GATT_SERVICE_DEFINE(
 
     // Erase External Flash Characteristic
     BT_GATT_CHARACTERISTIC(&erase_external_flash_uuid.uuid,
-                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
-                           BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
+                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
                            read_erase_external_flash_vnd,
                            write_erase_external_flash_vnd,
                            &external_flash_erase_status),

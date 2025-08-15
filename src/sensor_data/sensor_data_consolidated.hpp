@@ -78,6 +78,13 @@ typedef struct {
     // Step count
     uint32_t step_count;
     uint8_t step_count_delta;  // Steps since last sample (usually 0-2)
+    
+    // Raw pressure sensor data for Choros algorithms
+    uint16_t pressure_left[8];   // Raw ADC values from left foot sensors
+    uint16_t pressure_right[8];  // Raw ADC values from right foot sensors
+    
+    // Timestamp for Choros algorithms
+    uint32_t timestamp_ms;        // Absolute timestamp in milliseconds
 } sensor_data_consolidated_t;
 
 #ifdef __cplusplus

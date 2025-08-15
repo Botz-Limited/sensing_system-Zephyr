@@ -397,7 +397,7 @@ static void sensor_data_thread_fn(void *arg1, void *arg2, void *arg3) {
 // D2D data - update sensor state directly (primary device only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
           update_foot_state_from_d2d(foot_data, foot_id);
-          LOG_DBG("Updated left foot state from D2D data");
+          LOG_WRN("Updated left foot state from D2D data");
 #endif
         }
 
@@ -493,7 +493,7 @@ static void sensor_data_thread_fn(void *arg1, void *arg2, void *arg3) {
         break;
 
       default:
-        LOG_DBG("Received unsupported message type %d from %s", msg.type,
+        LOG_WRN("Received unsupported message type %d from %s", msg.type,
                 get_sender_name(msg.sender));
         break;
       }
@@ -510,7 +510,7 @@ static void process_foot_data_work_handler(struct k_work *work) {
 
   // Process all available foot data in the ring buffer
   while (foot_ring_get(&foot_ring, &foot_data, &foot_id)) {
-    LOG_DBG("Processing foot sensor data for foot %d", foot_id);
+    LOG_WRN("Processing foot sensor data for foot %d", foot_id);
 
     if (foot_id == 0) {
       // Left foot processing
@@ -721,7 +721,7 @@ static void process_imu_data_work_handler(struct k_work *work) {
 
   // Process all available IMU data in the ring buffer
   while (imu_ring_get(&imu_ring, &imu_data)) {
-    LOG_DBG("Processing IMU data");
+    LOG_WRN("Processing IMU data");
 
     // Store quaternion values
     sensor_state.latest_quaternion[0] = imu_data.quat_w;
@@ -790,7 +790,7 @@ static void process_command_work_handler(struct k_work *work) {
 
   // Process all available commands in the ring buffer
   while (command_ring_get(&command_ring, command)) {
-    LOG_DBG("Processing command: %s", command);
+    LOG_WRN("Processing command: %s", command);
 
     if (strcmp(command, "START_SENSOR_PROCESSING") == 0) {
       atomic_set(&processing_active, 1);
@@ -897,8 +897,9 @@ static void process_sensor_sample(void) {
   // Create consolidated data structure - initialize all fields
   sensor_data_consolidated_t consolidated = {};
 
-  // Set time delta
+  // Set time delta and timestamp
   consolidated.delta_time_ms = delta_time_ms;
+  consolidated.timestamp_ms = current_time;
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
   // PRIMARY DEVICE: Has data from BOTH feet
@@ -1017,7 +1018,7 @@ static void process_sensor_sample(void) {
       consolidated.double_support_time_ms =
           buffered_primary_data.double_support_time_ms;
       primary_data_buffered = false; // Clear buffer after use
-      LOG_DBG("Used buffered primary data for synchronized processing");
+      LOG_WRN("Used buffered primary data for synchronized processing");
     }
   } else {
     // D2D data is stale - buffer the primary data and mark left as invalid
@@ -1052,7 +1053,7 @@ static void process_sensor_sample(void) {
           sensor_state.double_support_time_ms;
       primary_data_buffered = true;
       primary_buffer_time = current_time;
-      LOG_DBG("Buffered primary data waiting for secondary data");
+      LOG_WRN("Buffered primary data waiting for secondary data");
     }
 
     // Mark left foot data as invalid since it's stale
@@ -1149,6 +1150,17 @@ static void process_sensor_sample(void) {
   consolidated.double_support_time_ms = 0;
 #endif
 
+  // Add raw pressure sensor data for Choros algorithms
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+  // Primary has both feet
+  memcpy(consolidated.pressure_left, sensor_state.left_pressure, sizeof(consolidated.pressure_left));
+  memcpy(consolidated.pressure_right, sensor_state.right_pressure, sizeof(consolidated.pressure_right));
+#else
+  // Secondary only has left foot
+  memcpy(consolidated.pressure_left, sensor_state.left_pressure, sizeof(consolidated.pressure_left));
+  memset(consolidated.pressure_right, 0, sizeof(consolidated.pressure_right));
+#endif
+
   // IMU data (local on both devices)
   memcpy(consolidated.quaternion, sensor_state.latest_quaternion,
          sizeof(consolidated.quaternion));
@@ -1167,7 +1179,7 @@ static void process_sensor_sample(void) {
 
   // Log periodically
   if (sensor_state.sample_count % 100 == 0) {
-    LOG_DBG("Processed %u samples - L:%s/%ums R:%s/%ums",
+    LOG_WRN("Processed %u samples - L:%s/%ums R:%s/%ums",
             sensor_state.sample_count,
             sensor_state.left_foot_contact ? "Contact" : "Swing",
             sensor_state.left_contact_elapsed_ms,
@@ -1177,7 +1189,7 @@ static void process_sensor_sample(void) {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Log D2D connection quality with network core metrics
     if (sensor_state.d2d_average_latency_ms > 0) {
-      LOG_DBG("D2D quality: avg=%ums, max=%ums, min=%ums, jitter=%ums, window=%ums",
+      LOG_WRN("D2D quality: avg=%ums, max=%ums, min=%ums, jitter=%ums, window=%ums",
               sensor_state.d2d_average_latency_ms,
               sensor_state.d2d_max_latency_ms,
               sensor_state.d2d_min_latency_ms,
@@ -1231,6 +1243,11 @@ static void process_sensor_sample(void) {
   extern struct k_msgq realtime_queue;
   k_msgq_put(&realtime_queue, &out_msg, K_NO_WAIT);
 #endif
+
+// Also send to analytics module for Choros buffer
+#if IS_ENABLED(CONFIG_ANALYTICS_MODULE)
+  k_msgq_put(&analytics_queue, &out_msg, K_NO_WAIT);
+#endif
 }
 
 static void
@@ -1239,7 +1256,7 @@ process_synchronized_foot_data(const synchronized_foot_data_t *sync_data) {
     return;
 
   // Log synchronized data
-  LOG_DBG("Synchronized L/R foot data at time %u", sync_data->sync_time);
+  LOG_WRN("Synchronized L/R foot data at time %u", sync_data->sync_time);
 
   // Calculate contact state from pressure values
   uint32_t left_total = 0, right_total = 0;
@@ -1258,11 +1275,11 @@ process_synchronized_foot_data(const synchronized_foot_data_t *sync_data) {
   bool both_in_air = !left_contact && !right_contact;
 
   if (both_in_air) {
-    LOG_DBG("TRUE FLIGHT detected! (L:%u, R:%u)", left_total, right_total);
+    LOG_WRN("TRUE FLIGHT detected! (L:%u, R:%u)", left_total, right_total);
     // Update bilateral timing in sensor state
     sensor_state.true_flight_time_ms += 10; // Assuming 100Hz sampling
   } else if (both_on_ground) {
-    LOG_DBG("DOUBLE SUPPORT phase (L:%u, R:%u)", left_total, right_total);
+    LOG_WRN("DOUBLE SUPPORT phase (L:%u, R:%u)", left_total, right_total);
     sensor_state.double_support_time_ms += 10;
   } else {
     // Reset counters when not in pure bilateral state
@@ -1282,7 +1299,7 @@ process_full_synchronized_data(const full_synchronized_data_t *full_sync) {
   if (!full_sync)
     return;
 
-  LOG_DBG("Full sync data at time %u (quality: %u%%)", full_sync->sync_time,
+  LOG_WRN("Full sync data at time %u (quality: %u%%)", full_sync->sync_time,
           full_sync->sync_quality);
 
   // Calculate contact states from pressure
@@ -1298,7 +1315,7 @@ process_full_synchronized_data(const full_synchronized_data_t *full_sync) {
 
   // Bilateral gait phase detection
   if (!left_contact && !right_contact) {
-    LOG_DBG("TRUE FLIGHT phase detected");
+    LOG_WRN("TRUE FLIGHT phase detected");
 
     // With bilateral IMU data, we can calculate:
     if (full_sync->left_imu.valid && full_sync->right_imu.valid) {
@@ -1310,22 +1327,22 @@ process_full_synchronized_data(const full_synchronized_data_t *full_sync) {
       // 2. Body rotation (comparing left vs right quaternions)
       // This could detect body lean, rotation during flight
 
-      LOG_DBG("Flight phase - CoM vertical acc: %.2f m/s²", (double)com_acc_y);
+      LOG_WRN("Flight phase - CoM vertical acc: %.2f m/s²", (double)com_acc_y);
     }
   } else if (left_contact && right_contact) {
-    LOG_DBG("DOUBLE SUPPORT phase");
+    LOG_WRN("DOUBLE SUPPORT phase");
 
     if (full_sync->left_imu.valid && full_sync->right_imu.valid) {
       // Calculate weight distribution based on forces and orientations
       float left_weight_pct =
           (float)left_total / (left_total + right_total) * 100;
-      LOG_DBG("Weight distribution - L: %.1f%%, R: %.1f%%",
+      LOG_WRN("Weight distribution - L: %.1f%%, R: %.1f%%",
               (double)left_weight_pct, (double)(100 - left_weight_pct));
     }
   } else if (left_contact && !right_contact) {
-    LOG_DBG("LEFT SINGLE SUPPORT");
+    LOG_WRN("LEFT SINGLE SUPPORT");
   } else {
-    LOG_DBG("RIGHT SINGLE SUPPORT");
+    LOG_WRN("RIGHT SINGLE SUPPORT");
   }
 
   // Advanced bilateral metrics (only with both IMUs)
@@ -1353,7 +1370,7 @@ process_full_synchronized_data(const full_synchronized_data_t *full_sync) {
               step_diff);
     }
 
-    LOG_DBG("Gait symmetry: %.1f%%, Step diff: %d", (double)symmetry_index,
+    LOG_WRN("Gait symmetry: %.1f%%, Step diff: %d", (double)symmetry_index,
             step_diff);
   }
 
@@ -1464,7 +1481,7 @@ static void update_foot_state_from_d2d(const foot_samples_t *foot_data,
       sensor_state.left_loading_rate = 0;
     }
 
-    LOG_DBG("D2D left foot data updated at %u ms",
+    LOG_WRN("D2D left foot data updated at %u ms",
             sensor_state.left_foot_last_update_time);
   }
   // Note: foot_id == 1 (right foot) should never come from D2D on primary
@@ -1482,7 +1499,7 @@ static void update_imu_state_from_d2d(const bhi360_log_record_t *imu_data) {
   // or merge it with local IMU data for bilateral analysis
   // This depends on your specific requirements
 
-  LOG_DBG("D2D IMU data updated at %u ms",
+  LOG_WRN("D2D IMU data updated at %u ms",
           sensor_state.left_imu_last_update_time);
 }
 

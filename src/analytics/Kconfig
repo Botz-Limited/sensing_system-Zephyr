@@ -5,30 +5,33 @@
 menu "Analytics Module"
 
 config ANALYTICS_MODULE
-	bool "Enable complex analytics calculation module"
+	bool "Enable analytics module"
 	default y
 	help
-	  Enable the analytics module for complex biomechanical calculations
+	  Enable the analytics module for complex metric calculations.
 
 config ANALYTICS_MODULE_LOG_LEVEL
 	int "Analytics module log level"
-	depends on ANALYTICS_MODULE && LOG
-	default 2
+	default 3
+	range 0 4
 	help
-	  Sets log level for analytics module
+	  Log level for analytics module
+	  0 - OFF
+	  1 - ERROR
+	  2 - WARNING
+	  3 - INFO
+	  4 - DEBUG
 
 config ANALYTICS_MODULE_STACK_SIZE
-	int "Analytics module thread stack size"
+	int "Analytics thread stack size"
 	default 4096
-	depends on ANALYTICS_MODULE
 	help
-	  Stack size for analytics processing thread
+	  Stack size for the analytics processing thread
 
 config ANALYTICS_MODULE_PRIORITY
-	int "Analytics module thread priority"
-	default 7
-	depends on ANALYTICS_MODULE
+	int "Analytics thread priority"
+	default 5
 	help
-	  Priority for analytics processing thread (lower number = higher priority)
+	  Priority of the analytics processing thread
 
 endmenu

@@ -26,6 +26,9 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_REALTIME_METRICS_MODULE_LOG_LEVEL);
 
+// Include Choros buffer for enhanced metrics (safe inclusion)
+#include <choros_buffer.hpp>
+
 // Thread configuration
 static constexpr int realtime_metrics_stack_size = CONFIG_REALTIME_METRICS_MODULE_STACK_SIZE;
 static constexpr int realtime_metrics_priority = CONFIG_REALTIME_METRICS_MODULE_PRIORITY;
@@ -262,7 +265,7 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                     break;
                     
                 default:
-                    LOG_DBG("Received unsupported message type %d", msg.type);
+                    LOG_WRN("Received unsupported message type %d", msg.type);
                     break;
             }
         }
@@ -275,7 +278,7 @@ static void process_consolidated_data_work_handler(struct k_work *work)
     ARG_UNUSED(work);
     
     if (atomic_get(&processing_active) == 1 && new_sensor_data_available) {
-        LOG_DBG("Processing consolidated sensor data");
+        LOG_WRN("Processing consolidated sensor data");
         
         // Calculate real-time metrics
         calculate_realtime_metrics();
@@ -291,7 +294,7 @@ static void process_command_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
     
-    LOG_DBG("Processing command: %s", pending_command);
+    LOG_WRN("Processing command: %s", pending_command);
     
     if (strcmp(pending_command, "START_REALTIME_PROCESSING") == 0) {
         atomic_set(&processing_active, 1);
@@ -375,7 +378,7 @@ static void calculate_realtime_metrics(void)
             metrics_state.right_contact_sum_ms = metrics_state.avg_right_contact_ms * 100;
             metrics_state.contact_count = 100;
             
-            LOG_DBG("Contact time accumulators reset after 1000 samples");
+            LOG_WRN("Contact time accumulators reset after 1000 samples");
         }
     }
     
@@ -400,7 +403,7 @@ static void calculate_realtime_metrics(void)
             metrics_state.right_force_sum = metrics_state.avg_right_force * 100;
             metrics_state.force_count = 100;
             
-            LOG_DBG("Force accumulators reset after 1000 samples");
+            LOG_WRN("Force accumulators reset after 1000 samples");
         }
     }
     
@@ -477,7 +480,7 @@ static void calculate_realtime_metrics(void)
         // Update metric with averaged value
         metrics_state.current_metrics.stride_length_cm = (uint16_t)(avg_stride_length * 100);
         
-        LOG_DBG("Stride length: current=%.2fm, avg=%.2fm (n=%d)",
+        LOG_WRN("Stride length: current=%.2fm, avg=%.2fm (n=%d)",
                 current_stride_length, avg_stride_length, metrics_state.stride_length_count);
     } else {
         // No valid stride, use last known value

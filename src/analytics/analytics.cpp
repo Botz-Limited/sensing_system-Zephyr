@@ -22,6 +22,16 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_ANALYTICS_MODULE_LOG_LEVEL);
 
+// Include Choros buffer for enhanced algorithms (safely added)
+#include <choros_buffer.hpp>
+
+extern void choros_buffer_init(void);
+
+// Global Choros buffer instance definition
+#if CHOROS_ENABLED
+choros_ring_buffer_t choros_buffer;
+#endif
+
 // Thread configuration
 static constexpr int analytics_stack_size = CONFIG_ANALYTICS_MODULE_STACK_SIZE;
 static constexpr int analytics_priority = CONFIG_ANALYTICS_MODULE_PRIORITY;
@@ -84,6 +94,7 @@ static struct {
     bool metrics_updated;
 } analytics_state;
 
+
 // Forward declarations
 static void analytics_init(void);
 static float calculate_fatigue_index_placeholder(void);
@@ -138,10 +149,13 @@ static void analytics_periodic_work_handler(struct k_work *work);
 // Initialize the analytics module
 static void analytics_init(void)
 {
-    LOG_INF("Initializing analytics module");
+    LOG_INF("Analytics init called - starting initialization");
     
     // Initialize state
     memset(&analytics_state, 0, sizeof(analytics_state));
+    
+    // Initialize Choros buffer (safe addition)
+    choros_buffer_init();
     
     // Initialize work queue
     k_work_queue_init(&analytics_work_q);
@@ -188,6 +202,7 @@ static void analytics_thread_fn(void *arg1, void *arg2, void *arg3)
         int ret = k_msgq_get(&realtime_queue, &msg, K_FOREVER);
         
         if (ret == 0) {
+           // LOG_WRN("Analytics: Received message type %d from sender %d", msg.type, msg.sender);
             // Queue different work based on message type
             switch (msg.type) {
                 case MSG_TYPE_REALTIME_METRICS:
@@ -204,6 +219,14 @@ static void analytics_thread_fn(void *arg1, void *arg2, void *arg3)
                         history_count++;
                     }
                     
+                    // Add to Choros buffer if enabled (safe parallel processing)
+                    #if CHOROS_ENABLED
+                    if (msg.sender == SENDER_SENSOR_DATA && msg.type == MSG_TYPE_SENSOR_DATA_CONSOLIDATED) {
+                        // Store consolidated data in Choros buffer for enhanced algorithms
+                        choros_buffer_add_consolidated(&msg.data.sensor_consolidated);
+                    }
+                    #endif
+                    
                     // Mark that new metrics are available
                     new_metrics_available = true;
                     k_work_submit_to_queue(&analytics_work_q, &process_realtime_metrics_work);
@@ -217,7 +240,8 @@ static void analytics_thread_fn(void *arg1, void *arg2, void *arg3)
                     break;
                     
                 default:
-                    LOG_DBG("Received unsupported message type %d", msg.type);
+                    // Only log unknown message types, not expected ones
+                    LOG_DBG("Received message type %d from %s", msg.type, get_sender_name(msg.sender));
                     break;
             }
         }
@@ -234,7 +258,7 @@ static void process_realtime_metrics_work_handler(struct k_work *work)
     if (atomic_get(&processing_active) == 1 && new_metrics_available) {
         uint32_t now = k_uptime_get_32();
         
-        LOG_DBG("Processing realtime metrics");
+        LOG_WRN("Processing realtime metrics");
         
         // Establish baseline during first 2 minutes
         if (!analytics_state.baseline_established) {
@@ -262,15 +286,40 @@ static void process_realtime_metrics_work_handler(struct k_work *work)
 static void process_command_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    LOG_DBG("Processing command: %s", pending_command);
+    LOG_WRN("Processing command: %s", pending_command);
     
-    if (strcmp(pending_command, "START_SENSOR_PROCESSING") == 0) {
+    if (strcmp(pending_command, "START_REALTIME_PROCESSING") == 0) {
+        // Analytics should start when realtime metrics start
         atomic_set(&processing_active, 1);
         analytics_state.baseline_start_time = k_uptime_get_32();
-        LOG_INF("Analytics processing started");
+        LOG_INF("Analytics processing started (via START_REALTIME_PROCESSING)");
         // Start periodic work
         k_work_schedule_for_queue(&analytics_work_q, &analytics_periodic_work, K_MSEC(200));
+        
+        // ALSO forward this command for realtime_metrics module
+        // Since both modules need to process, we need to put it back
+        generic_message_t fwd_msg = {};
+        fwd_msg.sender = SENDER_ACTIVITY_METRICS;
+        fwd_msg.type = MSG_TYPE_COMMAND;
+        strcpy(fwd_msg.data.command_str, pending_command);
+        k_msgq_put(&realtime_queue, &fwd_msg, K_NO_WAIT);
+        LOG_INF("Also forwarded START_REALTIME_PROCESSING for realtime_metrics");
     } else if (strcmp(pending_command, "STOP_REALTIME_PROCESSING") == 0) {
+        // Analytics should stop when realtime metrics stop
+        atomic_set(&processing_active, 0);
+        LOG_INF("Analytics processing stopped");
+        // Cancel periodic work
+        k_work_cancel_delayable(&analytics_periodic_work);
+        
+        // ALSO forward this command for realtime_metrics module
+        generic_message_t fwd_msg = {};
+        fwd_msg.sender = SENDER_ACTIVITY_METRICS;
+        fwd_msg.type = MSG_TYPE_COMMAND;
+        strcpy(fwd_msg.data.command_str, pending_command);
+        k_msgq_put(&realtime_queue, &fwd_msg, K_NO_WAIT);
+        LOG_INF("Also forwarded STOP_REALTIME_PROCESSING for realtime_metrics");
+    } else if (strcmp(pending_command, "START_SENSOR_PROCESSING") == 0 ||
+               strcmp(pending_command, "STOP_SENSOR_PROCESSING") == 0) {
         atomic_set(&processing_active, 0);
         LOG_INF("Analytics processing stopped");
         // Cancel periodic work
@@ -315,13 +364,19 @@ static void perform_complex_analytics(void)
     // TODO: Should analyze: loading rate, pronation, asymmetry, fatigue level
     analytics_state.injury_risk = calculate_injury_risk_placeholder();
     
-    // Stride length estimation placeholder
-    // TODO: Should use: height, cadence, speed, terrain adjustment
+    // Stride length - Use Choros if available, otherwise placeholder
+    #if CHOROS_ENABLED && CHOROS_USE_FOR_GCT
+    analytics_state.stride_length = choros_get_stride_length_safe(calculate_stride_length_placeholder());
+    #else
     analytics_state.stride_length = calculate_stride_length_placeholder();
+    #endif
     
-    // Pronation analysis placeholder
-    // TODO: Should track: pronation angle trends, left/right differences
+    // Pronation analysis - Use Choros if available, otherwise placeholder
+    #if CHOROS_ENABLED && CHOROS_USE_FOR_GCT
+    analytics_state.pronation_angle = choros_get_pronation_safe(calculate_pronation_analysis_placeholder());
+    #else
     analytics_state.pronation_angle = calculate_pronation_analysis_placeholder();
+    #endif
     
     // Log periodically
     if (analytics_state.analytics_count % 25 == 0) {
@@ -380,7 +435,7 @@ static void establish_baseline(void)
     analytics_state.baseline_pronation = total_pronation / samples;
     analytics_state.baseline_efficiency = total_efficiency / samples;
     
-    LOG_DBG("Baseline: contact=%.1fms, cadence=%.1f, pronation=%.1f°, efficiency=%.1f%%",
+    LOG_WRN("Baseline: contact=%.1fms, cadence=%.1f, pronation=%.1f°, efficiency=%.1f%%",
             (double)analytics_state.baseline_contact_time,
             (double)analytics_state.baseline_cadence,
             (double)analytics_state.baseline_pronation,

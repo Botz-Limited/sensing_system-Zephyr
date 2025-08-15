@@ -442,7 +442,7 @@ static void activity_metrics_init(void)
             sensor_data.avg_flight_time = total_flight / valid_samples;
         }
         
-        LOG_DBG("Step event: foot=%d, contact=%.1fms, flight=%.1fms, strike=%d",
+        LOG_WRN("Step event: foot=%d, contact=%.1fms, flight=%.1fms, strike=%d",
         event->foot, (double)event->contact_time_ms, (double)event->flight_time_ms, event->strike_pattern);
         });
         
@@ -644,7 +644,7 @@ static void activity_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                     break;
                     
                 default:
-                    LOG_DBG("Received unsupported message type %d from %s", 
+                    LOG_WRN("Received unsupported message type %d from %s", 
                             msg.type, get_sender_name(msg.sender));
                     break;
             }
@@ -671,7 +671,7 @@ static void process_foot_data_work_handler(struct k_work *work)
     // This is safe because k_work is the first member of foot_data_work
     struct foot_data_work *work_item = CONTAINER_OF(work, struct foot_data_work, work);
     
-    LOG_DBG("Processing foot sensor data for foot %d", work_item->foot_id);
+    LOG_WRN("Processing foot sensor data for foot %d", work_item->foot_id);
     
     // Process the foot data that was copied into this work item
     // work_item->data contains the exact data that was in the message
@@ -684,7 +684,7 @@ static void process_bhi360_data_work_handler(struct k_work *work)
     // Get the containing work item structure
     struct bhi360_data_work *work_item = CONTAINER_OF(work, struct bhi360_data_work, work);
     
-    LOG_DBG("Processing BHI360 data, type: %d", work_item->type);
+    LOG_WRN("Processing BHI360 data, type: %d", work_item->type);
     
     // Create a temporary message with the appropriate data
     generic_message_t temp_msg;
@@ -899,7 +899,7 @@ static void weight_calibration_work_handler(struct k_work *work)
         // Check if person is standing still
         if (!is_person_standing_still()) {
             weight_measurement.stable_samples_count = 0;
-            LOG_DBG("Motion detected - resetting stable sample count");
+            LOG_WRN("Motion detected - resetting stable sample count");
             k_msleep(100);
             continue;
         }
@@ -1065,7 +1065,7 @@ static void calculate_realtime_metrics(void)
 static void send_periodic_record(void)
 {
     // For now, just log the metrics
-    LOG_DBG("Periodic update: cadence=%.1f, contact=%.1fms, flight=%.1fms",
+    LOG_WRN("Periodic update: cadence=%.1f, contact=%.1fms, flight=%.1fms",
             (double)sensor_data.current_cadence, (double)sensor_data.avg_contact_time, (double)sensor_data.avg_flight_time);
     
     // TODO: Create proper message structure for activity records
@@ -1113,7 +1113,7 @@ static void send_ble_update(void)
     
     // Send to Bluetooth module
     // TODO: Define proper message type for activity metrics
-    LOG_DBG("BLE update: pace=%d s/km, cadence=%d, form=%d",
+    LOG_WRN("BLE update: pace=%d s/km, cadence=%d, form=%d",
             packet.pace_sec_per_km, packet.cadence_x2/2, packet.form_score);
 }
 #else
@@ -1454,7 +1454,7 @@ void activity_session_process_gps_update(const GPSUpdateCommand* gps_data)
     // Update elevation if provided
     if (gps_data->elevation_change_m != 0) {
         session_state.total_elevation_gain_cm += gps_data->elevation_change_m * 100;
-        LOG_DBG("Elevation change: %dm, total gain: %dcm",
+        LOG_WRN("Elevation change: %dm, total gain: %dcm",
                 gps_data->elevation_change_m, session_state.total_elevation_gain_cm);
     }
 
@@ -1571,7 +1571,7 @@ static void process_weight_measurement(void)
     // Check if person is standing still
     if (!is_person_standing_still()) {
         weight_measurement.stable_samples_count = 0;
-        LOG_DBG("Motion detected - resetting stable sample count");
+        LOG_WRN("Motion detected - resetting stable sample count");
         return;
     }
     
