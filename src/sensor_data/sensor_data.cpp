@@ -510,7 +510,15 @@ static void process_foot_data_work_handler(struct k_work *work) {
 
   // Process all available foot data in the ring buffer
   while (foot_ring_get(&foot_ring, &foot_data, &foot_id)) {
-    LOG_WRN("Processing foot sensor data for foot %d", foot_id);
+#if CONFIG_PRIMARY_DEVICE
+   // LOG_WRN("Processing foot sensor data for foot %d on PRIMARY (expecting foot_id=1 for right)", foot_id);
+#else
+   // LOG_WRN("Processing foot sensor data for foot %d on SECONDARY (expecting foot_id=0 for left)", foot_id);
+#endif
+    // Log some raw values to verify data is non-zero
+   // LOG_WRN("Raw foot data: [0]=%u, [1]=%u, [2]=%u, [3]=%u",
+   //         foot_data.values[0], foot_data.values[1],
+   //         foot_data.values[2], foot_data.values[3]);
 
     if (foot_id == 0) {
       // Left foot processing
@@ -528,6 +536,9 @@ static void process_foot_data_work_handler(struct k_work *work) {
       for (int i = 0; i < 8; i++) {
         sensor_state.left_pressure[i] = remapped_left[i];
       }
+      LOG_WRN("Updated left_pressure: [0]=%u, [1]=%u, [2]=%u, [3]=%u",
+              sensor_state.left_pressure[0], sensor_state.left_pressure[1],
+              sensor_state.left_pressure[2], sensor_state.left_pressure[3]);
 
       // Detect ground contact
       bool was_in_contact = sensor_state.left_foot_contact;
@@ -627,6 +638,9 @@ static void process_foot_data_work_handler(struct k_work *work) {
       for (int i = 0; i < 8; i++) {
         sensor_state.right_pressure[i] = remapped_right[i];
       }
+     // LOG_WRN("Updated right_pressure: [0]=%u, [1]=%u, [2]=%u, [3]=%u",
+      //        sensor_state.right_pressure[0], sensor_state.right_pressure[1],
+       //       sensor_state.right_pressure[2], sensor_state.right_pressure[3]);
 
       // Detect ground contact
       bool was_in_contact = sensor_state.right_foot_contact;
@@ -1575,8 +1589,24 @@ void get_sensor_snapshot(float quat[4], float accel[3], float lacc[3], float gyr
   *temp = sensor_state.latest_temperature;
 #if CONFIG_PRIMARY_DEVICE
   memcpy(pressure, sensor_state.right_pressure, sizeof(uint16_t)*8);
+  // Debug: Log the actual values being read
+  static int snapshot_count = 0;
+  snapshot_count++;
+  if (snapshot_count % 10 == 0) {  // Log every 10th call
+    //LOG_WRN("get_sensor_snapshot PRIMARY: right_pressure[0]=%u, [1]=%u, [2]=%u, [3]=%u",
+      //      sensor_state.right_pressure[0], sensor_state.right_pressure[1],
+        //    sensor_state.right_pressure[2], sensor_state.right_pressure[3]);
+  }
 #else
   memcpy(pressure, sensor_state.left_pressure, sizeof(uint16_t)*8);
+  // Debug: Log the actual values being read
+  static int snapshot_count = 0;
+  snapshot_count++;
+  if (snapshot_count % 10 == 0) {  // Log every 10th call
+    //LOG_WRN("get_sensor_snapshot SECONDARY: left_pressure[0]=%u, [1]=%u, [2]=%u, [3]=%u",
+      //      sensor_state.left_pressure[0], sensor_state.left_pressure[1],
+        //    sensor_state.left_pressure[2], sensor_state.left_pressure[3]);
+  }
 #endif
 }
 #endif

@@ -68,6 +68,13 @@ extern "C" {
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL); // NOLINT
 
+// External message queues
+extern struct k_msgq sensor_data_msgq;  // For sending to sensor_data module
+extern struct k_msgq bluetooth_msgq;    // For sending to bluetooth module
+#if defined(CONFIG_WIFI_MODULE)
+extern struct k_msgq wifi_msgq;         // For sending to wifi module
+#endif
+
 static constexpr uint32_t US_PER_SECOND = 1000000UL;
 static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
 static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_NORMAL =
@@ -331,7 +338,12 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
               (calibrated_value < 0) ? 0 : calibrated_value;
         }
 
-        // Only send to Bluetooth at 10Hz (every 8th sample)
+        // Send to sensor_data module for processing (needed for legacy BLE and metrics)
+        if (k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT) != 0) {
+          LOG_WRN("Failed to send foot sensor data to sensor_data module");
+        }
+        
+        // Also send to Bluetooth at 10Hz (every 8th sample) for JIS characteristics
         sample_counter++;
         if (sample_counter >= SAMPLES_TO_SKIP) {
           sample_counter = 0;
@@ -611,15 +623,17 @@ static bool app_event_handler(const struct app_event_header *aeh) {
     return false;
   }
   if (is_foot_sensor_start_activity_event(aeh)) {
+    LOG_WRN("Foot sensor received start activity event, current logging_active=%d", atomic_get(&logging_active));
     if (atomic_get(&logging_active) == 0) {
-      LOG_INF("Received foot_sensor_start_activity_event");
+      LOG_INF("Received foot_sensor_start_activity_event - starting foot sensor sampling");
       atomic_set(&logging_active, 1);
     }
     return false;
   }
   if (is_foot_sensor_stop_activity_event(aeh)) {
+    LOG_WRN("Foot sensor received stop activity event, current logging_active=%d", atomic_get(&logging_active));
     if (atomic_get(&logging_active) == 1) {
-      LOG_INF("Received foot_sensor_stop_activity_event");
+      LOG_INF("Received foot_sensor_stop_activity_event - stopping foot sensor sampling");
 
       atomic_set(&logging_active, 0);
     }

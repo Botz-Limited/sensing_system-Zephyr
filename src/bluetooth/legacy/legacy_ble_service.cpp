@@ -1,3 +1,5 @@
+#include <events/app_state_event.h>
+#include <stdint.h>
 #if CONFIG_LEGACY_BLE_ENABLED
 
 #include <zephyr/kernel.h>
@@ -12,7 +14,7 @@
 
 #include "ccc_callback_fix.hpp"
 #include "../sensor_data/sensor_data.h"
-#include <app.hpp>
+#include <app.hpp>  // Already includes generic_message_t and MSG_TYPE_COMMAND
 #include "../../src/bluetooth/ble_d2d_rx_client.hpp" // Include for D2D data types
 #include <time.h>
 #include "../../include/events/foot_sensor_event.h"
@@ -60,7 +62,7 @@ static uint8_t bno_notify_enabled;
 static uint8_t config_notify_enabled;
 
 // Legacy streaming control variables
-static bool legacy_streaming_enabled = false;
+static bool legacy_streaming_enabled = true;
 static uint8_t legacy_mode = 0; // 0=off, 1=I1, 2=I2, 3=I3
 
 extern "C" void insole_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {
@@ -83,10 +85,19 @@ extern "C" void insole_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t
         struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
         APP_EVENT_SUBMIT(motion_evt);
         
-        LOG_INF("Started sensor activity for legacy BLE compatibility");
+        // IMPORTANT: Also send START_SENSOR_PROCESSING command to sensor_data module
+        // This sets the processing_active flag which enables data consolidation
+        generic_message_t msg = {};
+        msg.sender = SENDER_BTH;
+        msg.type = MSG_TYPE_COMMAND;
+        strncpy(msg.data.command_str, "START_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
+        extern struct k_msgq sensor_data_msgq;
+        k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
+        
+        LOG_INF("Started sensor activity and processing for legacy BLE compatibility");
     } else {
         // Stop streaming when notifications are disabled
-        legacy_streaming_enabled = false;
+      //legacy_streaming_enabled = false;
         legacy_mode = 0;
         LOG_INF("Stopping legacy streaming");
         
@@ -257,7 +268,7 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
         if (legacy_streaming_enabled) {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // Handle primary data
-            if (insole_notify_enabled && insole_data_attr) {
+         // if (insole_notify_enabled && insole_data_attr) {
                 uint8_t buffer[107]; // Match old firmware: 106 + checksum
                 size_t len = pack_legacy_data(buffer);
                 
@@ -265,7 +276,7 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
                 if (err < 0 && err != -ENOTCONN) {
                     LOG_WRN("Legacy BLE notify error: %d", err);
                 }
-            }
+          //}
 
             // Handle secondary data on primary
             if (insole_secondary_notify_enabled && insole_secondary_data_attr) {
@@ -313,6 +324,21 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
 
 // Function to pack data matching legacy format for primary device
 static size_t pack_legacy_data(uint8_t *buffer) {
+
+static uint8_t i;
+if(i<10)
+{
+
+     // Also start sensor activities to ensure sensors are active
+    struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(foot_evt);
+    
+    struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(motion_evt);
+}
+
+i++;
+
     size_t index = 0;
 
     // 1. Timestamp (6 bytes)
@@ -335,33 +361,13 @@ static size_t pack_legacy_data(uint8_t *buffer) {
     float quat[4], accel[3], lacc[3], gyro[3], grav[3], mag[3], temp;
     uint16_t pressure[8];
     get_sensor_snapshot(quat, accel, lacc, gyro, grav, mag, &temp, pressure);
+    
+   
+   
 
     // For testing: If all pressure values are 0 (sensors not connected), simulate random values
-    bool sensors_connected = false;
-    for (int i = 0; i < 8; i++) {
-        if (pressure[i] != 0) {
-            sensors_connected = true;
-            break;
-        }
-    }
-    #if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR)   //This is for testing only!!!!!!
-    if (!sensors_connected) {
-        for (int i = 0; i < 8; i++) {
-            pressure[i] = sys_rand32_get() % 1024; // Random 0-1023
-        }
-        for (int i = 0; i < 4; i++) {
-            quat[i] = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f; // Random -1.0 to 1.0
-        }
-        for (int i = 0; i < 3; i++) {
-            accel[i] = (float)(sys_rand32_get() % 400) / 100.0f - 2.0f; // Random -2.0 to 2.0
-            lacc[i] = accel[i];
-            gyro[i] = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f; // Random -2.0 to 2.0
-            grav[i] = (float)(sys_rand32_get() % 2000) / 1000.0f - 1.0f; // Random -1.0 to 1.0
-            mag[i] = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f; // Random -1.0 to 1.0
-        }
-        temp = (float)(sys_rand32_get() % 5000) / 100.0f + 20.0f; // Random 20.0 to 70.0
-    }
-    #endif
+    // Note: Remove random data generation for production use
+    // Real sensor data from get_sensor_snapshot() should be used
 
 
     // 2. Insole data (16 bytes: 8x uint16_t, MSB first)
@@ -462,90 +468,50 @@ static size_t pack_secondary_data(uint8_t *buffer) {
     buffer[index++] = second;
 
     // 2. Insole data from secondary (16 bytes: 8x uint16_t, MSB first)
-    // For testing: If all values are 0 (no data), simulate random
-    bool has_foot_data = false;
-    for (int i = 0; i < 8; i++) {
-        if (secondary_foot_data.values[i] != 0) {
-            has_foot_data = true;
-            break;
-        }
-    }
-    #if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR)   //This is for testing only!!!!!!
-    if (!has_foot_data) {
-        for (int i = 0; i < 8; i++) {
-            secondary_foot_data.values[i] = sys_rand32_get() % 1024; // Random 0-1023
-        }
-    }
-    #endif
+    // Note: Remove random data generation for production use
     for (int i = 0; i < 8; i++) {
         buffer[index++] = (secondary_foot_data.values[i] >> 8) & 0xFF;
         buffer[index++] = secondary_foot_data.values[i] & 0xFF;
     }
 
     // 3. Quaternion from secondary IMU data (16 bytes: 4x float w, z, y, x)
-    // 3. Quaternion from secondary IMU data (16 bytes: 4x float w, z, y, x)
-    // For testing: If all zero, simulate random
-    bool has_imu_data = (secondary_imu_data.quat_w != 0.0f || secondary_imu_data.accel_x != 0.0f ||
-                         secondary_imu_data.accel_y != 0.0f || secondary_imu_data.accel_z != 0.0f ||
-                         secondary_imu_data.gyro_x != 0.0f || secondary_imu_data.gyro_y != 0.0f ||
-                         secondary_imu_data.gyro_z != 0.0f);
-                         #if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR)   //This is for testing only!!!!!!
-    if (!has_imu_data) {
-        secondary_imu_data.quat_w = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
-        secondary_imu_data.accel_x = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
-        secondary_imu_data.accel_y = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
-        secondary_imu_data.accel_z = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
-        secondary_imu_data.gyro_x = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f;
-        secondary_imu_data.gyro_y = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f;
-        secondary_imu_data.gyro_z = (float)(sys_rand32_get() % 4000) / 1000.0f - 2.0f;
-    }
-    #endif
-    float q[4] = {secondary_imu_data.quat_w, secondary_imu_data.accel_z, secondary_imu_data.accel_y, secondary_imu_data.accel_x};
+    // Note: The bhi360_3d_mapping_t structure only has quat_w and doesn't have full quaternion
+    // Since IMU is not working, we zero all quaternion data as required
+    float q[4] = {0.0f, 0.0f, 0.0f, 0.0f};  // w, z, y, x - all zeroed as IMU not working
     for (int i = 0; i < 4; i++) {
         memcpy(&buffer[index], &q[i], sizeof(float));
         index += sizeof(float);
     }
 
-    // 4. Orientation/Euler (12 bytes: 3x float z, y, x) - Calculated from quaternion
-    float sinr_cosp = 2.0f * (secondary_imu_data.quat_w * secondary_imu_data.accel_x + secondary_imu_data.accel_y * secondary_imu_data.accel_z);
-    float cosr_cosp = 1.0f - 2.0f * (secondary_imu_data.accel_x * secondary_imu_data.accel_x + secondary_imu_data.accel_y * secondary_imu_data.accel_y);
-    float roll = atan2f(sinr_cosp, cosr_cosp);
-
-    float sinp = 2.0f * (secondary_imu_data.quat_w * secondary_imu_data.accel_y - secondary_imu_data.accel_z * secondary_imu_data.accel_x);
-    float pitch = (fabsf(sinp) >= 1) ? copysignf(M_PI_F / 2, sinp) : asinf(sinp);
-
-    float siny_cosp = 2.0f * (secondary_imu_data.quat_w * secondary_imu_data.accel_z + secondary_imu_data.accel_x * secondary_imu_data.accel_y);
-    float cosy_cosp = 1.0f - 2.0f * (secondary_imu_data.accel_y * secondary_imu_data.accel_y + secondary_imu_data.accel_z * secondary_imu_data.accel_z);
-    float yaw = atan2f(siny_cosp, cosy_cosp);
-
-    float e[3] = {yaw, pitch, roll};
+    // 4. Orientation/Euler (12 bytes: 3x float z, y, x) - All zeroed as IMU not working
+    float e[3] = {0.0f, 0.0f, 0.0f};  // yaw, pitch, roll - all zeroed
     for (int i = 0; i < 3; i++) {
         memcpy(&buffer[index], &e[i], sizeof(float));
         index += sizeof(float);
     }
 
-    // 5. Accelerometer from secondary IMU (12 bytes: 3x float x, y, z)
-    float accel[3] = {0.0f, 0.0f, 0.0f};
+    // 5. Accelerometer from secondary IMU (12 bytes: 3x float x, y, z) - All zeroed as IMU not working
+    float accel[3] = {0.0f, 0.0f, 0.0f};  // IMU not working - zero all data
     for (int i = 0; i < 3; i++) {
         memcpy(&buffer[index], &accel[i], sizeof(float));
         index += sizeof(float);
     }
 
-    // 6. Linear acceleration - using same as accelerometer for simplicity (12 bytes: 3x float x, y, z)
+    // 6. Linear acceleration (12 bytes: 3x float x, y, z) - All zeroed as IMU not working
     for (int i = 0; i < 3; i++) {
         memcpy(&buffer[index], &accel[i], sizeof(float));
         index += sizeof(float);
     }
 
-    // 7. Gravity - set to zero as placeholder (12 bytes: 3x float x, y, z)
-    float grav[3] = {0.0f, 0.0f, 0.0f};
+    // 7. Gravity (12 bytes: 3x float x, y, z) - All zeroed as IMU not working
+    float grav[3] = {0.0f, 0.0f, 0.0f};  // IMU not working - zero all data
     for (int i = 0; i < 3; i++) {
         memcpy(&buffer[index], &grav[i], sizeof(float));
         index += sizeof(float);
     }
 
-    // 8. Magnetometer - set to zero as placeholder (12 bytes: 3x float z, y, x)
-    float mag[3] = {0.0f, 0.0f, 0.0f};
+    // 8. Magnetometer (12 bytes: 3x float z, y, x) - All zeroed as IMU not working
+    float mag[3] = {0.0f, 0.0f, 0.0f};  // IMU not working - zero all data
     for (int i = 0; i < 3; i++) {
         memcpy(&buffer[index], &mag[i], sizeof(float));
         index += sizeof(float);
@@ -576,21 +542,15 @@ static size_t pack_secondary_data(uint8_t *buffer) {
 static size_t pack_bno_data(uint8_t *buffer) {
     size_t index = 0;
     
-    // Get quaternion data
-    float quat[4];
-    float dummy[3];
-    float temp;
-    uint16_t pressure[8];
-    get_sensor_snapshot(quat, dummy, dummy, dummy, dummy, dummy, &temp, pressure);
-    
-    // Pack quaternion (4 floats: w, x, y, z)
-    float q[4] = {quat[0], quat[1], quat[2], quat[3]};
+    // BNO055 IMU is not connected/working - send zeros for quaternion
+    // Pack quaternion (4 floats: w, x, y, z) - all zeroed
+    float q[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     for (int i = 0; i < 4; i++) {
         memcpy(&buffer[index], &q[i], sizeof(float));
         index += sizeof(float);
     }
     
-    return index;
+    return index;  // Returns 16 bytes (4 floats)
 }
 
 // Function to pack zeroed data for primary when secondary is not connected
@@ -645,48 +605,10 @@ static void send_zero_filled_secondary_packet(void) {
     sim_buffer[5] = tm->tm_sec;
     
     size_t index = 6;
-    #if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR)   //This is for testing only!!!!!!
-    // Simulate random insole data (16 bytes: 8x uint16_t)
-    for (int i = 0; i < 8; i++) {
-        uint16_t val = sys_rand32_get() % 1024;
-        sim_buffer[index++] = (val >> 8) & 0xFF;
-        sim_buffer[index++] = val & 0xFF;
-    }
     
-    // Simulate random quaternion (16 bytes: 4x float)
-    for (int i = 0; i < 4; i++) {
-        float val = (float)(sys_rand32_get() % 200) / 100.0f - 1.0f;
-        memcpy(&sim_buffer[index], &val, sizeof(float));
-        index += sizeof(float);
-    }
-    
-    // Simulate random euler (12 bytes: 3x float)
-    for (int i = 0; i < 3; i++) {
-        float val = (float)(sys_rand32_get() % 36000) / 100.0f - 180.0f;
-        memcpy(&sim_buffer[index], &val, sizeof(float));
-        index += sizeof(float);
-    }
-    
-    // Simulate random accel, lacc, grav, mag (12 bytes each)
-    for (int j = 0; j < 4; j++) { // 4 sections
-        for (int i = 0; i < 3; i++) {
-            float val = (float)(sys_rand32_get() % 400) / 100.0f - 2.0f;
-            memcpy(&sim_buffer[index], &val, sizeof(float));
-            index += sizeof(float);
-        }
-    }
-    
-    // Temperature and battery (4 bytes each, random)
-    float temp = (float)(sys_rand32_get() % 5000) / 100.0f + 20.0f;
-    memcpy(&sim_buffer[index], &temp, sizeof(float));
-    index += sizeof(float);
-    
-    float battery = (float)(sys_rand32_get() % 10000) / 100.0f;
-    memcpy(&sim_buffer[index], &battery, sizeof(float));
-    index += sizeof(float);
-    
-
-    #endif // CONFIG_TEST_RANDOM_GENERATOR
+    // Fill with zeros when secondary is not connected (100 bytes of data)
+    memset(&sim_buffer[index], 0, 100);
+    index = 106;
     
     // Checksum
     uint8_t checksum = 0;
@@ -755,10 +677,31 @@ static ssize_t config_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 
 void legacy_ble_init(void) {
     #if CONFIG_LEGACY_BLE_ENABLED
+    // Start sensor processing by default for legacy mode BEFORE starting the thread
+    // This ensures sensor data is ready even before BLE connection
+    generic_message_t msg = {};
+    msg.sender = SENDER_BTH;
+    msg.type = MSG_TYPE_COMMAND;
+    strncpy(msg.data.command_str, "START_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
+    extern struct k_msgq sensor_data_msgq;
+    k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
+    
+    // Also start sensor activities to ensure sensors are active
+    struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(foot_evt);
+    
+    struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(motion_evt);
+    
+    LOG_INF("Legacy BLE: Started sensor activities and processing");
+    
+    // Create the thread with a 3-second start delay to allow sensors to initialize
+    // and start providing data before we begin reading
     k_thread_create(&legacy_thread_data, legacy_stack, LEGACY_THREAD_STACK_SIZE,
                     legacy_thread_func, NULL, NULL, NULL,
-                    LEGACY_THREAD_PRIORITY, 0, K_NO_WAIT);
-    LOG_INF("Legacy BLE service initialized");
+                    LEGACY_THREAD_PRIORITY, 0, K_MSEC(3000));
+    
+    LOG_INF("Legacy BLE service initialized - thread will start in 3 seconds");
     #endif
 }
 

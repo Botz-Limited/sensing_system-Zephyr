@@ -429,6 +429,33 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     }
                     break;
 
+                case MSG_TYPE_DELETE_ACTIVITY_LOG:
+                {
+                    // Process delete activity log command
+                    LOG_INF("Received delete activity log command for ID: %u", msg.data.delete_cmd.id);
+                    
+                    // Stop any active logging first if we're deleting files
+                    if (atomic_get(&logging_activity_active))
+                    {
+                        LOG_WRN("Activity logging is active, stopping it before deletion");
+                        atomic_set(&logging_activity_active, 0);
+                        end_activity_logging();
+                    }
+                    
+                    // Delete the specified activity log file
+                    err_t delete_status = delete_by_type_and_id(msg.data.delete_cmd.type, msg.data.delete_cmd.id);
+                    if (delete_status != err_t::NO_ERROR)
+                    {
+                        LOG_ERR("Failed to delete activity log file with ID %u: %d",
+                                msg.data.delete_cmd.id, (int)delete_status);
+                    }
+                    else
+                    {
+                        LOG_INF("Successfully deleted activity log file with ID %u", msg.data.delete_cmd.id);
+                    }
+                    break;
+                }
+
                 default:
                     LOG_WRN("Received unsupported message type %d  from sender %d", msg.type, msg.sender);
                     break;

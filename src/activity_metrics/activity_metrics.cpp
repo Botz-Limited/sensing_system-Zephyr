@@ -672,7 +672,7 @@ static void process_foot_data_work_handler(struct k_work *work)
     // This is safe because k_work is the first member of foot_data_work
     struct foot_data_work *work_item = CONTAINER_OF(work, struct foot_data_work, work);
     
-    LOG_WRN("Processing foot sensor data for foot %d", work_item->foot_id);
+   // LOG_WRN("Processing foot sensor data for foot %d", work_item->foot_id);
     
     // Process the foot data that was copied into this work item
     // work_item->data contains the exact data that was in the message
