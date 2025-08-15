@@ -43,6 +43,7 @@
 
 &mx25r64 {
     status = "okay";
+    size = <67108864>;
     partitions {
         compatible = "fixed-partitions";
         #address-cells = <1>;

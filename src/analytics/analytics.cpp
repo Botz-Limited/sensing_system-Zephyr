@@ -297,12 +297,13 @@ static void process_command_work_handler(struct k_work *work)
         k_work_schedule_for_queue(&analytics_work_q, &analytics_periodic_work, K_MSEC(200));
         
         // ALSO forward this command for realtime_metrics module
-        // Since both modules need to process, we need to put it back
+        // Send to sensor_data_queue which is the input queue for realtime_metrics
         generic_message_t fwd_msg = {};
         fwd_msg.sender = SENDER_ACTIVITY_METRICS;
         fwd_msg.type = MSG_TYPE_COMMAND;
         strcpy(fwd_msg.data.command_str, pending_command);
-        k_msgq_put(&realtime_queue, &fwd_msg, K_NO_WAIT);
+        extern struct k_msgq sensor_data_queue;
+        k_msgq_put(&sensor_data_queue, &fwd_msg, K_NO_WAIT);
         LOG_INF("Also forwarded START_REALTIME_PROCESSING for realtime_metrics");
     } else if (strcmp(pending_command, "STOP_REALTIME_PROCESSING") == 0) {
         // Analytics should stop when realtime metrics stop
@@ -312,18 +313,38 @@ static void process_command_work_handler(struct k_work *work)
         k_work_cancel_delayable(&analytics_periodic_work);
         
         // ALSO forward this command for realtime_metrics module
+        // Send to sensor_data_queue which is the input queue for realtime_metrics
         generic_message_t fwd_msg = {};
         fwd_msg.sender = SENDER_ACTIVITY_METRICS;
         fwd_msg.type = MSG_TYPE_COMMAND;
         strcpy(fwd_msg.data.command_str, pending_command);
-        k_msgq_put(&realtime_queue, &fwd_msg, K_NO_WAIT);
+        extern struct k_msgq sensor_data_queue;
+        k_msgq_put(&sensor_data_queue, &fwd_msg, K_NO_WAIT);
         LOG_INF("Also forwarded STOP_REALTIME_PROCESSING for realtime_metrics");
-    } else if (strcmp(pending_command, "START_SENSOR_PROCESSING") == 0 ||
-               strcmp(pending_command, "STOP_SENSOR_PROCESSING") == 0) {
-        atomic_set(&processing_active, 0);
-        LOG_INF("Analytics processing stopped");
-        // Cancel periodic work
-        k_work_cancel_delayable(&analytics_periodic_work);
+    } else if (strcmp(pending_command, "START_SENSOR_PROCESSING") == 0) {
+        // Analytics doesn't directly handle sensor processing, but should forward
+        LOG_INF("Forwarding START_SENSOR_PROCESSING command");
+        // Forward to sensor_data module via appropriate queue
+        generic_message_t fwd_msg = {};
+        fwd_msg.sender = SENDER_ANALYTICS;
+        fwd_msg.type = MSG_TYPE_COMMAND;
+        strcpy(fwd_msg.data.command_str, pending_command);
+        
+        // Forward to sensor_data module
+        extern struct k_msgq sensor_data_msgq;
+        k_msgq_put(&sensor_data_msgq, &fwd_msg, K_NO_WAIT);
+    } else if (strcmp(pending_command, "STOP_SENSOR_PROCESSING") == 0) {
+        // Analytics doesn't directly handle sensor processing, but should forward
+        LOG_INF("Forwarding STOP_SENSOR_PROCESSING command");
+        // Forward to sensor_data module via appropriate queue
+        generic_message_t fwd_msg = {};
+        fwd_msg.sender = SENDER_ANALYTICS;
+        fwd_msg.type = MSG_TYPE_COMMAND;
+        strcpy(fwd_msg.data.command_str, pending_command);
+        
+        // Forward to sensor_data module
+        extern struct k_msgq sensor_data_msgq;
+        k_msgq_put(&sensor_data_msgq, &fwd_msg, K_NO_WAIT);
     } else {
         LOG_WRN("Unknown command: %s", pending_command);
     }

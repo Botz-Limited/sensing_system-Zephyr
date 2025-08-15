@@ -107,6 +107,7 @@ static atomic_t command_work_idx = ATOMIC_INIT(0);
 // Message queues are defined in app.cpp
 extern struct k_msgq activity_metrics_msgq;  // Input queue for this module
 extern struct k_msgq sensor_data_msgq;       // Output to sensor_data module
+extern struct k_msgq sensor_data_queue;      // Output to realtime_metrics module (legacy name)
 extern struct k_msgq realtime_queue;         // Output to realtime_metrics module
 extern struct k_msgq bluetooth_msgq;         // Output to bluetooth module
 extern struct k_msgq data_msgq;              // Output to data module
@@ -748,9 +749,9 @@ static void process_command_work_handler(struct k_work *work)
         strcpy(start_msg.data.command_str, "START_SENSOR_PROCESSING");
         k_msgq_put(&sensor_data_msgq, &start_msg, K_NO_WAIT);
         
-        // Start realtime metrics processing
+        // Start realtime metrics processing - send to sensor_data_queue (input queue for realtime_metrics)
         strcpy(start_msg.data.command_str, "START_REALTIME_PROCESSING");
-        k_msgq_put(&realtime_queue, &start_msg, K_NO_WAIT);
+        k_msgq_put(&sensor_data_queue, &start_msg, K_NO_WAIT);
         
         LOG_INF("Sent start commands to sensor_data and realtime_metrics modules");
     } else if (strcmp(work_item->command, "STOP_ACTIVITY") == 0) {
@@ -770,9 +771,9 @@ static void process_command_work_handler(struct k_work *work)
         strcpy(stop_msg.data.command_str, "STOP_SENSOR_PROCESSING");
         k_msgq_put(&sensor_data_msgq, &stop_msg, K_NO_WAIT);
         
-        // Stop realtime metrics processing
+        // Stop realtime metrics processing - send to sensor_data_queue (input queue for realtime_metrics)
         strcpy(stop_msg.data.command_str, "STOP_REALTIME_PROCESSING");
-        k_msgq_put(&realtime_queue, &stop_msg, K_NO_WAIT);
+        k_msgq_put(&sensor_data_queue, &stop_msg, K_NO_WAIT);
         
         LOG_INF("Sent stop commands to sensor_data and realtime_metrics modules");
     } else if (strcmp(work_item->command, "MEASURE_WEIGHT") == 0) {

@@ -10,13 +10,13 @@
 #define MODULE data
 
 #include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <utility>
 #include <variant>
 #include <vector>
-#include <climits>
 
 #include <zephyr/device.h>
 #include <zephyr/drivers/flash.h>
@@ -96,12 +96,19 @@ static struct k_work process_erase_flash_work;
 
 // Message Buffers (protected by mutexes for thread safety)
 static generic_message_t pending_sensor_data_msg;
-static generic_message_t pending_command_msg; // Store full message for commands
+
+// Command Queue - robust handling for multiple commands
+#define MAX_QUEUED_COMMANDS 8
+static generic_message_t command_queue[MAX_QUEUED_COMMANDS];
+static uint8_t cmd_queue_head = 0;
+static uint8_t cmd_queue_tail = 0;
+static atomic_t cmd_queue_count = ATOMIC_INIT(0);
+
 static bhi360_calibration_data_t pending_calibration_data;
 
 // Mutexes for work item message buffers
 K_MUTEX_DEFINE(sensor_data_msg_mutex);
-K_MUTEX_DEFINE(command_msg_mutex);
+K_MUTEX_DEFINE(cmd_queue_mutex);  // Renamed for command queue
 K_MUTEX_DEFINE(calibration_msg_mutex);
 
 // File System State
@@ -153,6 +160,7 @@ err_t cap_and_reindex_log_files(const char *file_prefix, const char *dir_path, u
 int close_all_files_in_directory(const char *dir_path);
 err_t delete_oldest_log_file_checked(const char *file_prefix, const char *dir_path);
 int delete_all_files_in_directory(const char *dir_path);
+static int lsdir(const char *path);
 int find_latest_log_file(const char *file_prefix, record_type_t record_type, char *file_path,
                          const char *open_file_path);
 
@@ -212,6 +220,7 @@ static void data_init(void)
         LOG_INF("File System Mounted at %s", lfs_ext_storage_mnt.mnt_point);
     }
 
+
     // Initialize work queue
     k_work_queue_init(&data_work_q);
     k_work_queue_start(&data_work_q, data_workq_stack, K_THREAD_STACK_SIZEOF(data_workq_stack), data_priority - 1,
@@ -253,7 +262,7 @@ static uint32_t get_next_file_sequence(const char *dir_path, const char *file_pr
     {
         if (res == -ENOENT)
         {
-            LOG_DBG("Directory '%s' does not exist yet for prefix '%s'. Starting "
+            LOG_WRN("Directory '%s' does not exist yet for prefix '%s'. Starting "
                     "sequence from 1.",
                     dir_path, file_prefix);
             return 1;
@@ -325,7 +334,7 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
         }
         else
         {
-            LOG_DBG("Initial activity log notification sent (ID: %u).", latest_activity_log_id_to_report);
+            LOG_WRN("Initial activity log notification sent (ID: %u).", latest_activity_log_id_to_report);
         }
     }
 
@@ -343,7 +352,7 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     // Check if work is already pending to avoid buffer overwrite
                     if (!k_work_is_pending(&process_sensor_data_work))
                     {
-                        k_mutex_lock(&sensor_data_msg_mutex, K_FOREVER);
+                        k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
                         memcpy(&pending_sensor_data_msg, &msg, sizeof(generic_message_t));
                         k_mutex_unlock(&sensor_data_msg_mutex);
                         k_work_submit_to_queue(&data_work_q, &process_sensor_data_work);
@@ -355,25 +364,48 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     break;
 
                 case MSG_TYPE_COMMAND:
-                    // Check if work is already pending
-                    if (!k_work_is_pending(&process_command_work))
+                    // Queue command - never drop commands
+                    k_mutex_lock(&cmd_queue_mutex, K_MSEC(100));
+                    
+                    // Check if queue has space
+                    if (atomic_get(&cmd_queue_count) < MAX_QUEUED_COMMANDS)
                     {
-                        k_mutex_lock(&command_msg_mutex, K_FOREVER);
-                        memcpy(&pending_command_msg, &msg, sizeof(generic_message_t));
-                        k_mutex_unlock(&command_msg_mutex);
-                        k_work_submit_to_queue(&data_work_q, &process_command_work);
+                        // Add command to queue
+                        memcpy(&command_queue[cmd_queue_tail], &msg, sizeof(generic_message_t));
+                        cmd_queue_tail = (cmd_queue_tail + 1) % MAX_QUEUED_COMMANDS;
+                        atomic_inc(&cmd_queue_count);
+                        
+                        LOG_INF("Queued command: %s (queue depth: %ld)",
+                                msg.data.command_str, atomic_get(&cmd_queue_count));
+                        
+                        // Submit work if not already pending
+                        if (!k_work_is_pending(&process_command_work))
+                        {
+                            k_work_submit_to_queue(&data_work_q, &process_command_work);
+                        }
                     }
                     else
                     {
-                        LOG_WRN("Command work already pending, dropping message");
+                        LOG_ERR("Command queue full! Force processing");
+                        // Emergency: cancel current work and force immediate processing
+                        k_work_cancel(&process_command_work);
+                        
+                        // Replace oldest command (FIFO)
+                        memcpy(&command_queue[cmd_queue_tail], &msg, sizeof(generic_message_t));
+                        cmd_queue_tail = (cmd_queue_tail + 1) % MAX_QUEUED_COMMANDS;
+                        // Don't increment count as we're replacing
+                        
+                        k_work_submit_to_queue(&data_work_q, &process_command_work);
                     }
+                    
+                    k_mutex_unlock(&cmd_queue_mutex);
                     break;
 
                 case MSG_TYPE_SAVE_BHI360_CALIBRATION:
                     // Check if work is already pending
                     if (!k_work_is_pending(&process_calibration_work))
                     {
-                        k_mutex_lock(&calibration_msg_mutex, K_FOREVER);
+                        k_mutex_lock(&calibration_msg_mutex, K_MSEC(100));
                         memcpy(&pending_calibration_data, &msg.data.bhi360_calibration,
                                sizeof(bhi360_calibration_data_t));
                         k_mutex_unlock(&calibration_msg_mutex);
@@ -398,7 +430,7 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     break;
 
                 default:
-                    LOG_DBG("Received unsupported message type %d", msg.type);
+                    LOG_WRN("Received unsupported message type %d  from sender %d", msg.type, msg.sender);
                     break;
             }
         }
@@ -411,7 +443,7 @@ static void process_sensor_data_work_handler(struct k_work *work)
     ARG_UNUSED(work);
 
     // Make a local copy of the message under mutex protection
-    k_mutex_lock(&sensor_data_msg_mutex, K_FOREVER);
+    k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
     generic_message_t local_msg = pending_sensor_data_msg;
     k_mutex_unlock(&sensor_data_msg_mutex);
 
@@ -443,11 +475,12 @@ static void process_sensor_data_work_handler(struct k_work *work)
         } __attribute__((packed)) activity_metrics_binary_t;
 
         // Reset counter if approaching maximum to prevent overflow
-        if (activity_packet_counter >= (UINT32_MAX - 100)) {
+        if (activity_packet_counter >= (UINT32_MAX - 100))
+        {
             LOG_INF("Resetting activity packet counter to prevent overflow (was %u)", activity_packet_counter);
             activity_packet_counter = 0;
         }
-        
+
         activity_metrics_binary_t binary_metrics = {.packet_number = activity_packet_counter++,
                                                     .timestamp_ms = metrics->timestamp_ms,
                                                     .cadence_spm = metrics->cadence_spm,
@@ -492,28 +525,47 @@ static void process_sensor_data_work_handler(struct k_work *work)
     }
 }
 
-// Work handler for processing commands
+// Work handler for processing commands - processes all queued commands
 static void process_command_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-
-    // Make a local copy of the message under mutex protection
-    k_mutex_lock(&command_msg_mutex, K_FOREVER);
-    generic_message_t local_msg = pending_command_msg;
-    k_mutex_unlock(&command_msg_mutex);
-
-    const char *command_str = local_msg.data.command_str;
-    LOG_DBG("Processing command: %s", command_str);
-
-    if (strcmp(command_str, "START_LOGGING_ACTIVITY") == 0)
+    
+    // Process ALL queued commands
+    while (atomic_get(&cmd_queue_count) > 0)
     {
-        if (atomic_get(&logging_activity_active) == 0)
+        // Get next command from queue
+        k_mutex_lock(&cmd_queue_mutex, K_MSEC(100));
+        
+        // Double-check queue isn't empty (could have been processed by another thread)
+        if (atomic_get(&cmd_queue_count) == 0)
         {
-            if (!filesystem_available)
-            {
-                LOG_WRN("Cannot start activity logging - filesystem not available");
-            }
-            else
+            k_mutex_unlock(&cmd_queue_mutex);
+            break;
+        }
+        
+        // Retrieve command from head of queue
+        generic_message_t local_msg = command_queue[cmd_queue_head];
+        cmd_queue_head = (cmd_queue_head + 1) % MAX_QUEUED_COMMANDS;
+        atomic_dec(&cmd_queue_count);
+        
+        LOG_INF("Processing command from queue (remaining: %ld)", atomic_get(&cmd_queue_count));
+        
+        k_mutex_unlock(&cmd_queue_mutex);
+        
+        // Process the command
+        const char *command_str = local_msg.data.command_str;
+        LOG_WRN("Processing command: %s     activity logging =%ld", command_str, atomic_get(&logging_activity_active));
+        
+        // For STOP commands, cancel any pending sensor data work first
+        if (strstr(command_str, "STOP") != NULL)
+        {
+            LOG_INF("STOP command detected - cancelling sensor data work");
+            k_work_cancel(&process_sensor_data_work);
+        }
+        
+        if (strcmp(command_str, "START_LOGGING_ACTIVITY") == 0)
+        {
+            if (atomic_get(&logging_activity_active) == 0)
             {
                 LOG_INF("Starting activity logging");
                 // Use values from the command message's metadata fields
@@ -527,45 +579,62 @@ static void process_command_work_handler(struct k_work *work)
                     LOG_ERR("Failed to start activity logging: %d", (int)activity_status);
                 }
             }
-        }
-    }
-    else if (strcmp(command_str, "STOP_LOGGING_ACTIVITY") == 0)
-    {
-        if (atomic_get(&logging_activity_active) == 1)
-        {
-            LOG_INF("Stopping activity logging");
-            atomic_set(&logging_activity_active, 0);
-            if (filesystem_available)
+            else
             {
+                LOG_WRN("Activity logging already active, ignoring START command");
+            }
+        }
+        else if (strcmp(command_str, "STOP_LOGGING_ACTIVITY") == 0)
+        {
+            if (atomic_get(&logging_activity_active) == 1)
+            {
+                LOG_INF("Stopping activity logging");
+                atomic_set(&logging_activity_active, 0);
+                
                 err_t activity_status = end_activity_logging();
                 if (activity_status != err_t::NO_ERROR)
                 {
                     LOG_ERR("Failed to stop activity logging: %d", (int)activity_status);
+                }
+                else
+                {
+                    LOG_INF("Activity logging stopped successfully");
                 }
                 // Add small delay as in original to allow Bluetooth queue processing
                 k_msleep(10);
             }
-        }
-    }
-    else if (strcmp(command_str, "STOP_LOGGING") == 0)
-    {
-        LOG_INF("Stopping all logging");
-        if (atomic_get(&logging_activity_active) == 1)
-        {
-            atomic_set(&logging_activity_active, 0);
-            if (filesystem_available)
+            else
             {
-                err_t activity_status = end_activity_logging();
-                if (activity_status != err_t::NO_ERROR)
+                LOG_WRN("Activity logging not active, ignoring STOP command");
+            }
+        }
+        else if (strcmp(command_str, "STOP_LOGGING") == 0)
+        {
+            LOG_INF("Stopping all logging");
+            if (atomic_get(&logging_activity_active) == 1)
+            {
+                atomic_set(&logging_activity_active, 0);
+                if (filesystem_available)
                 {
-                    LOG_ERR("Failed to stop activity logging: %d", (int)activity_status);
+                    err_t activity_status = end_activity_logging();
+                    if (activity_status != err_t::NO_ERROR)
+                    {
+                        LOG_ERR("Failed to stop activity logging: %d", (int)activity_status);
+                    }
                 }
             }
         }
+        else
+        {
+            LOG_WRN("Unknown command: %s", command_str);
+        }
     }
-    else
+    
+    // Check if more commands arrived while we were processing
+    if (atomic_get(&cmd_queue_count) > 0)
     {
-        LOG_WRN("Unknown command: %s", command_str);
+        LOG_INF("More commands queued during processing, re-submitting work");
+        k_work_submit_to_queue(&data_work_q, &process_command_work);
     }
 }
 
@@ -575,7 +644,7 @@ static void process_calibration_work_handler(struct k_work *work)
     ARG_UNUSED(work);
 
     // Make a local copy of the calibration data under mutex protection
-    k_mutex_lock(&calibration_msg_mutex, K_FOREVER);
+    k_mutex_lock(&calibration_msg_mutex, K_MSEC(100));
     bhi360_calibration_data_t local_calib_data = pending_calibration_data;
     k_mutex_unlock(&calibration_msg_mutex);
 
@@ -631,13 +700,10 @@ static void process_erase_flash_work_handler(struct k_work *work)
         activity_log_file.filep = nullptr;
     }
 
-
     // Erase the flash
     LOG_WRN("Delete external flash - this may take a while...");
- 
 
     int erase_status = delete_all_files_in_directory(hardware_dir_path);
-    
 
     if (erase_status < 0)
     {
@@ -646,9 +712,8 @@ static void process_erase_flash_work_handler(struct k_work *work)
     else
     {
         LOG_INF("External flash erased successfully");
-                // Reset sequence numbers
+        // Reset sequence numbers
         next_activity_file_sequence = 0;
-  
     }
 
     // Send completion notification to bluetooth module
@@ -769,7 +834,7 @@ static err_t flush_activity_buffer(void)
 {
     if (activity_write_buffer_pos > 0)
     {
-        k_mutex_lock(&activity_file_mutex, K_FOREVER);
+        k_mutex_lock(&activity_file_mutex, K_MSEC(100));
         int ret = fs_write(&activity_log_file, activity_write_buffer, activity_write_buffer_pos);
         if (ret < 0)
         {
@@ -828,7 +893,7 @@ static err_t flush_activity_batch(void)
     activity_batch_bytes = 0;
     activity_batch_count = 0;
 
-    LOG_DBG("Flushed activity batch: %u samples", activity_batch_count);
+    LOG_WRN("Flushed activity batch: %u samples", activity_batch_count);
     return err_t::NO_ERROR;
 }
 
@@ -851,7 +916,7 @@ static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLog
     }
 
     // Lock mutex for buffer access
-    k_mutex_lock(&activity_file_mutex, K_FOREVER);
+    k_mutex_lock(&activity_file_mutex, K_MSEC(100));
 
     // Batch buffering logic
     if (activity_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE)
@@ -870,7 +935,7 @@ static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLog
 
     k_mutex_unlock(&activity_file_mutex);
 
-    LOG_DBG("Activity data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written,
+    LOG_WRN("Activity data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written,
             (unsigned)activity_write_buffer_pos, FLASH_PAGE_SIZE);
     return err_t::NO_ERROR;
 }
@@ -894,7 +959,7 @@ static bool encode_string_callback(pb_ostream_t *stream, const pb_field_t *field
 err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version)
 {
     err_t status = err_t::NO_ERROR;
-    k_mutex_lock(&activity_file_mutex, K_FOREVER);
+    k_mutex_lock(&activity_file_mutex, K_MSEC(100));
 
     // Reset tracking variables
     activity_last_timestamp_ms = (uint32_t)k_uptime_get();
@@ -911,7 +976,7 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     }
 
     // Get next sequence number
-    k_mutex_lock(&sequence_number_mutex, K_FOREVER);
+    k_mutex_lock(&sequence_number_mutex, K_MSEC(100));
     next_activity_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
     if (next_activity_file_sequence == 0)
     {
@@ -998,7 +1063,8 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
 err_t end_activity_logging()
 {
     err_t overall_status = err_t::NO_ERROR;
-    k_mutex_lock(&activity_file_mutex, K_FOREVER);
+
+    LOG_WRN("Closing file");
 
     if (activity_log_file.filep != nullptr)
     {
@@ -1087,7 +1153,7 @@ err_t end_activity_logging()
         activity_write_buffer_pos = 0;
     }
 
-    k_mutex_unlock(&activity_file_mutex);
+    LOG_WRN("Closing file CLOSED!!!!!!!!");
     return overall_status;
 }
 
@@ -1100,7 +1166,7 @@ err_t save_bhi360_calibration_data(const bhi360_calibration_data_t *calib_data)
     }
 
     // Lock mutex for thread safety
-    k_mutex_lock(&calibration_file_mutex, K_FOREVER);
+    k_mutex_lock(&calibration_file_mutex, K_MSEC(100));
 
     // Create calibration directory if it doesn't exist
     int ret = fs_mkdir(calibration_dir_path);
@@ -1549,7 +1615,7 @@ err_t delete_by_type_and_id(record_type_t type, uint8_t id)
             }
             else
             {
-                LOG_DBG("Sent empty activity log notification.");
+                LOG_WRN("Sent empty activity log notification.");
             }
         }
         else
@@ -1571,7 +1637,7 @@ err_t delete_by_type_and_id(record_type_t type, uint8_t id)
             }
             else
             {
-                LOG_DBG("Sent new latest activity log notification (ID: %u).", latest_file_seq_for_notify);
+                LOG_WRN("Sent new latest activity log notification (ID: %u).", latest_file_seq_for_notify);
             }
         }
     }
@@ -1674,7 +1740,7 @@ int find_latest_log_file(const char *file_prefix, record_type_t record_type, cha
     if (found_any_matching_file)
     {
         snprintk(file_path, util::max_path_length, "%s/%s", dir_path_buf, temp_latest_file_name);
-        LOG_DBG("Latest file found for prefix '%s': %s (ID: %u)", file_prefix, file_path, latest_id_found);
+        LOG_WRN("Latest file found for prefix '%s': %s (ID: %u)", file_prefix, file_path, latest_id_found);
         return latest_id_found;
     }
     else
@@ -1730,7 +1796,7 @@ static uint8_t get_filesystem_usage_percent(void)
     // Calculate percentage (avoid overflow)
     uint8_t usage_percent = (uint8_t)((used_blocks * 100) / total_blocks);
 
-    LOG_DBG("Filesystem usage: %u%% (used: %llu blocks, total: %llu blocks)", usage_percent, used_blocks, total_blocks);
+    LOG_WRN("Filesystem usage: %u%% (used: %llu blocks, total: %llu blocks)", usage_percent, used_blocks, total_blocks);
 
     return usage_percent;
 }
@@ -1805,6 +1871,56 @@ static bool check_filesystem_space_and_cleanup(void)
     LOG_INF("Filesystem cleanup complete. Deleted %d files, usage now at %u%%", total_files_deleted, usage_percent);
 
     return (usage_percent < 100); // Return true if we have any space left
+}
+
+static int lsdir(const char *path)
+{
+    int res;
+    struct fs_dir_t dirp;
+    static struct fs_dirent entry;
+
+    LOG_WRN("Starting Directories List");
+
+    fs_dir_t_init(&dirp);
+
+    /* Verify fs_opendir() */
+    res = fs_opendir(&dirp, path);
+    if (res)
+    {
+        LOG_ERR("Error opening dir %s [%d]\n", path, res);
+        return res;
+    }
+
+    LOG_INF("\nListing dir %s ...\n", path);
+    for (;;)
+    {
+        /* Verify fs_readdir() */
+        res = fs_readdir(&dirp, &entry);
+
+        /* entry.name[0] == 0 means end-of-dir */
+        if (res || entry.name[0] == 0)
+        {
+            if (res < 0)
+            {
+                LOG_ERR("Error reading dir [%d]\n", res);
+            }
+            break;
+        }
+
+        if (entry.type == FS_DIR_ENTRY_DIR)
+        {
+            LOG_INF("[DIR ] %s\n", entry.name);
+        }
+        else
+        {
+            LOG_INF("[FILE] %s (size = %zu)\n", entry.name, entry.size);
+        }
+    }
+
+    /* Verify fs_closedir() */
+    fs_closedir(&dirp);
+
+    return res;
 }
 
 // App event handler

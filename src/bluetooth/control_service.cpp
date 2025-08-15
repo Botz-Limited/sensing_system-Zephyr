@@ -926,6 +926,8 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
         new_motion_sensor_stop_activity_event();
     APP_EVENT_SUBMIT(motion_evt);
 
+    LOG_INF("Sending STOP_ACTIVITY message");
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Forward the command to secondary device
     FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
@@ -943,7 +945,7 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
 
     // Start logging Activity file
     if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {
-      LOG_WRN("Failed to send START_LOGGING_ACTIVITY command to DATA module");
+      LOG_WRN("Failed to send STOP_LOGGING_ACTIVITY command to DATA module");
     } else {
       LOG_INF("Sent STOP_LOGGING_ACTIVITY command to DATA module");
     }

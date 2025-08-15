@@ -18,6 +18,7 @@
 
 #include <app.hpp>
 #include <events/app_state_event.h>
+#include <events/motion_sensor_event.h>
 #include <errors.hpp>
 #include "realtime_metrics.h"
 
@@ -232,8 +233,8 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
     generic_message_t msg;
     
     while (true) {
-        // Wait for sensor data
-        int ret = k_msgq_get(&realtime_queue, &msg, K_FOREVER);
+        // Wait for sensor data from sensor_data_queue (not realtime_queue which is output!)
+        int ret = k_msgq_get(&sensor_data_queue, &msg, K_FOREVER);
         
         if (ret == 0) {
             // Queue different work based on message type
@@ -278,7 +279,7 @@ static void process_consolidated_data_work_handler(struct k_work *work)
     ARG_UNUSED(work);
     
     if (atomic_get(&processing_active) == 1 && new_sensor_data_available) {
-        LOG_WRN("Processing consolidated sensor data");
+       // LOG_WRN("Processing consolidated sensor data");
         
         // Calculate real-time metrics
         calculate_realtime_metrics();
@@ -733,6 +734,20 @@ static bool app_event_handler(const struct app_event_header *aeh)
                 realtime_metrics_init();
             }
         }
+        return false;
+    }
+    
+    // Handle start activity events
+    if (is_motion_sensor_start_activity_event(aeh)) {
+        LOG_INF("Realtime metrics: Activity started");
+        // Could trigger processing start here if needed
+        return false;
+    }
+    
+    // Handle stop activity events
+    if (is_motion_sensor_stop_activity_event(aeh)) {
+        LOG_INF("Realtime metrics: Activity stopped");
+        // Could trigger processing stop here if needed
         return false;
     }
     

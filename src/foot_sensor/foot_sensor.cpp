@@ -313,7 +313,11 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
     } else // Normal operation after calibration
     {
       if (atomic_get(&logging_active) == 1) {
-
+        // Rate limiting for Bluetooth: Send at 10Hz instead of 80Hz
+        // SAADC runs at 80Hz, so send every 8th sample to achieve 10Hz
+        static uint8_t sample_counter = 0;
+        const uint8_t SAMPLES_TO_SKIP = 8; // 80Hz / 8 = 10Hz
+        
         generic_message_t msg;
 
         msg.sender = SENDER_FOOT_SENSOR_THREAD;
@@ -327,11 +331,16 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
               (calibrated_value < 0) ? 0 : calibrated_value;
         }
 
-        if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
-          LOG_WRN("Failed to send foot sensor data to bluetooth module");
+        // Only send to Bluetooth at 10Hz (every 8th sample)
+        sample_counter++;
+        if (sample_counter >= SAMPLES_TO_SKIP) {
+          sample_counter = 0;
+          if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+            LOG_WRN("Failed to send foot sensor data to bluetooth module");
+          }
         }
 
-        // Also send to WiFi module if WiFi is active
+        // WiFi can still get full rate if needed
 #if defined(CONFIG_WIFI_MODULE)
         if (atomic_get(&wifi_active) == 1) {
           if (k_msgq_put(&wifi_msgq, &msg, K_NO_WAIT) != 0) {
