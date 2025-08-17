@@ -95,7 +95,7 @@ config BT_ATT_ENFORCE_FLOW
 
 config BT_MAX_PAIRED
 	int
-	default 4
+	default 6
 
 
 module = BLUETOOTH_MODULE

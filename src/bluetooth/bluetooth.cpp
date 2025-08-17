@@ -930,28 +930,35 @@ static void connected(struct bt_conn *conn, uint8_t err)
 #endif
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        // Only stop advertising if we already have a secondary device connected
-        // This allows the secondary to connect even when a phone is connected
-        if (d2d_conn != nullptr)
-        {
-            LOG_INF("Secondary already connected, stopping advertising");
+        // Count active connections to determine if we should keep advertising
+        struct bt_conn *active_conns[CONFIG_BT_MAX_CONN];
+        int active_count = 0;
+        
+        // Helper to count connections
+        auto count_conn_cb = [](struct bt_conn *conn, void *data) {
+            int *count = (int*)data;
+            struct bt_conn_info info;
+            if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+                (*count)++;
+            }
+        };
+        
+        bt_conn_foreach(BT_CONN_TYPE_LE, count_conn_cb, &active_count);
+        
+        LOG_INF("Active connections: %d/%d", active_count, CONFIG_BT_MAX_CONN);
+        
+        // Only stop advertising when we reach the maximum connection limit
+        if (active_count >= CONFIG_BT_MAX_CONN) {
+            LOG_INF("Maximum connections reached (%d/%d), stopping advertising",
+                    active_count, CONFIG_BT_MAX_CONN);
             int ret = bt_le_adv_stop();
-            if (ret != 0)
-            {
+            if (ret != 0) {
                 LOG_ERR("Failed to stop advertising (err 0x%02x)", ret);
             }
-
-            err_t error = ble_start_hidden();
-            if (error != err_t::NO_ERROR)
-            {
-                LOG_ERR("Failed to start hidden advertising %d", (int)error);
-            }
-        }
-        else
-        {
-            LOG_INF("No secondary connected yet, continuing to advertise for "
-                    "secondary device");
-            // Keep advertising so secondary can connect
+        } else {
+            LOG_INF("Connection slots available (%d/%d), continuing to advertise for additional connections",
+                    active_count, CONFIG_BT_MAX_CONN);
+            // Keep advertising so both secondary and phone can connect
         }
 #endif
     }
@@ -1012,15 +1019,51 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
         smp_proxy_clear_phone_conn(conn);
     }
 
-    // If this wasn't the D2D connection and we don't have a secondary connected,
-    // restart advertising to allow secondary to connect
-    if (conn != d2d_conn && d2d_conn == nullptr)
-    {
-        LOG_INF("Phone disconnected and no secondary connected, restarting "
-                "advertising");
+    // Count remaining active connections after this disconnection
+    int active_count = 0;
+    auto count_conn_cb = [](struct bt_conn *conn_iter, void *data) {
+        int *count = (int*)data;
+        struct bt_conn *disconnected_conn = *((struct bt_conn**)data + 1);
+        struct bt_conn_info info;
+        
+        // Skip the connection that just disconnected
+        if (conn_iter == disconnected_conn) {
+            return;
+        }
+        
+        if (bt_conn_get_info(conn_iter, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+            (*count)++;
+        }
+    };
+    
+    // We need to pass both the count and the disconnected connection
+    void *cb_data[2] = { &active_count, (void*)conn };
+    bt_conn_foreach(BT_CONN_TYPE_LE, [](struct bt_conn *conn_iter, void *data) {
+        void **params = (void**)data;
+        int *count = (int*)params[0];
+        struct bt_conn *disconnected_conn = (struct bt_conn*)params[1];
+        struct bt_conn_info info;
+        
+        // Skip the connection that just disconnected
+        if (conn_iter == disconnected_conn) {
+            return;
+        }
+        
+        if (bt_conn_get_info(conn_iter, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+            (*count)++;
+        }
+    }, cb_data);
+    
+    // Restart advertising if we have connection slots available
+    if (active_count < CONFIG_BT_MAX_CONN) {
+        LOG_INF("Connection disconnected - slots available (%d/%d), restarting advertising",
+                active_count, CONFIG_BT_MAX_CONN);
         // Forward declaration to ensure it's available
         extern err_t bt_start_advertising(int err);
         bt_start_advertising(0);
+    } else {
+        LOG_INF("Connection disconnected but max connections still active (%d/%d), not restarting advertising",
+                active_count, CONFIG_BT_MAX_CONN);
     }
 #endif
 }
@@ -1718,7 +1761,7 @@ err_t bt_start_advertising(int err)
         LOG_WRN("Firmware version: %s", APP_VERSION_STRING);
     }
 
-    k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
+ //   k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
     return err_t::NO_ERROR;
 }
 #endif // CONFIG_PRIMARY_DEVICE
@@ -1786,15 +1829,29 @@ static void ble_timer_handler_function(struct k_work *work)
     LOG_INF("Bluetooth advertising timeout");
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // For primary device, check if secondary (D2D) is connected
-    if (d2d_conn == nullptr)
-    {
-        // No secondary connected, restart advertising to allow secondary to connect
-        LOG_INF("No secondary device connected, restarting advertising");
+    // Count active connections to determine if we should restart advertising
+    int active_count = 0;
+    auto count_conn_cb = [](struct bt_conn *conn, void *data) {
+        int *count = (int*)data;
+        struct bt_conn_info info;
+        if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+            (*count)++;
+        }
+    };
+    
+    bt_conn_foreach(BT_CONN_TYPE_LE, count_conn_cb, &active_count);
+    
+    // Only restart advertising if we have slots available
+    if (active_count < CONFIG_BT_MAX_CONN) {
+        LOG_INF("Advertising timeout - connection slots available (%d/%d), restarting advertising",
+                active_count, CONFIG_BT_MAX_CONN);
         // Forward declaration to ensure it's available
         extern err_t bt_start_advertising(int err);
         bt_start_advertising(0);
         return;
+    } else {
+        LOG_INF("Advertising timeout - maximum connections reached (%d/%d), staying idle",
+                active_count, CONFIG_BT_MAX_CONN);
     }
 #endif
 
@@ -1883,14 +1940,14 @@ static void foot_samples_secondary_work_handler(struct k_work *work)
             foot_data->values[2], foot_data->values[3]);
     
     // Forward to data module for logging (if needed)
-    generic_message_t data_msg;
-    data_msg.sender = SENDER_D2D_SECONDARY;
-    data_msg.type = MSG_TYPE_FOOT_SAMPLES;
-    memcpy(&data_msg.data.foot_samples, foot_data, sizeof(foot_samples_t));
+ //   generic_message_t data_msg;
+ //   data_msg.sender = SENDER_D2D_SECONDARY;
+  //  data_msg.type = MSG_TYPE_FOOT_SAMPLES;
+  //  memcpy(&data_msg.data.foot_samples, foot_data, sizeof(foot_samples_t));
     
-    if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary foot data to data module");
-    }
+ //   if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
+ //       LOG_WRN("Failed to forward secondary foot data to data module");
+ //   }
     
 #if CONFIG_LEGACY_BLE_ENABLED
     // IMPORTANT: Update legacy BLE service with secondary foot data

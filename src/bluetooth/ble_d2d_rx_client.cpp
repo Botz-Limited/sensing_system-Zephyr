@@ -34,14 +34,14 @@ LOG_MODULE_REGISTER(d2d_rx_client, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 extern void jis_update_secondary_battery(uint8_t level);
 
 // Timing constants for discovery and subscription process
-static constexpr uint8_t DISCOVERY_INITIAL_DELAY_MS = 10;    // Delay before starting discovery
-static constexpr uint8_t SUBSCRIPTION_INITIAL_DELAY_MS = 20; // Delay before starting subscriptions
+static constexpr uint8_t DISCOVERY_INITIAL_DELAY_MS = 5;    // Delay before starting discovery
+static constexpr uint8_t SUBSCRIPTION_INITIAL_DELAY_MS = 10; // Delay before starting subscriptions
 static constexpr uint8_t SUBSCRIPTION_BETWEEN_DELAY_MS = 2;  // Minimal delay between each subscription
-static constexpr uint8_t SUBSCRIPTION_FINAL_DELAY_MS = 10;   // Delay after all subscriptions
-static constexpr uint8_t CONNECTION_STABILIZE_DELAY_MS = 15; // Delay for connection stabilization
-static constexpr uint8_t RETRY_DELAY_MS = 10;                // Delay before retrying operations
+static constexpr uint8_t SUBSCRIPTION_FINAL_DELAY_MS = 5;   // Delay after all subscriptions
+static constexpr uint8_t CONNECTION_STABILIZE_DELAY_MS = 4; // Delay for connection stabilization
+static constexpr uint8_t RETRY_DELAY_MS = 5;                // Delay before retrying operations
 static constexpr uint8_t RACE_CONDITION_DELAY_MS = 5;        // Delay to avoid race conditions
-static constexpr uint8_t RETRY_WAIT_MS = 100;                // Longer wait before retry on errors
+static constexpr uint8_t RETRY_WAIT_MS = 15;                // Longer wait before retry on errors
 static constexpr uint8_t WORK_INDEX_MX = 18;                 // Increased for new D2D batch char and future expansion
 
 // Service UUID: 75ad68d6-200c-437d-98b5-061862076c5f (must match secondary's TX service)

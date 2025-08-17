@@ -1087,7 +1087,7 @@ static void process_sensor_sample(void) {
 
     if (sensor_state.sample_count % 100 == 0 && left_data_age > 1000) {
       LOG_WRN(
-          "Left foot D2D data is stale (age: %u ms), buffering primary data",
+       //   "Left foot D2D data is stale (age: %u ms), buffering primary data",
           left_data_age);
     }
   }
