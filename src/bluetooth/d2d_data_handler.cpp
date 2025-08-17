@@ -106,12 +106,12 @@ int d2d_data_handler_process_foot_samples(const foot_samples_t *samples)
     }
     
     // Forward to central_data_hub_msgq with tagging for new architecture
-    extern struct k_msgq central_data_hub_msgq;
-    tagged_message_t tagged_msg;
-    tagged_msg.msg.sender = SENDER_D2D_SECONDARY;
-    tagged_msg.msg.type = MSG_TYPE_FOOT_SAMPLES;
-    tagged_msg.tag = SECONDARY_FOOT;
-    memcpy(&tagged_msg.msg.data.foot_samples, samples, sizeof(foot_samples_t));
+  //  extern struct k_msgq central_data_hub_msgq;
+  //  tagged_message_t tagged_msg;
+  //  tagged_msg.msg.sender = SENDER_D2D_SECONDARY;
+   // tagged_msg.msg.type = MSG_TYPE_FOOT_SAMPLES;
+    //tagged_msg.tag = SECONDARY_FOOT;
+   // memcpy(&tagged_msg.msg.data.foot_samples, samples, sizeof(foot_samples_t));
     
    // if (k_msgq_put(&central_data_hub_msgq, &tagged_msg, K_NO_WAIT) != 0) {
      //   LOG_WRN("Failed to forward secondary foot data to central data hub");
