@@ -258,6 +258,24 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
     }
 #endif
     
+ // Start sensor processing by default for legacy mode BEFORE starting the thread
+    // This ensures sensor data is ready even before BLE connection
+    generic_message_t msg = {};
+    msg.sender = SENDER_BTH;
+    msg.type = MSG_TYPE_COMMAND;
+    strncpy(msg.data.command_str, "START_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
+    extern struct k_msgq sensor_data_msgq;
+    k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
+    
+    // Also start sensor activities to ensure sensors are active
+    struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(foot_evt);
+    
+    struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(motion_evt);
+    
+    LOG_INF("Legacy BLE: Started sensor activities and processing");
+
     LOG_INF("Legacy BLE periodic transmission started (10Hz)");
 
     while (true) {
@@ -677,23 +695,7 @@ static ssize_t config_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 
 void legacy_ble_init(void) {
     #if CONFIG_LEGACY_BLE_ENABLED
-    // Start sensor processing by default for legacy mode BEFORE starting the thread
-    // This ensures sensor data is ready even before BLE connection
-    generic_message_t msg = {};
-    msg.sender = SENDER_BTH;
-    msg.type = MSG_TYPE_COMMAND;
-    strncpy(msg.data.command_str, "START_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
-    extern struct k_msgq sensor_data_msgq;
-    k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
-    
-    // Also start sensor activities to ensure sensors are active
-    struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
-    APP_EVENT_SUBMIT(foot_evt);
-    
-    struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
-    APP_EVENT_SUBMIT(motion_evt);
-    
-    LOG_INF("Legacy BLE: Started sensor activities and processing");
+   
     
     // Create the thread with a 3-second start delay to allow sensors to initialize
     // and start providing data before we begin reading

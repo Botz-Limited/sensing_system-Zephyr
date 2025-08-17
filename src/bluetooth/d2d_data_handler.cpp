@@ -113,11 +113,11 @@ int d2d_data_handler_process_foot_samples(const foot_samples_t *samples)
     tagged_msg.tag = SECONDARY_FOOT;
     memcpy(&tagged_msg.msg.data.foot_samples, samples, sizeof(foot_samples_t));
     
-    if (k_msgq_put(&central_data_hub_msgq, &tagged_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary foot data to central data hub");
-    } else {
-        LOG_DBG("Secondary foot data forwarded to central_data_hub_msgq with tag SECONDARY_FOOT");
-    }
+   // if (k_msgq_put(&central_data_hub_msgq, &tagged_msg, K_NO_WAIT) != 0) {
+     //   LOG_WRN("Failed to forward secondary foot data to central data hub");
+  //  } else {
+       // LOG_DBG("Secondary foot data forwarded to central_data_hub_msgq with tag SECONDARY_FOOT");
+  //  }
     
     return 0;
 }
