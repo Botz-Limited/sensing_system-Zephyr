@@ -11,6 +11,7 @@
 #include <zephyr/logging/log.h>
 #include <app.hpp>
 #include <gait_events.h>
+#include <gait_events_safety.h>
 #include <d2d_metrics.h>
 
 LOG_MODULE_REGISTER(sensor_data_events, LOG_LEVEL_DBG);
@@ -134,9 +135,12 @@ void sensor_data_1hz_timer_callback(void)
         last_buffer_count = event_detector.buffer_count;
     }
     
-    // Emergency buffer management - prevent overflow
+    // Emergency buffer management - use safety module to handle stuck states
+    gait_events_reset_if_stuck(&event_detector);
+    
+    // Additional buffer management if still near capacity
     if (event_detector.buffer_full || event_detector.buffer_count > (GAIT_BUFFER_SIZE_SAMPLES * 3 / 4)) {
-        LOG_WRN("Buffer nearing capacity (%d/%d), clearing oldest 25%%",
+        LOG_WRN("Buffer nearing capacity (%d/%d) after safety check, clearing oldest 25%%",
                 event_detector.buffer_count, GAIT_BUFFER_SIZE_SAMPLES);
         int samples_to_clear = GAIT_BUFFER_SIZE_SAMPLES / 4;
         event_detector.read_index = (event_detector.read_index + samples_to_clear) % GAIT_BUFFER_SIZE_SAMPLES;
@@ -145,8 +149,8 @@ void sensor_data_1hz_timer_callback(void)
         event_detector.buffer_full = false;
     }
     
-    // Process any pending data
-    int metrics_count = gait_events_process(&event_detector);
+    // Process any pending data with safety checks
+    int metrics_count = gait_events_process_safe(&event_detector);
     
     if (metrics_count > 0) {
         LOG_DBG("1Hz timer: processed %d metrics", metrics_count);

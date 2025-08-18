@@ -456,8 +456,8 @@ static const struct bt_le_conn_param conn_param = {
     .timeout = 400,
 };
 
-// Target service UUID: 5cb36a14-ca69-4d97-89a8-002ffc9ec8cd (changed 001f to 002f)
-static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x2f, 0x00, 0xa8, 0x89,
+// Target service UUID: 5cb36a14-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
+static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x3f, 0x00, 0xa8, 0x89,
                                                 0x97, 0x4d, 0x69, 0xca, 0x14, 0x6a, 0xb3, 0x5c};
 
 // Helper function to check if advertisement contains our target UUID
@@ -687,7 +687,7 @@ static const struct bt_data ad[] = {
 /* Scan response data - put the 128-bit UUID here to avoid advertising packet
  * size issues */
 static const struct bt_data sd[] = {
-    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a14, 0xca69, 0x4d97, 0x89a8, 0x002ffc9ec8cd)),
+    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a14, 0xca69, 0x4d97, 0x89a8, 0x003ffc9ec8cd)),
 };
 
 /**
@@ -1950,12 +1950,12 @@ static void foot_samples_secondary_work_handler(struct k_work *work)
     LOG_DBG("Processing secondary foot sensor data");
     
     // Log that we received secondary foot data (all 8 channels)
-    LOG_INF("Secondary foot data received - values[0-3]: %u %u %u %u",
-            foot_data->values[0], foot_data->values[1],
-            foot_data->values[2], foot_data->values[3]);
-    LOG_INF("Secondary foot data received - values[4-7]: %u %u %u %u",
-            foot_data->values[4], foot_data->values[5],
-            foot_data->values[6], foot_data->values[7]);
+    //LOG_INF("Secondary foot data received - values[0-3]: %u %u %u %u",
+      //      foot_data->values[0], foot_data->values[1],
+        //    foot_data->values[2], foot_data->values[3]);
+   // LOG_INF("Secondary foot data received - values[4-7]: %u %u %u %u",
+     //       foot_data->values[4], foot_data->values[5],
+       //     foot_data->values[6], foot_data->values[7]);
     
     // Forward to data module for logging (if needed)
  //   generic_message_t data_msg;

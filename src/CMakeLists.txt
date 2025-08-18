@@ -11,3 +11,10 @@ add_subdirectory(analytics)
 add_subdirectory(packetizer)
 add_subdirectory(battery)
 add_subdirectory(wifi)
+
+# Add gait analysis source files to the build
+target_sources(app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/gait_events.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gait_advanced_features.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gait_events_safety.cpp
+)

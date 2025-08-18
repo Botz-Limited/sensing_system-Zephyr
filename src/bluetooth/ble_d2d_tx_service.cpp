@@ -543,11 +543,9 @@ int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
     memcpy(&last_foot_sensor_data, samples, sizeof(foot_samples_t));
     
     // Log the values we're about to send
-    LOG_INF("D2D TX: Sending foot sensor data - values[0-7]: %u %u %u %u %u %u %u %u",
+    LOG_INF("D2D TX: Sending foot sensor data - values[0-3]: %u %u %u %u",
             samples->values[0], samples->values[1],
-            samples->values[2], samples->values[3],
-            samples->values[4], samples->values[5],
-            samples->values[6], samples->values[7]);
+            samples->values[2], samples->values[3]);
     
     // Simply send the raw data directly without any copying or conversion
     // The foot sensor characteristic is at a fixed index in the service definition
@@ -1152,4 +1150,3 @@ void d2d_tx_service_init(void)
     LOG_INF("D2D TX GATT service initialized");
     LOG_INF("Service attributes at %p, count=%d", d2d_tx_svc.attrs, d2d_tx_svc.attr_count);
 }
-

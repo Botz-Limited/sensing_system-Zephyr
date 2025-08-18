@@ -75,24 +75,7 @@ extern "C" void insole_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t
         // Start streaming immediately in I2 mode (combined data) like old firmware
         legacy_mode = 2;
         legacy_streaming_enabled = true;
-        LOG_INF("Auto-starting legacy streaming (mimicking old firmware behavior)");
-        
-        // Automatically start sensor activity to ensure sensors provide data
-        // This mimics the old firmware where sensors were always active
-        struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
-        APP_EVENT_SUBMIT(foot_evt);
-        
-        struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
-        APP_EVENT_SUBMIT(motion_evt);
-        
-        // IMPORTANT: Also send START_SENSOR_PROCESSING command to sensor_data module
-        // This sets the processing_active flag which enables data consolidation
-        generic_message_t msg = {};
-        msg.sender = SENDER_BTH;
-        msg.type = MSG_TYPE_COMMAND;
-        strncpy(msg.data.command_str, "START_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
-        extern struct k_msgq sensor_data_msgq;
-        k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
+      
         
         LOG_INF("Started sensor activity and processing for legacy BLE compatibility");
     } else {
@@ -216,6 +199,15 @@ static bool d2d_connected = false;
 void legacy_ble_set_d2d_connection_status(bool connected) {
     d2d_connected = connected;
     LOG_INF("Legacy BLE: D2D connection status updated to %s", connected ? "connected" : "disconnected");
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE) && IS_ENABLED(CONFIG_LEGACY_BLE_ENABLED)
+    // Reset the secondary data flag when D2D disconnects
+    // This ensures we send zeros until new data arrives after reconnection
+    if (!connected) {
+        secondary_data_updated = false;
+        LOG_INF("Secondary data flag reset due to D2D disconnection");
+    }
+#endif
 }
 
 void legacy_ble_update_secondary_data(const foot_samples_t *foot_data, const bhi360_3d_mapping_t *imu_data) {
@@ -257,6 +249,25 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
         return;
     }
 #endif
+
+  LOG_INF("Auto-starting legacy streaming (mimicking old firmware behavior)");
+        
+        // Automatically start sensor activity to ensure sensors provide data
+        // This mimics the old firmware where sensors were always active
+        struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+        
+        struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+        
+        // IMPORTANT: Also send START_SENSOR_PROCESSING command to sensor_data module
+        // This sets the processing_active flag which enables data consolidation
+        generic_message_t msg = {};
+        msg.sender = SENDER_BTH;
+        msg.type = MSG_TYPE_COMMAND;
+        strncpy(msg.data.command_str, "START_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
+        extern struct k_msgq sensor_data_msgq;
+        k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
     
     LOG_INF("Legacy BLE periodic transmission started (10Hz)");
 
@@ -281,7 +292,7 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
             // Handle secondary data on primary
             if (insole_secondary_notify_enabled && insole_secondary_data_attr) {
                 if (d2d_connected && secondary_data_updated) {
-                    // Send actual secondary data
+                    // Send actual secondary data - keep sending last known values
                     uint8_t buffer[107]; // Match old firmware: 106 + checksum
                     size_t len = pack_secondary_data(buffer);
                     
@@ -289,9 +300,10 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
                     if (err < 0 && err != -ENOTCONN) {
                         LOG_WRN("Secondary Legacy BLE notify error: %d", err);
                     }
-                    secondary_data_updated = false;
+                    // DO NOT reset secondary_data_updated here!
+                    // We want to keep sending the last known secondary data
                 } else {
-                    // Send zero-filled packet when secondary is disconnected
+                    // Send zero-filled packet when secondary is disconnected or no data received yet
                     send_zero_filled_secondary_packet();
                 }
             }
@@ -673,7 +685,7 @@ void legacy_ble_init(void) {
     // and start providing data before we begin reading
     k_thread_create(&legacy_thread_data, legacy_stack, LEGACY_THREAD_STACK_SIZE,
                     legacy_thread_func, NULL, NULL, NULL,
-                    LEGACY_THREAD_PRIORITY, 0, K_MSEC(3000));
+                    LEGACY_THREAD_PRIORITY, 0, K_MSEC(30000));
     
     LOG_INF("Legacy BLE service initialized - thread will start in 3 seconds");
     #endif
