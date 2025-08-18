@@ -8,6 +8,7 @@
 #include <ble_services.hpp>
 #include <app.hpp>
 #include "../data_dispatcher/data_dispatcher.h"
+#include <d2d_metrics.h>
 
 LOG_MODULE_REGISTER(d2d_data_handler, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -325,6 +326,47 @@ int d2d_data_handler_process_charge_status(uint8_t charge_status)
     // Note: This updates the primary's charge status characteristic with secondary's value
     // In a real implementation, you might want to have separate characteristics for each device
     jis_charge_status_notify(charge_status);
+
+    return 0;
+}
+
+int d2d_data_handler_process_metrics(const d2d_metrics_packet_t *metrics)
+{
+    if (!metrics) {
+        LOG_WRN("Received null D2D metrics packet");
+        return -EINVAL;
+    }
+
+    LOG_INF("Processing D2D metrics packet: timestamp=%u, sequence=%u, status=%u",
+            metrics->timestamp, metrics->sequence_num, metrics->calculation_status);
+
+    // Forward metrics to sensor_data module for bilateral processing
+    generic_message_t msg;
+    msg.sender = SENDER_D2D_SECONDARY;
+    msg.type = MSG_TYPE_D2D_METRICS;
+    memcpy(&msg.data.d2d_metrics, metrics, sizeof(d2d_metrics_packet_t));
+    
+    if (k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to forward D2D metrics to sensor_data module");
+        return -ENOSPC;
+    } else {
+        LOG_DBG("D2D metrics forwarded to sensor_data_msgq for bilateral processing");
+    }
+
+    // Also forward to bilateral_metrics module if enabled
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    extern struct k_msgq analytics_msgq;
+    generic_message_t analytics_msg;
+    analytics_msg.sender = SENDER_D2D_SECONDARY;
+    analytics_msg.type = MSG_TYPE_D2D_METRICS_RECEIVED;
+    memcpy(&analytics_msg.data.d2d_metrics, metrics, sizeof(d2d_metrics_packet_t));
+    
+    if (k_msgq_put(&analytics_msgq, &analytics_msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to forward D2D metrics to analytics module");
+    } else {
+        LOG_DBG("D2D metrics forwarded to analytics_msgq for bilateral calculations");
+    }
+#endif
 
     return 0;
 }

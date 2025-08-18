@@ -3,6 +3,7 @@
 #include <zephyr/types.h>
 #include <zephyr/bluetooth/conn.h>
 #include <app.hpp>
+#include <d2d_metrics.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -165,6 +166,13 @@ int d2d_tx_notify_weight_measurement(float weight_kg);
  * @return 0 on success, negative error code on failure
  */
 int d2d_tx_notify_battery_level(uint8_t level);
+
+/**
+ * @brief Send calculated metrics notification to primary device
+ * @param metrics D2D metrics packet with calculated parameters
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics);
 
 #ifdef __cplusplus
 }

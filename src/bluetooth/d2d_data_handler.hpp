@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <app_fixed_point.hpp>
 #include "ble_d2d_tx_service.hpp" // for d2d_sample_batch_t
+#include <d2d_metrics.h> // for d2d_metrics_packet_t
 
 #ifdef __cplusplus
 extern "C" {
@@ -118,6 +119,14 @@ int d2d_data_handler_process_charge_status(uint8_t charge_status);
  * @return 0 on success, negative error code on failure
  */
 int d2d_data_handler_process_activity_step_count(const bhi360_step_count_t *data);
+
+/**
+ * @brief Handle calculated metrics packet from secondary device
+ *
+ * @param metrics D2D metrics packet containing calculated parameters
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_data_handler_process_metrics(const d2d_metrics_packet_t *metrics);
 
 #ifdef __cplusplus
 }

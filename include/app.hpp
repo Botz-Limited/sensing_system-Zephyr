@@ -20,6 +20,7 @@
 #include <activity_session.hpp>  // For GPSUpdateCommand
 #include "../src/sensor_data/sensor_data_consolidated.hpp"  // For sensor_data_consolidated_t
 #include "../src/realtime_metrics/realtime_metrics.h"  // For realtime_metrics_t
+#include <d2d_metrics.h>  // For d2d_metrics_packet_t
 
 void app_log(const char *fmt, ...);
 
@@ -231,6 +232,7 @@ typedef struct
         realtime_metrics_t realtime_metrics;  // Real-time metrics data
         analytics_results_t analytics_results;  // Analytics calculation results
         battery_level_msg_t battery_level;  // Battery level from secondary device
+        d2d_metrics_packet_t d2d_metrics;  // D2D calculated metrics packet
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

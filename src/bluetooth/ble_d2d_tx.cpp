@@ -772,6 +772,19 @@ int ble_d2d_tx_send_charge_status(uint8_t status)
 #endif
 }
 
+int ble_d2d_tx_send_metrics(const d2d_metrics_packet_t *metrics)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+    LOG_DBG("D2D TX: Sending calculated metrics: seq=%u, status=%u",
+            metrics->sequence_num, metrics->calculation_status);
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_metrics(metrics);
+#else
+    return -EINVAL;
+#endif
+}
+
 // Control command forwarding functions (primary -> secondary)
 int ble_d2d_tx_send_set_time_command(uint32_t epoch_time)
 {

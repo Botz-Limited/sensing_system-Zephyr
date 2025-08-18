@@ -83,6 +83,10 @@ static struct bt_uuid_128 d2d_batch_uuid =
 static struct bt_uuid_128 d2d_battery_level_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e9, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+// D2D Metrics UUID (for parameter-only mode)
+static struct bt_uuid_128 d2d_metrics_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68ea, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection tracking
 static struct bt_conn *primary_conn = NULL;
 
@@ -105,6 +109,7 @@ static bool activity_step_count_notify_enabled = false;
 static bool weight_measurement_notify_enabled = false;
 static bool d2d_batch_notify_enabled = false;
 static bool battery_level_notify_enabled = false;
+static bool metrics_notify_enabled = false;
 static foot_samples_t foot_sensor_char_value = {0};
 
 // Data buffers - using fixed-point versions for BLE transmission
@@ -125,6 +130,7 @@ static char activity_log_path[256] = {0};
 static bhi360_step_count_fixed_t activity_step_count_fixed = {0, 0};
 static uint16_t weight_kg_x10 = 0; // Weight in kg * 10 (for 0.1kg precision)
 static uint8_t battery_level = 0; // Battery level percentage (0-100)
+static d2d_metrics_packet_t metrics_data = {0}; // D2D metrics packet
 
 // CCC changed callbacks
 static void foot_sensor_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
@@ -336,6 +342,17 @@ static void battery_level_ccc_changed(const struct bt_gatt_attr *attr, uint16_t 
     battery_level_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Battery level notifications %s", battery_level_notify_enabled ? "enabled" : "disabled");
 }
+
+static void metrics_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("metrics_ccc_changed: attr is NULL");
+        return;
+    }
+    metrics_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+    LOG_INF("D2D Metrics notifications %s", metrics_notify_enabled ? "enabled" : "disabled");
+}
 // Read callback for D2D batch characteristic
 static ssize_t read_d2d_batch(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                               uint16_t offset)
@@ -440,7 +457,11 @@ BT_GATT_SERVICE_DEFINE(
     
     // Battery level (notify)
     BT_GATT_CHARACTERISTIC(&d2d_battery_level_uuid.uuid, BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_NONE, NULL, NULL, NULL),
-    BT_GATT_CCC(battery_level_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
+    BT_GATT_CCC(battery_level_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    
+    // D2D Metrics (notify) - for parameter-only mode
+    BT_GATT_CHARACTERISTIC(&d2d_metrics_uuid.uuid, BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_NONE, NULL, NULL, NULL),
+    BT_GATT_CCC(metrics_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
 #endif // !CONFIG_PRIMARY_DEVICE
 
 
@@ -1023,6 +1044,7 @@ void d2d_tx_service_set_connection(struct bt_conn *conn)
         weight_measurement_notify_enabled = false;
         d2d_batch_notify_enabled = false;
         battery_level_notify_enabled = false;
+        metrics_notify_enabled = false;
     }
 }
 // Send D2D batch notification
@@ -1075,6 +1097,41 @@ int d2d_tx_notify_battery_level(uint8_t level)
     else
     {
         LOG_INF("D2D battery level sent: %u%%", level);
+    }
+
+    return err;
+}
+
+int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics)
+{
+    LOG_INF("D2D TX: Metrics notify called - seq=%u, status=%u",
+            metrics->sequence_num, metrics->calculation_status);
+
+    if (!primary_conn || !metrics_notify_enabled)
+    {
+        LOG_WRN("D2D TX: Cannot send metrics - no connection or notifications disabled");
+        return -ENOTCONN;
+    }
+
+    // Copy the metrics data
+    memcpy(&metrics_data, metrics, sizeof(d2d_metrics_packet_t));
+
+    // D2D Metrics characteristic is at the last index (after battery level + CCC)
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 2];
+    int err = bt_gatt_notify(primary_conn, char_attr, &metrics_data, sizeof(metrics_data));
+    if (err)
+    {
+        LOG_ERR("Failed to send D2D metrics notification: %d", err);
+    }
+    else
+    {
+        // Count valid bits in the valid_mask array
+        int valid_count = 0;
+        for (int i = 0; i < sizeof(metrics->valid_mask); i++) {
+            valid_count += __builtin_popcount(metrics->valid_mask[i]);
+        }
+        LOG_INF("D2D metrics sent: seq=%u, status=%u, valid_count=%d",
+                metrics->sequence_num, metrics->calculation_status, valid_count);
     }
 
     return err;

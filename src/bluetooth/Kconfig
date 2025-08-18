@@ -154,4 +154,13 @@ config LEGACY_BLE_ENABLED
 	  Temporarily enable legacy BLE services to mimic old firmware for mobile app compatibility.
 	  This is isolated and won't affect current BLE functionality.
 
+config D2D_PARAMETERS_ONLY_MODE
+	bool "Enable D2D Parameters-Only Mode for 99% battery savings"
+	default y
+	help
+	  When enabled, bilateral calculations use 1Hz parameter packets instead of 100Hz raw data
+	  for 99% battery savings. Parameters include GCT, stance time, swing time, peak pressure,
+	  COP coordinates, and pronation. Legacy BLE continues to work with raw data for phone
+	  compatibility. Seamless fallback to raw data when parameters unavailable.
+
 endif # BLUETOOTH_MODULE

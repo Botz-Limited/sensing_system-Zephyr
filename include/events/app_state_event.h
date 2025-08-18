@@ -81,6 +81,8 @@ typedef enum
     MSG_TYPE_BATTERY_LEVEL_PRIMARY, // Battery level notification
     MSG_TYPE_BATTERY_LEVEL_SECONDARY, // Battery level notification
     MSG_TYPE_REALTIME_METRICS_DATA, // Real-time metrics data
+    MSG_TYPE_D2D_METRICS, // D2D calculated metrics packet from secondary device
+    MSG_TYPE_D2D_METRICS_RECEIVED, // Notification that D2D metrics were received
     MSG_TYPE_ERASE_EXTERNAL_FLASH, // Command to erase external flash
     MSG_TYPE_EXTERNAL_FLASH_ERASE_COMPLETE, // Notification that flash erase is complete
 } msg_type_t;

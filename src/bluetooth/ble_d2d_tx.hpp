@@ -23,6 +23,9 @@ int ble_d2d_tx_send_bhi360_data3(const bhi360_linear_accel_t *data);
 int ble_d2d_tx_send_status(uint32_t status);
 int ble_d2d_tx_send_charge_status(uint8_t status);
 
+// Send calculated metrics (secondary -> primary)
+int ble_d2d_tx_send_metrics(const d2d_metrics_packet_t *metrics);
+
 // Send functions for control commands (primary -> secondary)
 int ble_d2d_tx_send_set_time_command(uint32_t epoch_time);
 int ble_d2d_tx_send_delete_foot_log_command(uint8_t log_id);

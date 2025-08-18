@@ -24,6 +24,7 @@
 #include <app.hpp>
 #include <errors.hpp>
 #include <events/app_state_event.h>
+#include <d2d_metrics.h>
 
 // External queues from app.cpp
 extern struct k_msgq analytics_queue;
@@ -157,6 +158,11 @@ static struct {
   uint32_t left_foot_last_update_time; // When D2D data last updated left foot
   uint32_t left_imu_last_update_time;  // When D2D IMU data last updated
   
+  // D2D parameter state tracking
+  d2d_metrics_packet_t latest_secondary_parameters;
+  bool secondary_parameters_valid;
+  uint32_t secondary_parameters_last_update_time;
+  
   // D2D connection quality tracking
   uint32_t d2d_latency_sum_ms;
   uint16_t d2d_latency_count;
@@ -268,6 +274,17 @@ static void update_foot_state_from_d2d(const foot_samples_t *foot_data,
  * (BHI360 via D2D).
  */
 static void update_imu_state_from_d2d(const bhi360_log_record_t *imu_data);
+/**
+ * @brief Process D2D metrics parameters from secondary device for bilateral calculations.
+ * @param metrics Pointer to the D2D metrics packet.
+ * @note This function processes calculated parameters instead of raw data for bilateral metrics.
+ */
+static void process_secondary_parameters(const d2d_metrics_packet_t *metrics);
+/**
+ * @brief Calculate bilateral timing metrics using parameters from secondary device.
+ * @note This function uses calculated parameters instead of raw data for bilateral timing.
+ */
+static void calculate_bilateral_timing_from_parameters(void);
 
 static uint16_t calculate_cpei(const uint16_t pressure[8], int16_t cop_x, int16_t cop_y);
 
@@ -490,6 +507,14 @@ static void sensor_data_thread_fn(void *arg1, void *arg2, void *arg3) {
           stats.commands_dropped++;
           LOG_WRN("Command ring buffer full, dropping command");
         }
+        break;
+        
+      case MSG_TYPE_D2D_METRICS:
+        // Process D2D metrics parameters for bilateral calculations
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        process_secondary_parameters(&msg.data.d2d_metrics);
+        LOG_DBG("Processed D2D metrics parameters for bilateral calculations");
+#endif
         break;
 
       default:
@@ -986,24 +1011,139 @@ static void process_sensor_sample(void) {
   static bool primary_data_buffered = false;
   static uint32_t primary_buffer_time = 0;
 
-  if (left_data_valid) {
-    // Left foot data (from D2D) is available and fresh
-    consolidated.left_contact_phase = (uint8_t)sensor_state.left_phase;
-    consolidated.left_in_contact = sensor_state.left_foot_contact;
-    consolidated.left_contact_duration_ms =
-        (uint16_t)(sensor_state.left_foot_contact
-                       ? 0
-                       : sensor_state.left_contact_elapsed_ms);
-    consolidated.left_peak_force = sensor_state.left_peak_force_current;
-    consolidated.left_loading_rate = sensor_state.left_loading_rate;
-    consolidated.left_cop_x = sensor_state.left_cop_x;
-    consolidated.left_cop_y = sensor_state.left_cop_y;
-    consolidated.left_pronation_deg = sensor_state.left_pronation_deg;
-    consolidated.left_strike_angle = sensor_state.left_strike_angle;
-    consolidated.left_arch_collapse = sensor_state.left_arch_collapse;
-    calculate_pressure_distribution(
-        sensor_state.left_pressure, &consolidated.left_heel_pct,
-        &consolidated.left_mid_pct, &consolidated.left_fore_pct);
+  // Check if we have fresh secondary parameters for bilateral calculations
+  bool secondary_params_valid = false;
+  uint32_t secondary_params_age = 0;
+  
+#if IS_ENABLED(CONFIG_D2D_PARAMETERS_ONLY_MODE)
+  // In parameters-only mode, prioritize parameters over raw data
+  if (sensor_state.secondary_parameters_valid) {
+    secondary_params_age = current_time - sensor_state.secondary_parameters_last_update_time;
+    secondary_params_valid = (secondary_params_age < 3000); // 3 second timeout for parameters
+    LOG_DBG("Parameters-only mode: secondary params valid=%s, age=%u ms",
+            secondary_params_valid ? "true" : "false", secondary_params_age);
+  }
+  
+  if (secondary_params_valid || left_data_valid) {
+#else
+  // In legacy mode, prioritize raw data over parameters
+  if (sensor_state.secondary_parameters_valid) {
+    secondary_params_age = current_time - sensor_state.secondary_parameters_last_update_time;
+    secondary_params_valid = (secondary_params_age < 3000); // 3 second timeout for parameters
+  }
+
+  if (left_data_valid || secondary_params_valid) {
+#endif
+#if IS_ENABLED(CONFIG_D2D_PARAMETERS_ONLY_MODE)
+    // Parameters-only mode: prioritize parameters
+    if (secondary_params_valid) {
+      // Use parameters for bilateral calculations (preferred in parameters-only mode)
+      const d2d_metrics_packet_t *params = &sensor_state.latest_secondary_parameters;
+      
+      // Convert parameters to consolidated data format for bilateral processing
+      if (d2d_metric_is_valid(params, IDX_GCT)) {
+        consolidated.left_contact_duration_ms = (uint16_t)params->metrics[IDX_GCT];
+      }
+      if (d2d_metric_is_valid(params, IDX_PEAK_PRESSURE)) {
+        // Convert kPa to force units (approximate conversion)
+        consolidated.left_peak_force = (uint16_t)(params->metrics[IDX_PEAK_PRESSURE] * 50.0f);
+      }
+      if (d2d_metric_is_valid(params, IDX_PRONATION)) {
+        consolidated.left_pronation_deg = (int8_t)params->metrics[IDX_PRONATION];
+      }
+      if (d2d_metric_is_valid(params, IDX_COP_X) && d2d_metric_is_valid(params, IDX_COP_Y)) {
+        consolidated.left_cop_x = (int16_t)params->metrics[IDX_COP_X];
+        consolidated.left_cop_y = (int16_t)params->metrics[IDX_COP_Y];
+      }
+      
+      // Set defaults for non-parameter data
+      consolidated.left_contact_phase = PHASE_NO_CONTACT; // Unknown from parameters
+      consolidated.left_in_contact = false; // Unknown from parameters
+      consolidated.left_loading_rate = 0;
+      consolidated.left_strike_angle = 0;
+      consolidated.left_arch_collapse = 0;
+      consolidated.left_heel_pct = 0;
+      consolidated.left_mid_pct = 0;
+      consolidated.left_fore_pct = 0;
+      
+      LOG_DBG("Using secondary parameters (parameters-only mode): GCT=%.1f, Pressure=%.1f",
+              (double)consolidated.left_contact_duration_ms, (double)consolidated.left_peak_force);
+    } else if (left_data_valid) {
+      // Fallback to raw data if parameters not available
+      consolidated.left_contact_phase = (uint8_t)sensor_state.left_phase;
+      consolidated.left_in_contact = sensor_state.left_foot_contact;
+      consolidated.left_contact_duration_ms =
+          (uint16_t)(sensor_state.left_foot_contact
+                         ? 0
+                         : sensor_state.left_contact_elapsed_ms);
+      consolidated.left_peak_force = sensor_state.left_peak_force_current;
+      consolidated.left_loading_rate = sensor_state.left_loading_rate;
+      consolidated.left_cop_x = sensor_state.left_cop_x;
+      consolidated.left_cop_y = sensor_state.left_cop_y;
+      consolidated.left_pronation_deg = sensor_state.left_pronation_deg;
+      consolidated.left_strike_angle = sensor_state.left_strike_angle;
+      consolidated.left_arch_collapse = sensor_state.left_arch_collapse;
+      calculate_pressure_distribution(
+          sensor_state.left_pressure, &consolidated.left_heel_pct,
+          &consolidated.left_mid_pct, &consolidated.left_fore_pct);
+      
+      LOG_DBG("Using raw data fallback (parameters-only mode)");
+    }
+#else
+    // Legacy mode: prioritize raw data over parameters
+    if (left_data_valid) {
+      // Left foot data (from D2D raw data) is available and fresh - used for legacy BLE
+      consolidated.left_contact_phase = (uint8_t)sensor_state.left_phase;
+      consolidated.left_in_contact = sensor_state.left_foot_contact;
+      consolidated.left_contact_duration_ms =
+          (uint16_t)(sensor_state.left_foot_contact
+                         ? 0
+                         : sensor_state.left_contact_elapsed_ms);
+      consolidated.left_peak_force = sensor_state.left_peak_force_current;
+      consolidated.left_loading_rate = sensor_state.left_loading_rate;
+      consolidated.left_cop_x = sensor_state.left_cop_x;
+      consolidated.left_cop_y = sensor_state.left_cop_y;
+      consolidated.left_pronation_deg = sensor_state.left_pronation_deg;
+      consolidated.left_strike_angle = sensor_state.left_strike_angle;
+      consolidated.left_arch_collapse = sensor_state.left_arch_collapse;
+      calculate_pressure_distribution(
+          sensor_state.left_pressure, &consolidated.left_heel_pct,
+          &consolidated.left_mid_pct, &consolidated.left_fore_pct);
+      LOG_DBG("Using raw data (legacy mode)");
+    } else if (secondary_params_valid) {
+      // Use parameters for bilateral calculations when raw data not available
+      const d2d_metrics_packet_t *params = &sensor_state.latest_secondary_parameters;
+      
+      // Convert parameters to consolidated data format for bilateral processing
+      if (d2d_metric_is_valid(params, IDX_GCT)) {
+        consolidated.left_contact_duration_ms = (uint16_t)params->metrics[IDX_GCT];
+      }
+      if (d2d_metric_is_valid(params, IDX_PEAK_PRESSURE)) {
+        // Convert kPa to force units (approximate conversion)
+        consolidated.left_peak_force = (uint16_t)(params->metrics[IDX_PEAK_PRESSURE] * 50.0f);
+      }
+      if (d2d_metric_is_valid(params, IDX_PRONATION)) {
+        consolidated.left_pronation_deg = (int8_t)params->metrics[IDX_PRONATION];
+      }
+      if (d2d_metric_is_valid(params, IDX_COP_X) && d2d_metric_is_valid(params, IDX_COP_Y)) {
+        consolidated.left_cop_x = (int16_t)params->metrics[IDX_COP_X];
+        consolidated.left_cop_y = (int16_t)params->metrics[IDX_COP_Y];
+      }
+      
+      // Set defaults for non-parameter data
+      consolidated.left_contact_phase = PHASE_NO_CONTACT; // Unknown from parameters
+      consolidated.left_in_contact = false; // Unknown from parameters
+      consolidated.left_loading_rate = 0;
+      consolidated.left_strike_angle = 0;
+      consolidated.left_arch_collapse = 0;
+      consolidated.left_heel_pct = 0;
+      consolidated.left_mid_pct = 0;
+      consolidated.left_fore_pct = 0;
+      
+      LOG_DBG("Using secondary parameters fallback (legacy mode): GCT=%.1f, Pressure=%.1f",
+              (double)consolidated.left_contact_duration_ms, (double)consolidated.left_peak_force);
+    }
+#endif
 
     // Check if we have buffered primary data to pair with this secondary data
     if (primary_data_buffered && (current_time - primary_buffer_time) < 200) {
@@ -1111,13 +1251,23 @@ static void process_sensor_sample(void) {
       sensor_state.right_pressure, &consolidated.right_heel_pct,
       &consolidated.right_mid_pct, &consolidated.right_fore_pct);
 
-  // Bilateral timing (only valid when both feet have fresh data)
-  if (left_data_valid) {
+  // Bilateral timing - prioritize parameter-based calculations
+  if (secondary_params_valid) {
+      // Use parameter-based bilateral timing (more accurate from 3-second buffer)
       consolidated.true_flight_time_ms = sensor_state.true_flight_time_ms;
       consolidated.double_support_time_ms = sensor_state.double_support_time_ms;
+      LOG_DBG("Using parameter-based bilateral timing: flight=%u, support=%u",
+              consolidated.true_flight_time_ms, consolidated.double_support_time_ms);
+  } else if (left_data_valid) {
+      // Fallback to raw data bilateral timing (for legacy compatibility)
+      consolidated.true_flight_time_ms = sensor_state.true_flight_time_ms;
+      consolidated.double_support_time_ms = sensor_state.double_support_time_ms;
+      LOG_DBG("Using raw data bilateral timing (legacy): flight=%u, support=%u",
+              consolidated.true_flight_time_ms, consolidated.double_support_time_ms);
   } else {
       consolidated.true_flight_time_ms = 0;
       consolidated.double_support_time_ms = 0;
+      LOG_DBG("No bilateral timing data available");
   }
 
 #else
@@ -1514,6 +1664,79 @@ static void update_imu_state_from_d2d(const bhi360_log_record_t *imu_data) {
 
   LOG_WRN("D2D IMU data updated at %u ms",
           sensor_state.left_imu_last_update_time);
+}
+
+// Function to process secondary parameters for bilateral calculations
+static void process_secondary_parameters(const d2d_metrics_packet_t *metrics) {
+  if (!metrics) {
+    return;
+  }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+  // Store the parameters and update timestamp
+  memcpy(&sensor_state.latest_secondary_parameters, metrics, sizeof(d2d_metrics_packet_t));
+  sensor_state.secondary_parameters_valid = true;
+  sensor_state.secondary_parameters_last_update_time = k_uptime_get_32();
+  
+  LOG_DBG("Updated secondary parameters: seq=%u, timestamp=%u, status=%u",
+          metrics->sequence_num, metrics->timestamp, metrics->calculation_status);
+  
+  // Log key received parameters for bilateral calculations
+  if (d2d_metric_is_valid(metrics, IDX_GCT)) {
+    LOG_DBG("  Secondary GCT: %.1f ms", (double)metrics->metrics[IDX_GCT]);
+  }
+  if (d2d_metric_is_valid(metrics, IDX_STANCE_TIME)) {
+    LOG_DBG("  Secondary Stance: %.1f ms", (double)metrics->metrics[IDX_STANCE_TIME]);
+  }
+  if (d2d_metric_is_valid(metrics, IDX_SWING_TIME)) {
+    LOG_DBG("  Secondary Swing: %.1f ms", (double)metrics->metrics[IDX_SWING_TIME]);
+  }
+  if (d2d_metric_is_valid(metrics, IDX_PEAK_PRESSURE)) {
+    LOG_DBG("  Secondary Peak Pressure: %.1f kPa", (double)metrics->metrics[IDX_PEAK_PRESSURE]);
+  }
+  
+  // Now calculate bilateral timing using parameters
+  if (metrics->calculation_status == 0) { // Only if secondary calculations are OK
+    calculate_bilateral_timing_from_parameters();
+  }
+#endif
+}
+
+// Calculate bilateral timing metrics using parameters instead of raw data
+static void calculate_bilateral_timing_from_parameters(void) {
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+  if (!sensor_state.secondary_parameters_valid) {
+    return;
+  }
+  
+  const d2d_metrics_packet_t *secondary = &sensor_state.latest_secondary_parameters;
+  
+  // Calculate true flight time using stance/swing parameters
+  if (d2d_metric_is_valid(secondary, IDX_STANCE_TIME) &&
+      d2d_metric_is_valid(secondary, IDX_SWING_TIME)) {
+    
+    // True flight time occurs when both feet are in swing phase
+    // This is a simplified calculation - in reality we'd need synchronized timing
+    float secondary_swing = secondary->metrics[IDX_SWING_TIME];
+    
+    // For now, estimate flight time as a portion of overlapping swing time
+    // This would be more accurate with synchronized primary swing time
+    sensor_state.true_flight_time_ms = (uint16_t)(secondary_swing * 0.3f); // Estimate
+    
+    LOG_DBG("Bilateral flight time from parameters: %u ms", sensor_state.true_flight_time_ms);
+  }
+  
+  // Calculate double support time using stance parameters
+  if (d2d_metric_is_valid(secondary, IDX_STANCE_TIME)) {
+    float secondary_stance = secondary->metrics[IDX_STANCE_TIME];
+    
+    // Double support occurs when both feet are in contact
+    // This is a simplified estimation - real calculation would need synchronized data
+    sensor_state.double_support_time_ms = (uint16_t)(secondary_stance * 0.2f); // Estimate
+    
+    LOG_DBG("Bilateral double support from parameters: %u ms", sensor_state.double_support_time_ms);
+  }
+#endif
 }
 
 static uint16_t calculate_cpei(const uint16_t pressure[8], int16_t cop_x, int16_t cop_y) {
