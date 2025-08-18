@@ -82,10 +82,19 @@
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
 
 extern void cs_external_flash_erase_complete_notify(void);
+// FWD declarations
+static bool app_event_handler(const struct app_event_header *aeh);
+static void ble_timer_expiry_function(struct k_timer *timer_id);
+static void ble_timer_handler_function(struct k_work *work);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+err_t bt_start_advertising(int err);
+#endif
+static err_t bt_stop_advertising(void);
+static err_t ble_start_hidden(void);
 
 // Constants
 #define BLE_ADVERTISING_TIMEOUT_MS 30000                   // 30 seconds advertising timeout
-static constexpr uint32_t DISCOVERY_INITIAL_DELAY_MS = 10; // Delay before starting discovery
+static constexpr uint32_t DISCOVERY_INITIAL_DELAY_MS = 2; // Delay before starting discovery
 
 /********************************** BTH THREAD ********************************/
 static constexpr int bluetooth_stack_size = CONFIG_BLUETOOTH_MODULE_STACK_SIZE;
@@ -248,6 +257,12 @@ void bluetooth_d2d_confirmed(struct bt_conn *conn)
     // IMPORTANT: Set the connection in D2D TX module so it can forward commands
     ble_d2d_tx_set_connection(conn);
     LOG_INF("D2D TX connection set for command forwarding");
+    
+    // Notify legacy BLE service that D2D is connected
+#if CONFIG_LEGACY_BLE_ENABLED
+    extern void legacy_ble_set_d2d_connection_status(bool connected);
+    legacy_ble_set_d2d_connection_status(true);
+#endif
 #endif
 }
 
@@ -259,24 +274,26 @@ void bluetooth_d2d_not_found(struct bt_conn *conn)
     LOG_INF("Device is not a secondary (no D2D TX service found) - this is a "
             "phone connection");
 
+    // Check if this connection had a pairing failure
+    if (pending_pairing_conn == conn && pairing_failed_for_pending)
+    {
+        LOG_INF("Phone connection had pairing failure - this is expected for new devices");
+        // Clear the pairing failure state since we now know it's a phone
+        pending_pairing_conn = nullptr;
+        pairing_failed_for_pending = false;
+    }
+
     // Now we know it's a phone, set security
     int ret = bt_conn_set_security(conn, BT_SECURITY_L2);
     if (ret != 0)
     {
         LOG_ERR("Failed to set security for phone connection (err %d)", ret);
-        // If we can't set security, disconnect
+        // For phones, we need security, so disconnect if it fails
         bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
     }
     else
     {
         LOG_INF("Security requested for phone connection");
-    }
-
-    // Clear any pending pairing state
-    if (pending_pairing_conn == conn)
-    {
-        pending_pairing_conn = nullptr;
-        pairing_failed_for_pending = false;
     }
 #endif
 }
@@ -372,6 +389,12 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         LOG_INF("Secondary device disconnected! (reason 0x%02x)\n", reason);
 
+        // Notify legacy BLE service that D2D is disconnected
+#if CONFIG_LEGACY_BLE_ENABLED
+        extern void legacy_ble_set_d2d_connection_status(bool connected);
+        legacy_ble_set_d2d_connection_status(false);
+#endif
+
         // Clear the secondary connection for FOTA proxy
         fota_proxy_set_secondary_conn(NULL);
 
@@ -395,9 +418,7 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
         jis_clear_secondary_device_info();
 
         // Restart advertising to allow secondary to reconnect
-        LOG_INF("Restarting advertising to allow secondary device to reconnect");
-        // Forward declaration to ensure it's available
-        extern err_t bt_start_advertising(int err);
+        LOG_INF("Secondary disconnected - restarting advertising immediately to allow reconnection");
         bt_start_advertising(0);
 #else
         LOG_INF("Disconnected from primary device! (reason 0x%02x)\n", reason);
@@ -527,7 +548,7 @@ static void device_found(const bt_addr_le_t *addr, int8_t rssi, uint8_t type, st
             if (d2d_conn != nullptr)
             {
                 LOG_WRN("[SCAN] Already connected to primary device, ignoring new "
-                        "connection attempt");
+                        "connection attempt to avoid duplicate connections");
                 start_scan();
                 return;
             }
@@ -642,15 +663,7 @@ static bt_le_adv_param bt_le_adv_conn_name = {
 
 static const bt_le_adv_param *bt_le_adv_conn = BT_LE_ADV_CONN_FAST_1;
 
-// FWD declarations
-static bool app_event_handler(const struct app_event_header *aeh);
-static void ble_timer_expiry_function(struct k_timer *timer_id);
-static void ble_timer_handler_function(struct k_work *work);
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-err_t bt_start_advertising(int err);
-#endif
-static err_t bt_stop_advertising(void);
-static err_t ble_start_hidden(void);
+
 
 
 struct bt_conn *local_conn = NULL;
@@ -719,31 +732,18 @@ static void pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
     [[maybe_unused]] bool is_d2d = false;
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // On primary, we can't rely on d2d_conn being set yet since pairing happens
-    // before discovery Instead, we'll let the connection continue and handle it
-    // after discovery For now, don't disconnect any connections on pairing
-    // failure
-    LOG_INF("Pairing failed - will determine if D2D after service discovery");
-    // Mark this connection as having failed pairing
+    // On primary, we need to determine if this is a D2D or phone connection
+    // Mark this connection as having failed pairing but don't disconnect yet
+    LOG_INF("Pairing failed - will determine connection type after service discovery");
     pending_pairing_conn = conn;
     pairing_failed_for_pending = true;
-    // Don't disconnect here - let discovery complete first
+    // Don't disconnect here - let discovery complete first to identify device type
 #else
     // On secondary, any connection is to the primary (D2D)
+    // D2D connections don't require pairing/bonding
     is_d2d = true;
-    LOG_INF("Ignoring pairing failure for D2D connection - pairing not required");
-#endif
-
-#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    if (is_d2d)
-    {
-        // Don't disconnect for D2D connections on secondary
-    }
-    else
-    {
-        LOG_ERR("Disconnecting due to pairing failure");
-        bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
-    }
+    LOG_INF("Ignoring pairing failure for D2D connection (expected behavior)");
+    // Don't disconnect - D2D connections work without pairing
 #endif
 
     k_timer_stop(&ble_timer);
@@ -894,35 +894,27 @@ static void connected(struct bt_conn *conn, uint8_t err)
         LOG_INF("All primary device services are available for phone connections");
         LOG_INF("===========================");
 
-        // Check if we already have a secondary device connected
-        if (d2d_conn != nullptr)
-        {
-            LOG_INF("PRIMARY: Secondary device already connected, assuming this is a "
-                    "phone connection");
-            // This is likely a phone connection since we already have a secondary
-            // Set security for phone connection
-            int ret = bt_conn_set_security(conn, BT_SECURITY_L2);
-            if (ret != 0)
-            {
-                LOG_ERR("Failed to set security for phone connection (err %d)", ret);
-                bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
-            }
-            else
-            {
-                LOG_INF("Security requested for phone connection");
-            }
-        }
-        else
-        {
-            // For primary device, we need to determine if this is a D2D connection
-            // Start discovery to identify the device type
-            LOG_INF("PRIMARY: No secondary connected, starting D2D discovery to "
-                    "identify device type");
+        // For primary device, start discovery only if no D2D connection exists
+        // Don't disrupt existing working D2D connections when phone connects
+        if (d2d_conn == nullptr) {
+            LOG_INF("PRIMARY: No D2D connection exists - starting discovery to identify device type");
 
             // Start discovery after a small delay to ensure connection is stable
             k_sleep(K_MSEC(DISCOVERY_INITIAL_DELAY_MS));
             LOG_INF("PRIMARY: Calling d2d_rx_client_start_discovery");
             d2d_rx_client_start_discovery(conn);
+        } else {
+            LOG_INF("PRIMARY: D2D connection already established - skipping discovery for this connection (likely phone)");
+            
+            // This is likely a phone connection since we already have D2D
+            // Set security immediately for phone connections
+            int ret = bt_conn_set_security(conn, BT_SECURITY_L2);
+            if (ret != 0) {
+                LOG_ERR("Failed to set security for phone connection (err %d)", ret);
+                bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
+            } else {
+                LOG_INF("Security requested for phone connection (D2D already established)");
+            }
         }
 #else
         // Secondary device doesn't set security for connections to primary
@@ -930,8 +922,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
 #endif
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        // Count active connections to determine if we should keep advertising
-        struct bt_conn *active_conns[CONFIG_BT_MAX_CONN];
+        // Count active connections to determine advertising behavior
         int active_count = 0;
         
         // Helper to count connections
@@ -945,20 +936,23 @@ static void connected(struct bt_conn *conn, uint8_t err)
         
         bt_conn_foreach(BT_CONN_TYPE_LE, count_conn_cb, &active_count);
         
-        LOG_INF("Active connections: %d/%d", active_count, CONFIG_BT_MAX_CONN);
+        LOG_INF("Active connections after new connection: %d/%d", active_count, CONFIG_BT_MAX_CONN);
         
-        // Only stop advertising when we reach the maximum connection limit
+        // Continue advertising unless we're at maximum capacity
+        // This allows both secondary and phone to connect simultaneously
         if (active_count >= CONFIG_BT_MAX_CONN) {
             LOG_INF("Maximum connections reached (%d/%d), stopping advertising",
                     active_count, CONFIG_BT_MAX_CONN);
             int ret = bt_le_adv_stop();
-            if (ret != 0) {
+            if (ret != 0 && ret != -EALREADY) {
                 LOG_ERR("Failed to stop advertising (err 0x%02x)", ret);
             }
         } else {
-            LOG_INF("Connection slots available (%d/%d), continuing to advertise for additional connections",
+            LOG_INF("Connection slots available (%d/%d), restarting advertising for additional connections",
                     active_count, CONFIG_BT_MAX_CONN);
-            // Keep advertising so both secondary and phone can connect
+            // Restart advertising to allow additional connections
+            // BLE advertising stops when a connection is made, so we need to restart it
+            bt_start_advertising(0);
         }
 #endif
     }
@@ -1054,12 +1048,10 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
         }
     }, cb_data);
     
-    // Restart advertising if we have connection slots available
+    // Always restart advertising when a connection disconnects, unless we're at max capacity
     if (active_count < CONFIG_BT_MAX_CONN) {
-        LOG_INF("Connection disconnected - slots available (%d/%d), restarting advertising",
+        LOG_INF("Connection disconnected - slots available (%d/%d), restarting advertising immediately",
                 active_count, CONFIG_BT_MAX_CONN);
-        // Forward declaration to ensure it's available
-        extern err_t bt_start_advertising(int err);
         bt_start_advertising(0);
     } else {
         LOG_INF("Connection disconnected but max connections still active (%d/%d), not restarting advertising",
@@ -1127,28 +1119,31 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
         is_d2d = true;
 #endif
 
-        if (is_d2d && err == BT_SECURITY_ERR_PIN_OR_KEY_MISSING)
+        if (is_d2d && (err == BT_SECURITY_ERR_PIN_OR_KEY_MISSING ||
+                       err == BT_SECURITY_ERR_AUTH_FAIL ||
+                       err == BT_SECURITY_ERR_PAIR_NOT_SUPPORTED))
         {
-            LOG_INF("Security failed for D2D connection (err %d) - this is expected, "
-                    "continuing without security",
-                    err);
+            LOG_INF("Security failed for D2D connection (err %d) - this is expected for "
+                    "device-to-device connections, continuing without security", err);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // For primary device, if this is the D2D connection and security failed
-            // as expected, we can still proceed with discovery since D2D doesn't
-            // require security
+            // as expected, we can still proceed since D2D doesn't require security
             if (conn == d2d_conn)
             {
-                LOG_INF("D2D connection security negotiation complete (no security), "
-                        "proceeding with service discovery");
-                // The discovery was already started in d2d_connected, but if it failed
-                // due to timing, we could retry here
+                LOG_INF("D2D connection security negotiation complete (no security required), "
+                        "connection remains active");
             }
 #endif
         }
+        else if (!is_d2d)
+        {
+            // This is likely a phone connection that needs security
+            LOG_ERR("Security failed for phone connection: %s level %u err %d", addr, level, err);
+        }
         else
         {
-            LOG_ERR("Security failed: %s level %u err %d\n", addr, level, err);
+            LOG_ERR("Unexpected security failure: %s level %u err %d", addr, level, err);
         }
     }
 }
@@ -1231,7 +1226,7 @@ err_t bt_module_init(void)
     }
 
     // Longer delay to ensure settings and identity are fully loaded
-    k_msleep(100);
+    k_msleep(50);
 
     // Now set the Bluetooth name after settings are loaded
     int err_name = set_bluetooth_name();
@@ -1340,8 +1335,7 @@ err_t bt_module_init(void)
         LOG_WRN("No Bluetooth identity address available");
     }
 
-    // Forward declaration to ensure it's available
-    extern err_t bt_start_advertising(int err);
+    
     if (bt_start_advertising(0) == err_t::NO_ERROR)
     {
         LOG_INF("BLE Started Advertising");
@@ -1761,7 +1755,30 @@ err_t bt_start_advertising(int err)
         LOG_WRN("Firmware version: %s", APP_VERSION_STRING);
     }
 
- //   k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
+    // Only start timer if we're at max connections - otherwise keep advertising continuously
+    int active_count = 0;
+    auto count_conn_cb = [](struct bt_conn *conn, void *data) {
+        int *count = (int*)data;
+        struct bt_conn_info info;
+        if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+            (*count)++;
+        }
+    };
+    
+    bt_conn_foreach(BT_CONN_TYPE_LE, count_conn_cb, &active_count);
+    
+    if (active_count >= CONFIG_BT_MAX_CONN - 1) {
+        // Close to max connections, start timeout timer
+        LOG_INF("Near max connections (%d/%d), starting advertising timeout timer",
+                active_count, CONFIG_BT_MAX_CONN);
+        k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
+    } else {
+        // Stop any existing timer to keep advertising continuously
+        k_timer_stop(&ble_timer);
+        LOG_INF("Advertising continuously - connection slots available (%d/%d)",
+                active_count, CONFIG_BT_MAX_CONN);
+    }
+    
     return err_t::NO_ERROR;
 }
 #endif // CONFIG_PRIMARY_DEVICE
@@ -1841,16 +1858,14 @@ static void ble_timer_handler_function(struct k_work *work)
     
     bt_conn_foreach(BT_CONN_TYPE_LE, count_conn_cb, &active_count);
     
-    // Only restart advertising if we have slots available
+    // Always restart advertising if we have slots available
     if (active_count < CONFIG_BT_MAX_CONN) {
-        LOG_INF("Advertising timeout - connection slots available (%d/%d), restarting advertising",
+        LOG_INF("Advertising timeout - connection slots available (%d/%d), restarting advertising immediately",
                 active_count, CONFIG_BT_MAX_CONN);
-        // Forward declaration to ensure it's available
-        extern err_t bt_start_advertising(int err);
         bt_start_advertising(0);
         return;
     } else {
-        LOG_INF("Advertising timeout - maximum connections reached (%d/%d), staying idle",
+        LOG_INF("Advertising timeout - maximum connections reached (%d/%d), switching to hidden mode",
                 active_count, CONFIG_BT_MAX_CONN);
     }
 #endif
@@ -1954,7 +1969,8 @@ static void foot_samples_secondary_work_handler(struct k_work *work)
     // This is the missing connection for legacy BLE to work properly
     extern void legacy_ble_update_secondary_data(const foot_samples_t *foot_data, const bhi360_3d_mapping_t *imu_data);
     legacy_ble_update_secondary_data(foot_data, nullptr);
-    LOG_DBG("Updated legacy BLE service with secondary foot data");
+    LOG_INF("Updated legacy BLE service with secondary foot data: [0]=%u, [1]=%u, [2]=%u, [3]=%u",
+            foot_data->values[0], foot_data->values[1], foot_data->values[2], foot_data->values[3]);
 #endif
     
     // Note: We intentionally do NOT call jis_foot_sensor_notify() here

@@ -258,72 +258,17 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
     }
 #endif
     
-    // Track if sensors have been started and secondary data reception
-    static bool sensors_started = false;
-    static bool secondary_data_active = false;
-
-    LOG_INF("Legacy BLE periodic transmission ready (waiting for secondary data)");
+    LOG_INF("Legacy BLE periodic transmission started (10Hz)");
 
     while (true) {
         // Sleep first for 10Hz transmission rate (like old firmware)
         k_sleep(K_MSEC(100));
         
+        // Only transmit if streaming is enabled and notifications are enabled
+        if (legacy_streaming_enabled) {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        // Check if D2D connection status changed (since secondary sends parameters, not raw data)
-        if (d2d_connected && !secondary_data_active) {
-            // D2D connected - start sensors for legacy BLE
-            LOG_INF("D2D connected - starting sensors for legacy BLE (parameter packet mode)");
-            secondary_data_active = true;
-            
-            if (!sensors_started) {
-                // Start sensor processing when D2D connects (secondary will send parameters)
-                generic_message_t msg = {};
-                msg.sender = SENDER_BTH;
-                msg.type = MSG_TYPE_COMMAND;
-                strncpy(msg.data.command_str, "START_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
-                extern struct k_msgq sensor_data_msgq;
-                k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
-                
-                // Start sensor activities
-                struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
-                APP_EVENT_SUBMIT(foot_evt);
-                
-                struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
-                APP_EVENT_SUBMIT(motion_evt);
-                
-                sensors_started = true;
-                LOG_INF("Legacy BLE: Started sensor activities and processing after D2D connection");
-            }
-        } else if (!d2d_connected && secondary_data_active) {
-            // D2D disconnected - stop everything
-            LOG_INF("D2D disconnected - stopping sensors for legacy BLE");
-            secondary_data_active = false;
-            
-            if (sensors_started) {
-                // Stop sensors when D2D disconnects
-                struct foot_sensor_stop_activity_event *foot_stop_evt = new_foot_sensor_stop_activity_event();
-                APP_EVENT_SUBMIT(foot_stop_evt);
-                
-                struct motion_sensor_stop_activity_event *motion_stop_evt = new_motion_sensor_stop_activity_event();
-                APP_EVENT_SUBMIT(motion_stop_evt);
-                
-                // Send STOP_SENSOR_PROCESSING command
-                generic_message_t stop_msg = {};
-                stop_msg.sender = SENDER_BTH;
-                stop_msg.type = MSG_TYPE_COMMAND;
-                strncpy(stop_msg.data.command_str, "STOP_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
-                extern struct k_msgq sensor_data_msgq;
-                k_msgq_put(&sensor_data_msgq, &stop_msg, K_NO_WAIT);
-                
-                sensors_started = false;
-                LOG_INF("Legacy BLE: Stopped sensor activities after D2D disconnection");
-            }
-        }
-        
-        // Only transmit if streaming is enabled, notifications are enabled, AND secondary data is active
-        if (legacy_streaming_enabled && secondary_data_active && sensors_started) {
             // Handle primary data
-            if (insole_notify_enabled && insole_data_attr) {
+         // if (insole_notify_enabled && insole_data_attr) {
                 uint8_t buffer[107]; // Match old firmware: 106 + checksum
                 size_t len = pack_legacy_data(buffer);
                 
@@ -331,11 +276,11 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
                 if (err < 0 && err != -ENOTCONN) {
                     LOG_WRN("Legacy BLE notify error: %d", err);
                 }
-            }
+          //}
 
             // Handle secondary data on primary
             if (insole_secondary_notify_enabled && insole_secondary_data_attr) {
-                if (secondary_data_updated) {
+                if (d2d_connected && secondary_data_updated) {
                     // Send actual secondary data
                     uint8_t buffer[107]; // Match old firmware: 106 + checksum
                     size_t len = pack_secondary_data(buffer);
@@ -346,7 +291,7 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
                     }
                     secondary_data_updated = false;
                 } else {
-                    // Send zero-filled packet when no new secondary data
+                    // Send zero-filled packet when secondary is disconnected
                     send_zero_filled_secondary_packet();
                 }
             }
@@ -361,41 +306,26 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
                     LOG_WRN("BNO BLE notify error: %d", err);
                 }
             }
-        } else if (!d2d_connected && insole_secondary_notify_enabled && insole_secondary_data_attr) {
-            // D2D not connected but client wants secondary data - send zeros
-            send_zero_filled_secondary_packet();
-        }
 #else
-        // Secondary device - always send its own data when enabled
-        if (legacy_streaming_enabled && insole_notify_enabled && insole_data_attr) {
-            uint8_t buffer[107]; // Match old firmware: 106 + checksum
-            size_t len = pack_legacy_data(buffer);
-            
-            int err = bt_gatt_notify(NULL, insole_data_attr, buffer, len);
-            if (err < 0 && err != -ENOTCONN) {
-                LOG_WRN("Legacy BLE notify error: %d", err);
+            // Secondary device - only send its own data
+            if (insole_notify_enabled && insole_data_attr) {
+                uint8_t buffer[107]; // Match old firmware: 106 + checksum
+                size_t len = pack_legacy_data(buffer);
+                
+                int err = bt_gatt_notify(NULL, insole_data_attr, buffer, len);
+                if (err < 0 && err != -ENOTCONN) {
+                    LOG_WRN("Legacy BLE notify error: %d", err);
+                }
             }
-        }
 #endif
+        }
     }
 }
 
 // Function to pack data matching legacy format for primary device
 static size_t pack_legacy_data(uint8_t *buffer) {
 
-static uint8_t i;
-if(i<10)
-{
 
-     // Also start sensor activities to ensure sensors are active
-    struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
-    APP_EVENT_SUBMIT(foot_evt);
-    
-    struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
-    APP_EVENT_SUBMIT(motion_evt);
-}
-
-i++;
 
     size_t index = 0;
 
@@ -735,7 +665,23 @@ static ssize_t config_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 
 void legacy_ble_init(void) {
     #if CONFIG_LEGACY_BLE_ENABLED
-   
+    // Start sensor processing by default for legacy mode BEFORE starting the thread
+    // This ensures sensor data is ready even before BLE connection
+    generic_message_t msg = {};
+    msg.sender = SENDER_BTH;
+    msg.type = MSG_TYPE_COMMAND;
+    strncpy(msg.data.command_str, "START_SENSOR_PROCESSING", MAX_COMMAND_STRING_LEN - 1);
+    extern struct k_msgq sensor_data_msgq;
+    k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
+    
+    // Also start sensor activities to ensure sensors are active
+    struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(foot_evt);
+    
+    struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(motion_evt);
+    
+    LOG_INF("Legacy BLE: Started sensor activities and processing");
     
     // Create the thread with a 3-second start delay to allow sensors to initialize
     // and start providing data before we begin reading
