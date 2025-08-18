@@ -1582,6 +1582,8 @@ static ssize_t ams_activity_step_count_read(struct bt_conn *conn,
  * @param metrics Pointer to metrics data
  */
 void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
+
+  //Ci serve: cadence_spm_value, base(ground_contact_ms_value     , stride_duration_ms_value ), stride_duration_asym_value, stride_length_asym_value, contact_time_asymmetry
   
   /*  if (!metrics) {
       return;

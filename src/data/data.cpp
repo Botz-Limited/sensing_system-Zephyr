@@ -108,7 +108,7 @@ static bhi360_calibration_data_t pending_calibration_data;
 
 // Mutexes for work item message buffers
 K_MUTEX_DEFINE(sensor_data_msg_mutex);
-K_MUTEX_DEFINE(cmd_queue_mutex);  // Renamed for command queue
+K_MUTEX_DEFINE(cmd_queue_mutex); // Renamed for command queue
 K_MUTEX_DEFINE(calibration_msg_mutex);
 
 // File System State
@@ -219,7 +219,6 @@ static void data_init(void)
         filesystem_available = true;
         LOG_INF("File System Mounted at %s", lfs_ext_storage_mnt.mnt_point);
     }
-
 
     // Initialize work queue
     k_work_queue_init(&data_work_q);
@@ -366,7 +365,7 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                 case MSG_TYPE_COMMAND:
                     // Queue command - never drop commands
                     k_mutex_lock(&cmd_queue_mutex, K_MSEC(100));
-                    
+
                     // Check if queue has space
                     if (atomic_get(&cmd_queue_count) < MAX_QUEUED_COMMANDS)
                     {
@@ -374,10 +373,10 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                         memcpy(&command_queue[cmd_queue_tail], &msg, sizeof(generic_message_t));
                         cmd_queue_tail = (cmd_queue_tail + 1) % MAX_QUEUED_COMMANDS;
                         atomic_inc(&cmd_queue_count);
-                        
-                        LOG_INF("Queued command: %s (queue depth: %ld)",
-                                msg.data.command_str, atomic_get(&cmd_queue_count));
-                        
+
+                        LOG_INF("Queued command: %s (queue depth: %ld)", msg.data.command_str,
+                                atomic_get(&cmd_queue_count));
+
                         // Submit work if not already pending
                         if (!k_work_is_pending(&process_command_work))
                         {
@@ -389,15 +388,15 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                         LOG_ERR("Command queue full! Force processing");
                         // Emergency: cancel current work and force immediate processing
                         k_work_cancel(&process_command_work);
-                        
+
                         // Replace oldest command (FIFO)
                         memcpy(&command_queue[cmd_queue_tail], &msg, sizeof(generic_message_t));
                         cmd_queue_tail = (cmd_queue_tail + 1) % MAX_QUEUED_COMMANDS;
                         // Don't increment count as we're replacing
-                        
+
                         k_work_submit_to_queue(&data_work_q, &process_command_work);
                     }
-                    
+
                     k_mutex_unlock(&cmd_queue_mutex);
                     break;
 
@@ -429,11 +428,10 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     }
                     break;
 
-                case MSG_TYPE_DELETE_ACTIVITY_LOG:
-                {
+                case MSG_TYPE_DELETE_ACTIVITY_LOG: {
                     // Process delete activity log command
                     LOG_INF("Received delete activity log command for ID: %u", msg.data.delete_cmd.id);
-                    
+
                     // Stop any active logging first if we're deleting files
                     if (atomic_get(&logging_activity_active))
                     {
@@ -441,13 +439,13 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                         atomic_set(&logging_activity_active, 0);
                         end_activity_logging();
                     }
-                    
+
                     // Delete the specified activity log file
                     err_t delete_status = delete_by_type_and_id(msg.data.delete_cmd.type, msg.data.delete_cmd.id);
                     if (delete_status != err_t::NO_ERROR)
                     {
-                        LOG_ERR("Failed to delete activity log file with ID %u: %d",
-                                msg.data.delete_cmd.id, (int)delete_status);
+                        LOG_ERR("Failed to delete activity log file with ID %u: %d", msg.data.delete_cmd.id,
+                                (int)delete_status);
                     }
                     else
                     {
@@ -482,23 +480,21 @@ static void process_sensor_data_work_handler(struct k_work *work)
         // Prepare a binary structure to store in the file
         typedef struct
         {
-            uint32_t packet_number;
+
+            uint8_t stride_duration_asym_value;  // 0-100%
+            uint8_t stride_length_asym_value;    // 0-100%
+            uint16_t stride_duration_ms_value;   // 0 to 200  stride average
+            uint16_t stride_length_avg_mm_value; //// 1200-2000mm (1.2-2.0m)
+            uint16_t ground_contact_ms;          // // 0 to 1000
+            uint8_t balance_lr_pct_value;        // 0 to 100
+            uint32_t run_speed_mms_value;        //// Result in mm/s
+            uint16_t flight_time_ms;             // 0 to 1000
+            uint32_t distance_m_value_sec;       // tot dist
+            uint32_t steps_number;
+
             uint32_t timestamp_ms;
-            uint16_t cadence_spm;
-            uint16_t pace_sec_km;
-            uint8_t form_score;
-            int8_t balance_lr_pct;
-            uint16_t ground_contact_ms;
-            uint16_t flight_time_ms;
-            int8_t contact_time_asymmetry;
-            int8_t force_asymmetry;
-            int8_t pronation_asymmetry;
-            uint8_t left_strike_pattern;
-            uint8_t right_strike_pattern;
-            int8_t avg_pronation_deg;
-            uint8_t vertical_ratio;
-            uint8_t efficiency_score;
-            uint8_t alerts;
+            uint16_t cadence_spm; //
+
         } __attribute__((packed)) activity_metrics_binary_t;
 
         // Reset counter if approaching maximum to prevent overflow
@@ -508,23 +504,20 @@ static void process_sensor_data_work_handler(struct k_work *work)
             activity_packet_counter = 0;
         }
 
-        activity_metrics_binary_t binary_metrics = {.packet_number = activity_packet_counter++,
-                                                    .timestamp_ms = metrics->timestamp_ms,
-                                                    .cadence_spm = metrics->cadence_spm,
-                                                    .pace_sec_km = metrics->pace_sec_km,
-                                                    .form_score = metrics->form_score,
-                                                    .balance_lr_pct = metrics->balance_lr_pct,
-                                                    .ground_contact_ms = metrics->ground_contact_ms,
-                                                    .flight_time_ms = metrics->flight_time_ms,
-                                                    .contact_time_asymmetry = metrics->contact_time_asymmetry,
-                                                    .force_asymmetry = metrics->force_asymmetry,
-                                                    .pronation_asymmetry = metrics->pronation_asymmetry,
-                                                    .left_strike_pattern = metrics->left_strike_pattern,
-                                                    .right_strike_pattern = metrics->right_strike_pattern,
-                                                    .avg_pronation_deg = metrics->avg_pronation_deg,
-                                                    .vertical_ratio = metrics->vertical_ratio,
-                                                    .efficiency_score = metrics->efficiency_score,
-                                                    .alerts = metrics->alerts};
+        activity_metrics_binary_t binary_metrics = {
+            .stride_duration_asym_value = metrics->stride_duration_asymmetry,
+            .stride_length_asym_value = metrics->stride_length_asymmetry,
+            .stride_duration_ms_value = metrics->stride_duration_ms,
+            .stride_length_avg_mm_value = (uint16_t)(metrics->stride_length_cm * 10), // Convert cm to mm
+            .ground_contact_ms = metrics->ground_contact_ms,
+            .balance_lr_pct_value = (uint8_t)(metrics->balance_lr_pct + 50), // Convert from -50..+50 to 0..100
+            .run_speed_mms_value = metrics->run_speed_mms_value,
+            .flight_time_ms = metrics->flight_time_ms,
+            .distance_m_value_sec = metrics->distance_m,
+            .steps_number = metrics->steps_number,
+            .timestamp_ms = metrics->timestamp_ms,
+            .cadence_spm = metrics->cadence_spm
+        };
 
         // Add to batch buffer if there's space
         if (activity_batch_bytes + sizeof(binary_metrics) <= sizeof(activity_batch_buffer))
@@ -556,40 +549,40 @@ static void process_sensor_data_work_handler(struct k_work *work)
 static void process_command_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     // Process ALL queued commands
     while (atomic_get(&cmd_queue_count) > 0)
     {
         // Get next command from queue
         k_mutex_lock(&cmd_queue_mutex, K_MSEC(100));
-        
+
         // Double-check queue isn't empty (could have been processed by another thread)
         if (atomic_get(&cmd_queue_count) == 0)
         {
             k_mutex_unlock(&cmd_queue_mutex);
             break;
         }
-        
+
         // Retrieve command from head of queue
         generic_message_t local_msg = command_queue[cmd_queue_head];
         cmd_queue_head = (cmd_queue_head + 1) % MAX_QUEUED_COMMANDS;
         atomic_dec(&cmd_queue_count);
-        
+
         LOG_INF("Processing command from queue (remaining: %ld)", atomic_get(&cmd_queue_count));
-        
+
         k_mutex_unlock(&cmd_queue_mutex);
-        
+
         // Process the command
         const char *command_str = local_msg.data.command_str;
         LOG_WRN("Processing command: %s     activity logging =%ld", command_str, atomic_get(&logging_activity_active));
-        
+
         // For STOP commands, cancel any pending sensor data work first
         if (strstr(command_str, "STOP") != NULL)
         {
             LOG_INF("STOP command detected - cancelling sensor data work");
             k_work_cancel(&process_sensor_data_work);
         }
-        
+
         if (strcmp(command_str, "START_LOGGING_ACTIVITY") == 0)
         {
             if (atomic_get(&logging_activity_active) == 0)
@@ -617,7 +610,7 @@ static void process_command_work_handler(struct k_work *work)
             {
                 LOG_INF("Stopping activity logging");
                 atomic_set(&logging_activity_active, 0);
-                
+
                 err_t activity_status = end_activity_logging();
                 if (activity_status != err_t::NO_ERROR)
                 {
@@ -656,7 +649,7 @@ static void process_command_work_handler(struct k_work *work)
             LOG_WRN("Unknown command: %s", command_str);
         }
     }
-    
+
     // Check if more commands arrived while we were processing
     if (atomic_get(&cmd_queue_count) > 0)
     {
