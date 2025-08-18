@@ -1152,3 +1152,4 @@ void d2d_tx_service_init(void)
     LOG_INF("D2D TX GATT service initialized");
     LOG_INF("Service attributes at %p, count=%d", d2d_tx_svc.attrs, d2d_tx_svc.attr_count);
 }
+

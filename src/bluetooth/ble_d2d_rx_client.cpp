@@ -632,13 +632,6 @@ static uint8_t foot_sensor_notify_handler(struct bt_conn *conn, struct bt_gatt_s
     }
 
     const foot_samples_t *samples = (const foot_samples_t *)data;
-    
-    // Log the received secondary foot sensor data for debugging
-    LOG_INF("D2D RX: Secondary foot data - [0-7]: %u %u %u %u %u %u %u %u",
-            samples->values[0], samples->values[1],
-            samples->values[2], samples->values[3],
-            samples->values[4], samples->values[5],
-            samples->values[6], samples->values[7]);
 
     // Process the data through the handler
     d2d_data_handler_process_foot_samples(samples);
@@ -647,7 +640,6 @@ static uint8_t foot_sensor_notify_handler(struct bt_conn *conn, struct bt_gatt_s
     // Update legacy BLE service with secondary foot data
     extern void legacy_ble_update_secondary_data(const foot_samples_t *foot_data, const bhi360_3d_mapping_t *imu_data);
     legacy_ble_update_secondary_data(samples, NULL);
-    LOG_DBG("D2D RX: Forwarded secondary foot data to legacy BLE service");
 #endif
 
     return BT_GATT_ITER_CONTINUE;
