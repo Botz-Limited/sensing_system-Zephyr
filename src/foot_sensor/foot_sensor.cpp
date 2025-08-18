@@ -78,7 +78,7 @@ extern struct k_msgq wifi_msgq;         // For sending to wifi module
 static constexpr uint32_t US_PER_SECOND = 1000000UL;
 static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
 static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_NORMAL =
-    80; // normal sampling rate (80 Hz)
+    100; // normal sampling rate (100 Hz)
 static constexpr uint8_t SAADC_SAMPLE_RATE_HZ_CALIBRATION =
     200; // Higher rate for quick calibration
 
@@ -218,6 +218,14 @@ if (!device_is_ready(temp_dev)) {
 
   LOG_INF("Foot Sensor Module Initialized");
 
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+  // Secondary device: auto-start logging after initialization
+  // The secondary device doesn't receive start_activity events from the phone
+  // so we need to auto-enable logging for D2D data transmission
+  atomic_set(&logging_active, 1);
+  LOG_INF("Secondary device: Auto-enabled foot sensor logging for D2D transmission");
+#endif
+
   module_set_state(MODULE_STATE_READY);
 }
 
@@ -230,7 +238,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
   // MODIFICATION: Removed 'static uint16_t buf_req_evt_counter = 0;'
   // as it's no longer used for limiting continuous sampling.
 
-  uint16_t samples_number = 0;
+  uint16_t samples_number = 8;
 
   int16_t *raw_adc_data = NULL;
 
@@ -267,7 +275,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
     break;
 
   case NRFX_SAADC_EVT_DONE:
-    samples_number = p_event->data.done.size;
+    samples_number = 8; // Fixed: added missing semicolon
     // Assign the buffer to our new uint16_t pointer
     raw_adc_data = (int16_t *)p_event->data.done.p_buffer;
 
@@ -323,7 +331,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
         // Rate limiting for Bluetooth: Send at 10Hz instead of 80Hz
         // SAADC runs at 80Hz, so send every 8th sample to achieve 10Hz
         static uint8_t sample_counter = 0;
-        const uint8_t SAMPLES_TO_SKIP = 8; // 80Hz / 8 = 10Hz
+        const uint8_t SAMPLES_TO_SKIP = 20; // 80Hz / 8 = 10Hz
         
         generic_message_t msg;
 

@@ -108,7 +108,7 @@ config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
 
 config BLUETOOTH_MODULE_STACK_SIZE
 	int "BTH  module thread stack size"
-	default 3072
+	default 8192
 
 config BLUETOOTH_MODULE_PRIORITY
 	int "BTH module thread priority"

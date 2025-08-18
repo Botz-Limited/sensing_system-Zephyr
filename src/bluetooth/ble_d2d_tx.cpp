@@ -195,11 +195,8 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
     if (!attr)
     {
         LOG_DBG("Discovery complete for state %d", discovery_state);
-        if (discovery_state != DISCOVER_COMPLETE)
-        {
-            // Continue with next discovery step
-            continue_discovery();
-        }
+        // Always call continue_discovery to handle completion
+        continue_discovery();
         return BT_GATT_ITER_STOP;
     }
 
@@ -322,8 +319,15 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
                 d2d_handles.weight_calibration_handle = bt_gatt_attr_value_handle(attr);
                 LOG_INF("Found weight calibration characteristic, handle: %u", d2d_handles.weight_calibration_handle);
             }
-            // Continue to D2D batch characteristic
-            discovery_state = DISCOVER_D2D_BATCH_CHAR;
+            // Check if we have essential characteristics - if so, complete discovery
+            // Some secondary devices may not have the newer D2D batch/conn param characteristics
+            if (d2d_handles.start_activity_handle != 0 && d2d_handles.stop_activity_handle != 0) {
+                LOG_INF("Essential characteristics found, completing discovery");
+                discovery_state = DISCOVER_COMPLETE;
+            } else {
+                // Continue to D2D batch characteristic
+                discovery_state = DISCOVER_D2D_BATCH_CHAR;
+            }
             break;
         case DISCOVER_D2D_BATCH_CHAR:
             if (bt_uuid_cmp(params->uuid, &d2d_rx_d2d_batch_uuid.uuid) == 0)
@@ -339,15 +343,8 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
                 d2d_handles.conn_param_control_handle = bt_gatt_attr_value_handle(attr);
                 LOG_INF("Found connection parameter control characteristic, handle: %u", d2d_handles.conn_param_control_handle);
             }
-            // Mark discovery as complete even if not all characteristics are found
+            // After the last characteristic, mark discovery as complete
             discovery_state = DISCOVER_COMPLETE;
-            d2d_handles.discovery_complete = true;
-            LOG_INF("D2D TX discovery complete - found %s characteristics",
-                    d2d_handles.conn_param_control_handle ? "all" : "most");
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-            // Process any queued commands (only available on primary device)
-            ble_d2d_tx_process_queued_commands();
-#endif
             break;
 
         default:
@@ -401,15 +398,16 @@ static void continue_discovery(void)
         return;
     }
 
-    // Check if we've discovered the essential characteristics and tried weight calibration
-    if (discovery_state > DISCOVER_CONN_PARAM_CONTROL_CHAR && 
+    // Check if we've discovered the essential characteristics
+    // Complete discovery if we have the essential handles, even if we're stuck on later characteristics
+    if ((discovery_state >= DISCOVER_WEIGHT_CALIBRATION_CHAR) &&
         d2d_handles.start_activity_handle != 0 &&
         d2d_handles.stop_activity_handle != 0)
     {
         // We have the essential characteristics, mark as complete
         discovery_state = DISCOVER_COMPLETE;
         d2d_handles.discovery_complete = true;
-        LOG_INF("D2D TX discovery complete with essential characteristics");
+        LOG_INF("D2D TX discovery complete with essential characteristics (stopped at state %d)", discovery_state);
         
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Process any queued commands
@@ -462,6 +460,16 @@ static void continue_discovery(void)
         case DISCOVER_CONN_PARAM_CONTROL_CHAR:
             discover_params.uuid = &d2d_rx_conn_param_control_uuid.uuid;
             break;
+        case DISCOVER_COMPLETE:
+            // Mark discovery as complete
+            d2d_handles.discovery_complete = true;
+            LOG_INF("D2D TX discovery complete - found %s characteristics",
+                    d2d_handles.conn_param_control_handle ? "all" : "most");
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            // Process any queued commands (only available on primary device)
+            ble_d2d_tx_process_queued_commands();
+#endif
+            return;
         default:
             LOG_INF("Discovery sequence complete");
             return;

@@ -21,6 +21,10 @@
 
 LOG_MODULE_REGISTER(d2d_tx_svc, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
+// Define the globals that were previously incorrectly defined as static in header
+d2d_pending_sample_t pending_sample {};
+d2d_sample_batch_t d2d_batch_buffer = {};
+
 // Service UUID: 75ad68d6-200c-437d-98b5-061862076c5f
 static struct bt_uuid_128 d2d_tx_service_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x75ad68d6, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
@@ -110,10 +114,8 @@ static bool weight_measurement_notify_enabled = false;
 static bool d2d_batch_notify_enabled = false;
 static bool battery_level_notify_enabled = false;
 static bool metrics_notify_enabled = false;
-static foot_samples_t foot_sensor_char_value = {0};
-
-// Data buffers - using fixed-point versions for BLE transmission
-static foot_samples_t foot_sensor_data;
+// Remove unnecessary static buffers - we'll send data directly
+static foot_samples_t last_foot_sensor_data = {0};  // Keep last sent data for read callback
 static bhi360_3d_mapping_fixed_t bhi360_data1_fixed;
 static bhi360_step_count_fixed_t bhi360_data2_fixed;
 static bhi360_linear_accel_fixed_t bhi360_data3_fixed;
@@ -366,14 +368,14 @@ static ssize_t read_d2d_batch(struct bt_conn *conn, const struct bt_gatt_attr *a
 static ssize_t read_foot_sensor(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                                 uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &foot_sensor_data, sizeof(foot_sensor_data));
+    // Return the last sent foot sensor data
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &last_foot_sensor_data, sizeof(last_foot_sensor_data));
 }
 
 static ssize_t read_status(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                            uint16_t offset)
 {
-    const foot_samples_t *value_to_read = static_cast<const foot_samples_t *>(attr->user_data);
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, value_to_read, sizeof(foot_samples_t));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &device_status, sizeof(device_status));
 }
 
 // GATT Service Definition - Only for secondary device
@@ -383,7 +385,7 @@ BT_GATT_SERVICE_DEFINE(
 
     // Foot sensor data characteristic (notify)
     BT_GATT_CHARACTERISTIC(&d2d_foot_sensor_uuid.uuid, BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_READ,
-                           read_foot_sensor, NULL, static_cast<void *>(&foot_sensor_char_value)),
+                           read_foot_sensor, NULL, NULL),
     BT_GATT_CCC(foot_sensor_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // BHI360 3D mapping data (notify)
@@ -524,31 +526,36 @@ static void try_combine_and_buffer(void)
 int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
 {
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    foot_samples_t temp_foot_data;
-    // 1. Get the current epoch timestamp from your RTC module
-    // uint32_t current_epoch = get_current_epoch_time(); // TODO: Use this when timestamp is needed
-
     if (!primary_conn)
     {
         LOG_WRN("D2D TX: Cannot send foot sensor data - no connection");
         return -ENOTCONN;
     }
+    
     if (!foot_sensor_notify_enabled)
     {
         // Force enable since we know subscriptions are working
         foot_sensor_notify_enabled = true;
+        LOG_INF("D2D TX: Force-enabled foot sensor notifications");
     }
-    memcpy(temp_foot_data.values, samples->values, sizeof(samples->values));
-    memcpy(&foot_sensor_char_value, &temp_foot_data, sizeof(foot_samples_t));
+    
+    // Save the data for read callbacks
+    memcpy(&last_foot_sensor_data, samples, sizeof(foot_samples_t));
+    
+    // Log the values we're about to send
+    LOG_INF("D2D TX: Sending foot sensor data - values[0-7]: %u %u %u %u %u %u %u %u",
+            samples->values[0], samples->values[1],
+            samples->values[2], samples->values[3],
+            samples->values[4], samples->values[5],
+            samples->values[6], samples->values[7]);
+    
+    // Simply send the raw data directly without any copying or conversion
     // The foot sensor characteristic is at a fixed index in the service definition
     const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[1];
-    struct bt_conn_info info;
-    if (bt_conn_get_info(primary_conn, &info) == 0)
-    {
-        LOG_DBG("Connection state before notify: type=%u, role=%u, state=%u", info.type, info.role, info.state);
-    }
-    int err = bt_gatt_notify(primary_conn, char_attr, static_cast<void *>(&foot_sensor_char_value),
-                             sizeof(foot_sensor_char_value));
+    
+    // Send the data directly from the input parameter
+    int err = bt_gatt_notify(primary_conn, char_attr, samples, sizeof(foot_samples_t));
+    
     if (err)
     {
         LOG_ERR("Failed to send foot sensor notification: %d", err);
@@ -565,11 +572,14 @@ int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
             LOG_ERR("Notifications not supported or not enabled");
         }
     }
-    // --- Batch buffering logic ---
-    pending_sample.foot = *samples;
-    pending_sample.foot_ready = true;
-    pending_sample.timestamp = k_uptime_get();
-    try_combine_and_buffer();
+    else
+    {
+        LOG_DBG("D2D TX: Foot sensor data sent successfully");
+    }
+    
+    // Remove the batching logic since we won't need it after legacy removal
+    // Just keep it simple - send raw data directly
+    
     return err;
 #else
     // Primary device doesn't have this service

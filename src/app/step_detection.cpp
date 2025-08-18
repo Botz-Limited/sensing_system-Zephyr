@@ -23,8 +23,10 @@ LOG_MODULE_REGISTER(step_detection, LOG_LEVEL_DBG);
 #define MIN_FLIGHT_TIME_MS     20.0f    // Minimum flight time
 
 // Sensor position constants (in mm from heel center)
-static const float sensor_x_positions[8] = {-15, 15, -20, 0, 20, -15, 0, 15};
-static const float sensor_y_positions[8] = {-80, -80, -40, -40, -40, 20, 20, 20};
+// Correct mapping based on actual sensor layout:
+// [0,1,2,3] = forefoot (toe area), [4,5] = midfoot (arch), [6,7] = heel
+static const float sensor_x_positions[8] = {0, -15, 0, 15, -10, 10, -15, 15};
+static const float sensor_y_positions[8] = {80, 60, 60, 60, 0, 0, -80, -80};
 
 // Global state variables
 StepDetectionState left_foot_state;
@@ -62,12 +64,12 @@ void step_detection_init(void)
 // Calculate pressure distribution metrics
 void calculate_pressure_metrics(float pressure_values[8], PressureMetrics* metrics)
 {
-    // Calculate regional pressures
-    float heel = pressure_values[HEEL_MEDIAL] + pressure_values[HEEL_LATERAL];
-    float midfoot = pressure_values[MIDFOOT_MEDIAL] + pressure_values[MIDFOOT_CENTER] + 
-                   pressure_values[MIDFOOT_LATERAL];
-    float forefoot = pressure_values[FOREFOOT_MEDIAL] + pressure_values[FOREFOOT_CENTER] + 
-                    pressure_values[FOREFOOT_LATERAL];
+    // Calculate regional pressures using correct sensor mapping:
+    // [0,1,2,3] = forefoot, [4,5] = midfoot, [6,7] = heel
+    float forefoot = pressure_values[0] + pressure_values[1] +
+                    pressure_values[2] + pressure_values[3];
+    float midfoot = pressure_values[4] + pressure_values[5];
+    float heel = pressure_values[6] + pressure_values[7];
     
     metrics->total_force = heel + midfoot + forefoot;
     
@@ -88,11 +90,13 @@ void calculate_pressure_metrics(float pressure_values[8], PressureMetrics* metri
         metrics->cop_x = x_weighted / metrics->total_force;
         metrics->cop_y = y_weighted / metrics->total_force;
         
-        // Calculate medial-lateral ratio
-        float medial = pressure_values[HEEL_MEDIAL] + pressure_values[MIDFOOT_MEDIAL] + 
-                      pressure_values[FOREFOOT_MEDIAL];
-        float lateral = pressure_values[HEEL_LATERAL] + pressure_values[MIDFOOT_LATERAL] + 
-                       pressure_values[FOREFOOT_LATERAL];
+        // Calculate medial-lateral ratio using correct mapping:
+        // Medial: [0] big toe med, [3] front med, [4] arch med, [7] heel med
+        // Lateral: [1] front lat, [2] front ctr, [5] arch lat, [6] heel lat
+        float medial = pressure_values[0] + pressure_values[3] +
+                      pressure_values[4] + pressure_values[7];
+        float lateral = pressure_values[1] + pressure_values[2] +
+                       pressure_values[5] + pressure_values[6];
         
         metrics->medial_lateral_ratio = medial / (medial + lateral);
     } else {
@@ -108,11 +112,12 @@ void calculate_pressure_metrics(float pressure_values[8], PressureMetrics* metri
 // Detect foot strike pattern
 uint8_t detect_strike_pattern(float pressure_values[8])
 {
-    float heel = pressure_values[HEEL_MEDIAL] + pressure_values[HEEL_LATERAL];
-    float midfoot = pressure_values[MIDFOOT_MEDIAL] + pressure_values[MIDFOOT_CENTER] + 
-                   pressure_values[MIDFOOT_LATERAL];
-    float forefoot = pressure_values[FOREFOOT_MEDIAL] + pressure_values[FOREFOOT_CENTER] + 
-                    pressure_values[FOREFOOT_LATERAL];
+    // Using correct sensor mapping:
+    // [0,1,2,3] = forefoot, [4,5] = midfoot, [6,7] = heel
+    float forefoot = pressure_values[0] + pressure_values[1] +
+                    pressure_values[2] + pressure_values[3];
+    float midfoot = pressure_values[4] + pressure_values[5];
+    float heel = pressure_values[6] + pressure_values[7];
     float total = heel + midfoot + forefoot;
     
     if (total < CONTACT_THRESHOLD_N) {

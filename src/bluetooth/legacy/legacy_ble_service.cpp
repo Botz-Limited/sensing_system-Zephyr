@@ -62,20 +62,39 @@ static uint8_t bno_notify_enabled;
 static uint8_t config_notify_enabled;
 
 // Legacy streaming control variables
-static bool legacy_streaming_enabled = true;
+static bool legacy_streaming_enabled = false;  // Start disabled until D2D is ready
 static uint8_t legacy_mode = 0; // 0=off, 1=I1, 2=I2, 3=I3
+static bool legacy_thread_started = false;  // Track if thread has been started
+static bool legacy_notifications_waiting = false;  // Track if notifications are waiting for D2D
+
+// D2D connection status (moved here so it's available early)
+static bool d2d_connected = false;
 
 extern "C" void insole_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value) {
     ARG_UNUSED(attr);
     insole_notify_enabled = (value == BT_GATT_CCC_NOTIFY);
     LOG_INF("Legacy BLE notifications %s", insole_notify_enabled ? "enabled" : "disabled");
     
-    // Auto-start streaming immediately when notifications are enabled (exactly like old firmware)
+    // Only auto-start if D2D is connected (for primary) or we're secondary device
     if (insole_notify_enabled) {
-        // Start streaming immediately in I2 mode (combined data) like old firmware
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // For primary device, only start if D2D is already connected
+        if (d2d_connected) {
+            // Start streaming in I2 mode (combined data) like old firmware
+            legacy_mode = 2;
+            legacy_streaming_enabled = true;
+            LOG_INF("Auto-starting legacy streaming (D2D connected)");
+        } else {
+            LOG_INF("Legacy notifications enabled but waiting for D2D connection before starting");
+            legacy_notifications_waiting = true;  // Will be started when D2D connects
+            // Don't start streaming yet
+        }
+#else
+        // Secondary device can start immediately (no D2D dependency)
         legacy_mode = 2;
         legacy_streaming_enabled = true;
-        LOG_INF("Auto-starting legacy streaming (mimicking old firmware behavior)");
+        LOG_INF("Secondary device: Auto-starting legacy streaming");
+#endif
         
         // Automatically start sensor activity to ensure sensors provide data
         // This mimics the old firmware where sensors were always active
@@ -210,24 +229,40 @@ static uint8_t find_attr_cb(const struct bt_gatt_attr *attr, uint16_t handle,
     return BT_GATT_ITER_CONTINUE;
 }
 
-// D2D connection status
-static bool d2d_connected = false;
-
 void legacy_ble_set_d2d_connection_status(bool connected) {
     d2d_connected = connected;
     LOG_INF("Legacy BLE: D2D connection status updated to %s", connected ? "connected" : "disconnected");
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // If D2D just connected and legacy notifications were waiting, start streaming now
+    if (connected && legacy_notifications_waiting && insole_notify_enabled) {
+        LOG_INF("D2D connected - starting delayed legacy streaming");
+        legacy_mode = 2;
+        legacy_streaming_enabled = true;
+        legacy_notifications_waiting = false;
+    } else if (!connected && legacy_streaming_enabled) {
+        // If D2D disconnected, stop streaming (but keep notifications enabled)
+        LOG_WRN("D2D disconnected - pausing legacy streaming");
+        legacy_streaming_enabled = false;
+        // Don't change legacy_mode so we can resume with same mode
+    }
+#endif
 }
 
 void legacy_ble_update_secondary_data(const foot_samples_t *foot_data, const bhi360_3d_mapping_t *imu_data) {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE) && IS_ENABLED(CONFIG_LEGACY_BLE_ENABLED)
     if (foot_data) {
         memcpy(&secondary_foot_data, foot_data, sizeof(foot_samples_t));
+        LOG_INF("Legacy BLE: Updated secondary foot data: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
+                foot_data->values[0], foot_data->values[1],
+                foot_data->values[2], foot_data->values[3],
+                foot_data->values[4], foot_data->values[5],
+                foot_data->values[6], foot_data->values[7]);
     }
     if (imu_data) {
         memcpy(&secondary_imu_data, imu_data, sizeof(bhi360_3d_mapping_t));
     }
     secondary_data_updated = true;
-    LOG_DBG("Updated secondary data for legacy BLE");
 #endif
 }
 
@@ -268,7 +303,7 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
         if (legacy_streaming_enabled) {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // Handle primary data
-         // if (insole_notify_enabled && insole_data_attr) {
+            if (insole_notify_enabled && insole_data_attr) {
                 uint8_t buffer[107]; // Match old firmware: 106 + checksum
                 size_t len = pack_legacy_data(buffer);
                 
@@ -276,12 +311,12 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
                 if (err < 0 && err != -ENOTCONN) {
                     LOG_WRN("Legacy BLE notify error: %d", err);
                 }
-          //}
+            }
 
             // Handle secondary data on primary
             if (insole_secondary_notify_enabled && insole_secondary_data_attr) {
                 if (d2d_connected && secondary_data_updated) {
-                    // Send actual secondary data
+                    // Send the latest secondary data when D2D is connected and data is updated
                     uint8_t buffer[107]; // Match old firmware: 106 + checksum
                     size_t len = pack_secondary_data(buffer);
                     
@@ -289,8 +324,8 @@ static void legacy_thread_func(void *p1, void *p2, void *p3) {
                     if (err < 0 && err != -ENOTCONN) {
                         LOG_WRN("Secondary Legacy BLE notify error: %d", err);
                     }
-                    secondary_data_updated = false;
-                } else {
+                    // Keep the flag set so we continue sending the latest data
+                } else if (!d2d_connected) {
                     // Send zero-filled packet when secondary is disconnected
                     send_zero_filled_secondary_packet();
                 }
@@ -456,7 +491,12 @@ static size_t pack_secondary_data(uint8_t *buffer) {
     buffer[index++] = second;
 
     // 2. Insole data from secondary (16 bytes: 8x uint16_t, MSB first)
-    // Note: Remove random data generation for production use
+    // foot_samples_t has all 8 channels
+    LOG_DBG("Packing secondary data: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
+            secondary_foot_data.values[0], secondary_foot_data.values[1],
+            secondary_foot_data.values[2], secondary_foot_data.values[3],
+            secondary_foot_data.values[4], secondary_foot_data.values[5],
+            secondary_foot_data.values[6], secondary_foot_data.values[7]);
     for (int i = 0; i < 8; i++) {
         buffer[index++] = (secondary_foot_data.values[i] >> 8) & 0xFF;
         buffer[index++] = secondary_foot_data.values[i] & 0xFF;
@@ -665,8 +705,21 @@ static ssize_t config_write(struct bt_conn *conn, const struct bt_gatt_attr *att
 
 void legacy_ble_init(void) {
     #if CONFIG_LEGACY_BLE_ENABLED
-    // Start sensor processing by default for legacy mode BEFORE starting the thread
-    // This ensures sensor data is ready even before BLE connection
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // For primary device, don't start anything yet - wait for D2D connection
+    LOG_INF("Legacy BLE service initialized (primary) - waiting for D2D connection before starting");
+    
+    // Still create the thread but with longer delay to give D2D time to connect
+    k_thread_create(&legacy_thread_data, legacy_stack, LEGACY_THREAD_STACK_SIZE,
+                    legacy_thread_func, NULL, NULL, NULL,
+                    LEGACY_THREAD_PRIORITY, 0, K_MSEC(5000));
+    legacy_thread_started = true;
+#else
+    // Secondary device can start sensor processing immediately
+    LOG_INF("Legacy BLE service initialized (secondary) - starting sensor processing");
+    
+    // Start sensor processing for secondary device
     generic_message_t msg = {};
     msg.sender = SENDER_BTH;
     msg.type = MSG_TYPE_COMMAND;
@@ -681,15 +734,15 @@ void legacy_ble_init(void) {
     struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
     APP_EVENT_SUBMIT(motion_evt);
     
-    LOG_INF("Legacy BLE: Started sensor activities and processing");
+    LOG_INF("Secondary: Started sensor activities and processing");
     
-    // Create the thread with a 3-second start delay to allow sensors to initialize
-    // and start providing data before we begin reading
+    // Create the thread with a 3-second start delay
     k_thread_create(&legacy_thread_data, legacy_stack, LEGACY_THREAD_STACK_SIZE,
                     legacy_thread_func, NULL, NULL, NULL,
                     LEGACY_THREAD_PRIORITY, 0, K_MSEC(3000));
+    legacy_thread_started = true;
+#endif
     
-    LOG_INF("Legacy BLE service initialized - thread will start in 3 seconds");
     #endif
 }
 

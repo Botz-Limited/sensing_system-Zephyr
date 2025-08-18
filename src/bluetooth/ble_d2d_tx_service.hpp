@@ -33,8 +33,9 @@ typedef struct {
 } d2d_pending_sample_t;
 
 
-static d2d_pending_sample_t pending_sample {};
-static d2d_sample_batch_t d2d_batch_buffer = {};
+// These must be extern to avoid multiple definitions
+extern d2d_pending_sample_t pending_sample;
+extern d2d_sample_batch_t d2d_batch_buffer;
 int d2d_tx_notify_d2d_batch(const d2d_sample_batch_t *batch);
 
 /**

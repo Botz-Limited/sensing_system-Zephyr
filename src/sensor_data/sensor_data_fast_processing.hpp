@@ -45,10 +45,11 @@ typedef enum {
 } contact_phase_t;
 
 // Pressure region indices
+// Correct mapping: [0-3] = forefoot, [4-5] = midfoot, [6-7] = heel
 typedef enum {
-    REGION_HEEL = 0,       // Sensors 0-1
-    REGION_MIDFOOT,        // Sensors 2-4
-    REGION_FOREFOOT        // Sensors 5-7
+    REGION_FOREFOOT = 0,   // Sensors 0-3
+    REGION_MIDFOOT,        // Sensors 4-5
+    REGION_HEEL            // Sensors 6-7
 } pressure_region_t;
 
 /**
@@ -99,10 +100,11 @@ ALWAYS_INLINE uint16_t detect_peak_force(const uint16_t pressure[8])
  */
 ALWAYS_INLINE contact_phase_t detect_contact_phase(const uint16_t pressure[8], bool was_in_contact)
 {
-    // Calculate regional pressures
-    uint32_t heel = pressure[0] + pressure[1];
-    uint32_t midfoot = pressure[2] + pressure[3] + pressure[4];
-    uint32_t forefoot = pressure[5] + pressure[6] + pressure[7];
+    // Calculate regional pressures using correct mapping
+    // [0-3] = forefoot, [4-5] = midfoot, [6-7] = heel
+    uint32_t forefoot = pressure[0] + pressure[1] + pressure[2] + pressure[3];
+    uint32_t midfoot = pressure[4] + pressure[5];
+    uint32_t heel = pressure[6] + pressure[7];
     uint32_t total = heel + midfoot + forefoot;
     
     // No contact
@@ -171,9 +173,11 @@ ALWAYS_INLINE void calculate_pressure_distribution(const uint16_t pressure[8],
                                                   uint8_t *mid_pct,
                                                   uint8_t *fore_pct)
 {
-    uint32_t heel = pressure[0] + pressure[1];
-    uint32_t mid = pressure[2] + pressure[3] + pressure[4];
-    uint32_t fore = pressure[5] + pressure[6] + pressure[7];
+    // Using correct sensor mapping:
+    // [0-3] = forefoot, [4-5] = midfoot, [6-7] = heel
+    uint32_t fore = pressure[0] + pressure[1] + pressure[2] + pressure[3];
+    uint32_t mid = pressure[4] + pressure[5];
+    uint32_t heel = pressure[6] + pressure[7];
     uint32_t total = heel + mid + fore;
     
     if (LIKELY(total > 0)) {

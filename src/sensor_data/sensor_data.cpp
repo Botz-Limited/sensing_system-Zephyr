@@ -16,6 +16,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+// Include gait_events.h early to get imu_data_t definition
+#include <gait_events.h>
+
 #include "sensor_data_enhanced_algorithms.hpp"
 #include "sensor_data_fast_processing.hpp"
 #include "sensor_data_ring_buffer.hpp"
@@ -62,7 +65,9 @@ static foot_data_ring_t foot_ring = {.data = {{0}},
                                      .count = ATOMIC_INIT(0)};
 static imu_data_ring_t imu_ring = {
     .data = {{0}},
-    .write_idx = 0, .read_idx = 0, .count = ATOMIC_INIT(0)};
+    .write_idx = 0,
+    .read_idx = 0,
+    .count = ATOMIC_INIT(0)};
 static command_ring_t command_ring = {
     .data = {{0}}, .write_idx = 0, .read_idx = 0, .count = ATOMIC_INIT(0)};
 
@@ -83,6 +88,16 @@ extern struct k_msgq
 
 // Module state
 static bool module_initialized = false;
+
+// External functions from sensor_data_events.cpp for event-driven gait parameters
+extern "C" {
+    void sensor_data_events_init(void);
+    void sensor_data_add_to_event_buffer(const foot_samples_t *foot_data,
+                                         const imu_data_t *imu_data,
+                                         float timestamp);
+    void sensor_data_1hz_timer_callback(void);
+    void sensor_data_process_received_metrics(const d2d_metrics_packet_t *metrics);
+}
 static atomic_t processing_active = ATOMIC_INIT(0);
 
 // Sensor data state
@@ -326,6 +341,10 @@ static void sensor_data_init(void) {
   // Start periodic sampling work at 80Hz
   k_work_schedule_for_queue(&sensor_data_work_q, &periodic_sample_work,
                             K_MSEC(12));
+  
+  // Initialize event-driven gait parameter system
+  sensor_data_events_init();
+  LOG_INF("Gait events system initialized with NON-BLOCKING buffer");
 
   // Initialize synchronization
   sensor_data_sync_init();
@@ -509,13 +528,18 @@ static void sensor_data_thread_fn(void *arg1, void *arg2, void *arg3) {
         }
         break;
         
-      case MSG_TYPE_D2D_METRICS:
-        // Process D2D metrics parameters for bilateral calculations
+      case MSG_TYPE_D2D_METRICS: {
+        // Process received D2D metrics from secondary
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         process_secondary_parameters(&msg.data.d2d_metrics);
         LOG_DBG("Processed D2D metrics parameters for bilateral calculations");
 #endif
+        // Also process for event-based metrics
+        const d2d_metrics_packet_t *metrics = &msg.data.d2d_metrics;
+        sensor_data_process_received_metrics(metrics);
+        LOG_DBG("Processed D2D event-based metrics from secondary");
         break;
+      }
 
       default:
         LOG_WRN("Received unsupported message type %d from %s", msg.type,
@@ -541,9 +565,11 @@ static void process_foot_data_work_handler(struct k_work *work) {
    // LOG_WRN("Processing foot sensor data for foot %d on SECONDARY (expecting foot_id=0 for left)", foot_id);
 #endif
     // Log some raw values to verify data is non-zero
-   // LOG_WRN("Raw foot data: [0]=%u, [1]=%u, [2]=%u, [3]=%u",
+   // LOG_WRN("Raw foot data: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
    //         foot_data.values[0], foot_data.values[1],
-   //         foot_data.values[2], foot_data.values[3]);
+   //         foot_data.values[2], foot_data.values[3],
+   //         foot_data.values[4], foot_data.values[5],
+   //         foot_data.values[6], foot_data.values[7]);
 
     if (foot_id == 0) {
       // Left foot processing
@@ -561,9 +587,11 @@ static void process_foot_data_work_handler(struct k_work *work) {
       for (int i = 0; i < 8; i++) {
         sensor_state.left_pressure[i] = remapped_left[i];
       }
-      LOG_WRN("Updated left_pressure: [0]=%u, [1]=%u, [2]=%u, [3]=%u",
+      LOG_WRN("Updated left_pressure: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
               sensor_state.left_pressure[0], sensor_state.left_pressure[1],
-              sensor_state.left_pressure[2], sensor_state.left_pressure[3]);
+              sensor_state.left_pressure[2], sensor_state.left_pressure[3],
+              sensor_state.left_pressure[4], sensor_state.left_pressure[5],
+              sensor_state.left_pressure[6], sensor_state.left_pressure[7]);
 
       // Detect ground contact
       bool was_in_contact = sensor_state.left_foot_contact;
@@ -583,11 +611,13 @@ static void process_foot_data_work_handler(struct k_work *work) {
             detect_strike_pattern(heel_pct, mid_pct, fore_pct);
 
         // Calculate foot strike angle using IMU + pressure
+        // Correct mapping: [6,7] = heel, [0,1,2,3] = forefoot
         uint16_t heel_force =
-            sensor_state.left_pressure[0] + sensor_state.left_pressure[1];
-        uint16_t fore_force = sensor_state.left_pressure[5] +
-                              sensor_state.left_pressure[6] +
-                              sensor_state.left_pressure[7];
+            sensor_state.left_pressure[6] + sensor_state.left_pressure[7];
+        uint16_t fore_force = sensor_state.left_pressure[0] +
+                              sensor_state.left_pressure[1] +
+                              sensor_state.left_pressure[2] +
+                              sensor_state.left_pressure[3];
         sensor_state.left_strike_angle = calculate_foot_strike_angle(
             sensor_state.latest_quaternion, heel_force, fore_force);
       } else if (was_in_contact && !sensor_state.left_foot_contact) {
@@ -685,11 +715,13 @@ static void process_foot_data_work_handler(struct k_work *work) {
             detect_strike_pattern(heel_pct, mid_pct, fore_pct);
 
         // Calculate foot strike angle using IMU + pressure
+        // Correct mapping: [6,7] = heel, [0,1,2,3] = forefoot
         uint16_t heel_force =
-            sensor_state.right_pressure[0] + sensor_state.right_pressure[1];
-        uint16_t fore_force = sensor_state.right_pressure[5] +
-                              sensor_state.right_pressure[6] +
-                              sensor_state.right_pressure[7];
+            sensor_state.right_pressure[6] + sensor_state.right_pressure[7];
+        uint16_t fore_force = sensor_state.right_pressure[0] +
+                              sensor_state.right_pressure[1] +
+                              sensor_state.right_pressure[2] +
+                              sensor_state.right_pressure[3];
         sensor_state.right_strike_angle = calculate_foot_strike_angle(
             sensor_state.latest_quaternion, heel_force, fore_force);
       } else if (was_in_contact && !sensor_state.right_foot_contact) {
@@ -873,13 +905,51 @@ static void periodic_sample_work_handler(struct k_work *work) {
     if (stats.foot_data_dropped == 0 && stats.imu_data_dropped == 0) {
       int current_priority = k_thread_priority_get(k_current_get());
       if (current_priority <
-          sensor_data_priority) // Assuming lower number is higher priority
-      {
+          sensor_data_priority) { // Assuming lower number is higher priority
         k_thread_priority_set(k_current_get(), sensor_data_priority);
         LOG_INF("Restored sensor data thread priority to default %d",
                 sensor_data_priority);
       }
+      
+      // Add data to event buffer for gait event detection
+      foot_samples_t foot_data_for_events = {};
+      // Populate foot data based on which device we're on
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+      // Primary device has right foot data
+      for (int i = 0; i < 8; i++) {
+        foot_data_for_events.values[i] = sensor_state.right_pressure[i];
+      }
+#else
+      // Secondary device has left foot data
+      for (int i = 0; i < 8; i++) {
+        foot_data_for_events.values[i] = sensor_state.left_pressure[i];
+      }
+#endif
+      
+      // Add data to event buffer for gait parameter detection
+      imu_data_t imu_data = {
+        .quat_w = sensor_state.latest_quaternion[0],
+        .quat_x = sensor_state.latest_quaternion[1],
+        .quat_y = sensor_state.latest_quaternion[2],
+        .quat_z = sensor_state.latest_quaternion[3],
+        .gyro_x = sensor_state.latest_gyro[0],
+        .gyro_y = sensor_state.latest_gyro[1],
+        .gyro_z = sensor_state.latest_gyro[2],
+        .accel_x = sensor_state.latest_linear_acc[0],
+        .accel_y = sensor_state.latest_linear_acc[1],
+        .accel_z = sensor_state.latest_linear_acc[2]
+      };
+      sensor_data_add_to_event_buffer(&foot_data_for_events, &imu_data, k_uptime_get_32() / 1000.0f);
     }
+  }
+  
+  // Trigger optimized timer callback for event-based metrics transmission
+  // Process every 2 seconds instead of 1Hz to reduce CPU load and prevent D2D blocking
+  static uint32_t last_metrics_callback = 0;
+  uint32_t current = k_uptime_get_32();
+  if (current - last_metrics_callback >= 2000) {  // 0.5Hz instead of 1Hz
+    sensor_data_1hz_timer_callback();
+    last_metrics_callback = current;
   }
 
   // Reschedule for next sample (12.5ms ≈ 80Hz, using 12ms as approximation)
@@ -1599,11 +1669,13 @@ static void update_foot_state_from_d2d(const foot_samples_t *foot_data,
           detect_strike_pattern(heel_pct, mid_pct, fore_pct);
 
       // Calculate foot strike angle using IMU + pressure
+      // Correct mapping: [6,7] = heel, [0,1,2,3] = forefoot
       uint16_t heel_force =
-          sensor_state.left_pressure[0] + sensor_state.left_pressure[1];
-      uint16_t fore_force = sensor_state.left_pressure[5] +
-                            sensor_state.left_pressure[6] +
-                            sensor_state.left_pressure[7];
+          sensor_state.left_pressure[6] + sensor_state.left_pressure[7];
+      uint16_t fore_force = sensor_state.left_pressure[0] +
+                            sensor_state.left_pressure[1] +
+                            sensor_state.left_pressure[2] +
+                            sensor_state.left_pressure[3];
       sensor_state.left_strike_angle = calculate_foot_strike_angle(
           sensor_state.latest_quaternion, heel_force, fore_force);
     }
