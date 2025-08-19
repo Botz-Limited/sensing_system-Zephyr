@@ -23,6 +23,11 @@
 #include <string.h>
 #include <errno.h>
 
+// Extern declaration for D2D stop command function
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+extern "C" int ble_d2d_tx_send_stop_activity_command(uint8_t value);
+#endif
+
 #define M_PI_F 3.14159265358979323846f
 
 LOG_MODULE_REGISTER(legacy_ble, LOG_LEVEL_INF);
@@ -92,6 +97,19 @@ extern "C" void insole_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t
         APP_EVENT_SUBMIT(motion_evt);
         
         LOG_INF("Stopped sensor activity for legacy BLE");
+        
+        // IMPORTANT: Also send stop command to secondary device via D2D
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        if (d2d_connected) {
+            uint8_t stop_value = 1; // 1 = stop activity
+            int d2d_err = ble_d2d_tx_send_stop_activity_command(stop_value);
+            if (d2d_err == 0) {
+                LOG_INF("Sent stop activity command to secondary device via D2D");
+            } else {
+                LOG_WRN("Failed to send stop command to secondary: %d", d2d_err);
+            }
+        }
+#endif
     }
 }
 

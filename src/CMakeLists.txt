@@ -16,5 +16,4 @@ add_subdirectory(wifi)
 target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/gait_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/gait_advanced_features.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gait_events_safety.cpp
 )

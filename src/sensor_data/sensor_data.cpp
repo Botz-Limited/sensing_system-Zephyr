@@ -16,6 +16,14 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+// Add MIN/MAX macros if not defined
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 // Include gait_events.h early to get imu_data_t definition
 #include <gait_events.h>
 
@@ -109,8 +117,8 @@ static struct {
   // Contact tracking - store elapsed time in contact
   bool left_foot_contact;
   bool right_foot_contact;
-  uint16_t left_contact_elapsed_ms;  // Time spent in current contact
-  uint16_t right_contact_elapsed_ms; // Time spent in current contact
+  uint32_t left_contact_elapsed_ms;  // Time spent in current contact (changed to uint32_t)
+  uint32_t right_contact_elapsed_ms; // Time spent in current contact (changed to uint32_t)
   contact_phase_t left_phase;
   contact_phase_t right_phase;
 
@@ -973,24 +981,28 @@ static void process_sensor_sample(void) {
   }
   sensor_state.last_sample_time = current_time;
 
-  // Update contact elapsed times
+  // Update contact elapsed times with safety reset
   if (sensor_state.left_foot_contact) {
-    // Check for overflow before adding
-    if ((UINT16_MAX - sensor_state.left_contact_elapsed_ms) > delta_time_ms) {
-      sensor_state.left_contact_elapsed_ms += delta_time_ms;
-    } else {
-      // Saturate at max uint16_t (65.535 seconds)
-      sensor_state.left_contact_elapsed_ms = UINT16_MAX;
+    sensor_state.left_contact_elapsed_ms += delta_time_ms;
+    
+    // Reset if contact exceeds 5 seconds (stuck state)
+    if (sensor_state.left_contact_elapsed_ms > 5000) {
+      LOG_WRN("Left foot contact stuck at %u ms, forcing reset", sensor_state.left_contact_elapsed_ms);
+      sensor_state.left_contact_elapsed_ms = 0;
+      sensor_state.left_foot_contact = false;
+      sensor_state.left_phase = PHASE_NO_CONTACT;
     }
   }
 
   if (sensor_state.right_foot_contact) {
-    // Check for overflow before adding
-    if ((UINT16_MAX - sensor_state.right_contact_elapsed_ms) > delta_time_ms) {
-      sensor_state.right_contact_elapsed_ms += delta_time_ms;
-    } else {
-      // Saturate at max uint16_t (65.535 seconds)
-      sensor_state.right_contact_elapsed_ms = UINT16_MAX;
+    sensor_state.right_contact_elapsed_ms += delta_time_ms;
+    
+    // Reset if contact exceeds 5 seconds (stuck state)
+    if (sensor_state.right_contact_elapsed_ms > 5000) {
+      LOG_WRN("Right foot contact stuck at %u ms, forcing reset", sensor_state.right_contact_elapsed_ms);
+      sensor_state.right_contact_elapsed_ms = 0;
+      sensor_state.right_foot_contact = false;
+      sensor_state.right_phase = PHASE_NO_CONTACT;
     }
   }
 
@@ -1145,7 +1157,7 @@ static void process_sensor_sample(void) {
       consolidated.left_contact_duration_ms =
           (uint16_t)(sensor_state.left_foot_contact
                          ? 0
-                         : sensor_state.left_contact_elapsed_ms);
+                         : MIN(sensor_state.left_contact_elapsed_ms, 5000));
       consolidated.left_peak_force = sensor_state.left_peak_force_current;
       consolidated.left_loading_rate = sensor_state.left_loading_rate;
       consolidated.left_cop_x = sensor_state.left_cop_x;
@@ -1168,7 +1180,7 @@ static void process_sensor_sample(void) {
       consolidated.left_contact_duration_ms =
           (uint16_t)(sensor_state.left_foot_contact
                          ? 0
-                         : sensor_state.left_contact_elapsed_ms);
+                         : MIN(sensor_state.left_contact_elapsed_ms, 5000));
       consolidated.left_peak_force = sensor_state.left_peak_force_current;
       consolidated.left_loading_rate = sensor_state.left_loading_rate;
       consolidated.left_cop_x = sensor_state.left_cop_x;
@@ -1254,7 +1266,7 @@ static void process_sensor_sample(void) {
       buffered_primary_data.right_contact_duration_ms =
           (uint16_t)(sensor_state.right_foot_contact
                          ? 0
-                         : sensor_state.right_contact_elapsed_ms);
+                         : MIN(sensor_state.right_contact_elapsed_ms, 5000));
       buffered_primary_data.right_peak_force =
           sensor_state.right_peak_force_current;
       buffered_primary_data.right_loading_rate =
@@ -1307,7 +1319,7 @@ static void process_sensor_sample(void) {
   consolidated.right_contact_duration_ms =
       (uint16_t)(sensor_state.right_foot_contact
                      ? 0
-                     : sensor_state.right_contact_elapsed_ms);
+                     : MIN(sensor_state.right_contact_elapsed_ms, 5000));
   consolidated.right_peak_force = sensor_state.right_peak_force_current;
   consolidated.right_loading_rate = sensor_state.right_loading_rate;
   consolidated.right_cop_x = sensor_state.right_cop_x;
@@ -1349,7 +1361,7 @@ static void process_sensor_sample(void) {
   consolidated.left_contact_duration_ms =
       (uint16_t)(sensor_state.left_foot_contact
                      ? 0
-                     : sensor_state.left_contact_elapsed_ms);
+                     : MIN(sensor_state.left_contact_elapsed_ms, 5000));
   consolidated.left_peak_force = sensor_state.left_peak_force_current;
   consolidated.left_loading_rate = sensor_state.left_loading_rate;
   consolidated.left_cop_x = sensor_state.left_cop_x;
