@@ -9,6 +9,11 @@
 #include <string.h>
 #include <math.h>
 
+/* Include for isfinite() function */
+#ifdef __ZEPHYR__
+#include <zephyr/sys/math_extras.h>
+#endif
+
 LOG_MODULE_REGISTER(gait_advanced, LOG_LEVEL_INF);
 
 /* Constants */
@@ -93,10 +98,11 @@ void kalman_update(kalman_state_t *state, float measurement)
     state->P[1][1] = P11;
 }
 
-int kalman_fill_gaps(float *signal, int length, float threshold, 
+int kalman_fill_gaps(float *signal, int length, float threshold,
                      int max_gap_samples, float sampling_rate)
 {
-    if (!signal || length <= 0) {
+    if (!signal || length <= 0 || length > GAIT_BUFFER_SIZE_SAMPLES) {
+        LOG_ERR("Invalid parameters for Kalman gap filling: length=%d", length);
         return -1;
     }
     
@@ -224,8 +230,19 @@ void dilate_motion_mask(uint8_t *mask, int length, int dilation)
         return;
     }
     
-    /* Create temporary mask for dilation */
-    uint8_t temp_mask[GAIT_BUFFER_SIZE_SAMPLES];
+    /* Bounds check to prevent buffer overflow */
+    if (length > GAIT_BUFFER_SIZE_SAMPLES) {
+        LOG_ERR("Motion mask length %d exceeds buffer size %d", length, GAIT_BUFFER_SIZE_SAMPLES);
+        return;
+    }
+    
+    /* Allocate temporary mask on heap to prevent stack overflow */
+    uint8_t *temp_mask = (uint8_t *)k_malloc(length * sizeof(uint8_t));
+    if (!temp_mask) {
+        LOG_ERR("Failed to allocate memory for motion mask dilation");
+        return;
+    }
+    
     memcpy(temp_mask, mask, length * sizeof(uint8_t));
     
     /* Apply dilation: if any sample in window is 1, set center to 1 */
@@ -245,6 +262,9 @@ void dilate_motion_mask(uint8_t *mask, int length, int dilation)
         
         mask[i] = should_dilate ? 1 : 0;
     }
+    
+    /* Free allocated memory */
+    k_free(temp_mask);
 }
 
 /**
@@ -536,7 +556,19 @@ void quaternion_normalize(quaternion_t *q)
 {
     if (!q) return;
     
-    float norm = sqrtf(q->w * q->w + q->x * q->x + q->y * q->y + q->z * q->z);
+    float norm_sq = q->w * q->w + q->x * q->x + q->y * q->y + q->z * q->z;
+    
+    /* Check for NaN or Inf */
+    if (!isfinite(norm_sq)) {
+        LOG_ERR("Quaternion contains NaN or Inf, resetting to identity");
+        q->w = 1.0f;
+        q->x = 0.0f;
+        q->y = 0.0f;
+        q->z = 0.0f;
+        return;
+    }
+    
+    float norm = sqrtf(norm_sq);
     
     if (norm > QUATERNION_NORM_EPSILON) {
         float inv_norm = 1.0f / norm;
@@ -544,6 +576,13 @@ void quaternion_normalize(quaternion_t *q)
         q->x *= inv_norm;
         q->y *= inv_norm;
         q->z *= inv_norm;
+    } else {
+        /* Quaternion is too small, reset to identity to prevent issues */
+        LOG_WRN("Quaternion norm too small (%.6f), resetting to identity", norm);
+        q->w = 1.0f;
+        q->x = 0.0f;
+        q->y = 0.0f;
+        q->z = 0.0f;
     }
 }
 
@@ -730,24 +769,66 @@ void rolling_window_init(rolling_window_t *window, int max_size, uint32_t durati
     memset(window, 0, sizeof(rolling_window_t));
     window->max_size = MIN(max_size, 100);  /* Cap at 100 samples */
     window->window_duration_ms = duration_ms;
+    
+    /* Initialize timestamps to avoid uninitialized data issues */
+    for (int i = 0; i < window->max_size; i++) {
+        window->timestamps[i] = 0;
+        window->buffer[i] = 0.0f;
+    }
+    
+    window->head = 0;
+    window->tail = 0;
+    window->count = 0;
 }
 
 void rolling_window_add(rolling_window_t *window, float value, uint32_t timestamp)
 {
     if (!window) return;
     
-    /* Remove old samples outside window */
-    uint32_t cutoff_time = timestamp - window->window_duration_ms;
+    /* Validate timestamp to prevent issues */
+    if (timestamp == 0) {
+        LOG_WRN("Invalid timestamp 0 provided to rolling window");
+        return;
+    }
     
-    while (window->count > 0) {
+    /* Remove old samples outside window */
+    uint32_t cutoff_time = (timestamp > window->window_duration_ms) ?
+                          (timestamp - window->window_duration_ms) : 0;
+    
+    /* Add loop protection to prevent infinite loop */
+    int max_iterations = window->max_size + 1;
+    
+    while (window->count > 0 && max_iterations-- > 0) {
         int oldest_idx = window->tail;
-        if (window->timestamps[oldest_idx] >= cutoff_time) {
-            break;  /* Still within window */
+        
+        /* Bounds check to prevent invalid memory access */
+        if (oldest_idx < 0 || oldest_idx >= window->max_size) {
+            LOG_ERR("Rolling window corruption detected: tail=%d, max=%d",
+                    oldest_idx, window->max_size);
+            /* Reset window to recover */
+            window->tail = 0;
+            window->head = 0;
+            window->count = 0;
+            break;
+        }
+        
+        /* Check if timestamp is valid before comparison */
+        if (window->timestamps[oldest_idx] == 0 ||
+            window->timestamps[oldest_idx] >= cutoff_time) {
+            break;  /* Still within window or uninitialized */
         }
         
         /* Remove oldest */
         window->tail = (window->tail + 1) % window->max_size;
         window->count--;
+    }
+    
+    /* Check if we hit max iterations (indicates a problem) */
+    if (max_iterations <= 0) {
+        LOG_ERR("Rolling window cleanup exceeded max iterations - resetting");
+        window->tail = 0;
+        window->head = 0;
+        window->count = 0;
     }
     
     /* Add new value */

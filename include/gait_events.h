@@ -78,7 +78,23 @@ typedef struct {
     float min_pitch;             /* Minimum pitch during stride */
     float speed_anthropometric;  /* Speed from anthropometric model */
     uint32_t step_count;         /* Cumulative step count */
-    bool valid;                  /* Validity flag */
+    
+    /* Additional metrics for event-based processing */
+    int8_t pronation_at_ic;       /* Pronation angle at initial contact (degrees) */
+    int8_t max_pronation;         /* Maximum pronation during stance (degrees) */
+    int16_t cop_x_at_ic;          /* COP X at initial contact (mm) */
+    int16_t cop_y_at_ic;          /* COP Y at initial contact (mm) */
+    int16_t cop_x_at_to;          /* COP X at toe-off (mm) */
+    int16_t cop_y_at_to;          /* COP Y at toe-off (mm) */
+    float cop_path_length;        /* Total COP path length during stance (mm) */
+    uint8_t strike_pattern;       /* 0=unknown, 1=heel, 2=midfoot, 3=forefoot */
+    uint16_t loading_rate;        /* Peak loading rate (N/s) */
+    uint8_t arch_collapse_index;  /* Arch collapse during midstance (0-100) */
+    uint16_t cpei;                /* Center of Pressure Excursion Index */
+    uint16_t push_off_power;      /* Push-off power index */
+    uint16_t peak_pressure;       /* Peak total pressure during stance */
+    
+    bool valid;                   /* Validity flag */
 } gait_metrics_t;
 
 /* 3D velocity state for integration */

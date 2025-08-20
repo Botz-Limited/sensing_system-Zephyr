@@ -611,79 +611,25 @@ static void process_foot_data_work_handler(struct k_work *work) {
         // Just made contact - reset elapsed time
         sensor_state.left_contact_elapsed_ms = 0;
 
-        // Detect strike pattern at initial contact
-        uint8_t heel_pct, mid_pct, fore_pct;
-        calculate_pressure_distribution(sensor_state.left_pressure, &heel_pct,
-                                        &mid_pct, &fore_pct);
-        sensor_state.left_strike_pattern =
-            detect_strike_pattern(heel_pct, mid_pct, fore_pct);
-
-        // Calculate foot strike angle using IMU + pressure
-        // Correct mapping: [6,7] = heel, [0,1,2,3] = forefoot
-        uint16_t heel_force =
-            sensor_state.left_pressure[6] + sensor_state.left_pressure[7];
-        uint16_t fore_force = sensor_state.left_pressure[0] +
-                              sensor_state.left_pressure[1] +
-                              sensor_state.left_pressure[2] +
-                              sensor_state.left_pressure[3];
-        sensor_state.left_strike_angle = calculate_foot_strike_angle(
-            sensor_state.latest_quaternion, heel_force, fore_force);
+        // EVENT-BASED: Strike pattern and other metrics now calculated in gait_events
+        // Just reset basic tracking here
       } else if (was_in_contact && !sensor_state.left_foot_contact) {
-        // Just lost contact - elapsed time will be captured in next
-        // consolidation
+        // Just lost contact - elapsed time will be captured in next consolidation
       }
-
-      // Update contact phase
+  
+      // Update contact phase (still needed for state tracking)
       sensor_state.left_phase =
           detect_contact_phase(sensor_state.left_pressure, was_in_contact);
-
-      // Track peak force during contact
+  
+      // Track peak force during contact (needed for D2D)
       if (sensor_state.left_foot_contact) {
           uint16_t current_force = detect_peak_force(sensor_state.left_pressure);
           if (current_force > sensor_state.left_peak_force_current) {
               sensor_state.left_peak_force_current = current_force;
           }
-
-          // Calculate center of pressure (true for left foot)
-          calculate_center_of_pressure(sensor_state.left_pressure,
-                                      &sensor_state.left_cop_x,
-                                      &sensor_state.left_cop_y,
-                                      true);
-
-          // Calculate loading rate (only during loading phase)
-          if (sensor_state.left_phase == PHASE_LOADING) {
-              sensor_state.left_loading_rate = calculate_loading_rate(
-                  current_force, sensor_state.left_previous_force,
-                  12 // Adjusted to 12.5ms between samples at 80Hz, approximated as
-                     // 12ms
-              );
-          }
-          sensor_state.left_previous_force = current_force;
-
-          // Detect arch collapse
-          sensor_state.left_arch_collapse = detect_arch_collapse(
-              sensor_state.left_pressure, sensor_state.left_phase);
-
-          // Calculate CPEI (Center of Pressure Excursion Index)
-          sensor_state.left_cpei = calculate_cpei(sensor_state.left_pressure,
-                                                 sensor_state.left_cop_x,
-                                                 sensor_state.left_cop_y);
-
-          // Calculate push-off power (only during push-off phase)
-          if (sensor_state.left_phase == PHASE_PUSH_OFF) {
-              sensor_state.left_push_off_power = calculate_push_off_power(
-                  current_force,
-                  sensor_state.latest_gyro[1],  // Using y-axis gyro for push-off velocity estimation
-                  12  // Sample interval
-              );
-          }
       } else {
-          // Reset metrics when not in contact
+          // Reset peak force when not in contact
           sensor_state.left_peak_force_current = 0;
-          sensor_state.left_previous_force = 0;
-          sensor_state.left_loading_rate = 0;
-          sensor_state.left_cpei = 0;
-          sensor_state.left_push_off_power = 0;
       }
     } else {
       // Right foot processing (same logic)
@@ -715,79 +661,25 @@ static void process_foot_data_work_handler(struct k_work *work) {
         // Just made contact - reset elapsed time
         sensor_state.right_contact_elapsed_ms = 0;
 
-        // Detect strike pattern at initial contact
-        uint8_t heel_pct, mid_pct, fore_pct;
-        calculate_pressure_distribution(sensor_state.right_pressure, &heel_pct,
-                                        &mid_pct, &fore_pct);
-        sensor_state.right_strike_pattern =
-            detect_strike_pattern(heel_pct, mid_pct, fore_pct);
-
-        // Calculate foot strike angle using IMU + pressure
-        // Correct mapping: [6,7] = heel, [0,1,2,3] = forefoot
-        uint16_t heel_force =
-            sensor_state.right_pressure[6] + sensor_state.right_pressure[7];
-        uint16_t fore_force = sensor_state.right_pressure[0] +
-                              sensor_state.right_pressure[1] +
-                              sensor_state.right_pressure[2] +
-                              sensor_state.right_pressure[3];
-        sensor_state.right_strike_angle = calculate_foot_strike_angle(
-            sensor_state.latest_quaternion, heel_force, fore_force);
+        // EVENT-BASED: Strike pattern and other metrics now calculated in gait_events
+        // Just reset basic tracking here
       } else if (was_in_contact && !sensor_state.right_foot_contact) {
-        // Just lost contact - elapsed time will be captured in next
-        // consolidation
+        // Just lost contact - elapsed time will be captured in next consolidation
       }
-
-      // Update contact phase
+  
+      // Update contact phase (still needed for state tracking)
       sensor_state.right_phase =
           detect_contact_phase(sensor_state.right_pressure, was_in_contact);
-
-      // Track peak force during contact
+  
+      // Track peak force during contact (needed for D2D)
       if (sensor_state.right_foot_contact) {
           uint16_t current_force = detect_peak_force(sensor_state.right_pressure);
           if (current_force > sensor_state.right_peak_force_current) {
               sensor_state.right_peak_force_current = current_force;
           }
-
-          // Calculate center of pressure (false for right foot)
-          calculate_center_of_pressure(sensor_state.right_pressure,
-                                      &sensor_state.right_cop_x,
-                                      &sensor_state.right_cop_y,
-                                      false);
-
-          // Calculate loading rate (only during loading phase)
-          if (sensor_state.right_phase == PHASE_LOADING) {
-              sensor_state.right_loading_rate = calculate_loading_rate(
-                  current_force, sensor_state.right_previous_force,
-                  12 // Adjusted to 12.5ms between samples at 80Hz, approximated as
-                     // 12ms
-              );
-          }
-          sensor_state.right_previous_force = current_force;
-
-          // Detect arch collapse
-          sensor_state.right_arch_collapse = detect_arch_collapse(
-              sensor_state.right_pressure, sensor_state.right_phase);
-
-          // Calculate CPEI (Center of Pressure Excursion Index)
-          sensor_state.right_cpei = calculate_cpei(sensor_state.right_pressure,
-                                                  sensor_state.right_cop_x,
-                                                  sensor_state.right_cop_y);
-
-          // Calculate push-off power (only during push-off phase)
-          if (sensor_state.right_phase == PHASE_PUSH_OFF) {
-              sensor_state.right_push_off_power = calculate_push_off_power(
-                  current_force,
-                  sensor_state.latest_gyro[1],  // Using y-axis gyro for push-off velocity estimation
-                  12  // Sample interval
-              );
-          }
       } else {
-          // Reset metrics when not in contact
+          // Reset peak force when not in contact
           sensor_state.right_peak_force_current = 0;
-          sensor_state.right_previous_force = 0;
-          sensor_state.right_loading_rate = 0;
-          sensor_state.right_cpei = 0;
-          sensor_state.right_push_off_power = 0;
       }
     }
   }
@@ -849,15 +741,8 @@ static void process_imu_data_work_handler(struct k_work *work) {
     // Update step count
     sensor_state.latest_step_count = imu_data.step_count;
 
-    // Calculate enhanced pronation using IMU + pressure data
-    // This provides more accurate pronation assessment
-    sensor_state.left_pronation_deg = calculate_pronation_enhanced(
-        sensor_state.latest_quaternion, sensor_state.left_pressure,
-        sensor_state.left_foot_contact, true);  // true for left
-
-    sensor_state.right_pronation_deg = calculate_pronation_enhanced(
-        sensor_state.latest_quaternion, sensor_state.right_pressure,
-        sensor_state.right_foot_contact, false);  // false for right
+    // EVENT-BASED: Pronation now calculated in gait_events at IC and during stance
+    // Remove real-time calculation to save processing power
   }
 }
 

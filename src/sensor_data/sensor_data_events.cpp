@@ -175,7 +175,7 @@ void sensor_data_1hz_timer_callback(void)
             d2d_metric_set_valid(&d2d_packet, IDX_CADENCE);
             
             // Stride length
-            d2d_packet.metrics[IDX_STRIDE_LENGTH] = latest->stride_length;
+            d2d_packet.metrics[IDX_STRIDE_LENGTH] = latest->stride_length * 100.0f;  // Convert to cm
             d2d_metric_set_valid(&d2d_packet, IDX_STRIDE_LENGTH);
             
             // Vertical oscillation
@@ -185,6 +185,61 @@ void sensor_data_1hz_timer_callback(void)
             // Step count
             d2d_packet.metrics[IDX_STEP_COUNT] = (float)latest->step_count;
             d2d_metric_set_valid(&d2d_packet, IDX_STEP_COUNT);
+            
+            // Pronation (use max pronation during stance)
+            d2d_packet.metrics[IDX_PRONATION] = (float)latest->max_pronation;
+            d2d_metric_set_valid(&d2d_packet, IDX_PRONATION);
+            
+            // Peak pressure
+            d2d_packet.metrics[IDX_PEAK_PRESSURE] = (float)latest->peak_pressure;
+            d2d_metric_set_valid(&d2d_packet, IDX_PEAK_PRESSURE);
+            
+            // Center of pressure at toe-off (use most recent COP)
+            d2d_packet.metrics[IDX_COP_X] = (float)latest->cop_x_at_to;
+            d2d_metric_set_valid(&d2d_packet, IDX_COP_X);
+            
+            d2d_packet.metrics[IDX_COP_Y] = (float)latest->cop_y_at_to;
+            d2d_metric_set_valid(&d2d_packet, IDX_COP_Y);
+            
+            // Foot strike angle (derived from strike pattern)
+            float strike_angle = 0.0f;
+            switch (latest->strike_pattern) {
+                case 1: strike_angle = -15.0f; break;  // Heel strike
+                case 2: strike_angle = 0.0f; break;    // Midfoot
+                case 3: strike_angle = 15.0f; break;   // Forefoot
+                default: strike_angle = 0.0f; break;
+            }
+            d2d_packet.metrics[IDX_FOOT_STRIKE_ANGLE] = strike_angle;
+            d2d_metric_set_valid(&d2d_packet, IDX_FOOT_STRIKE_ANGLE);
+            
+            // Loading rate
+            d2d_packet.metrics[IDX_LOADING_RATE] = (float)latest->loading_rate;
+            d2d_metric_set_valid(&d2d_packet, IDX_LOADING_RATE);
+            
+            // Balance metrics (derived from COP path)
+            d2d_packet.metrics[IDX_BALANCE_INDEX] = 100.0f - MIN(latest->cop_path_length, 100.0f);  // Simple balance index
+            d2d_metric_set_valid(&d2d_packet, IDX_BALANCE_INDEX);
+            
+            // Stance/swing times (derived from GCT and duration)
+            d2d_packet.metrics[IDX_STANCE_TIME] = latest->gct * 1000.0f;  // Same as GCT in ms
+            d2d_metric_set_valid(&d2d_packet, IDX_STANCE_TIME);
+            
+            float swing_time = (latest->duration - latest->gct) * 1000.0f;  // ms
+            d2d_packet.metrics[IDX_SWING_TIME] = swing_time;
+            d2d_metric_set_valid(&d2d_packet, IDX_SWING_TIME);
+            
+            // Step length (half of stride length)
+            d2d_packet.metrics[IDX_STEP_LENGTH] = latest->stride_length * 50.0f;  // Convert to cm and divide by 2
+            d2d_metric_set_valid(&d2d_packet, IDX_STEP_LENGTH);
+            
+            // Fatigue indicators (simple heuristics for now)
+            // Could be enhanced with more sophisticated algorithms
+            d2d_packet.metrics[IDX_FATIGUE_INDEX] = (float)latest->arch_collapse_index;  // Use arch collapse as fatigue indicator
+            d2d_metric_set_valid(&d2d_packet, IDX_FATIGUE_INDEX);
+            
+            // Power metrics
+            d2d_packet.metrics[IDX_POWER] = (float)latest->push_off_power;
+            d2d_metric_set_valid(&d2d_packet, IDX_POWER);
             
             // Count valid metrics
             int valid_count = 0;

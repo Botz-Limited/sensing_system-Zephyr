@@ -100,7 +100,7 @@ extern "C" void insole_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t
         
         // IMPORTANT: Also send stop command to secondary device via D2D
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        if (d2d_connected) {
+       
             uint8_t stop_value = 1; // 1 = stop activity
             int d2d_err = ble_d2d_tx_send_stop_activity_command(stop_value);
             if (d2d_err == 0) {
@@ -108,7 +108,7 @@ extern "C" void insole_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t
             } else {
                 LOG_WRN("Failed to send stop command to secondary: %d", d2d_err);
             }
-        }
+        
 #endif
     }
 }

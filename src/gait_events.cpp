@@ -9,6 +9,10 @@
 #include <zephyr/logging/log.h>
 #include <math.h>
 
+/* Include sensor data processing headers for algorithm functions */
+#include "sensor_data/sensor_data_enhanced_algorithms.hpp"
+#include "sensor_data/sensor_data_fast_processing.hpp"
+
 LOG_MODULE_REGISTER(gait_events, LOG_LEVEL_INF);
 
 /* Constants */
@@ -16,8 +20,8 @@ LOG_MODULE_REGISTER(gait_events, LOG_LEVEL_INF);
 #define M_PI 3.14159265358979323846
 #endif
 #define GRAVITY_MS2 9.81f
-#define RAD_TO_DEG (180.0f / M_PI)
-#define DEG_TO_RAD (M_PI / 180.0f)
+#define RAD_TO_DEG (180.0 / M_PI)
+#define DEG_TO_RAD (M_PI / 180.0)
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define MAX(a,b) ((a) > (b) ? (a) : (b))
 #define ABS(x) ((x) < 0 ? -(x) : (x))
@@ -461,8 +465,8 @@ static void create_stride_segments(gait_event_detector_t *detector)
         detector->stride_count++;
         
         LOG_DBG("Stride segment %d: IC=%d (%.2fs), TO=%d (%.2fs), next_IC=%d (%.2fs)",
-                detector->stride_count - 1, ic1, segment->ic_timestamp,
-                to_idx, segment->to_timestamp, ic2, segment->next_ic_timestamp);
+                detector->stride_count - 1, ic1, (double)segment->ic_timestamp,
+                to_idx, (double)segment->to_timestamp, ic2, (double)segment->next_ic_timestamp);
     }
     
     // Only log if we have segments or periodically
@@ -505,6 +509,116 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
         int ic_buf = (start_idx + segment->ic_index) % GAIT_BUFFER_SIZE_SAMPLES;
         int to_buf = (start_idx + segment->to_index) % GAIT_BUFFER_SIZE_SAMPLES;
         int next_ic_buf = (start_idx + segment->next_ic_index) % GAIT_BUFFER_SIZE_SAMPLES;
+        
+        /* EVENT-BASED CALCULATIONS AT INITIAL CONTACT (IC) */
+        foot_samples_t *ic_foot = &detector->foot_buffer[ic_buf];
+        imu_data_t *ic_imu = &detector->imu_buffer[ic_buf];
+        
+        /* Calculate strike pattern at IC */
+        uint8_t heel_pct, mid_pct, fore_pct;
+        calculate_pressure_distribution(ic_foot->values, &heel_pct, &mid_pct, &fore_pct);
+        m->strike_pattern = detect_strike_pattern(heel_pct, mid_pct, fore_pct);
+        
+        /* Calculate pronation at IC */
+        float quat[4] = {ic_imu->quat_w, ic_imu->quat_x, ic_imu->quat_y, ic_imu->quat_z};
+        m->pronation_at_ic = calculate_pronation_enhanced(quat, ic_foot->values, true, !detector->is_primary);
+        
+        /* Calculate COP at IC */
+        calculate_center_of_pressure(ic_foot->values, &m->cop_x_at_ic, &m->cop_y_at_ic, !detector->is_primary);
+        
+        /* EVENT-BASED CALCULATIONS AT TOE-OFF (TO) */
+        foot_samples_t *to_foot = &detector->foot_buffer[to_buf];
+        
+        /* Calculate COP at TO */
+        calculate_center_of_pressure(to_foot->values, &m->cop_x_at_to, &m->cop_y_at_to, !detector->is_primary);
+        
+        /* STANCE PHASE CALCULATIONS (IC to TO) */
+        m->max_pronation = m->pronation_at_ic;
+        m->peak_pressure = 0;
+        float cop_path_length = 0.0f;
+        int16_t prev_cop_x = m->cop_x_at_ic;
+        int16_t prev_cop_y = m->cop_y_at_ic;
+        uint16_t prev_force = 0;
+        uint16_t max_loading_rate = 0;
+        contact_phase_t current_phase = PHASE_LOADING;
+        
+        /* Process each sample during stance phase */
+        for (int i = segment->ic_index; i <= segment->to_index; i++) {
+            int buf_idx = (start_idx + i) % GAIT_BUFFER_SIZE_SAMPLES;
+            foot_samples_t *foot = &detector->foot_buffer[buf_idx];
+            imu_data_t *imu = &detector->imu_buffer[buf_idx];
+            
+            /* Track peak pressure */
+            uint16_t total_pressure = 0;
+            for (int j = 0; j < 8; j++) {
+                total_pressure += foot->values[j];
+            }
+            if (total_pressure > m->peak_pressure) {
+                m->peak_pressure = total_pressure;
+            }
+            
+            /* Track maximum pronation during stance */
+            float quat_stance[4] = {imu->quat_w, imu->quat_x, imu->quat_y, imu->quat_z};
+            int8_t pronation = calculate_pronation_enhanced(quat_stance, foot->values, true, !detector->is_primary);
+            if (ABS(pronation) > ABS(m->max_pronation)) {
+                m->max_pronation = pronation;
+            }
+            
+            /* Calculate COP path length */
+            int16_t cop_x, cop_y;
+            calculate_center_of_pressure(foot->values, &cop_x, &cop_y, !detector->is_primary);
+            float dx = (float)(cop_x - prev_cop_x);
+            float dy = (float)(cop_y - prev_cop_y);
+            cop_path_length += sqrtf(dx * dx + dy * dy);
+            prev_cop_x = cop_x;
+            prev_cop_y = cop_y;
+            
+            /* Update contact phase */
+            bool was_in_contact = (i > segment->ic_index);
+            current_phase = detect_contact_phase(foot->values, was_in_contact);
+            
+            /* Calculate loading rate during loading phase */
+            if (current_phase == PHASE_LOADING && i > segment->ic_index) {
+                uint16_t current_force = detect_peak_force(foot->values);
+                if (prev_force > 0) {
+                    float dt = detector->timestamps[buf_idx] - detector->timestamps[(start_idx + i - 1) % GAIT_BUFFER_SIZE_SAMPLES];
+                    if (dt > 0 && dt < 0.1f) {
+                        uint16_t loading_rate = calculate_loading_rate(current_force, prev_force, (uint16_t)(dt * 1000));
+                        if (loading_rate > max_loading_rate) {
+                            max_loading_rate = loading_rate;
+                        }
+                    }
+                }
+                prev_force = current_force;
+            }
+            
+            /* Detect arch collapse during midstance */
+            if (current_phase == PHASE_MIDSTANCE) {
+                uint8_t arch_collapse = detect_arch_collapse(foot->values, current_phase);
+                if (arch_collapse > m->arch_collapse_index) {
+                    m->arch_collapse_index = arch_collapse;
+                }
+            }
+            
+            /* Calculate CPEI and push-off power during appropriate phases */
+            if (current_phase == PHASE_MIDSTANCE || current_phase == PHASE_PUSH_OFF) {
+                /* TODO: Implement calculate_cpei when function is available
+                m->cpei = calculate_cpei(foot->values, cop_x, cop_y);
+                */
+                m->cpei = 0;  // Placeholder until function is implemented
+                
+                if (current_phase == PHASE_PUSH_OFF) {
+                    uint16_t force = detect_peak_force(foot->values);
+                    /* TODO: Implement calculate_push_off_power when function is available
+                    m->push_off_power = calculate_push_off_power(force, imu->gyro_y, 12);
+                    */
+                    m->push_off_power = force / 10;  // Simple placeholder calculation
+                }
+            }
+        }
+        
+        m->cop_path_length = cop_path_length;
+        m->loading_rate = max_loading_rate;
         
         /* Calculate stride length from velocity integration */
         float stride_length = 0.0f;

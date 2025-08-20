@@ -16,9 +16,9 @@ FROM ubuntu:24.04
 
 COPY --from=go-build /usr/local /usr/local
 
-ARG NCS_VERSION=3.0.2
+ARG NCS_VERSION=3.1.0
 ARG NRFTOOLS_VERSION=10.24.2
-ARG ZSDK_VERSION=0.17.0
+ARG ZSDK_VERSION=0.17.4
 ARG GCC_VERSION=12
 ARG CMAKE_VERSION=4.0.2
 ARG CPPCHECK_VERSION=2.17.1
@@ -42,7 +42,7 @@ ENV PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig
 ENV OVMF_FD_PATH=/usr/share/ovmf/OVMF.fd
 ENV ZEPHYR_BASE=/home/ee/ncs/zephyr
 ENV CMAKE_PREFIX_PATH=/opt/toolchains
-ENV ZEPHYR_SDK_INSTALL_DIR=/opt/toolchains/zephyr-sdk-zephyr-sdk-${ZSDK_VERSION}
+ENV ZEPHYR_SDK_INSTALL_DIR=/opt/toolchains/zephyr-sdk-${ZSDK_VERSION}
 ENV NANOPB_PATH=/home/ee/ncs/modules/lib/nanopb
 ENV PATH="${PATH}:${NANOPB_PATH}/generator" 
 ENV PYTHONPATH="${NANOPB_PATH}/generator/proto"
