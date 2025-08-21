@@ -99,6 +99,7 @@ void sensor_data_1hz_timer_callback(void)
         return;
     }
     
+    
     // Try to lock mutex with timeout
     if (k_mutex_lock(&events_mutex, K_MSEC(10)) != 0) {
         // Failed to lock, skip this cycle
@@ -135,6 +136,7 @@ void sensor_data_1hz_timer_callback(void)
     }
     
     // Emergency buffer management - prevent overflow
+    // Skip this if we're not actively processing to avoid spurious warnings
     if (event_detector.buffer_full || event_detector.buffer_count > (GAIT_BUFFER_SIZE_SAMPLES * 3 / 4)) {
         LOG_WRN("Buffer nearing capacity (%d/%d) after safety check, clearing oldest 25%%",
                 event_detector.buffer_count, GAIT_BUFFER_SIZE_SAMPLES);

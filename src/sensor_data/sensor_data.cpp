@@ -841,7 +841,10 @@ static void periodic_sample_work_handler(struct k_work *work) {
   static uint32_t last_metrics_callback = 0;
   uint32_t current = k_uptime_get_32();
   if (current - last_metrics_callback >= 2000) {  // 0.5Hz instead of 1Hz
-    sensor_data_1hz_timer_callback();
+    // Only call timer callback when processing is active
+    if (atomic_get(&processing_active) == 1) {
+      sensor_data_1hz_timer_callback();
+    }
     last_metrics_callback = current;
   }
 
