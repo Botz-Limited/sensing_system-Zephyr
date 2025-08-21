@@ -52,6 +52,7 @@
 #include <events/foot_sensor_event.h>
 #include <events/motion_sensor_event.h>
 #include <status_codes.h>
+#include <ble_connection_state.h>
 
 #include "ble_d2d_file_transfer.hpp"
 #include "ble_d2d_rx.hpp"
@@ -273,6 +274,9 @@ void bluetooth_d2d_not_found(struct bt_conn *conn)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     LOG_INF("Device is not a secondary (no D2D TX service found) - this is a "
             "phone connection");
+    
+    // This is confirmed to be a phone connection
+    ble_set_phone_connection_state(true);
 
     // Check if this connection had a pairing failure
     if (pending_pairing_conn == conn && pairing_failed_for_pending)
@@ -643,6 +647,57 @@ static uint8_t ble_status_connected = 0;
 // Currently unused - kept for future BLE ID change handling
 __attribute__((unused)) static bool ble_id_has_changed = false;
 
+// Global phone connection state (atomic for thread safety)
+static atomic_t phone_connected = ATOMIC_INIT(0);
+
+// External queue declarations for clearing
+extern struct k_msgq bluetooth_msgq;
+extern struct k_msgq realtime_queue;
+extern struct k_msgq data_msgq;
+
+// Implementation of global BLE connection state functions
+extern "C" {
+bool ble_phone_is_connected(void) {
+    return atomic_get(&phone_connected) == 1;
+}
+
+void ble_set_phone_connection_state(bool connected) {
+    atomic_set(&phone_connected, connected ? 1 : 0);
+    LOG_INF("Phone connection state changed to: %s", connected ? "CONNECTED" : "DISCONNECTED");
+}
+
+void ble_clear_message_queues(void) {
+    generic_message_t dummy_msg;
+    int cleared_count = 0;
+    
+    // Clear bluetooth queue
+    while (k_msgq_get(&bluetooth_msgq, &dummy_msg, K_NO_WAIT) == 0) {
+        cleared_count++;
+    }
+    if (cleared_count > 0) {
+        LOG_INF("Cleared %d messages from bluetooth queue", cleared_count);
+    }
+    
+    // Clear realtime queue
+    cleared_count = 0;
+    while (k_msgq_get(&realtime_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        cleared_count++;
+    }
+    if (cleared_count > 0) {
+        LOG_INF("Cleared %d messages from realtime queue", cleared_count);
+    }
+    
+    // Clear data queue
+    cleared_count = 0;
+    while (k_msgq_get(&data_msgq, &dummy_msg, K_NO_WAIT) == 0) {
+        cleared_count++;
+    }
+    if (cleared_count > 0) {
+        LOG_INF("Cleared %d messages from data queue", cleared_count);
+    }
+}
+}
+
 struct check_bond_data
 {
     const bt_addr_le_t *addr;
@@ -865,8 +920,16 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
         LOG_INF("Connected");
         ble_status_connected = 1;
+        
+        // Clear any stale messages in BLE queues on reconnection
+        ble_clear_message_queues();
+        LOG_INF("BLE queues cleared on connection");
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Set phone connection state (only for non-D2D connections)
+        // We'll determine this after discovery completes
+        // For now, assume it might be a phone until proven otherwise
+        
         // Update Activity Metrics Service with connection (primary only)
         ams_set_connection(conn);
 #endif
@@ -990,6 +1053,12 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
     LOG_INF("Disconnected (reason 0x%02x)", reason);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Check if this was a phone connection (not D2D)
+    if (conn != d2d_conn) {
+        // This was a phone connection
+        ble_set_phone_connection_state(false);
+    }
+    
     // Clear Activity Metrics Service connection (primary only)
     ams_set_connection(NULL);
 #endif

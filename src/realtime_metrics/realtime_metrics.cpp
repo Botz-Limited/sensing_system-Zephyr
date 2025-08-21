@@ -20,6 +20,7 @@
 #include <events/app_state_event.h>
 #include <events/motion_sensor_event.h>
 #include <errors.hpp>
+#include <ble_connection_state.h>
 #include "realtime_metrics.h"
 
 // Include sensor data structures
@@ -689,7 +690,13 @@ static void calculate_realtime_metrics(void)
 // Send BLE update
 static void send_ble_update(void)
 {
-    LOG_INF("Sending BLE update: cadence=%d spm, pace=%d s/km, form=%d%%", 
+    // Check if phone is connected before attempting to send
+    if (!ble_phone_is_connected()) {
+        LOG_DBG("Skipping BLE update - phone not connected");
+        return;
+    }
+    
+    LOG_INF("Sending BLE update: cadence=%d spm, pace=%d s/km, form=%d%%",
             metrics_state.current_metrics.cadence_spm,
             metrics_state.current_metrics.pace_sec_km,
             metrics_state.current_metrics.form_score);
@@ -703,8 +710,8 @@ static void send_ble_update(void)
     // Note: We need to ensure the message can carry the metrics data
     // For now, we'll use a pointer in the data union (to be defined)
     // In production, we might want to copy the data or use a shared buffer
-    memcpy(&ble_msg.data, &metrics_state.current_metrics, 
-           sizeof(metrics_state.current_metrics) > sizeof(ble_msg.data) ? 
+    memcpy(&ble_msg.data, &metrics_state.current_metrics,
+           sizeof(metrics_state.current_metrics) > sizeof(ble_msg.data) ?
            sizeof(ble_msg.data) : sizeof(metrics_state.current_metrics));
     
     // Send to bluetooth module

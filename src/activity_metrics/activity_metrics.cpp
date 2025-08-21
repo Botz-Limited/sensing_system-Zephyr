@@ -25,6 +25,7 @@
 #include <activity_metrics.hpp>
 #include <errors.hpp>
 #include <ble_services.hpp>
+#include <ble_connection_state.h>
 #include <events/app_state_event.h>
 #include <events/foot_sensor_event.h>
 #include <events/motion_sensor_event.h>
@@ -1648,16 +1649,20 @@ static void process_weight_measurement(void)
         sensor_data.last_weight_measurement_time = now;
         sensor_data.weight_measurement_valid = true;
         
-        LOG_INF("Weight measurement complete: raw=%.1f kg, calibrated=%.1f kg", 
+        LOG_INF("Weight measurement complete: raw=%.1f kg, calibrated=%.1f kg",
         (double)raw_weight_kg, (double)calibrated_weight_kg);
         
-        // Send calibrated weight to bluetooth module
-        generic_message_t weight_msg;
-        memset(&weight_msg, 0, sizeof(weight_msg));
-        weight_msg.sender = SENDER_ACTIVITY_METRICS;
-        weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
-        weight_msg.data.weight_measurement.weight_kg = calibrated_weight_kg;
-        k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
+        // Send calibrated weight to bluetooth module (only if phone connected)
+        if (ble_phone_is_connected()) {
+            generic_message_t weight_msg;
+            memset(&weight_msg, 0, sizeof(weight_msg));
+            weight_msg.sender = SENDER_ACTIVITY_METRICS;
+            weight_msg.type = MSG_TYPE_WEIGHT_MEASUREMENT;
+            weight_msg.data.weight_measurement.weight_kg = calibrated_weight_kg;
+            k_msgq_put(&bluetooth_msgq, &weight_msg, K_NO_WAIT);
+        } else {
+            LOG_DBG("Weight measurement ready but phone not connected, not sending");
+        }
         
         weight_measurement.measurement_in_progress = false;
         } else {
