@@ -298,11 +298,38 @@ static void process_command_work_handler(struct k_work *work)
     LOG_WRN("Processing command: %s", pending_command);
     
     if (strcmp(pending_command, "START_REALTIME_PROCESSING") == 0) {
+        // Clear any pending messages in input queue before starting
+        generic_message_t dummy_msg;
+        while (k_msgq_get(&sensor_data_queue, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        
+        // Reset metrics state for clean start
+        memset(&metrics_state, 0, sizeof(metrics_state));
+        new_sensor_data_available = false;
+        
         atomic_set(&processing_active, 1);
-        LOG_INF("Realtime processing started");
+        LOG_INF("Realtime processing started - buffers cleared");
     } else if (strcmp(pending_command, "STOP_REALTIME_PROCESSING") == 0) {
         atomic_set(&processing_active, 0);
-        LOG_INF("Realtime processing stopped");
+        
+        // Clear all pending messages in output queues
+        generic_message_t dummy_msg;
+        while (k_msgq_get(&realtime_queue, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        while (k_msgq_get(&bluetooth_msgq, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        while (k_msgq_get(&data_msgq, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        
+        // Reset metrics state
+        memset(&metrics_state, 0, sizeof(metrics_state));
+        new_sensor_data_available = false;
+        
+        LOG_INF("Realtime processing stopped - all buffers cleared");
     } else {
         LOG_WRN("Unknown command: %s", pending_command);
     }

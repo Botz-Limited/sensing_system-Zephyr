@@ -753,7 +753,14 @@ static void process_command_work_handler(struct k_work *work)
         strcpy(start_msg.data.command_str, "START_REALTIME_PROCESSING");
         k_msgq_put(&sensor_data_queue, &start_msg, K_NO_WAIT);
         
+        // Also send to analytics module
+        #if IS_ENABLED(CONFIG_ANALYTICS_MODULE)
+        extern struct k_msgq analytics_queue;
+        k_msgq_put(&analytics_queue, &start_msg, K_NO_WAIT);
+        LOG_INF("Sent start commands to sensor_data, realtime_metrics and analytics modules");
+        #else
         LOG_INF("Sent start commands to sensor_data and realtime_metrics modules");
+        #endif
     } else if (strcmp(work_item->command, "STOP_ACTIVITY") == 0) {
         activity_session_stop();
         atomic_set(&processing_active, 0);
@@ -775,7 +782,14 @@ static void process_command_work_handler(struct k_work *work)
         strcpy(stop_msg.data.command_str, "STOP_REALTIME_PROCESSING");
         k_msgq_put(&sensor_data_queue, &stop_msg, K_NO_WAIT);
         
+        // Also send to analytics module
+        #if IS_ENABLED(CONFIG_ANALYTICS_MODULE)
+        extern struct k_msgq analytics_queue;
+        k_msgq_put(&analytics_queue, &stop_msg, K_NO_WAIT);
+        LOG_INF("Sent stop commands to sensor_data, realtime_metrics and analytics modules");
+        #else
         LOG_INF("Sent stop commands to sensor_data and realtime_metrics modules");
+        #endif
     } else if (strcmp(work_item->command, "MEASURE_WEIGHT") == 0) {
         // Normal weight measurement (not calibration)
         weight_measurement.calibration_mode = false;

@@ -198,8 +198,8 @@ static void analytics_thread_fn(void *arg1, void *arg2, void *arg3)
     generic_message_t msg;
     
     while (true) {
-        // Wait for realtime metrics
-        int ret = k_msgq_get(&realtime_queue, &msg, K_FOREVER);
+        // Wait for messages from analytics queue (NOT realtime queue!)
+        int ret = k_msgq_get(&analytics_queue, &msg, K_FOREVER);
         
         if (ret == 0) {
            // LOG_WRN("Analytics: Received message type %d from sender %d", msg.type, msg.sender);
@@ -289,10 +289,22 @@ static void process_command_work_handler(struct k_work *work)
     LOG_WRN("Processing command: %s", pending_command);
     
     if (strcmp(pending_command, "START_REALTIME_PROCESSING") == 0) {
+        // Clear any pending messages before starting
+        generic_message_t dummy_msg;
+        while (k_msgq_get(&analytics_queue, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        
+        // Reset state for clean start
+        memset(&analytics_state, 0, sizeof(analytics_state));
+        history_write_index = 0;
+        history_count = 0;
+        new_metrics_available = false;
+        
         // Analytics should start when realtime metrics start
         atomic_set(&processing_active, 1);
         analytics_state.baseline_start_time = k_uptime_get_32();
-        LOG_INF("Analytics processing started (via START_REALTIME_PROCESSING)");
+        LOG_INF("Analytics processing started (via START_REALTIME_PROCESSING) - buffers cleared");
         // Start periodic work
         k_work_schedule_for_queue(&analytics_work_q, &analytics_periodic_work, K_MSEC(200));
         
@@ -311,6 +323,20 @@ static void process_command_work_handler(struct k_work *work)
         LOG_INF("Analytics processing stopped");
         // Cancel periodic work
         k_work_cancel_delayable(&analytics_periodic_work);
+        
+        // Clear all pending messages from analytics queue
+        generic_message_t dummy_msg;
+        while (k_msgq_get(&analytics_queue, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        LOG_INF("Analytics queue cleared");
+        
+        // Reset state for clean restart
+        memset(&analytics_state, 0, sizeof(analytics_state));
+        history_write_index = 0;
+        history_count = 0;
+        new_metrics_available = false;
+        LOG_INF("Analytics state reset for clean restart");
         
         // ALSO forward this command for realtime_metrics module
         // Send to sensor_data_queue which is the input queue for realtime_metrics

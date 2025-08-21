@@ -757,11 +757,73 @@ static void process_command_work_handler(struct k_work *work) {
     LOG_WRN("Processing command: %s", command);
 
     if (strcmp(command, "START_SENSOR_PROCESSING") == 0) {
+      // Clear any pending messages in output queues before starting
+      generic_message_t dummy_msg;
+      while (k_msgq_get(&sensor_data_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        // Discard message
+      }
+      #if IS_ENABLED(CONFIG_REALTIME_METRICS_MODULE)
+      extern struct k_msgq realtime_queue;
+      while (k_msgq_get(&realtime_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        // Discard message
+      }
+      #endif
+      #if IS_ENABLED(CONFIG_ANALYTICS_MODULE)
+      while (k_msgq_get(&analytics_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        // Discard message
+      }
+      #endif
+      
+      // Clear ring buffers
+      atomic_set(&foot_ring.count, 0);
+      foot_ring.read_idx = 0;
+      foot_ring.write_idx = 0;
+      atomic_set(&imu_ring.count, 0);
+      imu_ring.read_idx = 0;
+      imu_ring.write_idx = 0;
+      
+      // Reset state for clean start
+      memset(&sensor_state, 0, sizeof(sensor_state));
+      stats.foot_data_dropped = 0;
+      stats.imu_data_dropped = 0;
+      
       atomic_set(&processing_active, 1);
-      LOG_INF("Sensor processing started");
+      LOG_INF("Sensor processing started - buffers cleared");
     } else if (strcmp(command, "STOP_SENSOR_PROCESSING") == 0) {
       atomic_set(&processing_active, 0);
-      LOG_INF("Sensor processing stopped");
+      
+      // Clear all pending messages in output queues
+      generic_message_t dummy_msg;
+      while (k_msgq_get(&sensor_data_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        // Discard message
+      }
+      #if IS_ENABLED(CONFIG_REALTIME_METRICS_MODULE)
+      extern struct k_msgq realtime_queue;
+      while (k_msgq_get(&realtime_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        // Discard message
+      }
+      #endif
+      #if IS_ENABLED(CONFIG_ANALYTICS_MODULE)
+      while (k_msgq_get(&analytics_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        // Discard message
+      }
+      #endif
+      
+      // Clear ring buffers
+      atomic_set(&foot_ring.count, 0);
+      foot_ring.read_idx = 0;
+      foot_ring.write_idx = 0;
+      atomic_set(&imu_ring.count, 0);
+      imu_ring.read_idx = 0;
+      imu_ring.write_idx = 0;
+      atomic_set(&command_ring.count, 0);
+      command_ring.read_idx = 0;
+      command_ring.write_idx = 0;
+      
+      // Reset sensor state
+      memset(&sensor_state, 0, sizeof(sensor_state));
+      
+      LOG_INF("Sensor processing stopped - all buffers cleared");
     } else if (strcmp(command, "SENSOR_STATS") == 0) {
       LOG_INF("Sensor Data Statistics:");
       LOG_INF("  Foot data: %u received, %u dropped (max depth: %u)",
