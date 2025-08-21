@@ -1011,9 +1011,15 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     }
     k_mutex_unlock(&sequence_number_mutex);
 
+    
+
     // Create file path
     snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.dat", hardware_dir_path, activity_file_prefix,
              next_activity_file_sequence);
+
+    LOG_WRN("activity_file_path=%s, activity_file_path_size=%d, hardware_dir_path=%s,    activity_file_prefix=%s, next_activity_file_sequence=%d",
+            activity_file_path, sizeof(activity_file_path), hardware_dir_path, activity_file_prefix,
+            next_activity_file_sequence);         
     fs_file_t_init(&activity_log_file);
 
     // Open file

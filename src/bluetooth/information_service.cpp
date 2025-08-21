@@ -77,10 +77,10 @@ static fota_progress_msg_t fota_progress_value = {false, 0, 0, 0, 0, 0};
 static bool fota_progress_subscribed = false;
 
 // Activity log tracking (primary device)
-static uint8_t activity_log_available = 0;
-static bool activity_log_available_subscribed = false;
-static char activity_log_path[util::max_path_length] = {0};
-static bool activity_log_path_subscribed = false;
+static uint8_t activity_log_available_primary = 0;
+static bool activity_log_available_primary_subscribed = false;
+static char activity_log_path_primary[util::max_path_length] = {0};
+static bool activity_log_path_primary_subscribed = false;
 
 // Secondary FOTA progress tracking (primary device only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -168,13 +168,13 @@ static void jis_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr* attr, u
 void jis_fota_progress_notify(const fota_progress_msg_t* progress);
 
 // Activity Log Characteristics
-static ssize_t jis_activity_log_available_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static void jis_activity_log_available_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-extern "C" void jis_activity_log_available_notify(uint8_t log_id);
+static ssize_t jis_activity_log_available_primary_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_activity_log_available_primary_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_activity_log_available_primary_notify(uint8_t log_id);
 
-static ssize_t jis_activity_log_path_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static void jis_activity_log_path_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-extern "C" void jis_activity_log_path_notify(const char* path);
+static ssize_t jis_activity_log_path_primary_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+static void jis_activity_log_path_primary_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+extern "C" void jis_activity_log_path_primary_notify(const char* path);
 
 // Secondary Device Information Characteristics (Primary only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -233,9 +233,9 @@ static struct bt_uuid_128 fota_progress_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb5, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 // Activity Log UUIDs (primary device)
-static struct bt_uuid_128 activity_log_available_uuid =
+static struct bt_uuid_128 activity_log_available_primary_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec2, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
-static struct bt_uuid_128 activity_log_path_uuid =
+static struct bt_uuid_128 activity_log_path_primary_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec3, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 // Step count UUIDs moved to Activity Metrics Service
@@ -368,20 +368,20 @@ BT_GATT_SERVICE_DEFINE(
     BT_GATT_CCC(jis_fota_progress_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Activity Log Available Characteristic
-    BT_GATT_CHARACTERISTIC(&activity_log_available_uuid.uuid,
+    BT_GATT_CHARACTERISTIC(&activity_log_available_primary_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
         BT_GATT_PERM_READ,
-        jis_activity_log_available_read, nullptr,
-        static_cast<void *>(&activity_log_available)),
-    BT_GATT_CCC(jis_activity_log_available_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+        jis_activity_log_available_primary_read, nullptr,
+        static_cast<void *>(&activity_log_available_primary)),
+    BT_GATT_CCC(jis_activity_log_available_primary_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Activity Log Path Characteristic
-    BT_GATT_CHARACTERISTIC(&activity_log_path_uuid.uuid,
+    BT_GATT_CHARACTERISTIC(&activity_log_path_primary_uuid.uuid,
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
         BT_GATT_PERM_READ,
-        jis_activity_log_path_read, nullptr,
-        activity_log_path),
-    BT_GATT_CCC(jis_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+        jis_activity_log_path_primary_read, nullptr,
+        static_cast<void *>(activity_log_path_primary)) ,
+    BT_GATT_CCC(jis_activity_log_path_primary_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary Device Information Characteristics
@@ -1164,59 +1164,64 @@ void jis_fota_progress_notify(const fota_progress_msg_t *progress)
 }
 
 // --- Activity Log Handlers ---
-static void jis_activity_log_available_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+static void jis_activity_log_available_primary_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
     if (!attr)
     {
-        LOG_ERR("jis_activity_log_available_ccc_cfg_changed: attr is NULL");
+        LOG_ERR("jis_activity_log_available_primary_ccc_cfg_changed: attr is NULL");
         return;
     }
-    activity_log_available_subscribed = value == BT_GATT_CCC_NOTIFY;
+    activity_log_available_primary_subscribed = value == BT_GATT_CCC_NOTIFY;
     LOG_DBG("Activity Log Available CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
-static ssize_t jis_activity_log_available_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+static ssize_t jis_activity_log_available_primary_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                                                uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(activity_log_available));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &activity_log_available_primary, sizeof(activity_log_available_primary));
 }
 
-extern "C" void jis_activity_log_available_notify(uint8_t log_id)
+extern "C" void jis_activity_log_available_primary_notify(uint8_t log_id)
 {
-    activity_log_available = log_id;
+    activity_log_available_primary = log_id;
     LOG_INF("Activity Log Available: ID=%u", log_id);
 
-    safe_gatt_notify(&activity_log_available_uuid.uuid, static_cast<const void *>(&activity_log_available),
-                     sizeof(activity_log_available));
+     auto *status_gatt =
+            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &activity_log_available_primary_uuid.uuid);
+        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&activity_log_available_primary), sizeof(activity_log_available_primary));
+
 }
 
-static void jis_activity_log_path_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+static void jis_activity_log_path_primary_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
     if (!attr)
     {
         LOG_ERR("jis_activity_log_path_ccc_cfg_changed: attr is NULL");
         return;
     }
-    activity_log_path_subscribed = value == BT_GATT_CCC_NOTIFY;
+    activity_log_path_primary_subscribed = value == BT_GATT_CCC_NOTIFY;
     LOG_DBG("Activity Log Path CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
-static ssize_t jis_activity_log_path_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+static ssize_t jis_activity_log_path_primary_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                                           uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, strlen(activity_log_path));
+    
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, strlen(activity_log_path_primary));
 }
 
-extern "C" void jis_activity_log_path_notify(const char *path)
+extern "C" void jis_activity_log_path_primary_notify(const char *path)
 {
-    memset(activity_log_path, 0, sizeof(activity_log_path));
-    strncpy(activity_log_path, path, sizeof(activity_log_path) - 1);
-    activity_log_path[sizeof(activity_log_path) - 1] = '\0';
+    memset(activity_log_path_primary, 0, sizeof(activity_log_path_primary));
+    strncpy(activity_log_path_primary, path, sizeof(activity_log_path_primary) - 1);
+    activity_log_path_primary[sizeof(activity_log_path_primary) - 1] = '\0';
 
-    LOG_INF("Activity Log Path: %s", activity_log_path);
+    LOG_INF("Activity Log Path: %s", activity_log_path_primary);
 
-    safe_gatt_notify(&activity_log_path_uuid.uuid, static_cast<const void *>(&activity_log_path),
-                     strlen(activity_log_path) + 1);
+    auto *status_gatt =
+            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &activity_log_path_primary_uuid.uuid);
+        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&activity_log_path_primary), sizeof(activity_log_path_primary));
+
 }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -1356,7 +1361,8 @@ static void jis_secondary_activity_log_path_ccc_cfg_changed(const struct bt_gatt
 static ssize_t jis_secondary_activity_log_path_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                                                     uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, strlen(secondary_activity_log_path));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, secondary_activity_log_path, 
+                            strlen(secondary_activity_log_path) + 1);
 }
 
 void jis_secondary_activity_log_path_notify(const char *path)
@@ -1371,7 +1377,7 @@ void jis_secondary_activity_log_path_notify(const char *path)
     {
         safe_gatt_notify(&secondary_activity_log_path_uuid.uuid,
                          static_cast<const void *>(&secondary_activity_log_path),
-                         strlen(secondary_activity_log_path) + 1);
+                         strlen(secondary_activity_log_path));
     }
 }
 #endif

@@ -24,7 +24,7 @@
 
 void app_log(const char *fmt, ...);
 
-static constexpr uint8_t MAX_FILE_PATH_LEN = 64;
+static constexpr uint8_t MAX_FILE_PATH_LEN = 34;
 
 
 // Define a structure for foot sensor samples

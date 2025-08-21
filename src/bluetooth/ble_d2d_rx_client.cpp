@@ -16,6 +16,7 @@
 #include "d2d_data_handler.hpp"
 #include <app.hpp>
 #include <ble_services.hpp>
+#include "sensor_data/sensor_data.h"
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_file_transfer.hpp"
@@ -105,6 +106,10 @@ static struct bt_uuid_128 d2d_batch_uuid =
 static struct bt_uuid_128 d2d_battery_level_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e9, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
 
+// D2D Metrics UUID (for event-based gait metrics)
+static struct bt_uuid_128 d2d_metrics_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68ea, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
 // Connection handle
 static struct bt_conn *secondary_conn = NULL;
 
@@ -133,6 +138,7 @@ static uint16_t activity_step_count_handle = 0;
 static uint16_t weight_measurement_handle = 0;
 static uint16_t d2d_batch_handle = 0;
 static uint16_t battery_level_handle = 0;
+static uint16_t d2d_metrics_handle = 0;
 
 // Discovery state
 enum discover_state
@@ -196,6 +202,9 @@ static uint8_t d2d_batch_notify_handler(struct bt_conn *conn, struct bt_gatt_sub
 
 static uint8_t battery_level_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                             const void *data, uint16_t length);
+
+static uint8_t d2d_metrics_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+                                          const void *data, uint16_t length);
 
 // Work items for deferred subscription
 static void subscribe_work_handler(struct k_work *work);
@@ -526,6 +535,16 @@ static void perform_subscriptions(void)
         k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
         subscribe_work_items[work_index].handle = battery_level_handle;
         subscribe_work_items[work_index].notify_func = battery_level_notify_handler;
+        subscribe_work_items[work_index].index = work_index;
+        work_index++;
+    }
+
+    // Add D2D metrics subscription
+    if (d2d_metrics_handle && work_index < WORK_INDEX_MX)
+    {
+        k_work_init(&subscribe_work_items[work_index].work, individual_subscribe_work_handler);
+        subscribe_work_items[work_index].handle = d2d_metrics_handle;
+        subscribe_work_items[work_index].notify_func = d2d_metrics_notify_handler;
         subscribe_work_items[work_index].index = work_index;
         work_index++;
     }
@@ -1277,6 +1296,64 @@ static uint8_t weight_measurement_notify_handler(struct bt_conn *conn, struct bt
     return BT_GATT_ITER_CONTINUE;
 }
 
+static uint8_t d2d_metrics_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
+                                          const void *data, uint16_t length)
+{
+    // Check if we still have a valid secondary connection
+    if (!secondary_conn || conn != secondary_conn)
+    {
+        LOG_WRN("D2D metrics notification after disconnection, ignoring");
+        return BT_GATT_ITER_STOP;
+    }
+
+    struct bt_conn_info info;
+    if (!conn || bt_conn_get_info(conn, &info) != 0)
+    {
+        LOG_ERR("Invalid connection in callback");
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (!data)
+    {
+        LOG_WRN("D2D metrics unsubscribed");
+        params->value_handle = 0;
+        return BT_GATT_ITER_STOP;
+    }
+
+    if (length != sizeof(d2d_metrics_packet_t))
+    {
+        LOG_WRN("Invalid D2D metrics length: %u (expected %u)", length, sizeof(d2d_metrics_packet_t));
+        return BT_GATT_ITER_CONTINUE;
+    }
+
+    const d2d_metrics_packet_t *metrics = (const d2d_metrics_packet_t *)data;
+    
+    LOG_INF("=== RECEIVED D2D METRICS FROM SECONDARY ===");
+    LOG_INF("  Sequence: %u, Timestamp: %u ms", metrics->sequence_num, metrics->timestamp);
+    
+    // Log some key metrics if valid
+    if (d2d_metric_is_valid(metrics, IDX_GCT)) {
+        LOG_INF("  GCT: %.1f ms", (double)metrics->metrics[IDX_GCT]);
+    }
+    if (d2d_metric_is_valid(metrics, IDX_CADENCE)) {
+        LOG_INF("  Cadence: %.1f spm", (double)metrics->metrics[IDX_CADENCE]);
+    }
+    if (d2d_metric_is_valid(metrics, IDX_PRONATION)) {
+        LOG_INF("  Pronation: %.1f deg", (double)metrics->metrics[IDX_PRONATION]);
+    }
+    if (d2d_metric_is_valid(metrics, IDX_COP_X) && d2d_metric_is_valid(metrics, IDX_COP_Y)) {
+        LOG_INF("  COP: (%.1f, %.1f) mm", (double)metrics->metrics[IDX_COP_X], (double)metrics->metrics[IDX_COP_Y]);
+    }
+    if (d2d_metric_is_valid(metrics, IDX_LOADING_RATE)) {
+        LOG_INF("  Loading Rate: %.1f N/s", (double)metrics->metrics[IDX_LOADING_RATE]);
+    }
+    
+    // Process the received metrics for bilateral analysis
+    sensor_data_process_received_metrics(metrics);
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
 static uint8_t battery_level_notify_handler(struct bt_conn *conn, struct bt_gatt_subscribe_params *params,
                                             const void *data, uint16_t length)
 {
@@ -1942,6 +2019,12 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
             LOG_INF("Found battery level characteristic, handle: %u", battery_level_handle);
             characteristics_found++;
         }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_metrics_uuid.uuid) == 0)
+        {
+            d2d_metrics_handle = chrc->value_handle;
+            LOG_INF("Found D2D metrics characteristic, handle: %u", d2d_metrics_handle);
+            characteristics_found++;
+        }
     }
     else if (discovery_state == DISCOVER_DIS)
     {
@@ -2101,6 +2184,7 @@ void d2d_rx_client_start_discovery(struct bt_conn *conn)
     activity_step_count_handle = 0;
     d2d_batch_handle = 0;
     battery_level_handle = 0;
+    d2d_metrics_handle = 0;
 
     // Clear all subscribe params to ensure clean state
     memset(subscribe_params, 0, sizeof(subscribe_params));
@@ -2185,6 +2269,7 @@ void d2d_rx_client_disconnected(void)
     activity_step_count_handle = 0;
     d2d_batch_handle = 0;
     battery_level_handle = 0;
+    d2d_metrics_handle = 0;
 
     // Clear subscribe params
     memset(subscribe_params, 0, sizeof(subscribe_params));

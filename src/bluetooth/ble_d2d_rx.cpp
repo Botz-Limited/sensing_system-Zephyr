@@ -196,6 +196,7 @@ static ssize_t d2d_start_activity_write(struct bt_conn *conn, const struct bt_ga
         start_logging_msg.type = MSG_TYPE_COMMAND;
         strncpy(start_logging_msg.data.command_str, "START_LOGGING_ACTIVITY",
                 sizeof(start_logging_msg.data.command_str) - 1);
+        start_logging_msg.data.command_str[sizeof(start_logging_msg.data.command_str) - 1] = '\0';
 
         if (k_msgq_put(&data_msgq, &start_logging_msg, K_NO_WAIT) != 0) {
             LOG_WRN("Failed to send START_LOGGING_ACTIVITY command to DATA module");
@@ -245,6 +246,7 @@ static ssize_t d2d_stop_activity_write(struct bt_conn *conn, const struct bt_gat
         stop_logging_msg.type = MSG_TYPE_COMMAND;
         strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING_ACTIVITY",
                 sizeof(stop_logging_msg.data.command_str) - 1);
+        stop_logging_msg.data.command_str[sizeof(stop_logging_msg.data.command_str) - 1] = '\0';
 
         if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {
             LOG_WRN("Failed to send STOP_LOGGING_ACTIVITY command to DATA module");

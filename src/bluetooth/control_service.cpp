@@ -419,6 +419,7 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
     start_logging_msg.type = MSG_TYPE_COMMAND;
     strncpy(start_logging_msg.data.command_str, "START_LOGGING_ACTIVITY",
             sizeof(start_logging_msg.data.command_str) - 1);
+    start_logging_msg.data.command_str[sizeof(start_logging_msg.data.command_str) - 1] = '\0';
 
     // Start logging Activity file
     if (k_msgq_put(&data_msgq, &start_logging_msg, K_NO_WAIT) != 0) {
@@ -941,6 +942,7 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
     stop_logging_msg.type = MSG_TYPE_COMMAND;
     strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING_ACTIVITY",
             sizeof(stop_logging_msg.data.command_str) - 1);
+    stop_logging_msg.data.command_str[sizeof(stop_logging_msg.data.command_str) - 1] = '\0';
 
     // Start logging Activity file
     if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {

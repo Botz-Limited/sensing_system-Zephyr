@@ -2586,8 +2586,8 @@ static void new_activity_log_work_handler(struct k_work *work)
     LOG_INF("  Sequence ID: %u", log_info->file_sequence_id);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Primary device: Send activity log notifications
-    jis_activity_log_available_notify(log_info->file_sequence_id);
-    jis_activity_log_path_notify(log_info->file_path);
+    jis_activity_log_available_primary_notify(log_info->file_sequence_id);
+    jis_activity_log_path_primary_notify(log_info->file_path);
 #else
     // Secondary device: Send to primary via D2D
     int err = d2d_tx_notify_activity_log_available(log_info->file_sequence_id);

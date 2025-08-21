@@ -22,8 +22,7 @@ LOG_MODULE_REGISTER(gait_events, LOG_LEVEL_INF);
 #define GRAVITY_MS2 9.81f
 #define RAD_TO_DEG (180.0 / M_PI)
 #define DEG_TO_RAD (M_PI / 180.0)
-#define MIN(a,b) ((a) < (b) ? (a) : (b))
-#define MAX(a,b) ((a) > (b) ? (a) : (b))
+/* MIN/MAX already defined in zephyr/sys/util.h */
 #define ABS(x) ((x) < 0 ? -(x) : (x))
 
 /**
@@ -196,13 +195,181 @@ void gait_events_add_data(gait_event_detector_t *detector,
 }
 
 /**
+ * @brief Detect swing phase from IMU data
+ */
+static bool detect_swing_phase_imu(const imu_data_t *imu, bool was_in_swing)
+{
+    // Swing phase detected by angular velocity and acceleration patterns
+    float gyro_magnitude = sqrtf(imu->gyro_x * imu->gyro_x +
+                                 imu->gyro_y * imu->gyro_y +
+                                 imu->gyro_z * imu->gyro_z);
+    
+    float accel_magnitude = sqrtf(imu->accel_x * imu->accel_x +
+                                  imu->accel_y * imu->accel_y +
+                                  imu->accel_z * imu->accel_z);
+    
+    // Thresholds for swing detection
+    const float SWING_GYRO_THRESHOLD = 2.0f;  // rad/s
+    const float SWING_ACCEL_MIN = 8.0f;       // m/s^2
+    const float SWING_ACCEL_MAX = 15.0f;      // m/s^2
+    
+    // Detect swing: moderate acceleration with controlled rotation
+    bool in_swing = (gyro_magnitude < SWING_GYRO_THRESHOLD) &&
+                    (accel_magnitude > SWING_ACCEL_MIN) &&
+                    (accel_magnitude < SWING_ACCEL_MAX);
+    
+    // Apply hysteresis to prevent oscillation
+    if (was_in_swing && !in_swing) {
+        // Exiting swing - need stronger signal
+        return (gyro_magnitude < SWING_GYRO_THRESHOLD * 0.8f);
+    }
+    
+    return in_swing;
+}
+
+/**
+ * @brief Detect turns from gyroscope data
+ */
+static void detect_turn_event(gait_event_detector_t *detector, const imu_data_t *imu, float dt)
+{
+    static float yaw_angle = 0.0f;
+    static uint32_t turn_start_time = 0;
+    static bool in_turn = false;
+    
+    // Integrate yaw rate to get heading change
+    yaw_angle += imu->gyro_z * dt;
+    
+    // Detect significant yaw rate indicating turn
+    const float TURN_RATE_THRESHOLD = 0.5f;  // rad/s (~30 deg/s)
+    const float TURN_ANGLE_THRESHOLD = 0.785f;  // radians (~45 degrees)
+    
+    if (fabsf(imu->gyro_z) > TURN_RATE_THRESHOLD) {
+        if (!in_turn) {
+            in_turn = true;
+            turn_start_time = k_uptime_get_32();  // Use system time
+            yaw_angle = 0.0f;  // Reset integration
+            LOG_DBG("Turn started at time %u ms", turn_start_time);
+        }
+    } else if (in_turn) {
+        // Turn ended - check total angle
+        if (fabsf(yaw_angle) > TURN_ANGLE_THRESHOLD) {
+            float turn_duration = (float)(k_uptime_get_32() - turn_start_time);  // ms
+            float turn_angle_deg = yaw_angle * (float)RAD_TO_DEG;
+            LOG_INF("Turn completed: %.1f degrees in %.1f ms",
+                    (double)turn_angle_deg, (double)turn_duration);
+        }
+        in_turn = false;
+    }
+}
+
+/**
+ * @brief Detect steps from accelerometer when pressure not available
+ */
+static void detect_step_from_imu(gait_event_detector_t *detector, const imu_data_t *imu)
+{
+    static float accel_history[10] = {0};
+    static uint8_t accel_idx = 0;
+    static uint32_t last_step_time = 0;
+    
+    // Store acceleration magnitude in circular buffer
+    float accel_mag = sqrtf(imu->accel_x * imu->accel_x +
+                            imu->accel_y * imu->accel_y +
+                            imu->accel_z * imu->accel_z);
+    accel_history[accel_idx] = accel_mag;
+    accel_idx = (accel_idx + 1) % 10;
+    
+    uint32_t current_time = k_uptime_get_32();
+    
+    // Simple peak detection for steps (backup when no pressure)
+    if (current_time - last_step_time > 300) {  // Min 300ms between steps
+        float avg = 0.0f;
+        for (int i = 0; i < 10; i++) {
+            avg += accel_history[i];
+        }
+        avg /= 10.0f;
+        
+        // Current value significantly above average indicates step
+        if (accel_mag > avg * 1.2f && accel_mag > 11.0f) {
+            last_step_time = current_time;
+            detector->total_step_count++;
+            LOG_DBG("IMU step detected at time %u ms (total: %u)",
+                    current_time, detector->total_step_count);
+        }
+    }
+}
+
+/**
  * Update velocity by integrating IMU accelerometer data
- * Implements simplified sensor fusion with ZUPT
+ * Implements simplified sensor fusion with ZUPT and IMU event detection
  */
 static void update_velocity_integration(gait_event_detector_t *detector,
                                        const imu_data_t *imu_data,
                                        float dt)
 {
+    // IMU-only event detection
+    static bool was_in_swing = false;
+    static uint32_t last_log_time = 0;
+    uint32_t current_time = k_uptime_get_32();
+    
+    // 1. Swing phase detection from IMU
+    bool in_swing = detect_swing_phase_imu(imu_data, was_in_swing);
+    if (in_swing != was_in_swing) {
+        if (in_swing) {
+            LOG_DBG("IMU swing phase started at time %u ms", current_time);
+        } else {
+            LOG_DBG("IMU swing phase ended at time %u ms", current_time);
+        }
+        was_in_swing = in_swing;
+    }
+    
+    // 2. Turn detection
+    detect_turn_event(detector, imu_data, dt);
+    
+    // 3. Step detection from IMU (backup for when pressure unavailable)
+    detect_step_from_imu(detector, imu_data);
+    
+    // 4. Vertical oscillation tracking through velocity integration
+    static float vertical_velocity = 0.0f;
+    static float vertical_position = 0.0f;
+    static float max_height = 0.0f;
+    static float min_height = 0.0f;
+    
+    // Get vertical acceleration (simplified - assuming Z is vertical)
+    float world_accel_z = imu_data->accel_z - GRAVITY_MS2;
+    
+    // Integrate to get velocity
+    vertical_velocity += world_accel_z * dt;
+    
+    // Apply damping to reduce drift
+    vertical_velocity *= 0.99f;
+    
+    // Integrate to get position
+    vertical_position += vertical_velocity * dt;
+    
+    // Track max/min for vertical oscillation
+    if (vertical_position > max_height) max_height = vertical_position;
+    if (vertical_position < min_height) min_height = vertical_position;
+    
+    // Calculate vertical oscillation in cm
+    float vertical_osc_cm = (max_height - min_height) * 100.0f;
+    
+    // Reset on new stride (check current phase)
+    static gait_phase_t last_phase = GAIT_PHASE_IDLE;
+    if (detector->current_phase == GAIT_PHASE_STANCE) {
+        // Log vertical oscillation periodically
+        if (current_time - last_log_time > 1000) {  // Every second
+            LOG_DBG("Vertical oscillation: %.1f cm", (double)vertical_osc_cm);
+            last_log_time = current_time;
+        }
+        
+        // Reset tracking on phase change to stance
+        if (detector->current_phase != last_phase) {
+            max_height = vertical_position;
+            min_height = vertical_position;
+        }
+    }
+    last_phase = detector->current_phase;
+    
     if (detector->use_advanced_features) {
         /* ADVANCED: Use full quaternion-based IMU fusion */
         bool is_stance = (detector->current_phase == GAIT_PHASE_STANCE);
