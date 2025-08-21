@@ -218,14 +218,6 @@ if (!device_is_ready(temp_dev)) {
 
   LOG_INF("Foot Sensor Module Initialized");
 
-#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-  // Secondary device: auto-start logging after initialization
-  // The secondary device doesn't receive start_activity events from the phone
-  // so we need to auto-enable logging for D2D data transmission
-  atomic_set(&logging_active, 1);
-  LOG_INF("Secondary device: Auto-enabled foot sensor logging for D2D transmission");
-#endif
-
   module_set_state(MODULE_STATE_READY);
 }
 
