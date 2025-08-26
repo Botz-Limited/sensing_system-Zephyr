@@ -18,6 +18,12 @@
 extern "C" {
 #endif
 
+// Global storage for secondary data (for aggregation with primary)
+extern foot_samples_t g_secondary_foot_data;
+extern d2d_quaternion_fixed_t g_secondary_quat_data;
+extern uint32_t g_secondary_last_timestamp;
+extern bool g_secondary_data_valid;
+
 /**
  * @brief Handle D2D batch data from secondary device
  * @param batch Pointer to batch data

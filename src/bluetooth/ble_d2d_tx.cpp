@@ -541,7 +541,8 @@ int ble_d2d_tx_send_foot_sensor_data(const foot_samples_t *samples)
     LOG_INF("D2D TX: Sending foot sensor data");
 
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Secondary device: Send via GATT notification
+    // Call the function to add foot data to the batch buffer
+    // but it will not send via individual characteristic anymore
     return d2d_tx_notify_foot_sensor_data(samples);
 #else
     // Primary device shouldn't call this
@@ -708,6 +709,8 @@ int ble_d2d_tx_send_bhi360_data1(const bhi360_3d_mapping_t *data)
     LOG_DBG("D2D TX: Sending BHI360 3D mapping data");
 
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Call the function to add quaternion to batch buffer
+    // but it will not send via individual characteristic anymore
     return d2d_tx_notify_bhi360_data1(data);
 #else
     return -EINVAL;
@@ -750,7 +753,9 @@ int ble_d2d_tx_send_bhi360_data3(const bhi360_linear_accel_t *data)
     LOG_DBG("D2D TX: Sending BHI360 linear accel data");
 
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    return d2d_tx_notify_bhi360_data3(data);
+    // Linear acceleration no longer sent to primary
+    // Not via individual characteristic or batch
+    return 0;
 #else
     return -EINVAL;
 #endif
@@ -1201,15 +1206,15 @@ int ble_d2d_tx_send_conn_param_control_command(uint8_t profile)
 
 void try_combine_and_buffer()
 {
-    if (pending_sample.foot_ready && pending_sample.imu_ready)
+    if (pending_sample.foot_ready && pending_sample.quat_ready)
     {
         d2d_batch_buffer.foot[d2d_batch_count] = pending_sample.foot;
-        d2d_batch_buffer.imu[d2d_batch_count] = pending_sample.imu;
+        d2d_batch_buffer.quat[d2d_batch_count] = pending_sample.quat;
         d2d_batch_buffer.timestamp[d2d_batch_count] = pending_sample.timestamp;
         d2d_batch_count++;
 
         pending_sample.foot_ready = false;
-        pending_sample.imu_ready = false;
+        pending_sample.quat_ready = false;
 
         if (d2d_batch_count == D2D_BATCH_SIZE)
         {
@@ -1236,11 +1241,15 @@ void on_new_foot_sample(const foot_samples_t* foot, uint32_t timestamp)
     try_combine_and_buffer();
 }
 
-// Call this when a new IMU sample arrives
+// Call this when a new IMU sample arrives (now extracts only quaternion)
 void on_new_imu_sample(const bhi360_log_record_t* imu, uint32_t timestamp)
 {
-    pending_sample.imu = *imu;
-    pending_sample.imu_ready = true;
+    // Extract quaternion data from full IMU record and convert to fixed-point
+    pending_sample.quat.quat_x = (int16_t)(imu->quat_x * 10000.0f);
+    pending_sample.quat.quat_y = (int16_t)(imu->quat_y * 10000.0f);
+    pending_sample.quat.quat_z = (int16_t)(imu->quat_z * 10000.0f);
+    pending_sample.quat.quat_w = (int16_t)(imu->quat_w * 10000.0f);
+    pending_sample.quat_ready = true;
     if (timestamp > pending_sample.timestamp)
         pending_sample.timestamp = timestamp;
     try_combine_and_buffer();

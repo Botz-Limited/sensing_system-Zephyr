@@ -18,17 +18,27 @@ extern "C" {
 
 #define D2D_BATCH_SIZE 1
 
+// Simplified quaternion-only structure for D2D transmission (8 bytes)
 typedef struct __attribute__((packed)) {
-    uint32_t timestamp[D2D_BATCH_SIZE];
-    foot_samples_t foot[D2D_BATCH_SIZE];
-    bhi360_log_record_t imu[D2D_BATCH_SIZE];
-} d2d_sample_batch_t;
+    int16_t quat_x;  // Scaled by 10000
+    int16_t quat_y;
+    int16_t quat_z;
+    int16_t quat_w;
+} d2d_quaternion_fixed_t;
+
+// Simplified D2D batch structure - quaternion only, no gyro or linear accel
+// This reduces BLE bandwidth by ~65% (28 bytes vs 80+ bytes)
+typedef struct __attribute__((packed)) {
+    uint32_t timestamp[D2D_BATCH_SIZE];           // 4 bytes
+    foot_samples_t foot[D2D_BATCH_SIZE];          // 16 bytes (8 channels x 2 bytes)
+    d2d_quaternion_fixed_t quat[D2D_BATCH_SIZE];  // 8 bytes (4 x int16_t)
+} d2d_sample_batch_t;  // Total: 28 bytes
 
 typedef struct {
     bool foot_ready;
-    bool imu_ready;
+    bool quat_ready;
     foot_samples_t foot;
-    bhi360_log_record_t imu;
+    d2d_quaternion_fixed_t quat;  // Only quaternion data
     uint32_t timestamp;
 } d2d_pending_sample_t;
 

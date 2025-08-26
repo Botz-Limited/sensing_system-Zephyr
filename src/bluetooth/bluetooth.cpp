@@ -1527,23 +1527,18 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_foot_samples_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-                        // Check if work is already pending before submitting
-                        if (!k_work_is_pending(&foot_samples_secondary_work)) {
+
                             k_work_submit_to_queue(&bluetooth_work_q, &foot_samples_secondary_work);
-                        } else {
-                            LOG_WRN("Secondary foot samples work already pending, skipping submission");
-                        }
+   
                     } else {
                         // Primary foot data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_foot_samples_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
                         // Check if work is already pending before submitting
-                        if (!k_work_is_pending(&foot_samples_work)) {
+
                             k_work_submit_to_queue(&bluetooth_work_q, &foot_samples_work);
-                        } else {
-                            LOG_WRN("Foot samples work already pending, skipping submission");
-                        }
+
                     }
                     break;
 
@@ -1554,24 +1549,20 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_3d_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-                        // Check if work is already pending before submitting
-                        if (!k_work_is_pending(&bhi360_3d_mapping_secondary_work)) {
+
+
                             k_work_submit_to_queue(&bluetooth_work_q, &bhi360_3d_mapping_secondary_work);
-                        } else {
-                            LOG_WRN("Secondary BHI360 3D mapping work already pending, skipping submission");
-                        }
+
                     } else {
                         // Primary BHI360 3D data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_3d_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-                        // Check if work is already pending before submitting
-                        if (!k_work_is_pending(&bhi360_3d_mapping_work)) {
+
+ 
                             k_work_submit_to_queue(&bluetooth_work_q, &bhi360_3d_mapping_work);
-                        } else {
-                            LOG_WRN("BHI360 3D mapping work already pending, skipping submission");
-                        }
                     }
+
                     break;
 
                 case MSG_TYPE_BHI360_LINEAR_ACCEL:
@@ -1581,23 +1572,17 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_linear_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-                        // Check if work is already pending before submitting
-                        if (!k_work_is_pending(&bhi360_linear_accel_secondary_work)) {
+
                             k_work_submit_to_queue(&bluetooth_work_q, &bhi360_linear_accel_secondary_work);
-                        } else {
-                            LOG_WRN("Secondary BHI360 linear accel work already pending, skipping submission");
-                        }
+
                     } else {
                         // Primary linear accel data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_linear_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-                        // Check if work is already pending before submitting
-                        if (!k_work_is_pending(&bhi360_linear_accel_work)) {
+
                             k_work_submit_to_queue(&bluetooth_work_q, &bhi360_linear_accel_work);
-                        } else {
-                            LOG_WRN("BHI360 linear accel work already pending, skipping submission");
-                        }
+
                     }
                     break;
 
@@ -1605,84 +1590,63 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_bhi360_step_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&bhi360_step_count_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &bhi360_step_count_work);
-                    } else {
-                        LOG_WRN("BHI360 step count work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_ACTIVITY_STEP_COUNT:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_activity_step_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&activity_step_count_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &activity_step_count_work);
-                    } else {
-                        LOG_WRN("Activity step count work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_COMMAND:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_command_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&command_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &command_work);
-                    } else {
-                        LOG_WRN("Command work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_FOTA_PROGRESS:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_fota_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&fota_progress_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &fota_progress_work);
-                    } else {
-                        LOG_WRN("FOTA progress work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_ERROR_STATUS:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_error_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&error_status_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &error_status_work);
-                    } else {
-                        LOG_WRN("Error status work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_NEW_ACTIVITY_LOG_FILE:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_log_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&new_activity_log_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &new_activity_log_work);
-                    } else {
-                        LOG_WRN("New activity log work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_ACTIVITY_METRICS_BLE:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_metrics_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&activity_metrics_ble_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
-                    } else {
-                        LOG_WRN("Activity metrics BLE work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_DEVICE_INFO:
@@ -1690,47 +1654,36 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_device_info_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
                     // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&device_info_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &device_info_work);
-                    } else {
-                        LOG_WRN("Device info work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_WEIGHT_MEASUREMENT:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_weight_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&weight_measurement_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &weight_measurement_work);
-                    } else {
-                        LOG_WRN("Weight measurement work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_BATTERY_LEVEL_PRIMARY:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_battery_primary_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&battery_level_primary_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &battery_level_primary_work);
-                    } else {
-                        LOG_WRN("Battery level primary work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_BATTERY_LEVEL_SECONDARY:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_battery_secondary_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    // Check if work is already pending before submitting
-                    if (!k_work_is_pending(&battery_level_secondary_work)) {
+
                         k_work_submit_to_queue(&bluetooth_work_q, &battery_level_secondary_work);
-                    } else {
-                        LOG_WRN("Battery level secondary work already pending, skipping submission");
-                    }
+
                     break;
 
                 case MSG_TYPE_EXTERNAL_FLASH_ERASE_COMPLETE:
@@ -1989,6 +1942,7 @@ static void foot_samples_work_handler(struct k_work *work)
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_foot_samples_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
+
     
     foot_samples_t *foot_data = &msg.data.foot_samples;
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -2038,9 +1992,10 @@ static void foot_samples_secondary_work_handler(struct k_work *work)
     
     // NOTE: Legacy BLE update is now handled directly in ble_d2d_rx_client.cpp
     // to avoid duplicate updates causing stuck data
-    LOG_DBG("Secondary foot data received in bluetooth module: [0]=%u, [1]=%u, [2]=%u, [3]=%u",
-            foot_data->values[0], foot_data->values[1], foot_data->values[2], foot_data->values[3]);
-    
+    LOG_DBG("Secondary foot data received in bluetooth module: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
+            foot_data->values[0], foot_data->values[1], foot_data->values[2], foot_data->values[3],
+            foot_data->values[4], foot_data->values[5], foot_data->values[6], foot_data->values[7]);
+
     // Note: We intentionally do NOT call jis_foot_sensor_notify() here
     // as that would mix secondary data with primary data
 #else
@@ -2136,7 +2091,7 @@ static void bhi360_linear_accel_work_handler(struct k_work *work)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Primary device: This handler now only processes primary linear accel data
     // Secondary data is handled by bhi360_linear_accel_secondary_work_handler
-    jis_bhi360_data3_notify(lacc_data);
+//    jis_bhi360_data3_notify(lacc_data);
 #else
     // Secondary device: Send to primary via D2D
     ble_d2d_tx_send_bhi360_data3(lacc_data);

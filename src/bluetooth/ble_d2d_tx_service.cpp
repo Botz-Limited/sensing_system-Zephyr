@@ -470,43 +470,35 @@ BT_GATT_SERVICE_DEFINE(
 // --- D2D batching logic (fixed-point for BLE optimization) ---
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 
-// Helper: Convert foot_samples_t to fixed-point foot_samples_t (if not already fixed-point)
-static void convert_foot_samples_to_fixed(const foot_samples_t *src, foot_samples_t *dst)
+// Helper: Convert quaternion from bhi360_3d_mapping_t to simplified fixed-point structure
+static void extract_quaternion_to_fixed(const bhi360_3d_mapping_t *src, d2d_quaternion_fixed_t *dst)
 {
-    // If foot_samples_t is already fixed-point, this is a memcpy
-    memcpy(dst, src, sizeof(foot_samples_t));
-}
-
-// Helper: Convert bhi360_log_record_t to fixed-point bhi360_log_record_fixed_t
-static void convert_bhi360_log_record_to_fixed(const bhi360_log_record_t *src, bhi360_log_record_fixed_t *dst)
-{
-    // Convert each float field to fixed-point (Q15 or Q8 as appropriate)
-    // Use scale factors as defined in FixedPoint namespace (see Fixed_Point_Conversion_Guide.md)
-    dst->lacc_x = float_to_fixed16(src->lacc_x, FixedPoint::ACCEL_SCALE);
-    dst->lacc_y = float_to_fixed16(src->lacc_y, FixedPoint::ACCEL_SCALE);
-    dst->lacc_z = float_to_fixed16(src->lacc_z, FixedPoint::ACCEL_SCALE);
-    dst->gyro_x = float_to_fixed16(src->gyro_x, FixedPoint::GYRO_SCALE);
-    dst->gyro_y = float_to_fixed16(src->gyro_y, FixedPoint::GYRO_SCALE);
-    dst->gyro_z = float_to_fixed16(src->gyro_z, FixedPoint::GYRO_SCALE);
-    // Add more fields if needed, using the correct scale for each
-    // Add more fields if needed
+    // Note: src.accel_x/y/z are actually quaternion x/y/z in current implementation
+    dst->quat_x = float_to_fixed16(src->accel_x, FixedPoint::QUAT_SCALE);
+    dst->quat_y = float_to_fixed16(src->accel_y, FixedPoint::QUAT_SCALE);
+    dst->quat_z = float_to_fixed16(src->accel_z, FixedPoint::QUAT_SCALE);
+    dst->quat_w = float_to_fixed16(src->quat_w, FixedPoint::QUAT_SCALE);
+    // No gyro, no linear acceleration - only quaternion for reduced BLE bandwidth
 }
 
 static void try_combine_and_buffer(void)
 {
-    if (pending_sample.foot_ready && pending_sample.imu_ready)
+    if (pending_sample.foot_ready && pending_sample.quat_ready)
     {
+        // Store timestamp
         d2d_batch_buffer.timestamp[0] = pending_sample.timestamp;
-        // Convert and store foot sample as fixed-point
-        convert_foot_samples_to_fixed(&pending_sample.foot, &d2d_batch_buffer.foot[0]);
-        // Convert and store IMU sample as fixed-point (cast to correct type)
-        convert_bhi360_log_record_to_fixed(&pending_sample.imu, (bhi360_log_record_fixed_t *)&d2d_batch_buffer.imu[0]);
+        
+        // Copy foot sample directly (already in correct format)
+        memcpy(&d2d_batch_buffer.foot[0], &pending_sample.foot, sizeof(foot_samples_t));
+        
+        // Copy quaternion data (already converted to fixed-point)
+        memcpy(&d2d_batch_buffer.quat[0], &pending_sample.quat, sizeof(d2d_quaternion_fixed_t));
 
-        // Reset pending
+        // Reset pending flags
         pending_sample.foot_ready = false;
-        pending_sample.imu_ready = false;
+        pending_sample.quat_ready = false;
 
-        // Send the single-sample batch
+        // Send the batch (28 bytes total)
         if (primary_conn && d2d_batch_notify_enabled)
         {
             const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 2];
@@ -517,7 +509,7 @@ static void try_combine_and_buffer(void)
             }
             else
             {
-                LOG_DBG("D2D batch notification sent");
+                LOG_DBG("D2D batch sent (28 bytes): foot + quaternion only");
             }
         }
     }
@@ -528,57 +520,24 @@ int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     if (!primary_conn)
     {
-        LOG_WRN("D2D TX: Cannot send foot sensor data - no connection");
+        LOG_WRN("D2D TX: Cannot batch foot sensor data - no connection");
         return -ENOTCONN;
-    }
-    
-    if (!foot_sensor_notify_enabled)
-    {
-        // Force enable since we know subscriptions are working
-        foot_sensor_notify_enabled = true;
-        LOG_INF("D2D TX: Force-enabled foot sensor notifications");
     }
     
     // Save the data for read callbacks
     memcpy(&last_foot_sensor_data, samples, sizeof(foot_samples_t));
     
-    // Log the values we're about to send
-    LOG_INF("D2D TX: Sending foot sensor data - values[0-3]: %u %u %u %u",
-            samples->values[0], samples->values[1],
-            samples->values[2], samples->values[3]);
+    // Add foot data to pending batch
+    memcpy(&pending_sample.foot, samples, sizeof(foot_samples_t));
+    pending_sample.foot_ready = true;
+    pending_sample.timestamp = k_uptime_get_32();  // Get current timestamp
     
-    // Simply send the raw data directly without any copying or conversion
-    // The foot sensor characteristic is at a fixed index in the service definition
-    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[1];
+    LOG_DBG("D2D TX: Foot sensor data added to batch buffer");
     
-    // Send the data directly from the input parameter
-    int err = bt_gatt_notify(primary_conn, char_attr, samples, sizeof(foot_samples_t));
+    // Try to combine with quaternion and send batch
+    try_combine_and_buffer();
     
-    if (err)
-    {
-        LOG_ERR("Failed to send foot sensor notification: %d", err);
-        if (err == -ENOTCONN)
-        {
-            LOG_ERR("Connection lost");
-        }
-        else if (err == -EINVAL)
-        {
-            LOG_ERR("Invalid parameters");
-        }
-        else if (err == -ENOTSUP)
-        {
-            LOG_ERR("Notifications not supported or not enabled");
-        }
-    }
-    else
-    {
-        LOG_DBG("D2D TX: Foot sensor data sent successfully");
-    }
-    
-    // Remove the batching logic since we won't need it after legacy removal
-    // Just keep it simple - send raw data directly
-    
-    return err;
+    return 0;
 #else
     // Primary device doesn't have this service
     return -ENOTSUP;
@@ -588,39 +547,24 @@ int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
 int d2d_tx_notify_bhi360_data1(const bhi360_3d_mapping_t *data)
 {
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    LOG_DBG("D2D TX: BHI360 data1 notify called");
+    LOG_DBG("D2D TX: BHI360 data1 batching called");
     if (!primary_conn)
     {
-        LOG_WRN("D2D TX: Cannot send BHI360 data1 - no connection");
+        LOG_WRN("D2D TX: Cannot batch BHI360 data1 - no connection");
         return -ENOTCONN;
     }
-    if (!bhi360_data1_notify_enabled)
-    {
-        LOG_WRN("D2D TX: Cannot send BHI360 data1 - notifications not enabled");
-        return -ENOTCONN;
-    }
-    // Convert float data to fixed-point for BLE transmission
-    convert_3d_mapping_to_fixed(*data, bhi360_data1_fixed);
-    // BHI360 data1 characteristic is at index 4
-    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[4];
-    int err = bt_gatt_notify(primary_conn, char_attr, &bhi360_data1_fixed, sizeof(bhi360_data1_fixed));
-    if (err)
-    {
-        LOG_ERR("Failed to send BHI360 data1 notification: %d", err);
-    }
-    // --- Batch buffering logic ---
-    memset(&pending_sample.imu, 0, sizeof(pending_sample.imu));
-    // Map incoming 3D mapping data to bhi360_log_record_t fields
-    pending_sample.imu.lacc_x = data->accel_x;
-    pending_sample.imu.lacc_y = data->accel_y;
-    pending_sample.imu.lacc_z = data->accel_z;
-    pending_sample.imu.gyro_x = data->gyro_x;
-    pending_sample.imu.gyro_y = data->gyro_y;
-    pending_sample.imu.gyro_z = data->gyro_z;
-    // If you have quaternion data, map it here as well if available in data
-    pending_sample.imu_ready = true;
+    
+    // Extract only quaternion data for D2D batch
+    extract_quaternion_to_fixed(data, &pending_sample.quat);
+    pending_sample.quat_ready = true;
+    pending_sample.timestamp = k_uptime_get_32();  // Get current timestamp
+    
+    LOG_DBG("D2D TX: Quaternion data added to batch buffer");
+    
+    // Try to combine with foot samples and send batch
     try_combine_and_buffer();
-    return err;
+    
+    return 0;
 #else
     return -ENOTSUP;
 #endif
@@ -629,30 +573,10 @@ int d2d_tx_notify_bhi360_data1(const bhi360_3d_mapping_t *data)
 int d2d_tx_notify_bhi360_data3(const bhi360_linear_accel_t *data)
 {
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    LOG_DBG("D2D TX: BHI360 data3 (linear accel) notify called");
-    if (!primary_conn || !bhi360_data3_notify_enabled)
-    {
-        LOG_WRN("D2D TX: Cannot send BHI360 data3 - no connection or notifications disabled");
-        return -ENOTCONN;
-    }
-    // Convert float data to fixed-point for BLE transmission
-    convert_linear_accel_to_fixed(*data, bhi360_data3_fixed);
-    // BHI360 data3 characteristic is at index 10
-    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[10];
-    int err = bt_gatt_notify(primary_conn, char_attr, &bhi360_data3_fixed, sizeof(bhi360_data3_fixed));
-    if (err)
-    {
-        LOG_ERR("Failed to send BHI360 data3 notification: %d", err);
-    }
-    // --- Batch buffering logic ---
-    memset(&pending_sample.imu, 0, sizeof(pending_sample.imu));
-    // Only fill linear acceleration fields for batch
-    pending_sample.imu.lacc_x = data->x;
-    pending_sample.imu.lacc_y = data->y;
-    pending_sample.imu.lacc_z = data->z;
-    pending_sample.imu_ready = true;
-    try_combine_and_buffer();
-    return err;
+    LOG_DBG("D2D TX: BHI360 data3 (linear accel) - DISABLED");
+    // Linear acceleration is NOT sent via D2D anymore
+    // Not via individual characteristic or batch
+    return 0;
 #else
     return -ENOTSUP;
 #endif

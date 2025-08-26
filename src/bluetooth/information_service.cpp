@@ -39,6 +39,10 @@
 #include <util.hpp>
 #include <zephyr/random/random.h>
 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "d2d_data_handler.hpp"  // For accessing secondary data globals
+#endif
+
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 static uint32_t device_status_bitfield = 0;
@@ -57,7 +61,13 @@ static uint8_t charge_status = 0;
 static uint8_t battery_levels[2] = {80, 79}; // [0] = primary, [1] = secondary (0 = unknown)
 static foot_samples_t foot_sensor_char_value = {0};
 
+// Aggregated data storage for read callbacks
+static foot_samples_aggregated_t foot_sensor_aggregated_value = {0};
+static quaternion_aggregated_t quaternion_aggregated_value = {0};
+
 static bool status_subscribed = true;
+static bool foot_sensor_subscribed = true;  // Separate flag for foot sensor
+static bool bhi360_data1_subscribed = true;
 
 static uint8_t ct[10];
 static uint8_t ct_update = 0;
@@ -66,11 +76,11 @@ static uint8_t ct_update = 0;
 // 1: 3D Mapping, 2: Step Count, 3: Linear Acceleration
 // Using fixed-point versions for BLE transmission
 static bhi360_3d_mapping_fixed_t bhi360_data1_value_fixed = {0, 0, 0, 0, 0, 0, 0, 0};
-static bhi360_step_count_fixed_t bhi360_data2_value_fixed = {0, 0};
-static bhi360_linear_accel_fixed_t bhi360_data3_value_fixed = {0, 0, 0};
-static bool bhi360_data1_subscribed = false;
-static bool bhi360_data2_subscribed = false;
-static bool bhi360_data3_subscribed = false;
+// Commented out - only quaternion data sent to BLE at 5Hz
+// static bhi360_step_count_fixed_t bhi360_data2_value_fixed = {0, 0};
+// static bhi360_linear_accel_fixed_t bhi360_data3_value_fixed = {0, 0, 0};
+// static bool bhi360_data2_subscribed = false;
+// static bool bhi360_data3_subscribed = false;
 
 // FOTA progress tracking
 static fota_progress_msg_t fota_progress_value = {false, 0, 0, 0, 0, 0};
@@ -125,13 +135,14 @@ static void jis_bhi360_data1_ccc_cfg_changed(const struct bt_gatt_attr* attr, ui
 extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t* data);
 extern "C" void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t* data);
 
-static ssize_t jis_bhi360_data2_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
+// Commented out - only quaternion data sent to BLE at 5Hz
+// static ssize_t jis_bhi360_data2_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+// static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+// extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
 
-static ssize_t jis_bhi360_data3_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
-static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
-extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t* data);
+// static ssize_t jis_bhi360_data3_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
+// static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
+// extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t* data);
 
 // Step count characteristics moved to Activity Metrics Service
 
@@ -223,10 +234,11 @@ static struct bt_uuid_128 foot_sensor_samples =
 // BHI360 Data Set UUIDs
 static struct bt_uuid_128 bhi360_data1_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb2, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
-static struct bt_uuid_128 bhi360_data2_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb3, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
-static struct bt_uuid_128 bhi360_data3_uuid =
-    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb4, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+// Commented out - only quaternion data sent to BLE at 5Hz
+// static struct bt_uuid_128 bhi360_data2_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb3, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+// static struct bt_uuid_128 bhi360_data3_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372eb4, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 // FOTA Progress UUID
 static struct bt_uuid_128 fota_progress_uuid =
@@ -324,21 +336,22 @@ BT_GATT_SERVICE_DEFINE(
         static_cast<void *>(&bhi360_data1_value_fixed)),
     BT_GATT_CCC(jis_bhi360_data1_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
+    // Commented out - only quaternion data sent to BLE at 5Hz
     // Individual foot step count characteristic - DEPRECATED
     // Only aggregated step counts (total and activity) should be used by mobile apps
-    BT_GATT_CHARACTERISTIC(&bhi360_data2_uuid.uuid,
-        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ,
-        jis_bhi360_data2_read, nullptr,
-        static_cast<void *>(&bhi360_data2_value_fixed)),
-    BT_GATT_CCC(jis_bhi360_data2_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    // BT_GATT_CHARACTERISTIC(&bhi360_data2_uuid.uuid,
+    //     BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+    //     BT_GATT_PERM_READ,
+    //     jis_bhi360_data2_read, nullptr,
+    //     static_cast<void *>(&bhi360_data2_value_fixed)),
+    // BT_GATT_CCC(jis_bhi360_data2_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
-    BT_GATT_CHARACTERISTIC(&bhi360_data3_uuid.uuid,
-        BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-        BT_GATT_PERM_READ,
-        jis_bhi360_data3_read, nullptr,
-        static_cast<void *>(&bhi360_data3_value_fixed)),
-    BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    // BT_GATT_CHARACTERISTIC(&bhi360_data3_uuid.uuid,
+    //     BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+    //     BT_GATT_PERM_READ,
+    //     jis_bhi360_data3_read, nullptr,
+    //     static_cast<void *>(&bhi360_data3_value_fixed)),
+    // BT_GATT_CCC(jis_bhi360_data3_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Step count characteristics moved to Activity Metrics Service
 
@@ -682,18 +695,42 @@ extern "C" void jis_clear_err_status_notify(err_t error_code)
 
 void jis_foot_sensor_notify(const foot_samples_t *samples_data)
 {
-    // 1. Get the current epoch timestamp from your RTC module
-    uint32_t current_epoch = get_current_epoch_time();
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 
-    foot_samples_t temp_foot_data;
-
-    memcpy(temp_foot_data.values, samples_data->values, sizeof(samples_data->values));
-
-    memcpy(&foot_sensor_char_value, &temp_foot_data, sizeof(foot_samples_t));
-
-    if (status_subscribed)
+    // Always prepare aggregated data (for both notify and read)
+    foot_sensor_aggregated_value.timestamp = k_uptime_get_32();
+    
+    // Copy primary data
+    memcpy(foot_sensor_aggregated_value.primary, samples_data->values, sizeof(samples_data->values));
+    
+    // Copy secondary data if available
+    if (g_secondary_data_valid) {
+        memcpy(foot_sensor_aggregated_value.secondary, g_secondary_foot_data.values, sizeof(g_secondary_foot_data.values));
+        LOG_DBG("Aggregated foot data prepared - Primary[0]=%u, Secondary[0]=%u",
+                foot_sensor_aggregated_value.primary[0], foot_sensor_aggregated_value.secondary[0]);
+    } else {
+        // No secondary data, send zeros
+        memset(foot_sensor_aggregated_value.secondary, 0, sizeof(foot_sensor_aggregated_value.secondary));
+        LOG_DBG("Primary-only foot data prepared (secondary not available)");
+    }
+    
+    // Send notification if subscribed
+    foot_sensor_subscribed=true;
+    if (foot_sensor_subscribed)  // Use correct subscription flag
     {
-        // Convert to BLE format with sequence number
+        auto *status_gatt =
+            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
+        if (status_gatt)
+        {
+            // Send aggregated format
+            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_aggregated_value), sizeof(foot_sensor_aggregated_value));
+            LOG_DBG("Foot sensor aggregated notification sent: %u bytes", sizeof(foot_sensor_aggregated_value));
+        }
+    }
+#else
+    // Secondary device - send only its own data
+    if (foot_sensor_subscribed)
+    {
         foot_samples_ble_t ble_data;
         BleSequenceManager::getInstance().addFootSample(samples_data, &ble_data);
 
@@ -701,16 +738,19 @@ void jis_foot_sensor_notify(const foot_samples_t *samples_data)
             bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
         if (status_gatt)
         {
-            // Send BLE format with sequence number
             bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&ble_data), sizeof(ble_data));
         }
     }
+#endif
+    
+    // Store primary data for legacy compatibility
+    memcpy(&foot_sensor_char_value, samples_data, sizeof(foot_samples_t));
 }
 
 // Helper function to send BLE format data directly (used by recovery)
 extern "C" void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data)
 {
-    if (status_subscribed && data)
+    if (foot_sensor_subscribed && data)  // Use correct subscription flag
     {
         auto *status_gatt =
             bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
@@ -746,7 +786,7 @@ static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr *attr, uin
         LOG_ERR("jis_foot_sensor_ccc_cfg_changed: attr is NULL");
         return;
     }
-    status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    foot_sensor_subscribed = value == BT_GATT_CCC_NOTIFY;  // Use separate flag
     LOG_DBG("Foot Sensor CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
@@ -810,13 +850,14 @@ static ssize_t jis_status_read(struct bt_conn *conn, const struct bt_gatt_attr *
 static ssize_t jis_foot_sensor_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                                     uint16_t offset)
 {
-    // Cast attr->user_data to the correct type (foot_samples_t *).
-    // This 'attr->user_data' is actually a pointer to your global
-    // 'foot_sensor_char_value'.
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Return aggregated data for primary device
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &foot_sensor_aggregated_value, sizeof(foot_sensor_aggregated_value));
+#else
+    // Secondary device returns simple format
     const foot_samples_t *value_to_read = static_cast<const foot_samples_t *>(attr->user_data);
-
-    // Ensure that sizeof(foot_samples_t) is used, not sizeof(error_bitfield_data)
     return bt_gatt_attr_read(conn, attr, buf, len, offset, value_to_read, sizeof(foot_samples_t));
+#endif
 }
 
 /**
@@ -996,21 +1037,61 @@ static void jis_bhi360_data1_ccc_cfg_changed(const struct bt_gatt_attr *attr, ui
 static ssize_t jis_bhi360_data1_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
                                      uint16_t offset)
 {
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Return aggregated quaternion data for primary device
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &quaternion_aggregated_value, sizeof(quaternion_aggregated_value));
+#else
+    // Secondary device returns fixed-point format
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_3d_mapping_fixed_t));
+#endif
 }
 extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
 {
-    // Convert float data to fixed-point for BLE transmission
-    convert_3d_mapping_to_fixed(*data, bhi360_data1_value_fixed);
-
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Always prepare aggregated quaternion data (for both notify and read)
+    quaternion_aggregated_value.timestamp = k_uptime_get_32();
+    
+    // Convert primary data to fixed-point
+    quaternion_aggregated_value.primary_x = float_to_fixed16(data->accel_x, FixedPoint::QUAT_SCALE);
+    quaternion_aggregated_value.primary_y = float_to_fixed16(data->accel_y, FixedPoint::QUAT_SCALE);
+    quaternion_aggregated_value.primary_z = float_to_fixed16(data->accel_z, FixedPoint::QUAT_SCALE);
+    quaternion_aggregated_value.primary_w = float_to_fixed16(data->quat_w, FixedPoint::QUAT_SCALE);
+    
+    // Copy secondary data if available
+    if (g_secondary_data_valid) {
+        quaternion_aggregated_value.secondary_x = g_secondary_quat_data.quat_x;
+        quaternion_aggregated_value.secondary_y = g_secondary_quat_data.quat_y;
+        quaternion_aggregated_value.secondary_z = g_secondary_quat_data.quat_z;
+        quaternion_aggregated_value.secondary_w = g_secondary_quat_data.quat_w;
+        LOG_DBG("Aggregated quaternion prepared - Primary(%.2f,%.2f,%.2f,%.2f), Secondary(fixed)",
+                data->accel_x, data->accel_y, data->accel_z, data->quat_w);
+    } else {
+        // No secondary data, send zeros
+        quaternion_aggregated_value.secondary_x = 0;
+        quaternion_aggregated_value.secondary_y = 0;
+        quaternion_aggregated_value.secondary_z = 0;
+        quaternion_aggregated_value.secondary_w = 0;
+        LOG_DBG("Primary-only quaternion prepared (secondary not available)");
+    }
+    
+    // Send notification if subscribed
     if (bhi360_data1_subscribed)
     {
-        // Convert to BLE format with sequence number
+        safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&quaternion_aggregated_value), sizeof(quaternion_aggregated_value));
+        LOG_DBG("Quaternion aggregated notification sent: %u bytes", sizeof(quaternion_aggregated_value));
+    }
+#else
+    // Secondary device - send only its own data
+    if (bhi360_data1_subscribed)
+    {
         bhi360_3d_mapping_ble_t ble_data;
         BleSequenceManager::getInstance().addBhi3603D(data, &ble_data);
-
         safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&ble_data), sizeof(ble_data));
     }
+#endif
+    
+    // Store primary data for legacy compatibility
+    convert_3d_mapping_to_fixed(*data, bhi360_data1_value_fixed);
 }
 
 // Helper function to send BLE format data directly (used by recovery)
@@ -1022,104 +1103,105 @@ extern "C" void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t *data)
     }
 }
 
+// Commented out - only quaternion data sent to BLE at 5Hz
 // --- BHI360 Data Set 2 ---
-static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
-{
-    if (!attr)
-    {
-        LOG_ERR("jis_bhi360_data2_ccc_cfg_changed: attr is NULL");
-        return;
-    }
-    bhi360_data2_subscribed = value == BT_GATT_CCC_NOTIFY;
-    LOG_DBG("BHI360 Data2 CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
-}
-static ssize_t jis_bhi360_data2_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
-                                     uint16_t offset)
-{
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_step_count_fixed_t));
-}
+// static void jis_bhi360_data2_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+// {
+//     if (!attr)
+//     {
+//         LOG_ERR("jis_bhi360_data2_ccc_cfg_changed: attr is NULL");
+//         return;
+//     }
+//     bhi360_data2_subscribed = value == BT_GATT_CCC_NOTIFY;
+//     LOG_DBG("BHI360 Data2 CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+// }
+// static ssize_t jis_bhi360_data2_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
+//                                      uint16_t offset)
+// {
+//     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_step_count_fixed_t));
+// }
 
-extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t *data)
-{
-    // Step count data is already integers, just copy
-    bhi360_data2_value_fixed.step_count = data->step_count;
-    bhi360_data2_value_fixed.activity_duration_s = 0; // Deprecated - always 0
+// extern "C" void jis_bhi360_data2_notify(const bhi360_step_count_t *data)
+// {
+//     // Step count data is already integers, just copy
+//     bhi360_data2_value_fixed.step_count = data->step_count;
+//     bhi360_data2_value_fixed.activity_duration_s = 0; // Deprecated - always 0
 
-    if (bhi360_data2_subscribed)
-    {
-        safe_gatt_notify(&bhi360_data2_uuid.uuid, static_cast<const void *>(&bhi360_data2_value_fixed),
-                         sizeof(bhi360_data2_value_fixed));
-    }
+//     if (bhi360_data2_subscribed)
+//     {
+//         safe_gatt_notify(&bhi360_data2_uuid.uuid, static_cast<const void *>(&bhi360_data2_value_fixed),
+//                          sizeof(bhi360_data2_value_fixed));
+//     }
 
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Also update secondary step count for aggregation
-    // This function is called from d2d_data_handler when secondary data arrives
-    // We need to tell the bluetooth module about the secondary update
-    static uint32_t last_secondary_steps = 0;
-    static uint32_t last_secondary_duration = 0;
+// #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+//     // Also update secondary step count for aggregation
+//     // This function is called from d2d_data_handler when secondary data arrives
+//     // We need to tell the bluetooth module about the secondary update
+//     static uint32_t last_secondary_steps = 0;
+//     static uint32_t last_secondary_duration = 0;
 
-    // Check if this is likely secondary data (different from last known
-    // secondary) This is a bit of a hack - ideally we'd have a separate function
-    // for secondary
-    if (data->step_count != last_secondary_steps || data->activity_duration_s != last_secondary_duration)
-    {
-        // Send a message to bluetooth module with secondary step count
-        generic_message_t msg = {};
-        msg.sender = SENDER_D2D_SECONDARY; // Indicate it's from D2D
-        msg.type = MSG_TYPE_BHI360_STEP_COUNT;
-        msg.data.bhi360_step_count = *data;
+//     // Check if this is likely secondary data (different from last known
+//     // secondary) This is a bit of a hack - ideally we'd have a separate function
+//     // for secondary
+//     if (data->step_count != last_secondary_steps || data->activity_duration_s != last_secondary_duration)
+//     {
+//         // Send a message to bluetooth module with secondary step count
+//         generic_message_t msg = {};
+//         msg.sender = SENDER_D2D_SECONDARY; // Indicate it's from D2D
+//         msg.type = MSG_TYPE_BHI360_STEP_COUNT;
+//         msg.data.bhi360_step_count = *data;
 
-        if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) == 0)
-        {
-            last_secondary_steps = data->step_count;
-            last_secondary_duration = data->activity_duration_s;
-            LOG_DBG("Sent secondary step count to bluetooth module for aggregation");
-        }
-    }
-#endif
-}
+//         if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) == 0)
+//         {
+//             last_secondary_steps = data->step_count;
+//             last_secondary_duration = data->activity_duration_s;
+//             LOG_DBG("Sent secondary step count to bluetooth module for aggregation");
+//         }
+//     }
+// #endif
+// }
 
 // --- BHI360 Data Set 3 ---
-static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
-{
-    if (!attr)
-    {
-        LOG_ERR("jis_bhi360_data3_ccc_cfg_changed: attr is NULL");
-        return;
-    }
-    bhi360_data3_subscribed = value == BT_GATT_CCC_NOTIFY;
-    LOG_DBG("BHI360 Data3 CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
-}
+// static void jis_bhi360_data3_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+// {
+//     if (!attr)
+//     {
+//         LOG_ERR("jis_bhi360_data3_ccc_cfg_changed: attr is NULL");
+//         return;
+//     }
+//     bhi360_data3_subscribed = value == BT_GATT_CCC_NOTIFY;
+//     LOG_DBG("BHI360 Data3 CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
+// }
 
-static ssize_t jis_bhi360_data3_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
-                                     uint16_t offset)
-{
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_linear_accel_fixed_t));
-}
+// static ssize_t jis_bhi360_data3_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf, uint16_t len,
+//                                      uint16_t offset)
+// {
+//     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_linear_accel_fixed_t));
+// }
 
-void jis_bhi360_data3_notify(const bhi360_linear_accel_t *data)
-{
-    // Convert float data to fixed-point for BLE transmission
-    convert_linear_accel_to_fixed(*data, bhi360_data3_value_fixed);
+// void jis_bhi360_data3_notify(const bhi360_linear_accel_t *data)
+// {
+//     // Convert float data to fixed-point for BLE transmission
+//     convert_linear_accel_to_fixed(*data, bhi360_data3_value_fixed);
 
-    if (bhi360_data3_subscribed)
-    {
-        // Convert to BLE format with sequence number
-        bhi360_linear_accel_ble_t ble_data;
-        BleSequenceManager::getInstance().addBhi360Accel(data, &ble_data);
+//     if (bhi360_data3_subscribed)
+//     {
+//         // Convert to BLE format with sequence number
+//         bhi360_linear_accel_ble_t ble_data;
+//         BleSequenceManager::getInstance().addBhi360Accel(data, &ble_data);
 
-        safe_gatt_notify(&bhi360_data3_uuid.uuid, static_cast<const void *>(&ble_data), sizeof(ble_data));
-    }
-}
+//         safe_gatt_notify(&bhi360_data3_uuid.uuid, static_cast<const void *>(&ble_data), sizeof(ble_data));
+//     }
+// }
 
 // Helper function to send BLE format data directly (used by recovery)
-extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t *data)
-{
-    if (bhi360_data3_subscribed && data)
-    {
-        safe_gatt_notify(&bhi360_data3_uuid.uuid, static_cast<const void *>(data), sizeof(*data));
-    }
-}
+// extern "C" void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t *data)
+// {
+//     if (bhi360_data3_subscribed && data)
+//     {
+//         safe_gatt_notify(&bhi360_data3_uuid.uuid, static_cast<const void *>(data), sizeof(*data));
+//     }
+// }
 
 // --- FOTA Progress ---
 static void jis_fota_progress_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)

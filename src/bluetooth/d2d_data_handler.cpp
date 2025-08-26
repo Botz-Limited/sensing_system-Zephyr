@@ -17,13 +17,19 @@ extern struct k_msgq sensor_data_msgq;
 extern struct k_msgq activity_metrics_msgq;
 extern struct k_msgq bluetooth_msgq;
 
+// Global storage for secondary data (for aggregation with primary)
+foot_samples_t g_secondary_foot_data = {0};
+d2d_quaternion_fixed_t g_secondary_quat_data = {0};
+uint32_t g_secondary_last_timestamp = 0;
+bool g_secondary_data_valid = false;
+
 int d2d_data_handler_init(void)
 {
     LOG_INF("D2D data handler initialized");
     return 0;
 }
 
-// Handle D2D batch data from secondary device
+// Handle D2D batch data from secondary device (simplified: quaternion only)
 int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
 {
     if (!batch) {
@@ -31,54 +37,73 @@ int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
         return -EINVAL;
     }
 
-    LOG_INF("Processing D2D batch: timestamp[0]=%u", batch->timestamp[0]);
+    LOG_INF("Processing D2D batch (quaternion-only): timestamp[0]=%u", batch->timestamp[0]);
 
-    // Process each sample in the batch (assuming batch size is defined as D2D_BATCH_SIZE)
-    for (int i = 0; i < D2D_BATCH_SIZE; i++) {
-        // Unpack foot sample (no conversion needed, assuming raw integers)
-        foot_samples_t foot = batch->foot[i];
-
-        // Unpack and convert IMU sample from fixed-point to float
-        bhi360_log_record_t imu;
-        imu.quat_x = fixed16_to_float(batch->imu[i].quat_x, FixedPoint::QUAT_SCALE);
-        imu.quat_y = fixed16_to_float(batch->imu[i].quat_y, FixedPoint::QUAT_SCALE);
-        imu.quat_z = fixed16_to_float(batch->imu[i].quat_z, FixedPoint::QUAT_SCALE);
-        imu.quat_w = fixed16_to_float(batch->imu[i].quat_w, FixedPoint::QUAT_SCALE);
-        imu.gyro_x = fixed16_to_float(batch->imu[i].gyro_x, FixedPoint::GYRO_SCALE);
-        imu.gyro_y = fixed16_to_float(batch->imu[i].gyro_y, FixedPoint::GYRO_SCALE);
-        imu.gyro_z = fixed16_to_float(batch->imu[i].gyro_z, FixedPoint::GYRO_SCALE);
-        imu.lacc_x = fixed16_to_float(batch->imu[i].lacc_x, FixedPoint::ACCEL_SCALE);
-        imu.lacc_y = fixed16_to_float(batch->imu[i].lacc_y, FixedPoint::ACCEL_SCALE);
-        imu.lacc_z = fixed16_to_float(batch->imu[i].lacc_z, FixedPoint::ACCEL_SCALE);
-        imu.quat_accuracy = fixed16_to_float(batch->imu[i].quat_accuracy, FixedPoint::ACCURACY_SCALE);
-        imu.step_count = batch->imu[i].step_count;  // Assuming uint32_t, no conversion
-
-        // Send foot data to central hub with tagging
+    // Store secondary data for aggregation (D2D_BATCH_SIZE = 1 currently)
+    if (D2D_BATCH_SIZE > 0) {
+        // Store foot sample (direct copy, no conversion needed)
+        memcpy(&g_secondary_foot_data, &batch->foot[0], sizeof(foot_samples_t));
+        
+        // Store quaternion data (already in fixed-point format)
+        memcpy(&g_secondary_quat_data, &batch->quat[0], sizeof(d2d_quaternion_fixed_t));
+        
+        // Update timestamp and validity
+        g_secondary_last_timestamp = batch->timestamp[0];
+        g_secondary_data_valid = true;
+        
+        LOG_DBG("Secondary data stored for aggregation: foot + quaternion");
+        LOG_DBG("Foot values[0-3]: %u %u %u %u",
+                g_secondary_foot_data.values[0], g_secondary_foot_data.values[1],
+                g_secondary_foot_data.values[2], g_secondary_foot_data.values[3]);
+        LOG_DBG("Quaternion (fixed): x=%d y=%d z=%d w=%d",
+                g_secondary_quat_data.quat_x, g_secondary_quat_data.quat_y,
+                g_secondary_quat_data.quat_z, g_secondary_quat_data.quat_w);
+        
+        // Still forward to central hub for logging/analysis
         extern struct k_msgq central_data_hub_msgq;
+        
+        // Foot data to central hub
         tagged_message_t foot_msg;
         foot_msg.msg.sender = SENDER_D2D_SECONDARY;
         foot_msg.msg.type = MSG_TYPE_FOOT_SAMPLES;
         foot_msg.tag = SECONDARY_FOOT;
-        memcpy(&foot_msg.msg.data.foot_samples, &foot, sizeof(foot_samples_t));
+        memcpy(&foot_msg.msg.data.foot_samples, &batch->foot[0], sizeof(foot_samples_t));
         if (k_msgq_put(&central_data_hub_msgq, &foot_msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to queue foot sample %d from batch to central hub");
+            LOG_ERR("Failed to queue foot sample to central hub");
         } else {
-            LOG_DBG("Foot sample %d from batch queued to central hub with tag SECONDARY_FOOT", i);
+            LOG_DBG("Foot sample queued to central hub with tag SECONDARY_FOOT");
         }
 
-        // Send IMU data to central hub with tagging
+        // Convert quaternion for central hub (needs float format)
+        bhi360_log_record_t imu;
+        imu.quat_x = fixed16_to_float(batch->quat[0].quat_x, FixedPoint::QUAT_SCALE);
+        imu.quat_y = fixed16_to_float(batch->quat[0].quat_y, FixedPoint::QUAT_SCALE);
+        imu.quat_z = fixed16_to_float(batch->quat[0].quat_z, FixedPoint::QUAT_SCALE);
+        imu.quat_w = fixed16_to_float(batch->quat[0].quat_w, FixedPoint::QUAT_SCALE);
+        imu.gyro_x = 0.0f;
+        imu.gyro_y = 0.0f;
+        imu.gyro_z = 0.0f;
+        imu.lacc_x = 0.0f;
+        imu.lacc_y = 0.0f;
+        imu.lacc_z = 0.0f;
+        imu.quat_accuracy = 0.0f;
+        imu.step_count = 0;
+        imu.timestamp = batch->timestamp[0];
+        
+        // Quaternion data to central hub
         tagged_message_t imu_msg;
         imu_msg.msg.sender = SENDER_D2D_SECONDARY;
         imu_msg.msg.type = MSG_TYPE_BHI360_LOG_RECORD;
         imu_msg.tag = SECONDARY_IMU;
         memcpy(&imu_msg.msg.data.bhi360_log_record, &imu, sizeof(bhi360_log_record_t));
         if (k_msgq_put(&central_data_hub_msgq, &imu_msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to queue IMU sample %d from batch to central hub");
+            LOG_ERR("Failed to queue quaternion sample to central hub");
         } else {
-            LOG_DBG("IMU sample %d from batch queued to central hub with tag SECONDARY_IMU", i);
+            LOG_DBG("Quaternion sample queued to central hub (gyro/accel zeroed)");
         }
     }
 
+    LOG_INF("D2D batch processed and stored: 28 bytes (foot + quaternion only)");
     return 0;
 }
 

@@ -267,7 +267,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
     break;
 
   case NRFX_SAADC_EVT_DONE:
-    samples_number = 8; // Fixed: added missing semicolon
+    samples_number = 8;
     // Assign the buffer to our new uint16_t pointer
     raw_adc_data = (int16_t *)p_event->data.done.p_buffer;
 
@@ -320,10 +320,11 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
     } else // Normal operation after calibration
     {
       if (atomic_get(&logging_active) == 1) {
-        // Rate limiting for Bluetooth: Send at 10Hz instead of 80Hz
-        // SAADC runs at 80Hz, so send every 8th sample to achieve 10Hz
+      
+        // Rate limiting for Bluetooth: Send at 5Hz instead of 100Hz
+        // SAADC runs at 100Hz, so send every 20th sample to achieve 5Hz
+        const uint8_t SAMPLES_TO_SKIP = 20; // 100Hz / 20 = 5Hz
         static uint8_t sample_counter = 0;
-        const uint8_t SAMPLES_TO_SKIP = 20; // 80Hz / 8 = 10Hz
         
         generic_message_t msg;
 
@@ -343,23 +344,18 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
           LOG_WRN("Failed to send foot sensor data to sensor_data module");
         }
         
-        // Also send to Bluetooth at 10Hz (every 8th sample) for JIS characteristics
-        sample_counter++;
-        if (sample_counter >= SAMPLES_TO_SKIP) {
-          sample_counter = 0;
-          if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+        // Also send to Bluetooth at 20Hz (every 5th sample) for JIS characteristics
+        if (++sample_counter % SAMPLES_TO_SKIP == 0) {
+          sample_counter = 0;          if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
             LOG_WRN("Failed to send foot sensor data to bluetooth module");
+          }
+          else
+          {
+            LOG_ERR("Sent MESSAGE MSG_TYPE_FOOT_SAMPLES to bluetooth module");
           }
         }
 
-        // WiFi can still get full rate if needed
-#if defined(CONFIG_WIFI_MODULE)
-        if (atomic_get(&wifi_active) == 1) {
-          if (k_msgq_put(&wifi_msgq, &msg, K_NO_WAIT) != 0) {
-            LOG_WRN("Failed to send foot sensor data to wifi module");
-          }
-        }
-#endif
+
       }
     }
     break;
@@ -371,7 +367,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
   case NRFX_SAADC_EVT_FINISHED:
     LOG_INF("SAADC event: FINISHED - Sampling process has ended cleanly.");
     nrfx_dppi_channel_disable(&m_dppi_instance, dppi_channel_timer_saadc);
-    LOG_DBG("SAADC sampling DPPI channel %u disabled on FINISHED event.",
+    LOG_WRN("SAADC sampling DPPI channel %u disabled on FINISHED event.",
             dppi_channel_timer_saadc);
     break;
 

@@ -1,11 +1,16 @@
 /**
  * @file motion_sensor_refactored.cpp
  * @brief Refactored motion sensor module using BHI360 driver
- * @version 2.0.0
- * @date July 2025
+ * @version 2.0.1
+ * @date August 2025
  *
  * This is a refactored version showing integration with the new BHI360 driver.
  * Changes marked with // DRIVER_INTEGRATION:
+ *
+ * Update: Added rate limiting for Bluetooth transmission
+ * - Motion sensor samples at 100Hz internally for logging and processing
+ * - Bluetooth transmission limited to 5Hz to reduce BLE bandwidth usage
+ * - Quaternion, linear acceleration, and step count sent every 20th sample
  */
 
 #include <hal/nrf_spim.h>
@@ -65,7 +70,9 @@ static const struct device *const bhi360_dev = DEVICE_DT_GET(BHI360_NODE);
 
 // Use atomic for thread-safe access to logging state
 static atomic_t logging_active = ATOMIC_INIT(0);
+#if defined(CONFIG_WIFI_MODULE)
 static atomic_t wifi_active = ATOMIC_INIT(0);
+#endif
 static float configured_sample_rate = 50.0f;
 
 // Step count tracking variables (file scope for access across functions)
@@ -322,7 +329,7 @@ static void motion_sensor_init() {
     }
 
     // Configure sensor rates
-    float motion_sensor_rate = 80.0f;
+    float motion_sensor_rate = 100.0f;
     float step_counter_rate = 20.0f;
     configured_sample_rate = motion_sensor_rate;
     uint32_t report_latency_ms = 0;
@@ -750,60 +757,80 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
       }
 #endif
 
-      // Send individual values to Bluetooth module
-      // 3D mapping with actual gyro data and quaternion
-      generic_message_t qmsg{};
-      qmsg.sender = SENDER_BHI360_THREAD;
-      qmsg.type = MSG_TYPE_BHI360_3D_MAPPING;
-      qmsg.data.bhi360_3d_mapping.gyro_x = latest_gyro_x;
-      qmsg.data.bhi360_3d_mapping.gyro_y = latest_gyro_y;
-      qmsg.data.bhi360_3d_mapping.gyro_z = latest_gyro_z;
-      // Using accel fields for quaternion x,y,z components
-      qmsg.data.bhi360_3d_mapping.accel_x = latest_quat_x;
-      qmsg.data.bhi360_3d_mapping.accel_y = latest_quat_y;
-      qmsg.data.bhi360_3d_mapping.accel_z = latest_quat_z;
-      qmsg.data.bhi360_3d_mapping.quat_w =
-          latest_quat_w; // Now including W component
+      // Rate limiting for Bluetooth: Send at 5Hz instead of 100Hz
+      // Motion sensor runs at 100Hz, so send every 20th sample to achieve 5Hz
+      static uint8_t motion_bt_sample_counter = 0;
+      const uint8_t MOTION_SAMPLES_TO_SKIP = 20; // 100Hz / 20 = 5Hz
+      
+      // Always increment counter when we have new data
+      motion_bt_sample_counter++;
+      
+      // Only send to Bluetooth at 5Hz rate (reduced from 100Hz for BLE bandwidth)
+      if (motion_bt_sample_counter >= MOTION_SAMPLES_TO_SKIP) {
+        motion_bt_sample_counter = 0;
+        
+        // BLUETOOTH ONLY: Send quaternion data only - no gyro, no linear acceleration
+        // This reduces BLE bandwidth by ~60% while maintaining internal processing at 100Hz
+        generic_message_t qmsg{};
+        qmsg.sender = SENDER_BHI360_THREAD;
+        qmsg.type = MSG_TYPE_BHI360_3D_MAPPING;
+        
+        // Zero out gyro data for Bluetooth - not needed for phone display
+        // Internal processing still uses full gyro data at 100Hz
+        qmsg.data.bhi360_3d_mapping.gyro_x = 0;  // Zeroed to reduce BLE bandwidth
+        qmsg.data.bhi360_3d_mapping.gyro_y = 0;  // Zeroed to reduce BLE bandwidth
+        qmsg.data.bhi360_3d_mapping.gyro_z = 0;  // Zeroed to reduce BLE bandwidth
+        
+        // Quaternion data is sent (using accel fields for x,y,z components)
+        qmsg.data.bhi360_3d_mapping.accel_x = latest_quat_x;
+        qmsg.data.bhi360_3d_mapping.accel_y = latest_quat_y;
+        qmsg.data.bhi360_3d_mapping.accel_z = latest_quat_z;
+        qmsg.data.bhi360_3d_mapping.quat_w = latest_quat_w;
+        
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-      k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
+        k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
 #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
 // k_msgq_put(&sensor_data_msgq, &qmsg, K_NO_WAIT);
 #endif
 #else
-      // Secondary device: Send to primary via D2D
-      ble_d2d_tx_send_bhi360_data1(&qmsg.data.bhi360_3d_mapping);
+        // Secondary device: Send to primary via D2D (quaternion only)
+        ble_d2d_tx_send_bhi360_data1(&qmsg.data.bhi360_3d_mapping);
 #endif
 
-      // Linear acceleration
-      generic_message_t lmsg{};
-      lmsg.sender = SENDER_BHI360_THREAD;
-      lmsg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
-      lmsg.data.bhi360_linear_accel.x = latest_lacc_x;
-      lmsg.data.bhi360_linear_accel.y = latest_lacc_y;
-      lmsg.data.bhi360_linear_accel.z = latest_lacc_z;
+        // Linear acceleration - COMMENTED OUT to reduce BLE bandwidth
+        // Internal processing still uses linear acceleration at 100Hz
+        /*
+        generic_message_t lmsg{};
+        lmsg.sender = SENDER_BHI360_THREAD;
+        lmsg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
+        lmsg.data.bhi360_linear_accel.x = latest_lacc_x;
+        lmsg.data.bhi360_linear_accel.y = latest_lacc_y;
+        lmsg.data.bhi360_linear_accel.z = latest_lacc_z;
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-      k_msgq_put(&bluetooth_msgq, &lmsg, K_NO_WAIT);
+        k_msgq_put(&bluetooth_msgq, &lmsg, K_NO_WAIT);
 #else
-      // Secondary device: Send to primary via D2D
-      ble_d2d_tx_send_bhi360_data3(&lmsg.data.bhi360_linear_accel);
+        // Secondary device: Send to primary via D2D
+        ble_d2d_tx_send_bhi360_data3(&lmsg.data.bhi360_linear_accel);
 #endif
+        */
 
-      // Step count (global count, no duration)
-      generic_message_t smsg{};
-      smsg.sender = SENDER_BHI360_THREAD;
-      smsg.type = MSG_TYPE_BHI360_STEP_COUNT;
-      smsg.data.bhi360_step_count.step_count = latest_step_count;
-      smsg.data.bhi360_step_count.activity_duration_s =
-          0; // Deprecated - always 0
+        // Step count (global count, no duration) - KEEP for display
+        generic_message_t smsg{};
+        smsg.sender = SENDER_BHI360_THREAD;
+        smsg.type = MSG_TYPE_BHI360_STEP_COUNT;
+        smsg.data.bhi360_step_count.step_count = latest_step_count;
+        smsg.data.bhi360_step_count.activity_duration_s =
+            0; // Deprecated - always 0
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-      k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
+        k_msgq_put(&bluetooth_msgq, &smsg, K_NO_WAIT);
 #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
-      // k_msgq_put(&sensor_data_msgq, &smsg, K_NO_WAIT);
+        // k_msgq_put(&sensor_data_msgq, &smsg, K_NO_WAIT);
 #endif
 #else
-      // Secondary device: Send to primary via D2D
-      ble_d2d_tx_send_bhi360_data2(&smsg.data.bhi360_step_count);
+        // Secondary device: Send to primary via D2D
+        ble_d2d_tx_send_bhi360_data2(&smsg.data.bhi360_step_count);
 #endif
+      }
 
       // Also send activity step count to data module for activity file
       generic_message_t activity_msg{};

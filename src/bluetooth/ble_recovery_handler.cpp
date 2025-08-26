@@ -141,7 +141,7 @@ void BleRecoveryHandler::sendRecoveryMarker() {
     // Send markers through notification channels
     jis_foot_sensor_notify_ble(&foot_marker);
     jis_bhi360_data1_notify_ble(&bhi360_3d_marker);
-    jis_bhi360_data3_notify_ble(&bhi360_accel_marker);
+//    jis_bhi360_data3_notify_ble(&bhi360_accel_marker);
 }
 
 bool BleRecoveryHandler::sendNextFootPacket() {
@@ -186,7 +186,7 @@ bool BleRecoveryHandler::sendNextBhi360AccelPacket() {
             bhi360_accel_recovery_data[current_packet_index].seq_num);
     
     // Send through notification channel
-    jis_bhi360_data3_notify_ble(&bhi360_accel_recovery_data[current_packet_index]);
+   // jis_bhi360_data3_notify_ble(&bhi360_accel_recovery_data[current_packet_index]);
     
     current_packet_index++;
     return true;

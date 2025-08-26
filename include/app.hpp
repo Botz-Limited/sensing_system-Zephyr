@@ -34,6 +34,26 @@ struct foot_samples_t {
     // ... any other fields ...
 };
 
+// Aggregated foot samples for primary + secondary (36 bytes)
+struct foot_samples_aggregated_t {
+    uint32_t timestamp;                             // 4 bytes - uptime in ms
+    uint16_t primary[NUM_FOOT_SENSOR_CHANNELS];     // 16 bytes - primary foot channels
+    uint16_t secondary[NUM_FOOT_SENSOR_CHANNELS];   // 16 bytes - secondary foot channels
+} __attribute__((packed));
+
+// Aggregated quaternion for primary + secondary (20 bytes)
+struct quaternion_aggregated_t {
+    uint32_t timestamp;         // 4 bytes - uptime in ms
+    int16_t primary_x;          // 2 bytes
+    int16_t primary_y;          // 2 bytes
+    int16_t primary_z;          // 2 bytes
+    int16_t primary_w;          // 2 bytes
+    int16_t secondary_x;        // 2 bytes
+    int16_t secondary_y;        // 2 bytes
+    int16_t secondary_z;        // 2 bytes
+    int16_t secondary_w;        // 2 bytes
+} __attribute__((packed));
+
 // Structures for BHI360 data
 typedef struct
 {

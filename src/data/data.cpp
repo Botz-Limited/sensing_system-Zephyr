@@ -349,18 +349,12 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
             switch (msg.type)
             {
                 case MSG_TYPE_REALTIME_METRICS_DATA:
-                    // Check if work is already pending to avoid buffer overwrite
-                    if (!k_work_is_pending(&process_sensor_data_work))
-                    {
+
                         k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
                         memcpy(&pending_sensor_data_msg, &msg, sizeof(generic_message_t));
                         k_mutex_unlock(&sensor_data_msg_mutex);
                         k_work_submit_to_queue(&data_work_q, &process_sensor_data_work);
-                    }
-                    else
-                    {
-                        LOG_WRN("Sensor data work already pending, dropping message");
-                    }
+
                     break;
 
                 case MSG_TYPE_COMMAND:
@@ -403,30 +397,19 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
 
                 case MSG_TYPE_SAVE_BHI360_CALIBRATION:
                     // Check if work is already pending
-                    if (!k_work_is_pending(&process_calibration_work))
-                    {
+
                         k_mutex_lock(&calibration_msg_mutex, K_MSEC(100));
                         memcpy(&pending_calibration_data, &msg.data.bhi360_calibration,
                                sizeof(bhi360_calibration_data_t));
                         k_mutex_unlock(&calibration_msg_mutex);
                         k_work_submit_to_queue(&data_work_q, &process_calibration_work);
-                    }
-                    else
-                    {
-                        LOG_WRN("Calibration work already pending, dropping message");
-                    }
+
                     break;
 
                 case MSG_TYPE_ERASE_EXTERNAL_FLASH:
-                    // Queue work to erase external flash
-                    if (!k_work_is_pending(&process_erase_flash_work))
-                    {
+
                         k_work_submit_to_queue(&data_work_q, &process_erase_flash_work);
-                    }
-                    else
-                    {
-                        LOG_WRN("Erase flash work already pending");
-                    }
+
                     break;
 
                 case MSG_TYPE_DELETE_ACTIVITY_LOG:
