@@ -463,12 +463,19 @@ BT_GATT_SERVICE_DEFINE(
     
     // D2D Metrics (notify) - for parameter-only mode
     BT_GATT_CHARACTERISTIC(&d2d_metrics_uuid.uuid, BT_GATT_CHRC_NOTIFY, BT_GATT_PERM_NONE, NULL, NULL, NULL),
-    BT_GATT_CCC(metrics_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE), );
+    BT_GATT_CCC(metrics_ccc_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE));
 #endif // !CONFIG_PRIMARY_DEVICE
 
 
 // --- D2D batching logic (fixed-point for BLE optimization) ---
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
+// Forward declarations
+static void try_combine_and_buffer(void);
+static void d2d_batch_timeout_work_handler(struct k_work *work);
+
+// Work item for periodic timeout checking
+K_WORK_DELAYABLE_DEFINE(d2d_batch_timeout_work, d2d_batch_timeout_work_handler);
 
 // Helper: Convert quaternion from bhi360_3d_mapping_t to simplified fixed-point structure
 static void extract_quaternion_to_fixed(const bhi360_3d_mapping_t *src, d2d_quaternion_fixed_t *dst)
@@ -481,35 +488,98 @@ static void extract_quaternion_to_fixed(const bhi360_3d_mapping_t *src, d2d_quat
     // No gyro, no linear acceleration - only quaternion for reduced BLE bandwidth
 }
 
+// Timeout for waiting for paired data (100ms)
+#define D2D_BATCH_TIMEOUT_MS 100
+
+// Periodic work handler to check for timeout
+static void d2d_batch_timeout_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    // Just call try_combine_and_buffer to check timeouts
+    try_combine_and_buffer();
+    
+    // Reschedule if we still have pending data
+    if (pending_sample.foot_ready || pending_sample.quat_ready) {
+        k_work_schedule(&d2d_batch_timeout_work, K_MSEC(50));
+    }
+}
+
 static void try_combine_and_buffer(void)
 {
-    if (pending_sample.foot_ready && pending_sample.quat_ready)
-    {
+    static int64_t foot_ready_time = 0;
+    static int64_t quat_ready_time = 0;
+    int64_t current_time = k_uptime_get();
+    
+    // Track when each data type became ready
+    if (pending_sample.foot_ready && foot_ready_time == 0) {
+        foot_ready_time = current_time;
+    }
+    if (pending_sample.quat_ready && quat_ready_time == 0) {
+        quat_ready_time = current_time;
+    }
+    
+    // Check if we should send the batch
+    bool should_send = false;
+    
+    // Case 1: Both data types are ready - send immediately
+    if (pending_sample.foot_ready && pending_sample.quat_ready) {
+        should_send = true;
+        LOG_DBG("D2D batch: Both foot and quaternion ready, sending");
+    }
+    // Case 2: Only foot data ready and timeout exceeded
+    else if (pending_sample.foot_ready && 
+             (current_time - foot_ready_time) > D2D_BATCH_TIMEOUT_MS) {
+        should_send = true;
+        LOG_DBG("D2D batch: Foot data timeout, sending without quaternion");
+    }
+    // Case 3: Only quaternion ready and timeout exceeded
+    else if (pending_sample.quat_ready && 
+             (current_time - quat_ready_time) > D2D_BATCH_TIMEOUT_MS) {
+        should_send = true;
+        LOG_DBG("D2D batch: Quaternion timeout, sending without foot data");
+    }
+    
+    if (should_send) {
         // Store timestamp
         d2d_batch_buffer.timestamp[0] = pending_sample.timestamp;
         
-        // Copy foot sample directly (already in correct format)
-        memcpy(&d2d_batch_buffer.foot[0], &pending_sample.foot, sizeof(foot_samples_t));
+        // Copy foot sample if available, otherwise use zeros
+        if (pending_sample.foot_ready) {
+            memcpy(&d2d_batch_buffer.foot[0], &pending_sample.foot, sizeof(foot_samples_t));
+        } else {
+            memset(&d2d_batch_buffer.foot[0], 0, sizeof(foot_samples_t));
+        }
         
-        // Copy quaternion data (already converted to fixed-point)
-        memcpy(&d2d_batch_buffer.quat[0], &pending_sample.quat, sizeof(d2d_quaternion_fixed_t));
+        // Copy quaternion data if available, otherwise use zeros
+        if (pending_sample.quat_ready) {
+            memcpy(&d2d_batch_buffer.quat[0], &pending_sample.quat, sizeof(d2d_quaternion_fixed_t));
+        } else {
+            memset(&d2d_batch_buffer.quat[0], 0, sizeof(d2d_quaternion_fixed_t));
+        }
 
-        // Reset pending flags
+        // Reset pending flags and timestamps
         pending_sample.foot_ready = false;
         pending_sample.quat_ready = false;
+        foot_ready_time = 0;
+        quat_ready_time = 0;
 
         // Send the batch (28 bytes total)
-        if (primary_conn && d2d_batch_notify_enabled)
-        {
-            const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 2];
-            int err = bt_gatt_notify(primary_conn, char_attr, &d2d_batch_buffer, sizeof(d2d_sample_batch_t));
-            if (err)
-            {
-                LOG_ERR("Failed to send D2D batch notification: %d", err);
+        if (primary_conn && d2d_batch_notify_enabled) {
+            // Find the D2D batch characteristic by UUID instead of using index
+            const struct bt_gatt_attr *char_attr = bt_gatt_find_by_uuid(
+                d2d_tx_svc.attrs, d2d_tx_svc.attr_count, &d2d_batch_uuid.uuid);
+            
+            if (!char_attr) {
+                LOG_ERR("D2D batch characteristic not found!");
+                return;
             }
-            else
-            {
-                LOG_DBG("D2D batch sent (28 bytes): foot + quaternion only");
+            int err = bt_gatt_notify(primary_conn, char_attr, &d2d_batch_buffer, sizeof(d2d_sample_batch_t));
+            if (err) {
+                LOG_ERR("Failed to send D2D batch notification: %d", err);
+            } else {
+                LOG_INF("D2D batch sent: foot=%s, quat=%s",
+                        pending_sample.foot_ready ? "yes" : "no",
+                        pending_sample.quat_ready ? "yes" : "no");
             }
         }
     }
@@ -536,6 +606,9 @@ int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples)
     
     // Try to combine with quaternion and send batch
     try_combine_and_buffer();
+    
+    // Schedule periodic check for timeout
+    k_work_schedule(&d2d_batch_timeout_work, K_MSEC(50));
     
     return 0;
 #else
@@ -989,9 +1062,8 @@ int d2d_tx_notify_d2d_batch(const d2d_sample_batch_t *batch)
         return -ENOTCONN;
     }
 
-    // D2D batch characteristic is at the last index (after weight measurement + CCC)
-    // Find the correct index: count all attrs, batch char is last two (char+ccc)
-    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 2];
+    // D2D batch characteristic is third from last (before battery and metrics)
+    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 6];
     int err = bt_gatt_notify(primary_conn, char_attr, batch, sizeof(d2d_sample_batch_t));
     if (err)
     {
@@ -1019,8 +1091,14 @@ int d2d_tx_notify_battery_level(uint8_t level)
 
     battery_level = level;
 
-    // Battery level characteristic is at index 51 (after D2D batch + CCC)
-    const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[51];
+    // Find the battery level characteristic by UUID
+    const struct bt_gatt_attr *char_attr = bt_gatt_find_by_uuid(
+        d2d_tx_svc.attrs, d2d_tx_svc.attr_count, &d2d_battery_level_uuid.uuid);
+    
+    if (!char_attr) {
+        LOG_ERR("Battery level characteristic not found!");
+        return -EINVAL;
+    }
     int err = bt_gatt_notify(primary_conn, char_attr, &battery_level, sizeof(battery_level));
     if (err)
     {
@@ -1048,7 +1126,7 @@ int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics)
     // Copy the metrics data
     memcpy(&metrics_data, metrics, sizeof(d2d_metrics_packet_t));
 
-    // D2D Metrics characteristic is at the last index (after battery level + CCC)
+    // D2D Metrics characteristic is the last characteristic (skip back from CCC)
     const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 2];
     int err = bt_gatt_notify(primary_conn, char_attr, &metrics_data, sizeof(metrics_data));
     if (err)
@@ -1073,4 +1151,9 @@ void d2d_tx_service_init(void)
 {
     LOG_INF("D2D TX GATT service initialized");
     LOG_INF("Service attributes at %p, count=%d", d2d_tx_svc.attrs, d2d_tx_svc.attr_count);
+    
+    // Debug: Log the last few characteristic positions
+    LOG_INF("D2D batch char should be at index %d", d2d_tx_svc.attr_count - 6);
+    LOG_INF("Battery level char should be at index %d", d2d_tx_svc.attr_count - 4);
+    LOG_INF("D2D metrics char should be at index %d", d2d_tx_svc.attr_count - 2);
 }

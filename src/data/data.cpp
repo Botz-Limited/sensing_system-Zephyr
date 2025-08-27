@@ -808,6 +808,7 @@ static err_t flush_activity_buffer(void)
 {
     if (activity_write_buffer_pos > 0)
     {
+        LOG_ERR("File writing");
         k_mutex_lock(&activity_file_mutex, K_MSEC(100));
         int ret = fs_write(&activity_log_file, activity_write_buffer, activity_write_buffer_pos);
         if (ret < 0)
@@ -1133,6 +1134,14 @@ err_t end_activity_logging()
     }
 
     LOG_WRN("Closing file CLOSED!!!!!!!!");
+    
+    // TODO: test only - list directory contents
+    LOG_WRN("About to list directory contents for: %s", hardware_dir_path);
+    int lsdir_result = lsdir(hardware_dir_path);
+    if (lsdir_result != 0) {
+        LOG_ERR("lsdir failed with error: %d", lsdir_result);
+    }
+    
     return overall_status;
 }
 
@@ -1857,8 +1866,10 @@ static int lsdir(const char *path)
     int res;
     struct fs_dir_t dirp;
     static struct fs_dirent entry;
+    int file_count = 0;
+    int dir_count = 0;
 
-    LOG_WRN("Starting Directories List");
+    LOG_WRN("Starting directory listing for: %s", path);
 
     fs_dir_t_init(&dirp);
 
@@ -1866,11 +1877,13 @@ static int lsdir(const char *path)
     res = fs_opendir(&dirp, path);
     if (res)
     {
-        LOG_ERR("Error opening dir %s [%d]\n", path, res);
+        LOG_ERR("Error opening dir %s [%d]", path, res);
         return res;
     }
 
-    LOG_INF("\nListing dir %s ...\n", path);
+    LOG_WRN("Successfully opened directory: %s", path);
+    LOG_WRN("Listing contents:");
+    
     for (;;)
     {
         /* Verify fs_readdir() */
@@ -1881,23 +1894,31 @@ static int lsdir(const char *path)
         {
             if (res < 0)
             {
-                LOG_ERR("Error reading dir [%d]\n", res);
+                LOG_ERR("Error reading dir [%d]", res);
             }
             break;
         }
 
         if (entry.type == FS_DIR_ENTRY_DIR)
         {
-            LOG_INF("[DIR ] %s\n", entry.name);
+            LOG_WRN("  [DIR ] %s", entry.name);
+            dir_count++;
         }
         else
         {
-            LOG_INF("[FILE] %s (size = %zu)\n", entry.name, entry.size);
+            LOG_WRN("  [FILE] %s (size = %zu bytes)", entry.name, entry.size);
+            file_count++;
         }
     }
 
+    LOG_WRN("Directory listing complete: %d files, %d directories", file_count, dir_count);
+
     /* Verify fs_closedir() */
-    fs_closedir(&dirp);
+    res = fs_closedir(&dirp);
+    if (res != 0)
+    {
+        LOG_ERR("Error closing directory: %d", res);
+    }
 
     return res;
 }
@@ -1925,8 +1946,6 @@ static bool app_event_handler(const struct app_event_header *aeh)
             {
                 end_activity_logging();
 
-                //TODO: test only
-                lsdir(hardware_dir_path);
             }
         }
         return false;

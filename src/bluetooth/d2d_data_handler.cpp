@@ -37,8 +37,6 @@ int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
         return -EINVAL;
     }
 
-    LOG_INF("Processing D2D batch (quaternion-only): timestamp[0]=%u", batch->timestamp[0]);
-
     // Store secondary data for aggregation (D2D_BATCH_SIZE = 1 currently)
     if (D2D_BATCH_SIZE > 0) {
         // Store foot sample (direct copy, no conversion needed)

@@ -151,30 +151,21 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
                              struct bt_gatt_discover_params *params);
 static void continue_discovery(void);
 
-// Discovery state machine states
+// Discovery state machine states - simplified for batch discovery
 enum discover_state
 {
     DISCOVER_SERVICE,
-    DISCOVER_SET_TIME_CHAR,
-    DISCOVER_DELETE_FOOT_LOG_CHAR,
-    DISCOVER_DELETE_BHI360_LOG_CHAR,
-    DISCOVER_DELETE_ACTIVITY_LOG_CHAR,
-    DISCOVER_START_ACTIVITY_CHAR,
-    DISCOVER_STOP_ACTIVITY_CHAR,
-    DISCOVER_ERASE_FLASH_CHAR,
-    DISCOVER_FOTA_STATUS_CHAR,
-    DISCOVER_TRIGGER_CALIBRATION_CHAR,
-    DISCOVER_REQUEST_DEVICE_INFO_CHAR,
-    DISCOVER_GPS_UPDATE_CHAR,
-    DISCOVER_WEIGHT_CALIBRATION_CHAR,
-    DISCOVER_D2D_BATCH_CHAR,
-    DISCOVER_CONN_PARAM_CONTROL_CHAR,
+    DISCOVER_CHARACTERISTICS,  // Discover all characteristics at once
     DISCOVER_COMPLETE
 };
 
 static enum discover_state discovery_state = DISCOVER_SERVICE;
 
 
+// OLD BATCHING CODE - DISABLED
+// The new batching implementation is in ble_d2d_tx_service.cpp
+// These functions are no longer used but kept for reference
+#if 0
 // Extern declarations for batching symbols defined in the header
 extern d2d_pending_sample_t pending_sample;
 extern d2d_sample_batch_t d2d_batch_buffer;
@@ -183,6 +174,7 @@ void try_combine_and_buffer();
 void d2d_flush_buffer();
 void on_new_foot_sample(const foot_samples_t* foot, uint32_t timestamp);
 void on_new_imu_sample(const bhi360_log_record_t* imu, uint32_t timestamp);
+#endif
 
 
 // Service discovery callback
@@ -193,161 +185,166 @@ static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *at
     if (!attr)
     {
         LOG_DBG("Discovery complete for state %d", discovery_state);
-        // Always call continue_discovery to handle completion
-        continue_discovery();
+        
+        if (discovery_state == DISCOVER_SERVICE)
+        {
+            // No D2D RX service found
+            LOG_ERR("D2D RX service not found on secondary device");
+            discovery_state = DISCOVER_COMPLETE;
+            return BT_GATT_ITER_STOP;
+        }
+        else if (discovery_state == DISCOVER_CHARACTERISTICS)
+        {
+            // All characteristics discovered, mark as complete
+            discovery_state = DISCOVER_COMPLETE;
+            d2d_handles.discovery_complete = true;
+            
+            // Log what we found
+            LOG_INF("D2D TX discovery complete - found characteristics:");
+            if (d2d_handles.set_time_handle) LOG_INF("  Set Time: handle %u", d2d_handles.set_time_handle);
+            if (d2d_handles.delete_foot_log_handle) LOG_INF("  Delete Foot Log: handle %u", d2d_handles.delete_foot_log_handle);
+            if (d2d_handles.delete_bhi360_log_handle) LOG_INF("  Delete BHI360 Log: handle %u", d2d_handles.delete_bhi360_log_handle);
+            if (d2d_handles.delete_activity_log_handle) LOG_INF("  Delete Activity Log: handle %u", d2d_handles.delete_activity_log_handle);
+            if (d2d_handles.start_activity_handle) LOG_INF("  Start Activity: handle %u", d2d_handles.start_activity_handle);
+            if (d2d_handles.stop_activity_handle) LOG_INF("  Stop Activity: handle %u", d2d_handles.stop_activity_handle);
+            if (d2d_handles.erase_flash_handle) LOG_INF("  Erase Flash: handle %u", d2d_handles.erase_flash_handle);
+            if (d2d_handles.fota_status_handle) LOG_INF("  FOTA Status: handle %u", d2d_handles.fota_status_handle);
+            if (d2d_handles.trigger_calibration_handle) LOG_INF("  Trigger Calibration: handle %u", d2d_handles.trigger_calibration_handle);
+            if (d2d_handles.request_device_info_handle) LOG_INF("  Request Device Info: handle %u", d2d_handles.request_device_info_handle);
+            if (d2d_handles.gps_update_handle) LOG_INF("  GPS Update: handle %u", d2d_handles.gps_update_handle);
+            if (d2d_handles.weight_calibration_handle) LOG_INF("  Weight Calibration: handle %u", d2d_handles.weight_calibration_handle);
+            if (d2d_handles.d2d_batch_handle) LOG_INF("  D2D Batch: handle %u", d2d_handles.d2d_batch_handle);
+            if (d2d_handles.conn_param_control_handle) LOG_INF("  Conn Param Control: handle %u", d2d_handles.conn_param_control_handle);
+            
+            // Check if we have essential characteristics
+            if (d2d_handles.start_activity_handle != 0 && d2d_handles.stop_activity_handle != 0)
+            {
+                LOG_INF("Essential characteristics found, discovery successful");
+            }
+            else
+            {
+                LOG_WRN("Some essential characteristics not found");
+            }
+            
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            // Process any queued commands
+            ble_d2d_tx_process_queued_commands();
+#endif
+        }
+        
         return BT_GATT_ITER_STOP;
     }
 
     LOG_DBG("[ATTRIBUTE] handle %u", attr->handle);
 
-    switch (discovery_state)
+    if (discovery_state == DISCOVER_SERVICE)
     {
-        case DISCOVER_SERVICE:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_service_uuid.uuid) == 0)
+        // Looking for the D2D RX service
+        if (bt_uuid_cmp(params->uuid, &d2d_rx_service_uuid.uuid) == 0)
+        {
+            LOG_INF("Found D2D RX service, handle: %u", attr->handle);
+            discover_start_handle = attr->handle + 1;
+            discover_end_handle = 0xffff;
+            
+            // Now discover ALL characteristics at once
+            discovery_state = DISCOVER_CHARACTERISTICS;
+            discover_params.uuid = NULL;  // Discover all characteristics
+            discover_params.func = discover_func;
+            discover_params.start_handle = discover_start_handle;
+            discover_params.end_handle = discover_end_handle;
+            discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+            
+            int err = bt_gatt_discover(d2d_conn, &discover_params);
+            if (err)
             {
-                LOG_INF("Found D2D RX service, handle: %u", attr->handle);
-                discover_start_handle = attr->handle + 1;
-                discover_end_handle = 0xffff;
-                discovery_state = DISCOVER_SET_TIME_CHAR;
-            }
-            break;
-
-        case DISCOVER_SET_TIME_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_set_time_uuid.uuid) == 0)
-            {
-                d2d_handles.set_time_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found set time characteristic, handle: %u", d2d_handles.set_time_handle);
-                discovery_state = DISCOVER_DELETE_FOOT_LOG_CHAR;
-            }
-            break;
-
-        case DISCOVER_DELETE_FOOT_LOG_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_delete_foot_log_uuid.uuid) == 0)
-            {
-                d2d_handles.delete_foot_log_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found delete foot log characteristic, handle: %u", d2d_handles.delete_foot_log_handle);
-                discovery_state = DISCOVER_DELETE_BHI360_LOG_CHAR;
-            }
-            break;
-
-        case DISCOVER_DELETE_BHI360_LOG_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_delete_bhi360_log_uuid.uuid) == 0)
-            {
-                d2d_handles.delete_bhi360_log_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found delete BHI360 log characteristic, handle: %u", d2d_handles.delete_bhi360_log_handle);
-                discovery_state = DISCOVER_DELETE_ACTIVITY_LOG_CHAR;
-            }
-            break;
-
-        case DISCOVER_DELETE_ACTIVITY_LOG_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_delete_activity_log_uuid.uuid) == 0)
-            {
-                d2d_handles.delete_activity_log_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found delete activity log characteristic, handle: %u", d2d_handles.delete_activity_log_handle);
-                discovery_state = DISCOVER_START_ACTIVITY_CHAR;
-            }
-            break;
-
-        case DISCOVER_START_ACTIVITY_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_start_activity_uuid.uuid) == 0)
-            {
-                d2d_handles.start_activity_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found start activity characteristic, handle: %u", d2d_handles.start_activity_handle);
-                discovery_state = DISCOVER_STOP_ACTIVITY_CHAR;
-            }
-            break;
-
-        case DISCOVER_STOP_ACTIVITY_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_stop_activity_uuid.uuid) == 0)
-            {
-                d2d_handles.stop_activity_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found stop activity characteristic, handle: %u", d2d_handles.stop_activity_handle);
-                discovery_state = DISCOVER_ERASE_FLASH_CHAR;
-            }
-            break;
-
-        case DISCOVER_ERASE_FLASH_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_erase_flash_uuid.uuid) == 0)
-            {
-                d2d_handles.erase_flash_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found erase flash characteristic, handle: %u", d2d_handles.erase_flash_handle);
-                discovery_state = DISCOVER_FOTA_STATUS_CHAR;
-            }
-            break;
-
-        case DISCOVER_FOTA_STATUS_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_fota_status_uuid.uuid) == 0)
-            {
-                d2d_handles.fota_status_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found FOTA status characteristic, handle: %u", d2d_handles.fota_status_handle);
-                discovery_state = DISCOVER_TRIGGER_CALIBRATION_CHAR;
-            }
-            break;
-
-        case DISCOVER_TRIGGER_CALIBRATION_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_trigger_calibration_uuid.uuid) == 0)
-            {
-                d2d_handles.trigger_calibration_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found trigger calibration characteristic, handle: %u", d2d_handles.trigger_calibration_handle);
-                discovery_state = DISCOVER_REQUEST_DEVICE_INFO_CHAR;
-            }
-            break;
-
-        case DISCOVER_REQUEST_DEVICE_INFO_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_request_device_info_uuid.uuid) == 0)
-            {
-                d2d_handles.request_device_info_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found request device info characteristic, handle: %u", d2d_handles.request_device_info_handle);
-                discovery_state = DISCOVER_GPS_UPDATE_CHAR;
-            }
-            break;
-
-        case DISCOVER_GPS_UPDATE_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_gps_update_uuid.uuid) == 0)
-            {
-                d2d_handles.gps_update_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found GPS update characteristic, handle: %u", d2d_handles.gps_update_handle);
-                discovery_state = DISCOVER_WEIGHT_CALIBRATION_CHAR;
-            }
-            break;
-
-        case DISCOVER_WEIGHT_CALIBRATION_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_weight_calibration_uuid.uuid) == 0)
-            {
-                d2d_handles.weight_calibration_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found weight calibration characteristic, handle: %u", d2d_handles.weight_calibration_handle);
-            }
-            // Check if we have essential characteristics - if so, complete discovery
-            // Some secondary devices may not have the newer D2D batch/conn param characteristics
-            if (d2d_handles.start_activity_handle != 0 && d2d_handles.stop_activity_handle != 0) {
-                LOG_INF("Essential characteristics found, completing discovery");
+                LOG_ERR("Failed to start characteristic discovery: %d", err);
                 discovery_state = DISCOVER_COMPLETE;
-            } else {
-                // Continue to D2D batch characteristic
-                discovery_state = DISCOVER_D2D_BATCH_CHAR;
             }
-            break;
-        case DISCOVER_D2D_BATCH_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_d2d_batch_uuid.uuid) == 0)
+            else
             {
-                d2d_handles.d2d_batch_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found D2D batch characteristic, handle: %u", d2d_handles.d2d_batch_handle);
+                LOG_INF("Started discovery of all characteristics");
             }
-            discovery_state = DISCOVER_CONN_PARAM_CONTROL_CHAR;
-            break;
-        case DISCOVER_CONN_PARAM_CONTROL_CHAR:
-            if (bt_uuid_cmp(params->uuid, &d2d_rx_conn_param_control_uuid.uuid) == 0)
-            {
-                d2d_handles.conn_param_control_handle = bt_gatt_attr_value_handle(attr);
-                LOG_INF("Found connection parameter control characteristic, handle: %u", d2d_handles.conn_param_control_handle);
-            }
-            // After the last characteristic, mark discovery as complete
-            discovery_state = DISCOVER_COMPLETE;
-            break;
-
-        default:
-            LOG_WRN("Unknown discovery state: %d", discovery_state);
-            break;
+            
+            return BT_GATT_ITER_STOP;
+        }
+    }
+    else if (discovery_state == DISCOVER_CHARACTERISTICS)
+    {
+        // We're discovering all characteristics - check each one against our UUIDs
+        struct bt_gatt_chrc *chrc = (struct bt_gatt_chrc *)attr->user_data;
+        uint16_t value_handle = bt_gatt_attr_value_handle(attr);
+        
+        // Check against all our characteristic UUIDs
+        if (bt_uuid_cmp(chrc->uuid, &d2d_rx_set_time_uuid.uuid) == 0)
+        {
+            d2d_handles.set_time_handle = value_handle;
+            LOG_INF("Found set time characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_delete_foot_log_uuid.uuid) == 0)
+        {
+            d2d_handles.delete_foot_log_handle = value_handle;
+            LOG_INF("Found delete foot log characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_delete_bhi360_log_uuid.uuid) == 0)
+        {
+            d2d_handles.delete_bhi360_log_handle = value_handle;
+            LOG_INF("Found delete BHI360 log characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_delete_activity_log_uuid.uuid) == 0)
+        {
+            d2d_handles.delete_activity_log_handle = value_handle;
+            LOG_INF("Found delete activity log characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_start_activity_uuid.uuid) == 0)
+        {
+            d2d_handles.start_activity_handle = value_handle;
+            LOG_INF("Found start activity characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_stop_activity_uuid.uuid) == 0)
+        {
+            d2d_handles.stop_activity_handle = value_handle;
+            LOG_INF("Found stop activity characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_erase_flash_uuid.uuid) == 0)
+        {
+            d2d_handles.erase_flash_handle = value_handle;
+            LOG_INF("Found erase flash characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_fota_status_uuid.uuid) == 0)
+        {
+            d2d_handles.fota_status_handle = value_handle;
+            LOG_INF("Found FOTA status characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_trigger_calibration_uuid.uuid) == 0)
+        {
+            d2d_handles.trigger_calibration_handle = value_handle;
+            LOG_INF("Found trigger calibration characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_request_device_info_uuid.uuid) == 0)
+        {
+            d2d_handles.request_device_info_handle = value_handle;
+            LOG_INF("Found request device info characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_gps_update_uuid.uuid) == 0)
+        {
+            d2d_handles.gps_update_handle = value_handle;
+            LOG_INF("Found GPS update characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_weight_calibration_uuid.uuid) == 0)
+        {
+            d2d_handles.weight_calibration_handle = value_handle;
+            LOG_INF("Found weight calibration characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_d2d_batch_uuid.uuid) == 0)
+        {
+            d2d_handles.d2d_batch_handle = value_handle;
+            LOG_INF("Found D2D batch characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_conn_param_control_uuid.uuid) == 0)
+        {
+            d2d_handles.conn_param_control_handle = value_handle;
+            LOG_INF("Found connection parameter control characteristic, handle: %u", value_handle);
+        }
     }
 
     return BT_GATT_ITER_CONTINUE;
@@ -386,101 +383,12 @@ static void start_discovery(void)
     }
 }
 
-// Continue discovery for next characteristic
+// Continue discovery is no longer needed with batch discovery
 static void continue_discovery(void)
 {
-    int err;
-
-    if (!d2d_conn)
-    {
-        return;
-    }
-
-    // Check if we've discovered the essential characteristics
-    // Complete discovery if we have the essential handles, even if we're stuck on later characteristics
-    if ((discovery_state >= DISCOVER_WEIGHT_CALIBRATION_CHAR) &&
-        d2d_handles.start_activity_handle != 0 &&
-        d2d_handles.stop_activity_handle != 0)
-    {
-        // We have the essential characteristics, mark as complete
-        discovery_state = DISCOVER_COMPLETE;
-        d2d_handles.discovery_complete = true;
-        LOG_INF("D2D TX discovery complete with essential characteristics (stopped at state %d)", discovery_state);
-        
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        // Process any queued commands
-        ble_d2d_tx_process_queued_commands();
-#endif
-        return;
-    }
-
-    switch (discovery_state)
-    {
-        case DISCOVER_SET_TIME_CHAR:
-            discover_params.uuid = &d2d_rx_set_time_uuid.uuid;
-            break;
-        case DISCOVER_DELETE_FOOT_LOG_CHAR:
-            discover_params.uuid = &d2d_rx_delete_foot_log_uuid.uuid;
-            break;
-        case DISCOVER_DELETE_BHI360_LOG_CHAR:
-            discover_params.uuid = &d2d_rx_delete_bhi360_log_uuid.uuid;
-            break;
-        case DISCOVER_DELETE_ACTIVITY_LOG_CHAR:
-            discover_params.uuid = &d2d_rx_delete_activity_log_uuid.uuid;
-            break;
-        case DISCOVER_START_ACTIVITY_CHAR:
-            discover_params.uuid = &d2d_rx_start_activity_uuid.uuid;
-            break;
-        case DISCOVER_STOP_ACTIVITY_CHAR:
-            discover_params.uuid = &d2d_rx_stop_activity_uuid.uuid;
-            break;
-        case DISCOVER_ERASE_FLASH_CHAR:
-            discover_params.uuid = &d2d_rx_erase_flash_uuid.uuid;
-            break;
-        case DISCOVER_FOTA_STATUS_CHAR:
-            discover_params.uuid = &d2d_rx_fota_status_uuid.uuid;
-            break;
-        case DISCOVER_TRIGGER_CALIBRATION_CHAR:
-            discover_params.uuid = &d2d_rx_trigger_calibration_uuid.uuid;
-            break;
-        case DISCOVER_REQUEST_DEVICE_INFO_CHAR:
-            discover_params.uuid = &d2d_rx_request_device_info_uuid.uuid;
-            break;
-        case DISCOVER_GPS_UPDATE_CHAR:
-            discover_params.uuid = &d2d_rx_gps_update_uuid.uuid;
-            break;
-        case DISCOVER_WEIGHT_CALIBRATION_CHAR:
-            discover_params.uuid = &d2d_rx_weight_calibration_uuid.uuid;
-            break;
-        case DISCOVER_D2D_BATCH_CHAR:
-            discover_params.uuid = &d2d_rx_d2d_batch_uuid.uuid;
-            break;
-        case DISCOVER_CONN_PARAM_CONTROL_CHAR:
-            discover_params.uuid = &d2d_rx_conn_param_control_uuid.uuid;
-            break;
-        case DISCOVER_COMPLETE:
-            // Mark discovery as complete
-            d2d_handles.discovery_complete = true;
-            LOG_INF("D2D TX discovery complete - found %s characteristics",
-                    d2d_handles.conn_param_control_handle ? "all" : "most");
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-            // Process any queued commands (only available on primary device)
-            ble_d2d_tx_process_queued_commands();
-#endif
-            return;
-        default:
-            LOG_INF("Discovery sequence complete");
-            return;
-    }
-
-    discover_params.start_handle = discover_start_handle;
-    discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
-
-    err = bt_gatt_discover(d2d_conn, &discover_params);
-    if (err)
-    {
-        LOG_ERR("Continue discover failed (err %d)", err);
-    }
+    // This function is kept for compatibility but is no longer used
+    // with the new batch discovery approach
+    LOG_DBG("continue_discovery called but not needed with batch discovery");
 }
 void ble_d2d_tx_init(void)
 {
@@ -1198,6 +1106,11 @@ int ble_d2d_tx_send_conn_param_control_command(uint8_t profile)
 #endif
 }
 
+// OLD BATCHING IMPLEMENTATION - DISABLED
+// These functions have been replaced by the new implementation in ble_d2d_tx_service.cpp
+// The new implementation handles single-sample batching with timeout instead of
+// waiting for D2D_BATCH_SIZE samples
+#if 0
 void try_combine_and_buffer()
 {
     if (pending_sample.foot_ready && pending_sample.quat_ready)
@@ -1248,3 +1161,4 @@ void on_new_imu_sample(const bhi360_log_record_t* imu, uint32_t timestamp)
         pending_sample.timestamp = timestamp;
     try_combine_and_buffer();
 }
+#endif

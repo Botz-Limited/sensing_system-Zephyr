@@ -2123,8 +2123,7 @@ static uint8_t d2d_batch_notify_handler(struct bt_conn *conn, struct bt_gatt_sub
         return BT_GATT_ITER_STOP;
     }
 
-    LOG_INF("=== RECEIVED D2D BATCH NOTIFICATION FROM SECONDARY ===");
-    LOG_HEXDUMP_INF(data, length, "Batch data:");
+;
 
     // Call the handler to process the batch data
     d2d_data_handler_process_batch((const d2d_sample_batch_t *)data);
