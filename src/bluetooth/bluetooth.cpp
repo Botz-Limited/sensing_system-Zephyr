@@ -2035,24 +2035,15 @@ static void bhi360_3d_mapping_secondary_work_handler(struct k_work *work)
     
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Primary device: Handle secondary BHI360 3D data properly
-    LOG_DBG("Processing secondary BHI360 3D mapping data");
-    LOG_INF("Secondary BHI360 3D: Accel(%.2f,%.2f,%.2f), Gyro(%.2f,%.2f,%.2f)",
-            (double)mapping_data->accel_x, (double)mapping_data->accel_y,
-            (double)mapping_data->accel_z, (double)mapping_data->gyro_x,
-            (double)mapping_data->gyro_y, (double)mapping_data->gyro_z);
+ //   LOG_DBG("Processing secondary BHI360 3D mapping data");
+  //  LOG_INF("Secondary BHI360 3D: Accel(%.2f,%.2f,%.2f), Gyro(%.2f,%.2f,%.2f)",
+      //      (double)mapping_data->accel_x, (double)mapping_data->accel_y,
+       //     (double)mapping_data->accel_z, (double)mapping_data->gyro_x,
+        //    (double)mapping_data->gyro_y, (double)mapping_data->gyro_z);
     
     // TODO: In future, we could have a separate characteristic for secondary BHI360 data
-    // For now, we'll forward it to the data module for logging
-    
-    // Forward to data module for logging (if needed)
-    generic_message_t data_msg;
-    data_msg.sender = SENDER_D2D_SECONDARY;
-    data_msg.type = MSG_TYPE_BHI360_3D_MAPPING;
-    memcpy(&data_msg.data.bhi360_3d_mapping, mapping_data, sizeof(bhi360_3d_mapping_t));
-    
-    if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary BHI360 3D data to data module");
-    }
+    // Note: We don't forward raw BHI360 3D mapping to data module as it's not needed for storage
+    // The calculated bilateral metrics are saved via MSG_TYPE_REALTIME_METRICS_DATA instead
     
     // Note: We intentionally do NOT call jis_bhi360_data1_notify() here
     // as that would mix secondary data with primary data
@@ -2107,17 +2098,8 @@ static void bhi360_linear_accel_secondary_work_handler(struct k_work *work)
             (double)lacc_data->x, (double)lacc_data->y, (double)lacc_data->z);
     
     // TODO: In future, we could have a separate characteristic for secondary linear accel data
-    // For now, we'll forward it to the data module for logging
-    
-    // Forward to data module for logging (if needed)
-    generic_message_t data_msg;
-    data_msg.sender = SENDER_D2D_SECONDARY;
-    data_msg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
-    memcpy(&data_msg.data.bhi360_linear_accel, lacc_data, sizeof(bhi360_linear_accel_t));
-    
-    if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary linear accel data to data module");
-    }
+    // Note: We don't forward raw linear accel to data module as it's not needed for storage
+    // The calculated bilateral metrics are saved via MSG_TYPE_REALTIME_METRICS_DATA instead
     
     // Note: We intentionally do NOT call jis_bhi360_data3_notify() here
     // as that would mix secondary data with primary data

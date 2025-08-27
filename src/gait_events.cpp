@@ -1,7 +1,7 @@
 /**
  * @file gait_events.c
  * @brief Implementation of event-driven gait parameter detection
- * Based on colleague's pressure event detection and consumer pattern
+ * Based on    pressure event detection and consumer pattern
  */
 
 #include <gait_events.h>
@@ -96,7 +96,7 @@ static int calculate_total_pressure(const foot_samples_t *foot_data)
 
 /**
  * Calculate adaptive pressure threshold based on recent data
- * Uses percentile method similar to colleague's implementation
+ * Uses percentile method similar to    implementation
  */
 static float calculate_adaptive_threshold(const foot_samples_t *buffer, 
                                          int start, int count)
@@ -446,7 +446,7 @@ static void apply_zupt(gait_event_detector_t *detector, bool is_stance)
 
 /**
  * Detect IC (Initial Contact) and TO (Toe Off) events from pressure data
- * Implements colleague's pressure_event_detection algorithm
+ * Implements    pressure_event_detection algorithm
  */
 static void detect_ic_to_events(gait_event_detector_t *detector)
 {
@@ -583,7 +583,7 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
 
 /**
  * Create stride segments from detected IC/TO events
- * Implements colleague's get_stride_segments_from_ic_to
+ * Implements    get_stride_segments_from_ic_to
  */
 static void create_stride_segments(gait_event_detector_t *detector)
 {
@@ -644,7 +644,7 @@ static void create_stride_segments(gait_event_detector_t *detector)
 
 /**
  * Calculate gait metrics for each stride segment
- * Implements colleague's update_gait_events algorithm
+ * Implements    update_gait_events algorithm
  */
 static void calculate_stride_metrics(gait_event_detector_t *detector)
 {
@@ -937,7 +937,7 @@ bool gait_events_ready_to_process(gait_event_detector_t *detector)
 
 /**
  * Consumer function - processes buffered data to detect events
- * This implements the consumer pattern from colleague's implementation
+ * This implements the consumer pattern from    implementation
  */
 int gait_events_process(gait_event_detector_t *detector)
 {
@@ -981,7 +981,7 @@ int gait_events_process(gait_event_detector_t *detector)
     /* Step 3: Calculate metrics for each stride */
     calculate_stride_metrics(detector);
     
-    /* Step 4: Update read index to keep overlap (similar to colleague's implementation) */
+    /* Step 4: Update read index to keep overlap (similar to    implementation) */
     if (detector->stride_count > 0) {
         /* Move read index past the last processed stride, keeping 1/3 second overlap */
         stride_segment_t *last_segment = &detector->stride_segments[detector->stride_count - 1];

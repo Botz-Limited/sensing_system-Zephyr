@@ -578,6 +578,141 @@ static void calculate_bilateral_metrics(void)
     if (pronation_asymmetry > 10) gait_quality -= MIN(pronation_asymmetry - 10, 20.0f);
     
     LOG_INF("BILATERAL GAIT QUALITY SCORE: %.1f/100", (double)gait_quality);
+    
+    // Send bilateral metrics to realtime_metrics module for aggregation and forwarding
+    // The realtime_metrics module will then send to both bluetooth and data modules
+    extern struct k_msgq realtime_queue;
+    generic_message_t metrics_msg;
+    metrics_msg.sender = SENDER_SENSOR_DATA;
+    metrics_msg.type = MSG_TYPE_REALTIME_METRICS;
+    
+    // Fill in the realtime_metrics structure with bilateral data
+    realtime_metrics_t *rt_metrics = &metrics_msg.data.realtime_metrics;
+    memset(rt_metrics, 0, sizeof(realtime_metrics_t));
+    
+    rt_metrics->timestamp_ms = k_uptime_get_32();
+    
+    // Bilateral cadence (average of both feet)
+    if (d2d_metric_is_valid(secondary, IDX_CADENCE) && primary->cadence > 0) {
+        rt_metrics->cadence_spm = (uint16_t)((secondary->metrics[IDX_CADENCE] + primary->cadence) / 2.0f);
+    }
+    
+    // Calculate pace from cadence and stride length
+    if (rt_metrics->cadence_spm > 0 && d2d_metric_is_valid(secondary, IDX_STRIDE_LENGTH) && primary->stride_length > 0) {
+        float avg_stride_m = (secondary->metrics[IDX_STRIDE_LENGTH] / 100.0f + primary->stride_length) / 2.0f;
+        float speed_mps = (rt_metrics->cadence_spm / 60.0f) * avg_stride_m;
+        if (speed_mps > 0) {
+            rt_metrics->pace_sec_km = (uint16_t)(1000.0f / speed_mps);
+        }
+    }
+    
+    // Ground contact time (average) and flight time
+    if (d2d_metric_is_valid(secondary, IDX_GCT) && primary->gct > 0) {
+        float avg_gct = (secondary->metrics[IDX_GCT] + primary->gct * 1000.0f) / 2.0f;
+        rt_metrics->ground_contact_ms = (uint16_t)avg_gct;
+        rt_metrics->contact_time_asymmetry = (uint8_t)MIN(gct_asymmetry, 100.0f);
+        
+        // Calculate flight time from stride duration and GCT
+        if (primary->duration > 0) {
+            float flight_time = (primary->duration - primary->gct) * 1000.0f;
+            if (d2d_metric_is_valid(secondary, IDX_SWING_TIME)) {
+                flight_time = (flight_time + secondary->metrics[IDX_SWING_TIME]) / 2.0f;
+            }
+            rt_metrics->flight_time_ms = (uint16_t)flight_time;
+        }
+    }
+    
+    // Flight time asymmetry
+    if (d2d_metric_is_valid(secondary, IDX_SWING_TIME) && primary->duration > 0) {
+        float pri_flight = (primary->duration - primary->gct) * 1000.0f;
+        float sec_flight = secondary->metrics[IDX_SWING_TIME];
+        float flight_asym = fabsf(sec_flight - pri_flight) / ((sec_flight + pri_flight) / 2.0f) * 100.0f;
+        rt_metrics->flight_time_asymmetry = (uint8_t)MIN(flight_asym, 100.0f);
+    }
+    
+    // Stride metrics
+    if (d2d_metric_is_valid(secondary, IDX_STRIDE_LENGTH) && primary->stride_length > 0) {
+        float avg_stride_cm = (secondary->metrics[IDX_STRIDE_LENGTH] + primary->stride_length * 100.0f) / 2.0f;
+        rt_metrics->stride_length_cm = (uint16_t)avg_stride_cm;
+        rt_metrics->stride_length_asymmetry = (uint8_t)MIN(stride_asymmetry, 100.0f);
+    }
+    
+    // Stride duration
+    if (primary->duration > 0) {
+        rt_metrics->stride_duration_ms = (uint16_t)(primary->duration * 1000.0f);
+        // Could calculate asymmetry if we had secondary stride duration
+        rt_metrics->stride_duration_asymmetry = 0;  // TODO: Add when available
+    }
+    
+    // Pronation metrics
+    if (d2d_metric_is_valid(secondary, IDX_PRONATION) && primary->max_pronation != 0) {
+        rt_metrics->avg_pronation_deg = (int8_t)((secondary->metrics[IDX_PRONATION] + primary->max_pronation) / 2);
+        rt_metrics->pronation_asymmetry = (uint8_t)MIN(pronation_asymmetry, 100.0f);
+    }
+    
+    // Strike patterns
+    if (d2d_metric_is_valid(secondary, IDX_FOOT_STRIKE_ANGLE)) {
+        // Convert strike angle to pattern (0=heel, 1=mid, 2=fore)
+        float sec_angle = secondary->metrics[IDX_FOOT_STRIKE_ANGLE];
+        rt_metrics->left_strike_pattern = (sec_angle < -5.0f) ? 0 : (sec_angle > 5.0f) ? 2 : 1;
+    }
+    rt_metrics->right_strike_pattern = (primary->strike_pattern > 0) ? primary->strike_pattern - 1 : 0;
+    
+    // Balance (based on COP and force distribution)
+    if (d2d_metric_is_valid(secondary, IDX_BALANCE_INDEX)) {
+        float sec_balance = secondary->metrics[IDX_BALANCE_INDEX];
+        float pri_balance = 100.0f - MIN(primary->cop_path_length, 100.0f);
+        rt_metrics->balance_lr_pct = (int8_t)((sec_balance - pri_balance) / 2.0f);  // -50 to +50
+    }
+    
+    // Force asymmetry (based on loading rate)
+    if (d2d_metric_is_valid(secondary, IDX_LOADING_RATE) && primary->loading_rate > 0) {
+        float sec_loading = secondary->metrics[IDX_LOADING_RATE];
+        float pri_loading = (float)primary->loading_rate;
+        float force_asym = fabsf(sec_loading - pri_loading) / ((sec_loading + pri_loading) / 2.0f) * 100.0f;
+        rt_metrics->force_asymmetry = (uint8_t)MIN(force_asym, 100.0f);
+    }
+    
+    // Vertical oscillation
+    if (d2d_metric_is_valid(secondary, IDX_VERTICAL_OSC)) {
+        float sec_vo = secondary->metrics[IDX_VERTICAL_OSC];
+        float pri_vo = primary->vertical_oscillation * 100.0f;
+        rt_metrics->vertical_oscillation_cm = (uint8_t)((sec_vo + pri_vo) / 2.0f);
+        // Vertical ratio: VO/stride length * 100
+        if (rt_metrics->stride_length_cm > 0) {
+            rt_metrics->vertical_ratio = (uint8_t)((rt_metrics->vertical_oscillation_cm * 100) / rt_metrics->stride_length_cm);
+        }
+    }
+    
+    // Form score based on gait quality
+    rt_metrics->form_score = (uint8_t)gait_quality;
+    
+    // Efficiency score (based on form and asymmetries)
+    float efficiency = 100.0f;
+    efficiency -= rt_metrics->contact_time_asymmetry / 4.0f;
+    efficiency -= rt_metrics->flight_time_asymmetry / 4.0f;
+    efficiency -= rt_metrics->force_asymmetry / 4.0f;
+    efficiency -= rt_metrics->pronation_asymmetry / 4.0f;
+    rt_metrics->efficiency_score = (uint8_t)MAX(0, MIN(100, efficiency));
+    
+    // Set alerts based on thresholds
+    rt_metrics->alerts = 0;
+    if (gct_asymmetry > 15.0f || stride_asymmetry > 15.0f) {
+        rt_metrics->alerts |= RT_ALERT_HIGH_ASYMMETRY;
+    }
+    if (gait_quality < 70.0f) {
+        rt_metrics->alerts |= RT_ALERT_POOR_FORM;
+    }
+    if (pronation_asymmetry > 15.0f) {
+        rt_metrics->alerts |= RT_ALERT_OVERPRONATION;
+    }
+    
+    // Send to realtime_metrics module which will forward to bluetooth and data modules
+    if (k_msgq_put(&realtime_queue, &metrics_msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send bilateral metrics to realtime_metrics module");
+    } else {
+        LOG_INF("Bilateral metrics sent to realtime_metrics module for distribution");
+    }
 }
 
 /**

@@ -169,7 +169,7 @@ int kalman_fill_gaps(float *signal, int length, float threshold,
 /**
  * ============================================================================
  * MOTION MASK
- * Implements colleague's build_motion_mask algorithm
+ * Implements    build_motion_mask algorithm
  * ============================================================================
  */
 
@@ -270,7 +270,7 @@ void dilate_motion_mask(uint8_t *mask, int length, int dilation)
 /**
  * ============================================================================
  * ENHANCED FSM
- * Implements colleague's detailed gait phase FSM
+ * Implements    detailed gait phase FSM
  * ============================================================================
  */
 
@@ -395,7 +395,7 @@ float gait_fsm_get_phase_percentage(const gait_fsm_t *fsm)
 /**
  * ============================================================================
  * QUATERNION IMU FUSION
- * Full quaternion-based sensor fusion like colleague's GyroOnlyTiltFusion
+ * Full quaternion-based sensor fusion like    GyroOnlyTiltFusion
  * ============================================================================
  */
 
@@ -627,7 +627,7 @@ vector3_t rotate_vector_by_quaternion(const vector3_t *v, const quaternion_t *q)
 /**
  * ============================================================================
  * ANTHROPOMETRIC MODELS
- * Complete implementation of colleague's speed estimation models
+ * Complete implementation of    speed estimation models
  * ============================================================================
  */
 
@@ -758,7 +758,7 @@ float anthro_hoyt_speed(float height_m, float contact_time_s)
 /**
  * ============================================================================
  * ROLLING WINDOW AVERAGING
- * Implements colleague's RollingWindow class
+ * Implements    RollingWindow class
  * ============================================================================
  */
 

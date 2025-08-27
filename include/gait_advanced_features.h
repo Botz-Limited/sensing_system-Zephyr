@@ -1,6 +1,6 @@
 /**
  * @file gait_advanced_features.h
- * @brief Advanced features for full compatibility with colleague's implementation
+ * @brief Advanced features for full compatibility with    implementation
  */
 
 #ifndef GAIT_ADVANCED_FEATURES_H

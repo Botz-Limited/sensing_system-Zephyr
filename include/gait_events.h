@@ -57,7 +57,7 @@ typedef struct {
     bool valid;            /* Validity flag */
 } stride_segment_t;
 
-/* Gait metrics for one stride (matches colleague's GaitMetrics struct) */
+/* Gait metrics for one stride (matches    GaitMetrics struct) */
 typedef struct {
     float timestamp;              /* Midpoint timestamp */
     float start_time;            /* IC timestamp */

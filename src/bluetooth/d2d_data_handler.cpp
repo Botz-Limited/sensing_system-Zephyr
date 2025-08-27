@@ -108,7 +108,7 @@ int d2d_data_handler_process_foot_samples(const foot_samples_t *samples)
     
     // DO NOT forward directly to phone via jis_foot_sensor_notify()
     // That function is for PRIMARY device's foot data only!
-    // Instead, forward to bluetooth module which will handle it properly
+    // Instead, forward so,  to bluetooth module which will handle it properly
     
     // Send to bluetooth module for proper handling
     generic_message_t ble_msg;
