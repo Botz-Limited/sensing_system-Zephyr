@@ -1924,6 +1924,9 @@ static bool app_event_handler(const struct app_event_header *aeh)
             if (atomic_get(&logging_activity_active))
             {
                 end_activity_logging();
+
+                //TODO: test only
+                lsdir(hardware_dir_path);
             }
         }
         return false;

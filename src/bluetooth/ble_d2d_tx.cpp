@@ -1,8 +1,6 @@
 #include "ble_d2d_tx.hpp"
 #include <app_fixed_point.hpp>
-#if defined(CONFIG_LEGACY_BLE_ENABLED) 
-#include "legacy/legacy_ble_service.h"
-#endif
+
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
@@ -513,10 +511,6 @@ void ble_d2d_tx_set_connection(struct bt_conn *conn)
         // Primary device: Start service discovery when connection is established
         k_sleep(K_MSEC(100)); // Small delay to ensure connection is stable
         start_discovery();
-        #if defined(CONFIG_LEGACY_BLE_ENABLED) 
-        // Update legacy BLE service with D2D connection status
-        legacy_ble_set_d2d_connection_status(true);
-        #endif
 #endif
     }
     else
@@ -525,10 +519,10 @@ void ble_d2d_tx_set_connection(struct bt_conn *conn)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Clear discovered handles
         memset(&d2d_handles, 0, sizeof(d2d_handles));
-        #if defined(CONFIG_LEGACY_BLE_ENABLED)  
-        // Update legacy BLE service with D2D connection status
-        legacy_ble_set_d2d_connection_status(false);
-        #endif
+        // Reset discovery parameters for next connection
+        discover_start_handle = 0x0001;
+        discover_end_handle = 0xffff;
+        discovery_state = DISCOVER_SERVICE;
 #endif
     }
 }

@@ -73,9 +73,6 @@
 #include "activity_metrics_service.h"
 #endif
 
-#if CONFIG_LEGACY_BLE_ENABLED
-#include "legacy/legacy_ble_service.h"
-#endif
 
 // External function declarations
 // Step count functions moved to Activity Metrics Service
@@ -260,10 +257,7 @@ void bluetooth_d2d_confirmed(struct bt_conn *conn)
     LOG_INF("D2D TX connection set for command forwarding");
     
     // Notify legacy BLE service that D2D is connected
-#if CONFIG_LEGACY_BLE_ENABLED
-    extern void legacy_ble_set_d2d_connection_status(bool connected);
-    legacy_ble_set_d2d_connection_status(true);
-#endif
+
 #endif
 }
 
@@ -394,10 +388,7 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
         LOG_INF("Secondary device disconnected! (reason 0x%02x)\n", reason);
 
         // Notify legacy BLE service that D2D is disconnected
-#if CONFIG_LEGACY_BLE_ENABLED
-        extern void legacy_ble_set_d2d_connection_status(bool connected);
-        legacy_ble_set_d2d_connection_status(false);
-#endif
+
 
         // Clear the secondary connection for FOTA proxy
         fota_proxy_set_secondary_conn(NULL);
@@ -1445,9 +1436,6 @@ err_t bt_module_init(void)
         k_thread_create(&bluetooth_thread_data, bluetooth_stack_area, K_THREAD_STACK_SIZEOF(bluetooth_stack_area),
                         bluetooth_process, nullptr, nullptr, nullptr, bluetooth_priority, 0, K_NO_WAIT);
 
-#if CONFIG_LEGACY_BLE_ENABLED
-    legacy_ble_init();
-#endif
 
     return err_t::NO_ERROR;
 }

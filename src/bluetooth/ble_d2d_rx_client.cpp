@@ -655,11 +655,6 @@ static uint8_t foot_sensor_notify_handler(struct bt_conn *conn, struct bt_gatt_s
     // Process the data through the handler
     d2d_data_handler_process_foot_samples(samples);
 
-#if defined(CONFIG_LEGACY_BLE_ENABLED) && defined(CONFIG_PRIMARY_DEVICE)
-    // Update legacy BLE service with secondary foot data
-    extern void legacy_ble_update_secondary_data(const foot_samples_t *foot_data, const bhi360_3d_mapping_t *imu_data);
-    legacy_ble_update_secondary_data(samples, NULL);
-#endif
 
     return BT_GATT_ITER_CONTINUE;
 }
@@ -718,11 +713,6 @@ static uint8_t bhi360_data1_notify_handler(struct bt_conn *conn, struct bt_gatt_
     // Process the data through the handler
     d2d_data_handler_process_bhi360_3d_mapping(&mapping);
 
-#if defined(CONFIG_LEGACY_BLE_ENABLED) && defined(CONFIG_PRIMARY_DEVICE)
-    // Update legacy BLE service with secondary IMU data
-    extern void legacy_ble_update_secondary_data(const foot_samples_t *foot_data, const bhi360_3d_mapping_t *imu_data);
-    legacy_ble_update_secondary_data(NULL, &mapping);
-#endif
 
     return BT_GATT_ITER_CONTINUE;
 }

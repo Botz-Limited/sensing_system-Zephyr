@@ -45,10 +45,6 @@ zephyr_library_sources_ifdef(CONFIG_PRIMARY_DEVICE
     ble_conn_params.cpp  # Connection parameter management for background execution
 )
 
-zephyr_library_sources_ifdef(CONFIG_LEGACY_BLE_ENABLED
-    legacy/legacy_ble_service.cpp 
-)
-
 
 # Secondary device specific services
 if(NOT CONFIG_PRIMARY_DEVICE)
@@ -62,6 +58,3 @@ endif()
 
 # Include D2D file transfer for all devices
 zephyr_library_sources(ble_d2d_file_transfer.cpp)
-
-# Legacy BLE service for both primary and secondary
-zephyr_library_sources_ifdef(CONFIG_LEGACY_BLE_ENABLED legacy/legacy_ble_service.cpp)

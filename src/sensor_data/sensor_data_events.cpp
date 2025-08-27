@@ -20,6 +20,45 @@ static gait_event_detector_t event_detector __aligned(8);
 static atomic_t events_initialized = ATOMIC_INIT(0);  // Use atomic instead of volatile bool
 static K_MUTEX_DEFINE(events_mutex);
 
+// Flow control state - safe implementation that won't break existing logic
+typedef enum {
+    FLOW_MODE_NORMAL = 0,     // All features enabled (buffer < 50%)
+    FLOW_MODE_REDUCED = 1,    // Reduced features (buffer 50-75%)
+    FLOW_MODE_CRITICAL = 2    // Critical only (buffer > 75%)
+} flow_control_mode_t;
+
+typedef enum {
+    METRIC_PRIORITY_CRITICAL = 0,  // GCT, cadence, strike pattern - NEVER skip
+    METRIC_PRIORITY_HIGH = 1,      // Pronation, balance, step count
+    METRIC_PRIORITY_NORMAL = 2,    // Form score, efficiency, VO
+    METRIC_PRIORITY_LOW = 3        // Derived metrics, alerts
+} metric_priority_t;
+
+// Flow control state structure
+static struct {
+    atomic_t current_mode;           // Current flow control mode
+    atomic_t buffer_pressure;        // Buffer usage percentage (0-100)
+    uint32_t mode_changes;           // Count of mode changes
+    uint32_t metrics_skipped;        // Count of skipped low-priority metrics
+    uint32_t last_mode_change_time;  // Time of last mode change
+    uint32_t overflow_events;        // Count of buffer overflow events
+    bool advanced_features_saved;   // Original state of advanced features
+} flow_control = {
+    .current_mode = ATOMIC_INIT(FLOW_MODE_NORMAL),
+    .buffer_pressure = ATOMIC_INIT(0),
+    .mode_changes = 0,
+    .metrics_skipped = 0,
+    .last_mode_change_time = 0,
+    .overflow_events = 0,
+    .advanced_features_saved = true
+};
+
+// Flow control thresholds - conservative to avoid breaking existing logic
+#define FLOW_THRESHOLD_NORMAL    50  // Below 50% - all features
+#define FLOW_THRESHOLD_REDUCED   75  // 50-75% - reduce processing
+#define FLOW_THRESHOLD_CRITICAL  90  // Above 90% - emergency mode
+#define FLOW_HYSTERESIS         10   // Hysteresis to prevent oscillation
+
 extern "C" {
 
 /**
@@ -86,6 +125,110 @@ void sensor_data_add_to_event_buffer(const foot_samples_t *foot_data,
 }
 
 /**
+ * @brief Safe flow control adjustment based on buffer pressure
+ * This function carefully adjusts processing mode without breaking existing logic
+ */
+static void adjust_flow_control_mode(int buffer_usage_percent)
+{
+    flow_control_mode_t current_mode = (flow_control_mode_t)atomic_get(&flow_control.current_mode);
+    flow_control_mode_t new_mode = current_mode;
+    uint32_t now = k_uptime_get_32();
+    
+    // Apply hysteresis to prevent oscillation
+    switch (current_mode) {
+        case FLOW_MODE_NORMAL:
+            if (buffer_usage_percent > FLOW_THRESHOLD_REDUCED) {
+                new_mode = FLOW_MODE_REDUCED;
+            }
+            break;
+            
+        case FLOW_MODE_REDUCED:
+            if (buffer_usage_percent < (FLOW_THRESHOLD_NORMAL - FLOW_HYSTERESIS)) {
+                new_mode = FLOW_MODE_NORMAL;
+            } else if (buffer_usage_percent > FLOW_THRESHOLD_CRITICAL) {
+                new_mode = FLOW_MODE_CRITICAL;
+            }
+            break;
+            
+        case FLOW_MODE_CRITICAL:
+            if (buffer_usage_percent < (FLOW_THRESHOLD_REDUCED - FLOW_HYSTERESIS)) {
+                new_mode = FLOW_MODE_REDUCED;
+            }
+            break;
+    }
+    
+    // Only change mode if different and enough time has passed (prevent rapid switching)
+    if (new_mode != current_mode && (now - flow_control.last_mode_change_time) > 5000) {
+        atomic_set(&flow_control.current_mode, new_mode);
+        flow_control.mode_changes++;
+        flow_control.last_mode_change_time = now;
+        
+        // Adjust processing based on new mode
+        switch (new_mode) {
+            case FLOW_MODE_NORMAL:
+                // Restore advanced features if they were originally enabled
+                if (flow_control.advanced_features_saved) {
+                    event_detector.use_advanced_features = true;
+                }
+                LOG_INF("Flow control: NORMAL mode (buffer %d%%), advanced features restored", 
+                        buffer_usage_percent);
+                break;
+                
+            case FLOW_MODE_REDUCED:
+                // Save current state and reduce processing
+                flow_control.advanced_features_saved = event_detector.use_advanced_features;
+                event_detector.use_advanced_features = false;
+                LOG_WRN("Flow control: REDUCED mode (buffer %d%%), advanced features disabled temporarily", 
+                        buffer_usage_percent);
+                break;
+                
+            case FLOW_MODE_CRITICAL:
+                // Emergency mode - minimal processing only
+                event_detector.use_advanced_features = false;
+                LOG_ERR("Flow control: CRITICAL mode (buffer %d%%), emergency processing only", 
+                        buffer_usage_percent);
+                flow_control.overflow_events++;
+                break;
+        }
+    }
+    
+    // Update buffer pressure for diagnostics
+    atomic_set(&flow_control.buffer_pressure, buffer_usage_percent);
+}
+
+/**
+ * @brief Check if a metric should be processed based on priority
+ * Critical metrics are ALWAYS processed to maintain system integrity
+ */
+static bool should_process_metric(metric_priority_t priority)
+{
+    flow_control_mode_t mode = (flow_control_mode_t)atomic_get(&flow_control.current_mode);
+    
+    switch (mode) {
+        case FLOW_MODE_NORMAL:
+            return true;  // Process all metrics
+            
+        case FLOW_MODE_REDUCED:
+            // Skip low priority metrics
+            if (priority >= METRIC_PRIORITY_LOW) {
+                flow_control.metrics_skipped++;
+                return false;
+            }
+            return true;
+            
+        case FLOW_MODE_CRITICAL:
+            // Only process critical metrics
+            if (priority > METRIC_PRIORITY_CRITICAL) {
+                flow_control.metrics_skipped++;
+                return false;
+            }
+            return true;
+    }
+    
+    return true;  // Default to processing
+}
+
+/**
  * @brief 1Hz timer callback for periodic metric transmission
  */
 void sensor_data_1hz_timer_callback(void)
@@ -107,6 +250,10 @@ void sensor_data_1hz_timer_callback(void)
     }
     
     callback_count++;
+    
+    // Calculate buffer pressure and adjust flow control
+    int buffer_usage_percent = (event_detector.buffer_count * 100) / GAIT_BUFFER_SIZE_SAMPLES;
+    adjust_flow_control_mode(buffer_usage_percent);
     
     // Monitor buffer health every 10 callbacks (20 seconds at 0.5Hz)
     if (callback_count % 10 == 0) {
@@ -279,13 +426,21 @@ void sensor_data_1hz_timer_callback(void)
     
     // Memory health check every 60 callbacks (2 minutes at 0.5Hz)
     if (callback_count % 60 == 0) {
-        LOG_INF("System health after %u cycles: buffer=%d/%d, metrics=%d",
-                callback_count, event_detector.buffer_count,
-                GAIT_BUFFER_SIZE_SAMPLES, metrics_count);
+        // Report flow control statistics
+        flow_control_mode_t current_mode = (flow_control_mode_t)atomic_get(&flow_control.current_mode);
+        const char *mode_str = (current_mode == FLOW_MODE_NORMAL) ? "NORMAL" :
+                               (current_mode == FLOW_MODE_REDUCED) ? "REDUCED" : "CRITICAL";
         
-        // Force garbage collection if needed
-        if (event_detector.buffer_count > GAIT_BUFFER_SIZE_SAMPLES / 2) {
-            LOG_WRN("Performing preventive buffer maintenance");
+        LOG_INF("System health after %u cycles: buffer=%d/%d (%d%%), metrics=%d, mode=%s",
+                callback_count, event_detector.buffer_count,
+                GAIT_BUFFER_SIZE_SAMPLES, buffer_usage_percent, metrics_count, mode_str);
+        
+        LOG_INF("Flow control stats: mode_changes=%u, metrics_skipped=%u, overflows=%u",
+                flow_control.mode_changes, flow_control.metrics_skipped, flow_control.overflow_events);
+        
+        // Force garbage collection if needed (only in reduced/critical modes)
+        if (current_mode != FLOW_MODE_NORMAL && event_detector.buffer_count > GAIT_BUFFER_SIZE_SAMPLES / 2) {
+            LOG_WRN("Performing preventive buffer maintenance in %s mode", mode_str);
             // Clear oldest 10% to keep things flowing
             int samples_to_clear = GAIT_BUFFER_SIZE_SAMPLES / 10;
             event_detector.read_index = (event_detector.read_index + samples_to_clear) % GAIT_BUFFER_SIZE_SAMPLES;

@@ -171,12 +171,6 @@ static struct {
   uint16_t left_push_off_power;
   uint16_t right_push_off_power;
 
-  #if CONFIG_LEGACY_BLE_ENABLED
-  float latest_temperature;
-  float latest_gravity[3];
-  float latest_accel[3];
-  float latest_mag[3];
-#endif
   // D2D data freshness tracking
   uint32_t left_foot_last_update_time; // When D2D data last updated left foot
   uint32_t left_imu_last_update_time;  // When D2D IMU data last updated
@@ -709,34 +703,6 @@ static void process_imu_data_work_handler(struct k_work *work) {
     sensor_state.latest_gyro[0] = imu_data.gyro_x;
     sensor_state.latest_gyro[1] = imu_data.gyro_y;
     sensor_state.latest_gyro[2] = imu_data.gyro_z;
-
-#if CONFIG_LEGACY_BLE_ENABLED
-    sensor_state.latest_temperature = 0.0f;
-    
-    // Calculate gravity from quaternion
-    float gx = 2.0f * (sensor_state.latest_quaternion[1] * sensor_state.latest_quaternion[3] - 
-                       sensor_state.latest_quaternion[0] * sensor_state.latest_quaternion[2]) * 9.81f;
-    float gy = 2.0f * (sensor_state.latest_quaternion[0] * sensor_state.latest_quaternion[1] + 
-                       sensor_state.latest_quaternion[2] * sensor_state.latest_quaternion[3]) * 9.81f;
-    float gz = (sensor_state.latest_quaternion[0] * sensor_state.latest_quaternion[0] - 
-                sensor_state.latest_quaternion[1] * sensor_state.latest_quaternion[1] - 
-                sensor_state.latest_quaternion[2] * sensor_state.latest_quaternion[2] + 
-                sensor_state.latest_quaternion[3] * sensor_state.latest_quaternion[3]) * 9.81f;
-    
-    sensor_state.latest_gravity[0] = gx;
-    sensor_state.latest_gravity[1] = gy;
-    sensor_state.latest_gravity[2] = gz;
-    
-    // Calculate total acceleration by adding gravity to linear acceleration
-    sensor_state.latest_accel[0] = sensor_state.latest_linear_acc[0] + gx;
-    sensor_state.latest_accel[1] = sensor_state.latest_linear_acc[1] + gy;
-    sensor_state.latest_accel[2] = sensor_state.latest_linear_acc[2] + gz;
-    
-    // Magnetometer not available
-    sensor_state.latest_mag[0] = 0.0f;
-    sensor_state.latest_mag[1] = 0.0f;
-    sensor_state.latest_mag[2] = 0.0f;
-#endif
 
     // Update step count
     sensor_state.latest_step_count = imu_data.step_count;
@@ -1834,36 +1800,5 @@ static bool app_event_handler(const struct app_event_header *aeh) {
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, module_state_event);
 
-#if CONFIG_LEGACY_BLE_ENABLED
-void get_sensor_snapshot(float quat[4], float accel[3], float lacc[3], float gyro[3], float grav[3], float mag[3], float *temp, uint16_t pressure[8]) {
-  memcpy(quat, sensor_state.latest_quaternion, sizeof(float)*4);
-  memcpy(accel, sensor_state.latest_accel, sizeof(float)*3);
-  memcpy(lacc, sensor_state.latest_linear_acc, sizeof(float)*3);
-  memcpy(gyro, sensor_state.latest_gyro, sizeof(float)*3);
-  memcpy(grav, sensor_state.latest_gravity, sizeof(float)*3);
-  memcpy(mag, sensor_state.latest_mag, sizeof(float)*3);
-  *temp = sensor_state.latest_temperature;
-#if CONFIG_PRIMARY_DEVICE
-  memcpy(pressure, sensor_state.right_pressure, sizeof(uint16_t)*8);
-  // Debug: Log the actual values being read
-  static int snapshot_count = 0;
-  snapshot_count++;
-  if (snapshot_count % 10 == 0) {  // Log every 10th call
-    //LOG_WRN("get_sensor_snapshot PRIMARY: right_pressure[0]=%u, [1]=%u, [2]=%u, [3]=%u",
-      //      sensor_state.right_pressure[0], sensor_state.right_pressure[1],
-        //    sensor_state.right_pressure[2], sensor_state.right_pressure[3]);
-  }
-#else
-  memcpy(pressure, sensor_state.left_pressure, sizeof(uint16_t)*8);
-  // Debug: Log the actual values being read
-  static int snapshot_count = 0;
-  snapshot_count++;
-  if (snapshot_count % 10 == 0) {  // Log every 10th call
-    //LOG_WRN("get_sensor_snapshot SECONDARY: left_pressure[0]=%u, [1]=%u, [2]=%u, [3]=%u",
-      //      sensor_state.left_pressure[0], sensor_state.left_pressure[1],
-        //    sensor_state.left_pressure[2], sensor_state.left_pressure[3]);
-  }
-#endif
-}
-#endif
+
 
