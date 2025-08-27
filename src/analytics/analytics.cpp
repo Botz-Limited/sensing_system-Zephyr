@@ -198,8 +198,13 @@ static void analytics_thread_fn(void *arg1, void *arg2, void *arg3)
     generic_message_t msg;
     
     while (true) {
-        // Wait for messages from analytics queue (NOT realtime queue!)
-        int ret = k_msgq_get(&analytics_queue, &msg, K_FOREVER);
+        // Wait for messages from realtime queue (for metrics) and analytics queue (for commands)
+        // Try realtime queue first for metrics data
+        int ret = k_msgq_get(&realtime_queue, &msg, K_MSEC(10));
+        if (ret != 0) {
+            // If no realtime data, check analytics queue for commands
+            ret = k_msgq_get(&analytics_queue, &msg, K_MSEC(100));
+        }
         
         if (ret == 0) {
            // LOG_WRN("Analytics: Received message type %d from sender %d", msg.type, msg.sender);
@@ -258,7 +263,7 @@ static void process_realtime_metrics_work_handler(struct k_work *work)
     if (atomic_get(&processing_active) == 1 && new_metrics_available) {
         uint32_t now = k_uptime_get_32();
         
-        LOG_WRN("Processing realtime metrics");
+      //  LOG_WRN("Processing realtime metrics");
         
         // Establish baseline during first 2 minutes
         if (!analytics_state.baseline_established) {
@@ -266,7 +271,7 @@ static void process_realtime_metrics_work_handler(struct k_work *work)
                 establish_baseline();
             } else {
                 analytics_state.baseline_established = true;
-                LOG_INF("Baseline established after 2 minutes");
+                //LOG_INF("Baseline established after 2 minutes");
             }
         }
         
@@ -286,7 +291,7 @@ static void process_realtime_metrics_work_handler(struct k_work *work)
 static void process_command_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    LOG_WRN("Processing command: %s", pending_command);
+   // LOG_WRN("Processing command: %s", pending_command);
     
     if (strcmp(pending_command, "START_REALTIME_PROCESSING") == 0) {
         // Clear any pending messages before starting
@@ -324,12 +329,15 @@ static void process_command_work_handler(struct k_work *work)
         // Cancel periodic work
         k_work_cancel_delayable(&analytics_periodic_work);
         
-        // Clear all pending messages from analytics queue
+        // Clear all pending messages from both queues
         generic_message_t dummy_msg;
         while (k_msgq_get(&analytics_queue, &dummy_msg, K_NO_WAIT) == 0) {
             // Discard message
         }
-        LOG_INF("Analytics queue cleared");
+        while (k_msgq_get(&realtime_queue, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        LOG_INF("Analytics and realtime queues cleared");
         
         // Reset state for clean restart
         memset(&analytics_state, 0, sizeof(analytics_state));
@@ -482,11 +490,11 @@ static void establish_baseline(void)
     analytics_state.baseline_pronation = total_pronation / samples;
     analytics_state.baseline_efficiency = total_efficiency / samples;
     
-    LOG_WRN("Baseline: contact=%.1fms, cadence=%.1f, pronation=%.1f°, efficiency=%.1f%%",
-            (double)analytics_state.baseline_contact_time,
-            (double)analytics_state.baseline_cadence,
-            (double)analytics_state.baseline_pronation,
-            (double)analytics_state.baseline_efficiency);
+//    LOG_WRN("Baseline: contact=%.1fms, cadence=%.1f, pronation=%.1f°, efficiency=%.1f%%",
+  //          (double)analytics_state.baseline_contact_time,
+    //        (double)analytics_state.baseline_cadence,
+      //      (double)analytics_state.baseline_pronation,
+        //    (double)analytics_state.baseline_efficiency);
 }
 
 // Module event handler

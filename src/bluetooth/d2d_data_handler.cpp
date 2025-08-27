@@ -101,7 +101,7 @@ int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
         }
     }
 
-    LOG_INF("D2D batch processed and stored: 28 bytes (foot + quaternion only)");
+   // LOG_INF("D2D batch processed and stored: 28 bytes (foot + quaternion only)");
     return 0;
 }
 

@@ -808,7 +808,6 @@ static err_t flush_activity_buffer(void)
 {
     if (activity_write_buffer_pos > 0)
     {
-        LOG_ERR("File writing");
         k_mutex_lock(&activity_file_mutex, K_MSEC(100));
         int ret = fs_write(&activity_log_file, activity_write_buffer, activity_write_buffer_pos);
         if (ret < 0)
