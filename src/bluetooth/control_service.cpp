@@ -941,10 +941,10 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
     stop_logging_msg.sender = SENDER_BTH;
     stop_logging_msg.type = MSG_TYPE_COMMAND;
     strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING_ACTIVITY",
-            sizeof(stop_logging_msg.data.command_str) - 1);
+            sizeof(stop_logging_msg.data.command_str));
     stop_logging_msg.data.command_str[sizeof(stop_logging_msg.data.command_str) - 1] = '\0';
 
-    // Start logging Activity file
+    // Stop logging Activity file
     if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {
       LOG_WRN("Failed to send STOP_LOGGING_ACTIVITY command to DATA module");
     } else {

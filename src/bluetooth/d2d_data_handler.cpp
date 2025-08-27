@@ -284,19 +284,20 @@ int d2d_data_handler_process_file_path(uint8_t log_id, uint8_t file_type, const 
         return -EINVAL;
     }
     
-    LOG_INF("Secondary device file path - ID: %u, Type: %u, Path: %s", 
+    LOG_INF("Secondary device file path - ID: %u, Type: %u, Path: %s",
             log_id, file_type, path);
     
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Forward declarations
     extern void jis_secondary_foot_log_path_notify(const char* path);
     extern void jis_secondary_bhi360_log_path_notify(const char* path);
+    extern void jis_secondary_activity_log_path_notify(const char* path);
     
     // Forward to Information Service based on file type
     switch (file_type) {
         case 2: // Activity log
-            // NOTE: Not forwarding activity logs - each device maintains its own
-            LOG_DBG("Secondary activity log path received but not forwarded (separate logs)");
+            jis_secondary_activity_log_path_notify(path);
+            LOG_DBG("Secondary activity log path forwarded to BLE");
             break;
         default:
             LOG_WRN("Unknown file type %u", file_type);
@@ -309,19 +310,20 @@ int d2d_data_handler_process_file_path(uint8_t log_id, uint8_t file_type, const 
 
 int d2d_data_handler_process_log_available(uint8_t log_id, uint8_t file_type)
 {
-    LOG_INF("Secondary device log available - ID: %u, Type: %u", 
+    LOG_INF("Secondary device log available - ID: %u, Type: %u",
             log_id, file_type);
     
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Forward declarations
     extern void jis_secondary_foot_log_available_notify(uint8_t log_id);
     extern void jis_secondary_bhi360_log_available_notify(uint8_t log_id);
+    extern void jis_secondary_activity_log_available_notify(uint8_t log_id);
     
     // Forward to Information Service based on file type
     switch (file_type) {
         case 2: // Activity log
-            // NOTE: Not forwarding activity logs - each device maintains its own
-            LOG_DBG("Secondary activity log available but not forwarded (separate logs)");
+            jis_secondary_activity_log_available_notify(log_id);
+            LOG_DBG("Secondary activity log available forwarded to BLE");
             break;
         default:
             LOG_WRN("Unknown file type %u", file_type);

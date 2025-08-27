@@ -2221,7 +2221,7 @@ static void command_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
     
-    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+    k_mutex_lock(&bluetooth_msg_mutex, K_MSEC(100));
     generic_message_t msg = pending_command_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
     

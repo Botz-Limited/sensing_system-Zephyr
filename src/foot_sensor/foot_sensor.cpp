@@ -349,10 +349,6 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
           sample_counter = 0;          if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
             LOG_WRN("Failed to send foot sensor data to bluetooth module");
           }
-          else
-          {
-            LOG_ERR("Sent MESSAGE MSG_TYPE_FOOT_SAMPLES to bluetooth module");
-          }
         }
 
 

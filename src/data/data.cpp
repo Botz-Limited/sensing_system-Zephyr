@@ -99,7 +99,7 @@ static generic_message_t pending_sensor_data_msg;
 
 // Command Queue - robust handling for multiple commands
 #define MAX_QUEUED_COMMANDS 8
-static generic_message_t command_queue[MAX_QUEUED_COMMANDS];
+static generic_message_t command_queue;
 static uint8_t cmd_queue_head = 0;
 static uint8_t cmd_queue_tail = 0;
 static atomic_t cmd_queue_count = ATOMIC_INIT(0);
@@ -108,7 +108,7 @@ static bhi360_calibration_data_t pending_calibration_data;
 
 // Mutexes for work item message buffers
 K_MUTEX_DEFINE(sensor_data_msg_mutex);
-K_MUTEX_DEFINE(cmd_queue_mutex);  // Renamed for command queue
+K_MUTEX_DEFINE(cmd_queue_mutex); // Renamed for command queue
 K_MUTEX_DEFINE(calibration_msg_mutex);
 
 // File System State
@@ -219,7 +219,6 @@ static void data_init(void)
         filesystem_available = true;
         LOG_INF("File System Mounted at %s", lfs_ext_storage_mnt.mnt_point);
     }
-
 
     // Initialize work queue
     k_work_queue_init(&data_work_q);
@@ -349,74 +348,64 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
             switch (msg.type)
             {
                 case MSG_TYPE_REALTIME_METRICS_DATA:
-
+                    // Check if work is already pending to avoid buffer overwrite
+                    if (!k_work_is_pending(&process_sensor_data_work))
+                    {
                         k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
                         memcpy(&pending_sensor_data_msg, &msg, sizeof(generic_message_t));
                         k_mutex_unlock(&sensor_data_msg_mutex);
                         k_work_submit_to_queue(&data_work_q, &process_sensor_data_work);
-
-                    break;
-
-                case MSG_TYPE_COMMAND:
-                    // Queue command - never drop commands
-                    k_mutex_lock(&cmd_queue_mutex, K_MSEC(100));
-                    
-                    // Check if queue has space
-                    if (atomic_get(&cmd_queue_count) < MAX_QUEUED_COMMANDS)
-                    {
-                        // Add command to queue
-                        memcpy(&command_queue[cmd_queue_tail], &msg, sizeof(generic_message_t));
-                        cmd_queue_tail = (cmd_queue_tail + 1) % MAX_QUEUED_COMMANDS;
-                        atomic_inc(&cmd_queue_count);
-                        
-                        LOG_INF("Queued command: %s (queue depth: %ld)",
-                                msg.data.command_str, atomic_get(&cmd_queue_count));
-                        
-                        // Submit work if not already pending
-                        if (!k_work_is_pending(&process_command_work))
-                        {
-                            k_work_submit_to_queue(&data_work_q, &process_command_work);
-                        }
                     }
                     else
                     {
-                        LOG_ERR("Command queue full! Force processing");
-                        // Emergency: cancel current work and force immediate processing
-                        k_work_cancel(&process_command_work);
-                        
-                        // Replace oldest command (FIFO)
-                        memcpy(&command_queue[cmd_queue_tail], &msg, sizeof(generic_message_t));
-                        cmd_queue_tail = (cmd_queue_tail + 1) % MAX_QUEUED_COMMANDS;
-                        // Don't increment count as we're replacing
-                        
-                        k_work_submit_to_queue(&data_work_q, &process_command_work);
+                        LOG_WRN("Sensor data work already pending, dropping message");
                     }
-                    
+                    break;
+
+                case MSG_TYPE_COMMAND:
+                    // Queue command - simplified like bluetooth module
+                    k_mutex_lock(&cmd_queue_mutex, K_MSEC(100));
+
+                    // Copy command to buffer
+                    memcpy(&command_queue, &msg, sizeof(generic_message_t));
+
+                    k_work_submit_to_queue(&data_work_q, &process_command_work);
+
                     k_mutex_unlock(&cmd_queue_mutex);
                     break;
 
                 case MSG_TYPE_SAVE_BHI360_CALIBRATION:
                     // Check if work is already pending
-
+                    if (!k_work_is_pending(&process_calibration_work))
+                    {
                         k_mutex_lock(&calibration_msg_mutex, K_MSEC(100));
                         memcpy(&pending_calibration_data, &msg.data.bhi360_calibration,
                                sizeof(bhi360_calibration_data_t));
                         k_mutex_unlock(&calibration_msg_mutex);
                         k_work_submit_to_queue(&data_work_q, &process_calibration_work);
-
+                    }
+                    else
+                    {
+                        LOG_WRN("Calibration work already pending, dropping message");
+                    }
                     break;
 
                 case MSG_TYPE_ERASE_EXTERNAL_FLASH:
-
+                    // Queue work to erase external flash
+                    if (!k_work_is_pending(&process_erase_flash_work))
+                    {
                         k_work_submit_to_queue(&data_work_q, &process_erase_flash_work);
-
+                    }
+                    else
+                    {
+                        LOG_WRN("Erase flash work already pending");
+                    }
                     break;
 
-                case MSG_TYPE_DELETE_ACTIVITY_LOG:
-                {
+                case MSG_TYPE_DELETE_ACTIVITY_LOG: {
                     // Process delete activity log command
                     LOG_INF("Received delete activity log command for ID: %u", msg.data.delete_cmd.id);
-                    
+
                     // Stop any active logging first if we're deleting files
                     if (atomic_get(&logging_activity_active))
                     {
@@ -424,13 +413,13 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                         atomic_set(&logging_activity_active, 0);
                         end_activity_logging();
                     }
-                    
+
                     // Delete the specified activity log file
                     err_t delete_status = delete_by_type_and_id(msg.data.delete_cmd.type, msg.data.delete_cmd.id);
                     if (delete_status != err_t::NO_ERROR)
                     {
-                        LOG_ERR("Failed to delete activity log file with ID %u: %d",
-                                msg.data.delete_cmd.id, (int)delete_status);
+                        LOG_ERR("Failed to delete activity log file with ID %u: %d", msg.data.delete_cmd.id,
+                                (int)delete_status);
                     }
                     else
                     {
@@ -535,44 +524,27 @@ static void process_sensor_data_work_handler(struct k_work *work)
     }
 }
 
-// Work handler for processing commands - processes all queued commands
+// Work handler for processing commands - simplified like bluetooth module
 static void process_command_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
-    // Process ALL queued commands
-    while (atomic_get(&cmd_queue_count) > 0)
-    {
-        // Get next command from queue
-        k_mutex_lock(&cmd_queue_mutex, K_MSEC(100));
-        
-        // Double-check queue isn't empty (could have been processed by another thread)
-        if (atomic_get(&cmd_queue_count) == 0)
-        {
-            k_mutex_unlock(&cmd_queue_mutex);
-            break;
-        }
-        
-        // Retrieve command from head of queue
-        generic_message_t local_msg = command_queue[cmd_queue_head];
-        cmd_queue_head = (cmd_queue_head + 1) % MAX_QUEUED_COMMANDS;
-        atomic_dec(&cmd_queue_count);
-        
-        LOG_INF("Processing command from queue (remaining: %ld)", atomic_get(&cmd_queue_count));
-        
-        k_mutex_unlock(&cmd_queue_mutex);
-        
+
+    // Get the command from the buffer
+    k_mutex_lock(&cmd_queue_mutex, K_MSEC(100));
+    generic_message_t local_msg = command_queue;
+    k_mutex_unlock(&cmd_queue_mutex);
+
         // Process the command
         const char *command_str = local_msg.data.command_str;
-        LOG_WRN("Processing command: %s     activity logging =%ld", command_str, atomic_get(&logging_activity_active));
-        
+        LOG_WRN("Processing command: %s activity logging =%ld", command_str, atomic_get(&logging_activity_active));
+
         // For STOP commands, cancel any pending sensor data work first
         if (strstr(command_str, "STOP") != NULL)
         {
             LOG_INF("STOP command detected - cancelling sensor data work");
             k_work_cancel(&process_sensor_data_work);
         }
-        
+
         if (strcmp(command_str, "START_LOGGING_ACTIVITY") == 0)
         {
             if (atomic_get(&logging_activity_active) == 0)
@@ -600,7 +572,7 @@ static void process_command_work_handler(struct k_work *work)
             {
                 LOG_INF("Stopping activity logging");
                 atomic_set(&logging_activity_active, 0);
-                
+
                 err_t activity_status = end_activity_logging();
                 if (activity_status != err_t::NO_ERROR)
                 {
@@ -638,14 +610,6 @@ static void process_command_work_handler(struct k_work *work)
         {
             LOG_WRN("Unknown command: %s", command_str);
         }
-    }
-    
-    // Check if more commands arrived while we were processing
-    if (atomic_get(&cmd_queue_count) > 0)
-    {
-        LOG_INF("More commands queued during processing, re-submitting work");
-        k_work_submit_to_queue(&data_work_q, &process_command_work);
-    }
 }
 
 // Work handler for processing calibration data
@@ -994,15 +958,14 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     }
     k_mutex_unlock(&sequence_number_mutex);
 
-    
-
     // Create file path
     snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.dat", hardware_dir_path, activity_file_prefix,
              next_activity_file_sequence);
 
-    LOG_WRN("activity_file_path=%s, activity_file_path_size=%d, hardware_dir_path=%s,    activity_file_prefix=%s, next_activity_file_sequence=%d",
+    LOG_WRN("activity_file_path=%s, activity_file_path_size=%d, hardware_dir_path=%s,    activity_file_prefix=%s, "
+            "next_activity_file_sequence=%d",
             activity_file_path, sizeof(activity_file_path), hardware_dir_path, activity_file_prefix,
-            next_activity_file_sequence);         
+            next_activity_file_sequence);
     fs_file_t_init(&activity_log_file);
 
     // Open file
