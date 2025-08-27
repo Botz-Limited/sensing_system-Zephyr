@@ -7,7 +7,6 @@
 #include <zephyr/logging/log.h>
 #include <ble_services.hpp>
 #include <app.hpp>
-#include "../data_dispatcher/data_dispatcher.h"
 #include <d2d_metrics.h>
 
 LOG_MODULE_REGISTER(d2d_data_handler, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
@@ -57,48 +56,42 @@ int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
                 g_secondary_quat_data.quat_x, g_secondary_quat_data.quat_y,
                 g_secondary_quat_data.quat_z, g_secondary_quat_data.quat_w);
         
-        // Still forward to central hub for logging/analysis
-        extern struct k_msgq central_data_hub_msgq;
-        
-        // Foot data to central hub
-        tagged_message_t foot_msg;
-        foot_msg.msg.sender = SENDER_D2D_SECONDARY;
-        foot_msg.msg.type = MSG_TYPE_FOOT_SAMPLES;
-        foot_msg.tag = SECONDARY_FOOT;
-        memcpy(&foot_msg.msg.data.foot_samples, &batch->foot[0], sizeof(foot_samples_t));
-        if (k_msgq_put(&central_data_hub_msgq, &foot_msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to queue foot sample to central hub");
+        // Forward RAW foot samples to bluetooth module for Information Service (phone display only)
+        extern struct k_msgq bluetooth_msgq;
+        generic_message_t ble_foot_msg;
+        ble_foot_msg.sender = SENDER_D2D_SECONDARY;
+        ble_foot_msg.type = MSG_TYPE_FOOT_SAMPLES;
+        memcpy(&ble_foot_msg.data.foot_samples, &batch->foot[0], sizeof(foot_samples_t));
+        if (k_msgq_put(&bluetooth_msgq, &ble_foot_msg, K_NO_WAIT) != 0) {
+            LOG_WRN("Failed to queue foot sample to bluetooth module");
         } else {
-            LOG_DBG("Foot sample queued to central hub with tag SECONDARY_FOOT");
+            LOG_DBG("Foot sample queued to bluetooth module for BLE notification");
         }
 
-        // Convert quaternion for central hub (needs float format)
-        bhi360_log_record_t imu;
-        imu.quat_x = fixed16_to_float(batch->quat[0].quat_x, FixedPoint::QUAT_SCALE);
-        imu.quat_y = fixed16_to_float(batch->quat[0].quat_y, FixedPoint::QUAT_SCALE);
-        imu.quat_z = fixed16_to_float(batch->quat[0].quat_z, FixedPoint::QUAT_SCALE);
-        imu.quat_w = fixed16_to_float(batch->quat[0].quat_w, FixedPoint::QUAT_SCALE);
-        imu.gyro_x = 0.0f;
-        imu.gyro_y = 0.0f;
-        imu.gyro_z = 0.0f;
-        imu.lacc_x = 0.0f;
-        imu.lacc_y = 0.0f;
-        imu.lacc_z = 0.0f;
-        imu.quat_accuracy = 0.0f;
-        imu.step_count = 0;
-        imu.timestamp = batch->timestamp[0];
+        // Convert RAW quaternion to BHI360 3D mapping format for bluetooth (phone display only)
+        bhi360_3d_mapping_t quat_mapping;
+        // Use quaternion values as "accel" fields (since we're sending quaternion data)
+        quat_mapping.accel_x = fixed16_to_float(batch->quat[0].quat_x, FixedPoint::QUAT_SCALE);
+        quat_mapping.accel_y = fixed16_to_float(batch->quat[0].quat_y, FixedPoint::QUAT_SCALE);
+        quat_mapping.accel_z = fixed16_to_float(batch->quat[0].quat_z, FixedPoint::QUAT_SCALE);
+        quat_mapping.quat_w = fixed16_to_float(batch->quat[0].quat_w, FixedPoint::QUAT_SCALE);
+        quat_mapping.gyro_x = 0.0f;  // No gyro data in batch
+        quat_mapping.gyro_y = 0.0f;
+        quat_mapping.gyro_z = 0.0f;
         
-        // Quaternion data to central hub
-        tagged_message_t imu_msg;
-        imu_msg.msg.sender = SENDER_D2D_SECONDARY;
-        imu_msg.msg.type = MSG_TYPE_BHI360_LOG_RECORD;
-        imu_msg.tag = SECONDARY_IMU;
-        memcpy(&imu_msg.msg.data.bhi360_log_record, &imu, sizeof(bhi360_log_record_t));
-        if (k_msgq_put(&central_data_hub_msgq, &imu_msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to queue quaternion sample to central hub");
+        // Send quaternion as BHI360 3D mapping to bluetooth for phone display
+        generic_message_t ble_quat_msg;
+        ble_quat_msg.sender = SENDER_D2D_SECONDARY;
+        ble_quat_msg.type = MSG_TYPE_BHI360_3D_MAPPING;
+        memcpy(&ble_quat_msg.data.bhi360_3d_mapping, &quat_mapping, sizeof(bhi360_3d_mapping_t));
+        if (k_msgq_put(&bluetooth_msgq, &ble_quat_msg, K_NO_WAIT) != 0) {
+            LOG_WRN("Failed to queue quaternion to bluetooth module");
         } else {
-            LOG_DBG("Quaternion sample queued to central hub (gyro/accel zeroed)");
+            LOG_DBG("Quaternion queued to bluetooth as BHI360 3D mapping for phone display");
         }
+        
+        // NOTE: Raw data is NOT used for bilateral calculations
+        // Bilateral calculations use the d2d_metrics_packet_t that comes separately
     }
 
    // LOG_INF("D2D batch processed and stored: 28 bytes (foot + quaternion only)");
@@ -170,30 +163,8 @@ int d2d_data_handler_process_bhi360_3d_mapping(const bhi360_3d_mapping_t *data)
         LOG_DBG("Secondary BHI360 3D data forwarded to bluetooth_msgq for proper routing");
     }
     
-    // Forward to central_data_hub_msgq with tagging for new architecture
-    extern struct k_msgq central_data_hub_msgq;
-    tagged_message_t tagged_msg_imu;
-    tagged_msg_imu.msg.sender = SENDER_D2D_SECONDARY;
-    tagged_msg_imu.msg.type = MSG_TYPE_BHI360_LOG_RECORD;
-    tagged_msg_imu.tag = SECONDARY_IMU;
-    
-    // Convert 3D mapping to log record format
-    tagged_msg_imu.msg.data.bhi360_log_record.quat_x = data->accel_x;
-    tagged_msg_imu.msg.data.bhi360_log_record.quat_y = data->accel_y;
-    tagged_msg_imu.msg.data.bhi360_log_record.quat_z = data->accel_z;
-    tagged_msg_imu.msg.data.bhi360_log_record.quat_w = data->quat_w;
-    tagged_msg_imu.msg.data.bhi360_log_record.gyro_x = data->gyro_x;
-    tagged_msg_imu.msg.data.bhi360_log_record.gyro_y = data->gyro_y;
-    tagged_msg_imu.msg.data.bhi360_log_record.gyro_z = data->gyro_z;
-    tagged_msg_imu.msg.data.bhi360_log_record.lacc_x = 0;
-    tagged_msg_imu.msg.data.bhi360_log_record.lacc_y = 0;
-    tagged_msg_imu.msg.data.bhi360_log_record.lacc_z = 0;
-    
-    if (k_msgq_put(&central_data_hub_msgq, &tagged_msg_imu, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary BHI360 3D data to central data hub");
-    } else {
-        LOG_DBG("Secondary BHI360 3D data forwarded to central_data_hub_msgq with tag SECONDARY_IMU");
-    }
+    // NOTE: Raw BHI360 3D mapping is for phone display only
+    // Bilateral calculations use the d2d_metrics_packet_t
     
     return 0;
 }
@@ -219,19 +190,7 @@ int d2d_data_handler_process_bhi360_step_count(const bhi360_step_count_t *data)
         LOG_DBG("Secondary step count forwarded to activity_metrics_msgq");
     }
     
-    // Also forward to central_data_hub_msgq with tagging
-    extern struct k_msgq central_data_hub_msgq;
-    tagged_message_t tagged_msg_step;
-    tagged_msg_step.msg.sender = SENDER_D2D_SECONDARY;
-    tagged_msg_step.msg.type = MSG_TYPE_BHI360_STEP_COUNT;
-    tagged_msg_step.tag = ACTIVITY_DATA;
-    memcpy(&tagged_msg_step.msg.data.bhi360_step_count, data, sizeof(bhi360_step_count_t));
-    
-    if (k_msgq_put(&central_data_hub_msgq, &tagged_msg_step, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary step count to central data hub");
-    } else {
-        LOG_DBG("Secondary step count forwarded to central_data_hub_msgq with tag ACTIVITY_DATA");
-    }
+    // NOTE: Step count is aggregated in activity_metrics module
     
     return 0;
 }
@@ -259,19 +218,8 @@ int d2d_data_handler_process_bhi360_linear_accel(const bhi360_linear_accel_t *da
         LOG_DBG("Secondary BHI360 linear accel forwarded to bluetooth_msgq for proper routing");
     }
     
-    // Forward to central_data_hub_msgq with tagging
-    extern struct k_msgq central_data_hub_msgq;
-    tagged_message_t tagged_msg_accel;
-    tagged_msg_accel.msg.sender = SENDER_D2D_SECONDARY;
-    tagged_msg_accel.msg.type = MSG_TYPE_BHI360_LINEAR_ACCEL;
-    tagged_msg_accel.tag = SECONDARY_IMU;
-    memcpy(&tagged_msg_accel.msg.data.bhi360_linear_accel, data, sizeof(bhi360_linear_accel_t));
-    
-    if (k_msgq_put(&central_data_hub_msgq, &tagged_msg_accel, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary linear accel to central data hub");
-    } else {
-        LOG_DBG("Secondary linear accel forwarded to central_data_hub_msgq with tag SECONDARY_IMU");
-    }
+    // NOTE: Raw linear accel is for phone display only
+    // Bilateral calculations use the d2d_metrics_packet_t
     
     return 0;
 }
