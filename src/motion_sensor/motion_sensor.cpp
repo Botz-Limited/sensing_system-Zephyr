@@ -846,7 +846,7 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
       activity_msg.data.activity_step_count.right_step_count =
           latest_activity_step_count;
 #endif
-      k_msgq_put(&data_msgq, &activity_msg, K_NO_WAIT);
+     // k_msgq_put(&data_msgq, &activity_msg, K_NO_WAIT);
     }
   }
 }

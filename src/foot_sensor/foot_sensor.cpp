@@ -120,6 +120,9 @@ static atomic_t wifi_active = ATOMIC_INIT(0);
 // ADJUSTMENT: Added __aligned(4) for DMA-safe memory alignment
 static int16_t saadc_buffer[BUFFER_COUNT][SAADC_BUFFER_SIZE] __aligned(4);
 
+// Buffer index for double buffering - moved to file scope for init_saadc access
+static uint16_t buffer_index = 0;
+
 // Calibration specific variables
 static int16_t saadc_offset[SAADC_CHANNEL_COUNT]; // Stores the zero-point
                                                   // offset for each channel
@@ -226,7 +229,7 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
   nrfx_err_t status;
   (void)status; // Suppress unused variable warning
 
-  static uint16_t buffer_index = 0;
+  // buffer_index is now declared at file scope
   // MODIFICATION: Removed 'static uint16_t buf_req_evt_counter = 0;'
   // as it's no longer used for limiting continuous sampling.
 
@@ -245,6 +248,8 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
     break;
 
   case NRFX_SAADC_EVT_BUF_REQ:
+    // FIX: Properly rotate buffers - increment index FIRST to get the OTHER buffer
+    buffer_index = (buffer_index + 1) % BUFFER_COUNT;
     LOG_DBG("SAADC BUF_REQ: Setting buffer[%d]", buffer_index);
     status =
         nrfx_saadc_buffer_set(saadc_buffer[buffer_index], SAADC_BUFFER_SIZE);
@@ -261,8 +266,6 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
         LOG_INF("Sent error status to Bluetooth module");
       }
       // Don't assert - just skip this buffer
-    } else {
-      buffer_index = (buffer_index + 1) % BUFFER_COUNT;
     }
     break;
 
@@ -334,6 +337,10 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
         // Populate the foot sensor data directly into the message's union
         // member.
         for (uint8_t i = 0; i < samples_number; i++) {
+          // DEBUG: Log raw values to diagnose stuck channels
+          if (sample_counter == 0 && i < 4) {  // Log first 4 channels periodically
+            LOG_DBG("Raw ADC[%d]: %d, Offset: %d", i, raw_adc_data[i], saadc_offset[i]);
+          }
           int16_t calibrated_value = raw_adc_data[i] - saadc_offset[i];
           msg.data.foot_samples.values[i] =
               (calibrated_value < 0) ? 0 : calibrated_value;
@@ -346,7 +353,12 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
         
         // Also send to Bluetooth at 20Hz (every 5th sample) for JIS characteristics
         if (++sample_counter % SAMPLES_TO_SKIP == 0) {
-          sample_counter = 0;          if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
+          sample_counter = 0;
+          LOG_INF("Updated global secondary foot data - values[0-3]: %u %u %u %u",
+            raw_adc_data[0], raw_adc_data[1], raw_adc_data[2], raw_adc_data[3]);
+    LOG_INF("Updated global secondary foot data - values[4-7]: %u %u %u %u",
+            raw_adc_data[4], raw_adc_data[5], raw_adc_data[6], raw_adc_data[7]);
+          if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0) {
             LOG_WRN("Failed to send foot sensor data to bluetooth module");
           }
         }
@@ -497,12 +509,14 @@ static err_t init_saadc(void) {
 
   // 3. Populate the configuration for each SAADC channel into the array.
   for (int i = 0; i < SAADC_CHANNEL_COUNT; i++) {
-    all_nrfx_channels[i].channel_config = {.gain = NRF_SAADC_GAIN1,
-                                           .reference =
-                                               NRF_SAADC_REFERENCE_INTERNAL,
-                                           .acq_time = NRF_SAADC_ACQTIME_10US,
-                                           .mode = NRF_SAADC_MODE_SINGLE_ENDED,
-                                           .burst = NRF_SAADC_BURST_DISABLED};
+    // Initialize channel configuration with proper field order
+    all_nrfx_channels[i].channel_config.gain = NRF_SAADC_GAIN1;
+    all_nrfx_channels[i].channel_config.reference = NRF_SAADC_REFERENCE_INTERNAL;
+    all_nrfx_channels[i].channel_config.acq_time = NRF_SAADC_ACQTIME_10US;
+    all_nrfx_channels[i].channel_config.mode = NRF_SAADC_MODE_SINGLE_ENDED;
+    all_nrfx_channels[i].channel_config.burst = NRF_SAADC_BURST_DISABLED;
+    all_nrfx_channels[i].channel_config.resistor_p = NRF_SAADC_RESISTOR_DISABLED;
+    all_nrfx_channels[i].channel_config.resistor_n = NRF_SAADC_RESISTOR_DISABLED;
 
     all_nrfx_channels[i].pin_p =
         static_cast<nrf_saadc_input_t>(saadc_inputs[i]); // Positive input pin
@@ -521,10 +535,13 @@ static err_t init_saadc(void) {
   // Set up advanced mode for external triggering and continuous sampling.
   nrfx_saadc_adv_config_t adv_config = NRFX_SAADC_DEFAULT_ADV_CONFIG;
   adv_config.internal_timer_cc = 0;
-  adv_config.start_on_end = true; // External trigger from timer/DPPI
+  adv_config.start_on_end = true; // Re-enable for continuous sampling with proper buffer management
   uint32_t channel_mask =
       nrfx_saadc_channels_configured_get(); // Gets mask of all 8 configured
                                             // channels
+  
+  // DEBUG: Verify all 8 channels are enabled
+  LOG_INF("SAADC channel mask: 0x%02X (should be 0xFF for 8 channels)", channel_mask);
 
   // Pass your saadc_event_handler to process events.
   err = nrfx_saadc_advanced_mode_set(channel_mask, NRF_SAADC_RESOLUTION_14BIT,
@@ -547,16 +564,14 @@ static err_t init_saadc(void) {
   // Enable the SAADC peripheral after all configuration.
   nrfy_saadc_enable(NRF_SAADC);
 
+  // Set initial buffer (buffer 0)
+  buffer_index = 0;
   err = nrfx_saadc_buffer_set(saadc_buffer[0], SAADC_BUFFER_SIZE);
   if (err != NRFX_SUCCESS) {
     LOG_ERR("SAADC buffer 0 set failed: %d", err);
     return err_t::ADC_ERROR;
   }
-  err = nrfx_saadc_buffer_set(saadc_buffer[1], SAADC_BUFFER_SIZE);
-  if (err != NRFX_SUCCESS) {
-    LOG_ERR("SAADC buffer 1 set failed: %d", err);
-    return err_t::ADC_ERROR;
-  }
+  // Note: Only set one buffer initially. The second buffer will be requested via BUF_REQ event
 
   // This starts the first conversion cycle. After this, the DPPI chain
   // (Timer -> SAADC SAMPLE, and SAADC END -> SAADC START) will keep it going.
