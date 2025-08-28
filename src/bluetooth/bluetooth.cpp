@@ -911,7 +911,9 @@ static void connected(struct bt_conn *conn, uint8_t err)
         }
 
         LOG_INF("Connected");
+        
         ble_status_connected = 1;
+        ble_set_phone_connection_state(1);
         
         // Clear any stale messages in BLE queues on reconnection
         ble_clear_message_queues();
@@ -932,7 +934,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
         if (BleSequenceManager::getInstance().isInRecovery())
         {
             LOG_INF("Starting BLE packet recovery after reconnection");
-            BleRecoveryHandler::getInstance().startRecovery();
+          //  BleRecoveryHandler::getInstance().startRecovery();
         }
 #endif
 
@@ -1049,6 +1051,11 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
     if (conn != d2d_conn) {
         // This was a phone connection
         ble_set_phone_connection_state(false);
+        
+        // IMPORTANT: Clear message queues immediately on phone disconnect
+        // This prevents queue overflow during activity when phone disconnects
+        LOG_INF("Phone disconnected - clearing message queues to prevent overflow");
+        ble_clear_message_queues();
     }
     
     // Clear Activity Metrics Service connection (primary only)
@@ -1505,6 +1512,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
         if (ret == 0)
         { // Message successfully received
             
+                        
             // Copy message to appropriate buffer and submit work to queue
             // This allows the main thread to immediately return to waiting for next message
             switch (msg.type)
@@ -1949,6 +1957,7 @@ static void foot_samples_work_handler(struct k_work *work)
     jis_foot_sensor_notify(foot_data);
 #else
     // Secondary device: Send to primary via D2D
+    LOG_ERR("Calling d2d");
     ble_d2d_tx_send_foot_sensor_data(foot_data);
 #endif
 }
@@ -1982,19 +1991,19 @@ static void foot_samples_secondary_work_handler(struct k_work *work)
             g_secondary_foot_data.values[4], g_secondary_foot_data.values[5],
             g_secondary_foot_data.values[6], g_secondary_foot_data.values[7]);
     
+    // Call the new update function which will check if we should send aggregated notification
+    jis_foot_sensor_update_secondary(foot_data);
+    
     // Forward to data module for logging (if needed)
-    extern struct k_msgq data_msgq;
-    generic_message_t data_msg;
-    data_msg.sender = SENDER_D2D_SECONDARY;
-    data_msg.type = MSG_TYPE_FOOT_SAMPLES;
-    memcpy(&data_msg.data.foot_samples, foot_data, sizeof(foot_samples_t));
+   // extern struct k_msgq data_msgq;
+   // generic_message_t data_msg;
+   // data_msg.sender = SENDER_D2D_SECONDARY;
+   // data_msg.type = MSG_TYPE_FOOT_SAMPLES;
+   // memcpy(&data_msg.data.foot_samples, foot_data, sizeof(foot_samples_t));
     
-    if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to forward secondary foot data to data module");
-    }
-    
-    // Note: We intentionally do NOT call jis_foot_sensor_notify() here
-    // as that would mix secondary data with primary data
+   // if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
+    //    LOG_WRN("Failed to forward secondary foot data to data module");
+   // }
 #else
     // This handler should not be called on secondary device
     LOG_ERR("Unexpected: Secondary foot handler called on secondary device");
@@ -2063,11 +2072,11 @@ static void bhi360_3d_mapping_secondary_work_handler(struct k_work *work)
             g_secondary_quat_data.quat_x, g_secondary_quat_data.quat_y,
             g_secondary_quat_data.quat_z, g_secondary_quat_data.quat_w);
     
+    // Call the new update function which will check if we should send aggregated notification
+    jis_bhi360_data1_update_secondary(mapping_data);
+    
     // Note: We don't forward raw BHI360 3D mapping to data module as it's not needed for storage
     // The calculated bilateral metrics are saved via MSG_TYPE_REALTIME_METRICS_DATA instead
-    
-    // Note: We intentionally do NOT call jis_bhi360_data1_notify() here
-    // as that would mix secondary data with primary data
 #else
     // This handler should not be called on secondary device
     LOG_ERR("Unexpected: Secondary BHI360 3D handler called on secondary device");

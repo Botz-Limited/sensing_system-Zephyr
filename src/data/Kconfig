@@ -48,11 +48,11 @@ config DATA_MODULE_RESET_SETTINGS_FILE_ON_BOOT
 
 config DATA_MODULE_STACK_SIZE
 	int "Data module thread stack size"
-	default 8192
+	default 6148
 
 config DATA_MODULE_PRIORITY
 	int "Data module thread priority"
-	default 8
+	default 6
 
 config BT_LONG_WQ_STACK_SIZE
 	int

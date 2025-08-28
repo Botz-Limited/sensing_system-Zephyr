@@ -70,6 +70,13 @@ const char* dis_get_fw_revision(void);
 
 #ifdef __cplusplus
 }
+
+// C++ only functions (for aggregation)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+void jis_foot_sensor_update_secondary(const foot_samples_t *secondary_data);
+void jis_bhi360_data1_update_secondary(const bhi360_3d_mapping_t *secondary_data);
+#endif
+
 #endif
 
 #endif // BLE_SERVICES_HPP

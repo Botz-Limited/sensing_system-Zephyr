@@ -1,12 +1,8 @@
 config FOOT_SENSOR_MODULE
 	bool "Foot Sensor Module"
-	select GPIO
-	select NRFX_SAADC
-	select NRFX_TIMER
-	select NRFX_SAADC_CONFIG_CHANNEL_COUNT_ENABLE
-	select NRFX_DPPI_ENABLED
+	select ADC
 	help
-	  FOOT_SENSOR MODULE
+	  FOOT_SENSOR MODULE using Zephyr ADC driver
 
 if FOOT_SENSOR_MODULE
 
@@ -14,8 +10,19 @@ module = FOOT_SENSOR_MODULE
 module-str = FOOT_SENSOR module
 source "subsys/logging/Kconfig.template.log_config"
 
-config NRFX_SAADC_CHANNEL_COUNT
-	int
-	default 8	
+config FOOT_SENSOR_OPTIONAL
+	bool "Make foot sensor optional (non-critical for boot)"
+	default n
+	help
+	  If enabled, the system will continue to boot even if foot sensor
+	  initialization fails. If disabled, foot sensor failure will prevent
+	  system startup.
+
+config FOOT_SENSOR_USE_SIMPLE
+	bool "Use simplified thread-based ADC implementation"
+	default y
+	help
+	  Use simplified implementation with Zephyr ADC driver and thread-based
+	  sampling instead of complex NRFX/DPPI/Timer implementation
 
 endif # FOOT_SENSOR_MODULE

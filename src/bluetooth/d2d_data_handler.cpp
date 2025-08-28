@@ -49,7 +49,8 @@ int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
         g_secondary_data_valid = true;
         
         LOG_DBG("Secondary data stored for aggregation: foot + quaternion");
-        LOG_INF("Foot values[0-3]: %u %u %u %u",
+     
+      /*  LOG_INF("Foot values[0-3]: %u %u %u %u",
                 g_secondary_foot_data.values[0], g_secondary_foot_data.values[1],
                 g_secondary_foot_data.values[2], g_secondary_foot_data.values[3]);
         LOG_INF("Foot values[4-7]: %u %u %u %u",
@@ -57,7 +58,7 @@ int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
                 g_secondary_foot_data.values[6], g_secondary_foot_data.values[7]);
         LOG_DBG("Quaternion (fixed): x=%d y=%d z=%d w=%d",
                 g_secondary_quat_data.quat_x, g_secondary_quat_data.quat_y,
-                g_secondary_quat_data.quat_z, g_secondary_quat_data.quat_w);
+                g_secondary_quat_data.quat_z, g_secondary_quat_data.quat_w); */
         
         // Forward RAW foot samples to bluetooth module for Information Service (phone display only)
         extern struct k_msgq bluetooth_msgq;

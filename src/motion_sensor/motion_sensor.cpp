@@ -750,12 +750,6 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
       k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
 #endif
 
-      // Also send to WiFi module if WiFi is active
-#if defined(CONFIG_WIFI_MODULE)
-      if (atomic_get(&wifi_active) == 1) {
-        k_msgq_put(&wifi_msgq, &msg, K_NO_WAIT);
-      }
-#endif
 
       // Rate limiting for Bluetooth: Send at 5Hz instead of 100Hz
       // Motion sensor runs at 100Hz, so send every 20th sample to achieve 5Hz

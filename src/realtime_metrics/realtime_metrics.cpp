@@ -690,12 +690,7 @@ static void calculate_realtime_metrics(void)
 // Send BLE update
 static void send_ble_update(void)
 {
-    // Check if phone is connected before attempting to send
-    if (!ble_phone_is_connected()) {
-        LOG_DBG("Skipping BLE update - phone not connected");
-        return;
-    }
-    
+  
     LOG_INF("Sending BLE update: cadence=%d spm, pace=%d s/km, form=%d%%",
             metrics_state.current_metrics.cadence_spm,
             metrics_state.current_metrics.pace_sec_km,
@@ -714,10 +709,12 @@ static void send_ble_update(void)
            sizeof(metrics_state.current_metrics) > sizeof(ble_msg.data) ?
            sizeof(ble_msg.data) : sizeof(metrics_state.current_metrics));
     
+    if (ble_phone_is_connected()) {       
     // Send to bluetooth module
     int ret = k_msgq_put(&bluetooth_msgq, &ble_msg, K_NO_WAIT);
     if (ret != 0) {
-        LOG_WRN("Failed to send metrics to bluetooth queue: %d", ret);
+        LOG_WRN("Failed to send metrics to bluetooth queue: %d", ret);  
+    }
     }
 
     // Create message for data module
@@ -732,7 +729,7 @@ static void send_ble_update(void)
     
     
     // Send to data module
-    ret = k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT);
+    int ret = k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT);
     if (ret != 0) {
         LOG_WRN("Failed to send metrics to data queue: %d", ret);
     }
@@ -774,6 +771,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     // Handle start activity events
     if (is_motion_sensor_start_activity_event(aeh)) {
         LOG_INF("Realtime metrics: Activity started");
+        atomic_set(&processing_active, 1);
         // Could trigger processing start here if needed
         return false;
     }
@@ -781,6 +779,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     // Handle stop activity events
     if (is_motion_sensor_stop_activity_event(aeh)) {
         LOG_INF("Realtime metrics: Activity stopped");
+        atomic_set(&processing_active, 0);
         // Could trigger processing stop here if needed
         return false;
     }

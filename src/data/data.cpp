@@ -240,7 +240,7 @@ static void data_init(void)
     k_thread_name_set(data_tid, "data");
 
     // Start periodic flush timer (1Hz)
-    k_work_schedule_for_queue(&data_work_q, &periodic_flush_work, K_SECONDS(1));
+    k_work_schedule_for_queue(&data_work_q, &periodic_flush_work, K_NO_WAIT);
 
     module_set_state(MODULE_STATE_READY);
     LOG_INF("Data module initialized");
@@ -347,19 +347,14 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
             // Queue different work based on message type
             switch (msg.type)
             {
+
                 case MSG_TYPE_REALTIME_METRICS_DATA:
-                    // Check if work is already pending to avoid buffer overwrite
-                    if (!k_work_is_pending(&process_sensor_data_work))
-                    {
-                        k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
-                        memcpy(&pending_sensor_data_msg, &msg, sizeof(generic_message_t));
-                        k_mutex_unlock(&sensor_data_msg_mutex);
-                        k_work_submit_to_queue(&data_work_q, &process_sensor_data_work);
-                    }
-                    else
-                    {
-                        LOG_WRN("Sensor data work already pending, dropping message");
-                    }
+
+                    k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
+                    memcpy(&pending_sensor_data_msg, &msg, sizeof(generic_message_t));
+                    k_mutex_unlock(&sensor_data_msg_mutex);
+                    k_work_submit_to_queue(&data_work_q, &process_sensor_data_work);
+
                     break;
 
                 case MSG_TYPE_COMMAND:
@@ -448,6 +443,7 @@ static void process_sensor_data_work_handler(struct k_work *work)
 
     if (atomic_get(&logging_activity_active))
     {
+
         const realtime_metrics_t *metrics = &local_msg.data.realtime_metrics;
 
         LOG_INF("Writing Activity data metrics %d", metrics->timestamp_ms);
@@ -534,82 +530,82 @@ static void process_command_work_handler(struct k_work *work)
     generic_message_t local_msg = command_queue;
     k_mutex_unlock(&cmd_queue_mutex);
 
-        // Process the command
-        const char *command_str = local_msg.data.command_str;
-        LOG_WRN("Processing command: %s activity logging =%ld", command_str, atomic_get(&logging_activity_active));
+    // Process the command
+    const char *command_str = local_msg.data.command_str;
+    LOG_WRN("Processing command: %s activity logging =%ld", command_str, atomic_get(&logging_activity_active));
 
-        // For STOP commands, cancel any pending sensor data work first
-        if (strstr(command_str, "STOP") != NULL)
-        {
-            LOG_INF("STOP command detected - cancelling sensor data work");
-            k_work_cancel(&process_sensor_data_work);
-        }
+    // For STOP commands, cancel any pending sensor data work first
+    if (strstr(command_str, "STOP") != NULL)
+    {
+        LOG_INF("STOP command detected - cancelling sensor data work");
+        k_work_cancel(&process_sensor_data_work);
+    }
 
-        if (strcmp(command_str, "START_LOGGING_ACTIVITY") == 0)
+    if (strcmp(command_str, "START_LOGGING_ACTIVITY") == 0)
+    {
+        if (atomic_get(&logging_activity_active) == 0)
         {
-            if (atomic_get(&logging_activity_active) == 0)
+            LOG_INF("Starting activity logging");
+            // Use values from the command message's metadata fields
+            err_t activity_status = start_activity_logging(local_msg.sampling_frequency, local_msg.fw_version);
+            if (activity_status == err_t::NO_ERROR)
             {
-                LOG_INF("Starting activity logging");
-                // Use values from the command message's metadata fields
-                err_t activity_status = start_activity_logging(local_msg.sampling_frequency, local_msg.fw_version);
-                if (activity_status == err_t::NO_ERROR)
-                {
-                    atomic_set(&logging_activity_active, 1);
-                }
-                else
-                {
-                    LOG_ERR("Failed to start activity logging: %d", (int)activity_status);
-                }
+                atomic_set(&logging_activity_active, 1);
             }
             else
             {
-                LOG_WRN("Activity logging already active, ignoring START command");
+                LOG_ERR("Failed to start activity logging: %d", (int)activity_status);
             }
         }
-        else if (strcmp(command_str, "STOP_LOGGING_ACTIVITY") == 0)
+        else
         {
-            if (atomic_get(&logging_activity_active) == 1)
-            {
-                LOG_INF("Stopping activity logging");
-                atomic_set(&logging_activity_active, 0);
+            LOG_WRN("Activity logging already active, ignoring START command");
+        }
+    }
+    else if (strcmp(command_str, "STOP_LOGGING_ACTIVITY") == 0)
+    {
+        if (atomic_get(&logging_activity_active) == 1)
+        {
+            LOG_INF("Stopping activity logging");
+            atomic_set(&logging_activity_active, 0);
 
+            err_t activity_status = end_activity_logging();
+            if (activity_status != err_t::NO_ERROR)
+            {
+                LOG_ERR("Failed to stop activity logging: %d", (int)activity_status);
+            }
+            else
+            {
+                LOG_INF("Activity logging stopped successfully");
+            }
+            // Add small delay as in original to allow Bluetooth queue processing
+            k_msleep(10);
+        }
+        else
+        {
+            LOG_WRN("Activity logging not active, ignoring STOP command");
+        }
+    }
+    else if (strcmp(command_str, "STOP_LOGGING") == 0)
+    {
+        LOG_INF("Stopping all logging");
+        if (atomic_get(&logging_activity_active) == 1)
+        {
+            atomic_set(&logging_activity_active, 0);
+            if (filesystem_available)
+            {
                 err_t activity_status = end_activity_logging();
                 if (activity_status != err_t::NO_ERROR)
                 {
                     LOG_ERR("Failed to stop activity logging: %d", (int)activity_status);
                 }
-                else
-                {
-                    LOG_INF("Activity logging stopped successfully");
-                }
-                // Add small delay as in original to allow Bluetooth queue processing
-                k_msleep(10);
-            }
-            else
-            {
-                LOG_WRN("Activity logging not active, ignoring STOP command");
             }
         }
-        else if (strcmp(command_str, "STOP_LOGGING") == 0)
-        {
-            LOG_INF("Stopping all logging");
-            if (atomic_get(&logging_activity_active) == 1)
-            {
-                atomic_set(&logging_activity_active, 0);
-                if (filesystem_available)
-                {
-                    err_t activity_status = end_activity_logging();
-                    if (activity_status != err_t::NO_ERROR)
-                    {
-                        LOG_ERR("Failed to stop activity logging: %d", (int)activity_status);
-                    }
-                }
-            }
-        }
-        else
-        {
-            LOG_WRN("Unknown command: %s", command_str);
-        }
+    }
+    else
+    {
+        LOG_WRN("Unknown command: %s", command_str);
+    }
 }
 
 // Work handler for processing calibration data
@@ -1133,14 +1129,15 @@ err_t end_activity_logging()
     }
 
     LOG_WRN("Closing file CLOSED!!!!!!!!");
-    
+
     // TODO: test only - list directory contents
     LOG_WRN("About to list directory contents for: %s", hardware_dir_path);
     int lsdir_result = lsdir(hardware_dir_path);
-    if (lsdir_result != 0) {
+    if (lsdir_result != 0)
+    {
         LOG_ERR("lsdir failed with error: %d", lsdir_result);
     }
-    
+
     return overall_status;
 }
 
@@ -1882,7 +1879,7 @@ static int lsdir(const char *path)
 
     LOG_WRN("Successfully opened directory: %s", path);
     LOG_WRN("Listing contents:");
-    
+
     for (;;)
     {
         /* Verify fs_readdir() */
@@ -1944,7 +1941,6 @@ static bool app_event_handler(const struct app_event_header *aeh)
             if (atomic_get(&logging_activity_active))
             {
                 end_activity_logging();
-
             }
         }
         return false;

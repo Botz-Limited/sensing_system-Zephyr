@@ -35,6 +35,7 @@
 #include <app.hpp>
 #include <app_fixed_point.hpp>
 #include <ble_services.hpp>
+#include <ble_connection_state.h>
 #include <status_codes.h>
 #include <util.hpp>
 #include <zephyr/random/random.h>
@@ -65,9 +66,9 @@ static foot_samples_t foot_sensor_char_value = {0};
 static foot_samples_aggregated_t foot_sensor_aggregated_value = {0};
 static quaternion_aggregated_t quaternion_aggregated_value = {0};
 
-static bool status_subscribed = true;
-static bool foot_sensor_subscribed = true;  // Separate flag for foot sensor
-static bool bhi360_data1_subscribed = true;
+static bool status_subscribed = false;
+static bool foot_sensor_subscribed = false;  // Separate flag for foot sensor
+static bool bhi360_data1_subscribed = false;
 
 static uint8_t ct[10];
 static uint8_t ct_update = 0;
@@ -304,10 +305,10 @@ BT_GATT_SERVICE_DEFINE(
         // Foot Sensor samples Characteristic
     BT_GATT_CHARACTERISTIC(&foot_sensor_samples.uuid,
                             BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
-                            BT_GATT_PERM_READ_ENCRYPT,
+                            BT_GATT_PERM_READ,
                             jis_foot_sensor_read, nullptr,
-                            static_cast<void *>(&foot_sensor_char_value)),
-    BT_GATT_CCC(jis_foot_sensor_ccc_cfg_changed, BT_GATT_PERM_READ_ENCRYPT | BT_GATT_PERM_WRITE_ENCRYPT),
+                            static_cast<void *>(&foot_sensor_aggregated_value)),
+    BT_GATT_CCC(jis_foot_sensor_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
 
 
@@ -333,7 +334,7 @@ BT_GATT_SERVICE_DEFINE(
         BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
         BT_GATT_PERM_READ,
         jis_bhi360_data1_read, nullptr,
-        static_cast<void *>(&bhi360_data1_value_fixed)),
+        static_cast<void *>(&quaternion_aggregated_value)),
     BT_GATT_CCC(jis_bhi360_data1_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 
     // Commented out - only quaternion data sent to BLE at 5Hz
@@ -696,6 +697,7 @@ extern "C" void jis_clear_err_status_notify(err_t error_code)
 void jis_foot_sensor_notify(const foot_samples_t *samples_data)
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // PRIMARY DEVICE ONLY - handles aggregation and BLE notifications to phone
 
     // Always prepare aggregated data (for both notify and read)
     foot_sensor_aggregated_value.timestamp = k_uptime_get_32();
@@ -706,45 +708,32 @@ void jis_foot_sensor_notify(const foot_samples_t *samples_data)
     // Copy secondary data if available
     if (g_secondary_data_valid) {
         memcpy(foot_sensor_aggregated_value.secondary, g_secondary_foot_data.values, sizeof(g_secondary_foot_data.values));
-        LOG_DBG("Aggregated foot data prepared - Primary[0]=%u, Secondary[0]=%u",
-                foot_sensor_aggregated_value.primary[0], foot_sensor_aggregated_value.secondary[0]);
+      //  LOG_INF("Aggregated foot data prepared - Primary[0]=%u, Secondary[0]=%u",
+            //    foot_sensor_aggregated_value.primary[0], foot_sensor_aggregated_value.secondary[0]);
     } else {
         // No secondary data, send zeros
         memset(foot_sensor_aggregated_value.secondary, 0, sizeof(foot_sensor_aggregated_value.secondary));
-        LOG_DBG("Primary-only foot data prepared (secondary not available)");
+      //  LOG_INF("Primary-only foot data prepared (secondary not available)");
     }
     
-    // Send notification if subscribed
-    foot_sensor_subscribed=true;
-    if (foot_sensor_subscribed)  // Use correct subscription flag
-    {
+    // Send notification only if subscribed AND phone is connected
+    if (ble_phone_is_connected()) {
         auto *status_gatt =
             bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
-        if (status_gatt)
-        {
+        if (status_gatt) {
             // Send aggregated format
             bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_aggregated_value), sizeof(foot_sensor_aggregated_value));
-            LOG_DBG("Foot sensor aggregated notification sent: %u bytes", sizeof(foot_sensor_aggregated_value));
         }
     }
-#else
-    // Secondary device - send only its own data
-    if (foot_sensor_subscribed)
-    {
-        foot_samples_ble_t ble_data;
-        BleSequenceManager::getInstance().addFootSample(samples_data, &ble_data);
-
-        auto *status_gatt =
-            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
-        if (status_gatt)
-        {
-            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&ble_data), sizeof(ble_data));
-        }
-    }
-#endif
     
     // Store primary data for legacy compatibility
     memcpy(&foot_sensor_char_value, samples_data, sizeof(foot_samples_t));
+#else
+    // SECONDARY DEVICE - should NOT call this function!
+    // Secondary device sends data via D2D TX, not via Information Service
+    LOG_ERR("jis_foot_sensor_notify called on secondary device - this should not happen!");
+    LOG_ERR("Secondary device should use ble_d2d_tx_send_foot_sensor_data() instead");
+#endif
 }
 
 // Helper function to send BLE format data directly (used by recovery)
@@ -759,6 +748,76 @@ extern "C" void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data)
             bt_gatt_notify(nullptr, status_gatt, static_cast<const void *>(data), sizeof(*data));
         }
     }
+}
+
+// Function to update secondary foot data and check if we should notify
+void jis_foot_sensor_update_secondary(const foot_samples_t *secondary_data)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!secondary_data) return;
+    
+    // Update global secondary data
+    memcpy(&g_secondary_foot_data, secondary_data, sizeof(foot_samples_t));
+    g_secondary_data_valid = true;
+    g_secondary_last_timestamp = k_uptime_get_32();
+    
+    // Update aggregated structure with secondary data
+    memcpy(foot_sensor_aggregated_value.secondary, secondary_data->values, sizeof(secondary_data->values));
+    
+    LOG_DBG("Secondary foot data updated in aggregated structure");
+    
+    // Check if we have recent primary data (within 500ms)
+    uint32_t now = k_uptime_get_32();
+    if ((now - foot_sensor_aggregated_value.timestamp) < 500) {
+        // We have recent primary data, send aggregated notification
+        if (foot_sensor_subscribed) {
+            auto *status_gatt =
+                bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
+            if (status_gatt) {
+                bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_aggregated_value), 
+                              sizeof(foot_sensor_aggregated_value));
+                LOG_DBG("Foot sensor aggregated notification sent after secondary update: %u bytes", 
+                        sizeof(foot_sensor_aggregated_value));
+            }
+        }
+    }
+#endif
+}
+
+// Similar function for quaternion data
+void jis_bhi360_data1_update_secondary(const bhi360_3d_mapping_t *secondary_data)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!secondary_data) return;
+    
+    // Update global secondary quaternion data
+    g_secondary_quat_data.quat_x = float_to_fixed16(secondary_data->accel_x, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_y = float_to_fixed16(secondary_data->accel_y, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_z = float_to_fixed16(secondary_data->accel_z, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_w = float_to_fixed16(secondary_data->quat_w, FixedPoint::QUAT_SCALE);
+    g_secondary_data_valid = true;
+    g_secondary_last_timestamp = k_uptime_get_32();
+    
+    // Update aggregated structure with secondary data
+    quaternion_aggregated_value.secondary_x = g_secondary_quat_data.quat_x;
+    quaternion_aggregated_value.secondary_y = g_secondary_quat_data.quat_y;
+    quaternion_aggregated_value.secondary_z = g_secondary_quat_data.quat_z;
+    quaternion_aggregated_value.secondary_w = g_secondary_quat_data.quat_w;
+    
+    LOG_DBG("Secondary quaternion data updated in aggregated structure");
+    
+    // Check if we have recent primary data (within 500ms)
+    uint32_t now = k_uptime_get_32();
+    if ((now - quaternion_aggregated_value.timestamp) < 500) {
+        // We have recent primary data, send aggregated notification
+        if (bhi360_data1_subscribed) {
+            safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&quaternion_aggregated_value), 
+                           sizeof(quaternion_aggregated_value));
+            LOG_DBG("Quaternion aggregated notification sent after secondary update: %u bytes", 
+                    sizeof(quaternion_aggregated_value));
+        }
+    }
+#endif
 }
 
 /**
@@ -1048,6 +1107,8 @@ static ssize_t jis_bhi360_data1_read(struct bt_conn *conn, const struct bt_gatt_
 extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // PRIMARY DEVICE ONLY - handles aggregation and BLE notifications to phone
+    
     // Always prepare aggregated quaternion data (for both notify and read)
     quaternion_aggregated_value.timestamp = k_uptime_get_32();
     
@@ -1074,24 +1135,21 @@ extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
         LOG_DBG("Primary-only quaternion prepared (secondary not available)");
     }
     
-    // Send notification if subscribed
-    if (bhi360_data1_subscribed)
-    {
+    // Send notification only if subscribed AND phone is connected
+    if (ble_phone_is_connected()) {
         safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&quaternion_aggregated_value), sizeof(quaternion_aggregated_value));
         LOG_DBG("Quaternion aggregated notification sent: %u bytes", sizeof(quaternion_aggregated_value));
     }
-#else
-    // Secondary device - send only its own data
-    if (bhi360_data1_subscribed)
-    {
-        bhi360_3d_mapping_ble_t ble_data;
-        BleSequenceManager::getInstance().addBhi3603D(data, &ble_data);
-        safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&ble_data), sizeof(ble_data));
-    }
-#endif
+
     
     // Store primary data for legacy compatibility
     convert_3d_mapping_to_fixed(*data, bhi360_data1_value_fixed);
+#else
+    // SECONDARY DEVICE - should NOT call this function!
+    // Secondary device sends data via D2D TX, not via Information Service
+    LOG_ERR("jis_bhi360_data1_notify called on secondary device - this should not happen!");
+    LOG_ERR("Secondary device should use ble_d2d_tx_send_bhi360_data1() instead");
+#endif
 }
 
 // Helper function to send BLE format data directly (used by recovery)
