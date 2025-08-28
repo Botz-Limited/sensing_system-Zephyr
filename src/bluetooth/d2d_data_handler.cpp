@@ -49,9 +49,12 @@ int d2d_data_handler_process_batch(const d2d_sample_batch_t *batch)
         g_secondary_data_valid = true;
         
         LOG_DBG("Secondary data stored for aggregation: foot + quaternion");
-        LOG_DBG("Foot values[0-3]: %u %u %u %u",
+        LOG_INF("Foot values[0-3]: %u %u %u %u",
                 g_secondary_foot_data.values[0], g_secondary_foot_data.values[1],
                 g_secondary_foot_data.values[2], g_secondary_foot_data.values[3]);
+        LOG_INF("Foot values[4-7]: %u %u %u %u",
+                g_secondary_foot_data.values[4], g_secondary_foot_data.values[5],
+                g_secondary_foot_data.values[6], g_secondary_foot_data.values[7]);
         LOG_DBG("Quaternion (fixed): x=%d y=%d z=%d w=%d",
                 g_secondary_quat_data.quat_x, g_secondary_quat_data.quat_y,
                 g_secondary_quat_data.quat_z, g_secondary_quat_data.quat_w);
@@ -106,6 +109,18 @@ int d2d_data_handler_process_foot_samples(const foot_samples_t *samples)
     
     LOG_INF("Received foot sensor data from secondary");
     
+    // Update global secondary foot data for aggregation in Information Service
+    memcpy(&g_secondary_foot_data, samples, sizeof(foot_samples_t));
+    g_secondary_data_valid = true;
+    g_secondary_last_timestamp = k_uptime_get_32();
+    
+    LOG_INF("Updated global secondary foot data - values[0-3]: %u %u %u %u",
+            g_secondary_foot_data.values[0], g_secondary_foot_data.values[1],
+            g_secondary_foot_data.values[2], g_secondary_foot_data.values[3]);
+    LOG_INF("Updated global secondary foot data - values[4-7]: %u %u %u %u",
+            g_secondary_foot_data.values[4], g_secondary_foot_data.values[5],
+            g_secondary_foot_data.values[6], g_secondary_foot_data.values[7]);
+    
     // DO NOT forward directly to phone via jis_foot_sensor_notify()
     // That function is for PRIMARY device's foot data only!
     // Instead, forward so,  to bluetooth module which will handle it properly
@@ -146,6 +161,18 @@ int d2d_data_handler_process_bhi360_3d_mapping(const bhi360_3d_mapping_t *data)
     }
     
     LOG_DBG("Processing BHI360 3D mapping from secondary device");
+    
+    // Update global secondary quaternion data for aggregation in Information Service
+    // Convert float quaternion to fixed-point format for storage
+    g_secondary_quat_data.quat_x = float_to_fixed16(data->accel_x, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_y = float_to_fixed16(data->accel_y, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_z = float_to_fixed16(data->accel_z, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_w = float_to_fixed16(data->quat_w, FixedPoint::QUAT_SCALE);
+    g_secondary_data_valid = true;
+    g_secondary_last_timestamp = k_uptime_get_32();
+    
+    LOG_DBG("Updated global secondary quaternion data - (%.2f,%.2f,%.2f,%.2f)",
+            data->accel_x, data->accel_y, data->accel_z, data->quat_w);
     
     // DO NOT forward directly to phone via jis_bhi360_data1_notify()
     // That function is for PRIMARY device's BHI360 data only!

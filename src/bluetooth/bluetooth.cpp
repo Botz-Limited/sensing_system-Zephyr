@@ -59,6 +59,7 @@
 #include "ble_d2d_tx.hpp"
 #include "ble_d2d_tx_service.hpp"
 #include "bluetooth_debug.hpp"
+#include "d2d_data_handler.hpp"
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_rx_client.hpp"
 #include "ble_d2d_tx_queue.hpp"
@@ -1509,69 +1510,78 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
             switch (msg.type)
             {
                 case MSG_TYPE_FOOT_SAMPLES:
-                    // Route to appropriate work item based on sender
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Primary device: Route based on sender
                     if (msg.sender == SENDER_D2D_SECONDARY) {
-                        // Secondary foot data - use separate work item
+                        // Secondary foot data from D2D - use separate work item
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_foot_samples_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-
-                            k_work_submit_to_queue(&bluetooth_work_q, &foot_samples_secondary_work);
-   
+                        k_work_submit_to_queue(&bluetooth_work_q, &foot_samples_secondary_work);
                     } else {
-                        // Primary foot data
+                        // Primary's own foot data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_foot_samples_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-                        // Check if work is already pending before submitting
-
-                            k_work_submit_to_queue(&bluetooth_work_q, &foot_samples_work);
-
+                        k_work_submit_to_queue(&bluetooth_work_q, &foot_samples_work);
                     }
+#else
+                    // Secondary device: All foot data goes through normal handler to be sent via D2D
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_foot_samples_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &foot_samples_work);
+#endif
                     break;
 
                 case MSG_TYPE_BHI360_3D_MAPPING:
-                    // Route to appropriate work item based on sender
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Primary device: Route based on sender
                     if (msg.sender == SENDER_D2D_SECONDARY) {
-                        // Secondary BHI360 3D data - use separate work item
+                        // Secondary BHI360 3D data from D2D - use separate work item
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_3d_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-
-
-                            k_work_submit_to_queue(&bluetooth_work_q, &bhi360_3d_mapping_secondary_work);
-
+                        k_work_submit_to_queue(&bluetooth_work_q, &bhi360_3d_mapping_secondary_work);
                     } else {
-                        // Primary BHI360 3D data
+                        // Primary's own BHI360 3D data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_3d_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-
- 
-                            k_work_submit_to_queue(&bluetooth_work_q, &bhi360_3d_mapping_work);
+                        k_work_submit_to_queue(&bluetooth_work_q, &bhi360_3d_mapping_work);
                     }
-
+#else
+                    // Secondary device: All BHI360 3D data goes through normal handler to be sent via D2D
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_bhi360_3d_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &bhi360_3d_mapping_work);
+#endif
                     break;
 
                 case MSG_TYPE_BHI360_LINEAR_ACCEL:
-                    // Route to appropriate work item based on sender
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    // Primary device: Route based on sender
                     if (msg.sender == SENDER_D2D_SECONDARY) {
-                        // Secondary linear accel data - use separate work item
+                        // Secondary linear accel data from D2D - use separate work item
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_linear_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-
-                            k_work_submit_to_queue(&bluetooth_work_q, &bhi360_linear_accel_secondary_work);
-
+                        k_work_submit_to_queue(&bluetooth_work_q, &bhi360_linear_accel_secondary_work);
                     } else {
-                        // Primary linear accel data
+                        // Primary's own linear accel data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_linear_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
-
-                            k_work_submit_to_queue(&bluetooth_work_q, &bhi360_linear_accel_work);
-
+                        k_work_submit_to_queue(&bluetooth_work_q, &bhi360_linear_accel_work);
                     }
+#else
+                    // Secondary device: All linear accel data goes through normal handler to be sent via D2D
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_bhi360_linear_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &bhi360_linear_accel_work);
+#endif
                     break;
 
                 case MSG_TYPE_BHI360_STEP_COUNT:
@@ -1957,33 +1967,32 @@ static void foot_samples_secondary_work_handler(struct k_work *work)
     foot_samples_t *foot_data = &msg.data.foot_samples;
     
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Primary device: Handle secondary foot data properly
+    // Primary device: Update global secondary foot data for Information Service aggregation
     LOG_DBG("Processing secondary foot sensor data");
     
-    // Log that we received secondary foot data (all 8 channels)
-    //LOG_INF("Secondary foot data received - values[0-3]: %u %u %u %u",
-      //      foot_data->values[0], foot_data->values[1],
-        //    foot_data->values[2], foot_data->values[3]);
-   // LOG_INF("Secondary foot data received - values[4-7]: %u %u %u %u",
-     //       foot_data->values[4], foot_data->values[5],
-       //     foot_data->values[6], foot_data->values[7]);
+    // Update global secondary foot data for aggregation in Information Service
+    memcpy(&g_secondary_foot_data, foot_data, sizeof(foot_samples_t));
+    g_secondary_data_valid = true;
+    g_secondary_last_timestamp = k_uptime_get_32();
+    
+    LOG_DBG("Updated global secondary foot data - values[0-3]: %u %u %u %u",
+            g_secondary_foot_data.values[0], g_secondary_foot_data.values[1],
+            g_secondary_foot_data.values[2], g_secondary_foot_data.values[3]);
+    LOG_DBG("Updated global secondary foot data - values[4-7]: %u %u %u %u",
+            g_secondary_foot_data.values[4], g_secondary_foot_data.values[5],
+            g_secondary_foot_data.values[6], g_secondary_foot_data.values[7]);
     
     // Forward to data module for logging (if needed)
- //   generic_message_t data_msg;
- //   data_msg.sender = SENDER_D2D_SECONDARY;
-  //  data_msg.type = MSG_TYPE_FOOT_SAMPLES;
-  //  memcpy(&data_msg.data.foot_samples, foot_data, sizeof(foot_samples_t));
+    extern struct k_msgq data_msgq;
+    generic_message_t data_msg;
+    data_msg.sender = SENDER_D2D_SECONDARY;
+    data_msg.type = MSG_TYPE_FOOT_SAMPLES;
+    memcpy(&data_msg.data.foot_samples, foot_data, sizeof(foot_samples_t));
     
- //   if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
- //       LOG_WRN("Failed to forward secondary foot data to data module");
- //   }
+    if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to forward secondary foot data to data module");
+    }
     
-    // NOTE: Legacy BLE update is now handled directly in ble_d2d_rx_client.cpp
-    // to avoid duplicate updates causing stuck data
-    LOG_DBG("Secondary foot data received in bluetooth module: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
-            foot_data->values[0], foot_data->values[1], foot_data->values[2], foot_data->values[3],
-            foot_data->values[4], foot_data->values[5], foot_data->values[6], foot_data->values[7]);
-
     // Note: We intentionally do NOT call jis_foot_sensor_notify() here
     // as that would mix secondary data with primary data
 #else
@@ -2034,14 +2043,26 @@ static void bhi360_3d_mapping_secondary_work_handler(struct k_work *work)
     bhi360_3d_mapping_t *mapping_data = &msg.data.bhi360_3d_mapping;
     
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Primary device: Handle secondary BHI360 3D data properly
- //   LOG_DBG("Processing secondary BHI360 3D mapping data");
-  //  LOG_INF("Secondary BHI360 3D: Accel(%.2f,%.2f,%.2f), Gyro(%.2f,%.2f,%.2f)",
-      //      (double)mapping_data->accel_x, (double)mapping_data->accel_y,
-       //     (double)mapping_data->accel_z, (double)mapping_data->gyro_x,
-        //    (double)mapping_data->gyro_y, (double)mapping_data->gyro_z);
+    // Primary device: Update global secondary quaternion data for Information Service aggregation
+    LOG_DBG("Processing secondary BHI360 3D mapping data");
     
-    // TODO: In future, we could have a separate characteristic for secondary BHI360 data
+    // Update global secondary quaternion data for aggregation in Information Service
+    // The BHI360 3D mapping uses accel_x/y/z fields for quaternion x/y/z and quat_w for w
+    // Convert float quaternion to fixed-point format for storage
+    g_secondary_quat_data.quat_x = float_to_fixed16(mapping_data->accel_x, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_y = float_to_fixed16(mapping_data->accel_y, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_z = float_to_fixed16(mapping_data->accel_z, FixedPoint::QUAT_SCALE);
+    g_secondary_quat_data.quat_w = float_to_fixed16(mapping_data->quat_w, FixedPoint::QUAT_SCALE);
+    g_secondary_data_valid = true;
+    g_secondary_last_timestamp = k_uptime_get_32();
+    
+    LOG_DBG("Updated global secondary quaternion data - (%.2f,%.2f,%.2f,%.2f)",
+            (double)mapping_data->accel_x, (double)mapping_data->accel_y,
+            (double)mapping_data->accel_z, (double)mapping_data->quat_w);
+    LOG_DBG("Quaternion (fixed): x=%d y=%d z=%d w=%d",
+            g_secondary_quat_data.quat_x, g_secondary_quat_data.quat_y,
+            g_secondary_quat_data.quat_z, g_secondary_quat_data.quat_w);
+    
     // Note: We don't forward raw BHI360 3D mapping to data module as it's not needed for storage
     // The calculated bilateral metrics are saved via MSG_TYPE_REALTIME_METRICS_DATA instead
     
