@@ -44,6 +44,7 @@
 #include <app.hpp>
 #include <app_event_manager.h>
 #include <app_version.h>
+#include <ble_connection_state.h>
 #include <caf/events/module_state_event.h>
 #include <errors.hpp>
 #include <events/app_state_event.h>
@@ -52,7 +53,6 @@
 #include <events/foot_sensor_event.h>
 #include <events/motion_sensor_event.h>
 #include <status_codes.h>
-#include <ble_connection_state.h>
 
 #include "ble_d2d_file_transfer.hpp"
 #include "ble_d2d_rx.hpp"
@@ -74,7 +74,6 @@
 #include "activity_metrics_service.h"
 #endif
 
-
 // External function declarations
 // Step count functions moved to Activity Metrics Service
 
@@ -92,7 +91,7 @@ static err_t bt_stop_advertising(void);
 static err_t ble_start_hidden(void);
 
 // Constants
-#define BLE_ADVERTISING_TIMEOUT_MS 30000                   // 30 seconds advertising timeout
+#define BLE_ADVERTISING_TIMEOUT_MS 30000                  // 30 seconds advertising timeout
 static constexpr uint32_t DISCOVERY_INITIAL_DELAY_MS = 2; // Delay before starting discovery
 
 /********************************** BTH THREAD ********************************/
@@ -104,17 +103,17 @@ static k_tid_t bluetooth_tid;
 
 /********************************** WORK QUEUE ********************************/
 // Work queue configuration for asynchronous message processing
-static constexpr int bluetooth_workq_stack_size = 8192;  // Increased to 8KB to prevent stack overflow
+static constexpr int bluetooth_workq_stack_size = 8192; // Increased to 8KB to prevent stack overflow
 K_THREAD_STACK_DEFINE(bluetooth_workq_stack, bluetooth_workq_stack_size);
 static struct k_work_q bluetooth_work_q;
 
 // Work items for different message types
 static struct k_work foot_samples_work;
-static struct k_work foot_samples_secondary_work;  // Separate work item for secondary foot data
+static struct k_work foot_samples_secondary_work; // Separate work item for secondary foot data
 static struct k_work bhi360_3d_mapping_work;
-static struct k_work bhi360_3d_mapping_secondary_work;  // Separate work item for secondary BHI360 3D data
+static struct k_work bhi360_3d_mapping_secondary_work; // Separate work item for secondary BHI360 3D data
 static struct k_work bhi360_linear_accel_work;
-static struct k_work bhi360_linear_accel_secondary_work;  // Separate work item for secondary linear accel
+static struct k_work bhi360_linear_accel_secondary_work; // Separate work item for secondary linear accel
 static struct k_work bhi360_step_count_work;
 static struct k_work activity_step_count_work;
 static struct k_work command_work;
@@ -130,11 +129,11 @@ static struct k_work battery_level_secondary_work;
 // Message buffers for work items (protected by mutex for thread safety)
 K_MUTEX_DEFINE(bluetooth_msg_mutex);
 static generic_message_t pending_foot_samples_msg;
-static generic_message_t pending_foot_samples_secondary_msg;  // Separate buffer for secondary foot data
+static generic_message_t pending_foot_samples_secondary_msg; // Separate buffer for secondary foot data
 static generic_message_t pending_bhi360_3d_msg;
-static generic_message_t pending_bhi360_3d_secondary_msg;  // Separate buffer for secondary BHI360 3D data
+static generic_message_t pending_bhi360_3d_secondary_msg; // Separate buffer for secondary BHI360 3D data
 static generic_message_t pending_bhi360_linear_msg;
-static generic_message_t pending_bhi360_linear_secondary_msg;  // Separate buffer for secondary linear accel
+static generic_message_t pending_bhi360_linear_secondary_msg; // Separate buffer for secondary linear accel
 static generic_message_t pending_bhi360_step_msg;
 static generic_message_t pending_activity_step_msg;
 static generic_message_t pending_command_msg;
@@ -256,7 +255,7 @@ void bluetooth_d2d_confirmed(struct bt_conn *conn)
     // IMPORTANT: Set the connection in D2D TX module so it can forward commands
     ble_d2d_tx_set_connection(conn);
     LOG_INF("D2D TX connection set for command forwarding");
-    
+
     // Notify legacy BLE service that D2D is connected
 
 #endif
@@ -269,7 +268,7 @@ void bluetooth_d2d_not_found(struct bt_conn *conn)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     LOG_INF("Device is not a secondary (no D2D TX service found) - this is a "
             "phone connection");
-    
+
     // This is confirmed to be a phone connection
     ble_set_phone_connection_state(true);
 
@@ -389,7 +388,6 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
         LOG_INF("Secondary device disconnected! (reason 0x%02x)\n", reason);
 
         // Notify legacy BLE service that D2D is disconnected
-
 
         // Clear the secondary connection for FOTA proxy
         fota_proxy_set_secondary_conn(NULL);
@@ -648,44 +646,32 @@ extern struct k_msgq realtime_queue;
 extern struct k_msgq data_msgq;
 
 // Implementation of global BLE connection state functions
-extern "C" {
-bool ble_phone_is_connected(void) {
+extern "C"
+{
+bool ble_phone_is_connected(void)
+{
     return atomic_get(&phone_connected) == 1;
 }
 
-void ble_set_phone_connection_state(bool connected) {
+void ble_set_phone_connection_state(bool connected)
+{
     atomic_set(&phone_connected, connected ? 1 : 0);
     LOG_INF("Phone connection state changed to: %s", connected ? "CONNECTED" : "DISCONNECTED");
 }
 
-void ble_clear_message_queues(void) {
+void ble_clear_message_queues(void)
+{
     generic_message_t dummy_msg;
     int cleared_count = 0;
-    
+
     // Clear bluetooth queue
-    while (k_msgq_get(&bluetooth_msgq, &dummy_msg, K_NO_WAIT) == 0) {
+    while (k_msgq_get(&bluetooth_msgq, &dummy_msg, K_NO_WAIT) == 0)
+    {
         cleared_count++;
     }
-    if (cleared_count > 0) {
+    if (cleared_count > 0)
+    {
         LOG_INF("Cleared %d messages from bluetooth queue", cleared_count);
-    }
-    
-    // Clear realtime queue
-    cleared_count = 0;
-    while (k_msgq_get(&realtime_queue, &dummy_msg, K_NO_WAIT) == 0) {
-        cleared_count++;
-    }
-    if (cleared_count > 0) {
-        LOG_INF("Cleared %d messages from realtime queue", cleared_count);
-    }
-    
-    // Clear data queue
-    cleared_count = 0;
-    while (k_msgq_get(&data_msgq, &dummy_msg, K_NO_WAIT) == 0) {
-        cleared_count++;
-    }
-    if (cleared_count > 0) {
-        LOG_INF("Cleared %d messages from data queue", cleared_count);
     }
 }
 }
@@ -710,9 +696,6 @@ static bt_le_adv_param bt_le_adv_conn_name = {
 
 static const bt_le_adv_param *bt_le_adv_conn = BT_LE_ADV_CONN_FAST_1;
 
-
-
-
 struct bt_conn *local_conn = NULL;
 
 // Init timer
@@ -723,7 +706,6 @@ K_WORK_DEFINE(ble_handler, ble_timer_handler_function);
 // Weight measurement timeout work
 static void weight_measurement_timeout_work_handler(struct k_work *work);
 K_WORK_DELAYABLE_DEFINE(weight_measurement_timeout_work, weight_measurement_timeout_work_handler);
-
 
 /* Advertising data */
 static const struct bt_data ad[] = {
@@ -911,10 +893,10 @@ static void connected(struct bt_conn *conn, uint8_t err)
         }
 
         LOG_INF("Connected");
-        
+
         ble_status_connected = 1;
         ble_set_phone_connection_state(1);
-        
+
         // Clear any stale messages in BLE queues on reconnection
         ble_clear_message_queues();
         LOG_INF("BLE queues cleared on connection");
@@ -923,7 +905,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
         // Set phone connection state (only for non-D2D connections)
         // We'll determine this after discovery completes
         // For now, assume it might be a phone until proven otherwise
-        
+
         // Update Activity Metrics Service with connection (primary only)
         ams_set_connection(conn);
 #endif
@@ -934,7 +916,7 @@ static void connected(struct bt_conn *conn, uint8_t err)
         if (BleSequenceManager::getInstance().isInRecovery())
         {
             LOG_INF("Starting BLE packet recovery after reconnection");
-          //  BleRecoveryHandler::getInstance().startRecovery();
+            //  BleRecoveryHandler::getInstance().startRecovery();
         }
 #endif
 
@@ -953,23 +935,30 @@ static void connected(struct bt_conn *conn, uint8_t err)
 
         // For primary device, start discovery only if no D2D connection exists
         // Don't disrupt existing working D2D connections when phone connects
-        if (d2d_conn == nullptr) {
+        if (d2d_conn == nullptr)
+        {
             LOG_INF("PRIMARY: No D2D connection exists - starting discovery to identify device type");
 
             // Start discovery after a small delay to ensure connection is stable
             k_sleep(K_MSEC(DISCOVERY_INITIAL_DELAY_MS));
             LOG_INF("PRIMARY: Calling d2d_rx_client_start_discovery");
             d2d_rx_client_start_discovery(conn);
-        } else {
-            LOG_INF("PRIMARY: D2D connection already established - skipping discovery for this connection (likely phone)");
-            
+        }
+        else
+        {
+            LOG_INF(
+                "PRIMARY: D2D connection already established - skipping discovery for this connection (likely phone)");
+
             // This is likely a phone connection since we already have D2D
             // Set security immediately for phone connections
             int ret = bt_conn_set_security(conn, BT_SECURITY_L2);
-            if (ret != 0) {
+            if (ret != 0)
+            {
                 LOG_ERR("Failed to set security for phone connection (err %d)", ret);
                 bt_conn_disconnect(conn, BT_HCI_ERR_AUTH_FAIL);
-            } else {
+            }
+            else
+            {
                 LOG_INF("Security requested for phone connection (D2D already established)");
             }
         }
@@ -981,30 +970,34 @@ static void connected(struct bt_conn *conn, uint8_t err)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         // Count active connections to determine advertising behavior
         int active_count = 0;
-        
+
         // Helper to count connections
         auto count_conn_cb = [](struct bt_conn *conn, void *data) {
-            int *count = (int*)data;
+            int *count = (int *)data;
             struct bt_conn_info info;
-            if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+            if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED)
+            {
                 (*count)++;
             }
         };
-        
+
         bt_conn_foreach(BT_CONN_TYPE_LE, count_conn_cb, &active_count);
-        
+
         LOG_INF("Active connections after new connection: %d/%d", active_count, CONFIG_BT_MAX_CONN);
-        
+
         // Continue advertising unless we're at maximum capacity
         // This allows both secondary and phone to connect simultaneously
-        if (active_count >= CONFIG_BT_MAX_CONN) {
-            LOG_INF("Maximum connections reached (%d/%d), stopping advertising",
-                    active_count, CONFIG_BT_MAX_CONN);
+        if (active_count >= CONFIG_BT_MAX_CONN)
+        {
+            LOG_INF("Maximum connections reached (%d/%d), stopping advertising", active_count, CONFIG_BT_MAX_CONN);
             int ret = bt_le_adv_stop();
-            if (ret != 0 && ret != -EALREADY) {
+            if (ret != 0 && ret != -EALREADY)
+            {
                 LOG_ERR("Failed to stop advertising (err 0x%02x)", ret);
             }
-        } else {
+        }
+        else
+        {
             LOG_INF("Connection slots available (%d/%d), restarting advertising for additional connections",
                     active_count, CONFIG_BT_MAX_CONN);
             // Restart advertising to allow additional connections
@@ -1048,16 +1041,17 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Check if this was a phone connection (not D2D)
-    if (conn != d2d_conn) {
+    if (conn != d2d_conn)
+    {
         // This was a phone connection
         ble_set_phone_connection_state(false);
-        
+
         // IMPORTANT: Clear message queues immediately on phone disconnect
         // This prevents queue overflow during activity when phone disconnects
         LOG_INF("Phone disconnected - clearing message queues to prevent overflow");
         ble_clear_message_queues();
     }
-    
+
     // Clear Activity Metrics Service connection (primary only)
     ams_set_connection(NULL);
 #endif
@@ -1084,44 +1078,54 @@ static void disconnected(struct bt_conn *conn, uint8_t reason)
     // Count remaining active connections after this disconnection
     int active_count = 0;
     auto count_conn_cb = [](struct bt_conn *conn_iter, void *data) {
-        int *count = (int*)data;
-        struct bt_conn *disconnected_conn = *((struct bt_conn**)data + 1);
+        int *count = (int *)data;
+        struct bt_conn *disconnected_conn = *((struct bt_conn **)data + 1);
         struct bt_conn_info info;
-        
+
         // Skip the connection that just disconnected
-        if (conn_iter == disconnected_conn) {
+        if (conn_iter == disconnected_conn)
+        {
             return;
         }
-        
-        if (bt_conn_get_info(conn_iter, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+
+        if (bt_conn_get_info(conn_iter, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED)
+        {
             (*count)++;
         }
     };
-    
+
     // We need to pass both the count and the disconnected connection
-    void *cb_data[2] = { &active_count, (void*)conn };
-    bt_conn_foreach(BT_CONN_TYPE_LE, [](struct bt_conn *conn_iter, void *data) {
-        void **params = (void**)data;
-        int *count = (int*)params[0];
-        struct bt_conn *disconnected_conn = (struct bt_conn*)params[1];
-        struct bt_conn_info info;
-        
-        // Skip the connection that just disconnected
-        if (conn_iter == disconnected_conn) {
-            return;
-        }
-        
-        if (bt_conn_get_info(conn_iter, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
-            (*count)++;
-        }
-    }, cb_data);
-    
+    void *cb_data[2] = {&active_count, (void *)conn};
+    bt_conn_foreach(
+        BT_CONN_TYPE_LE,
+        [](struct bt_conn *conn_iter, void *data) {
+            void **params = (void **)data;
+            int *count = (int *)params[0];
+            struct bt_conn *disconnected_conn = (struct bt_conn *)params[1];
+            struct bt_conn_info info;
+
+            // Skip the connection that just disconnected
+            if (conn_iter == disconnected_conn)
+            {
+                return;
+            }
+
+            if (bt_conn_get_info(conn_iter, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED)
+            {
+                (*count)++;
+            }
+        },
+        cb_data);
+
     // Always restart advertising when a connection disconnects, unless we're at max capacity
-    if (active_count < CONFIG_BT_MAX_CONN) {
-        LOG_INF("Connection disconnected - slots available (%d/%d), restarting advertising immediately",
-                active_count, CONFIG_BT_MAX_CONN);
+    if (active_count < CONFIG_BT_MAX_CONN)
+    {
+        LOG_INF("Connection disconnected - slots available (%d/%d), restarting advertising immediately", active_count,
+                CONFIG_BT_MAX_CONN);
         bt_start_advertising(0);
-    } else {
+    }
+    else
+    {
         LOG_INF("Connection disconnected but max connections still active (%d/%d), not restarting advertising",
                 active_count, CONFIG_BT_MAX_CONN);
     }
@@ -1187,12 +1191,12 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
         is_d2d = true;
 #endif
 
-        if (is_d2d && (err == BT_SECURITY_ERR_PIN_OR_KEY_MISSING ||
-                       err == BT_SECURITY_ERR_AUTH_FAIL ||
+        if (is_d2d && (err == BT_SECURITY_ERR_PIN_OR_KEY_MISSING || err == BT_SECURITY_ERR_AUTH_FAIL ||
                        err == BT_SECURITY_ERR_PAIR_NOT_SUPPORTED))
         {
             LOG_INF("Security failed for D2D connection (err %d) - this is expected for "
-                    "device-to-device connections, continuing without security", err);
+                    "device-to-device connections, continuing without security",
+                    err);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // For primary device, if this is the D2D connection and security failed
@@ -1216,24 +1220,22 @@ static void security_changed(struct bt_conn *conn, bt_security_t level, enum bt_
     }
 }
 
-BT_CONN_CB_DEFINE(conn_callbacks) = {
-    .connected = connected,
-    .disconnected = disconnected,
-    .recycled = NULL,
-    .le_param_req = NULL,
+BT_CONN_CB_DEFINE(conn_callbacks) = {.connected = connected,
+                                     .disconnected = disconnected,
+                                     .recycled = NULL,
+                                     .le_param_req = NULL,
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    .le_param_updated = ble_conn_params_on_updated,
+                                     .le_param_updated = ble_conn_params_on_updated,
 #else
-    .le_param_updated = NULL,
+                                     .le_param_updated = NULL,
 #endif
 #if defined(CONFIG_BT_SMP)
-    .identity_resolved = NULL,
+                                     .identity_resolved = NULL,
 #endif
 #if defined(CONFIG_BT_SMP) || defined(CONFIG_BT_CLASSIC)
-    .security_changed = security_changed,
+                                     .security_changed = security_changed,
 #endif
-    ._node = {}
-};
+                                     ._node = {}};
 
 // Currently unused - kept for future power management
 __attribute__((unused)) static void ble_set_power_off()
@@ -1403,7 +1405,6 @@ err_t bt_module_init(void)
         LOG_WRN("No Bluetooth identity address available");
     }
 
-    
     if (bt_start_advertising(0) == err_t::NO_ERROR)
     {
         LOG_INF("BLE Started Advertising");
@@ -1444,7 +1445,6 @@ err_t bt_module_init(void)
         k_thread_create(&bluetooth_thread_data, bluetooth_stack_area, K_THREAD_STACK_SIZEOF(bluetooth_stack_area),
                         bluetooth_process, nullptr, nullptr, nullptr, bluetooth_priority, 0, K_NO_WAIT);
 
-
     return err_t::NO_ERROR;
 }
 
@@ -1477,11 +1477,10 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
     // Initialize work queue for asynchronous message processing
     k_work_queue_init(&bluetooth_work_q);
-    k_work_queue_start(&bluetooth_work_q, bluetooth_workq_stack,
-                       K_THREAD_STACK_SIZEOF(bluetooth_workq_stack),
+    k_work_queue_start(&bluetooth_work_q, bluetooth_workq_stack, K_THREAD_STACK_SIZEOF(bluetooth_workq_stack),
                        bluetooth_priority - 1, NULL);
     k_thread_name_set(&bluetooth_work_q.thread, "bluetooth_wq");
-    
+
     // Initialize all work items with their handlers
     k_work_init(&foot_samples_work, foot_samples_work_handler);
     k_work_init(&foot_samples_secondary_work, foot_samples_secondary_work_handler);
@@ -1511,8 +1510,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
         if (ret == 0)
         { // Message successfully received
-            
-                        
+
             // Copy message to appropriate buffer and submit work to queue
             // This allows the main thread to immediately return to waiting for next message
             switch (msg.type)
@@ -1520,13 +1518,16 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_FOOT_SAMPLES:
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     // Primary device: Route based on sender
-                    if (msg.sender == SENDER_D2D_SECONDARY) {
+                    if (msg.sender == SENDER_D2D_SECONDARY)
+                    {
                         // Secondary foot data from D2D - use separate work item
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_foot_samples_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
                         k_work_submit_to_queue(&bluetooth_work_q, &foot_samples_secondary_work);
-                    } else {
+                    }
+                    else
+                    {
                         // Primary's own foot data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_foot_samples_msg, &msg, sizeof(msg));
@@ -1545,13 +1546,16 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_BHI360_3D_MAPPING:
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     // Primary device: Route based on sender
-                    if (msg.sender == SENDER_D2D_SECONDARY) {
+                    if (msg.sender == SENDER_D2D_SECONDARY)
+                    {
                         // Secondary BHI360 3D data from D2D - use separate work item
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_3d_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
                         k_work_submit_to_queue(&bluetooth_work_q, &bhi360_3d_mapping_secondary_work);
-                    } else {
+                    }
+                    else
+                    {
                         // Primary's own BHI360 3D data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_3d_msg, &msg, sizeof(msg));
@@ -1570,13 +1574,16 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                 case MSG_TYPE_BHI360_LINEAR_ACCEL:
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
                     // Primary device: Route based on sender
-                    if (msg.sender == SENDER_D2D_SECONDARY) {
+                    if (msg.sender == SENDER_D2D_SECONDARY)
+                    {
                         // Secondary linear accel data from D2D - use separate work item
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_linear_secondary_msg, &msg, sizeof(msg));
                         k_mutex_unlock(&bluetooth_msg_mutex);
                         k_work_submit_to_queue(&bluetooth_work_q, &bhi360_linear_accel_secondary_work);
-                    } else {
+                    }
+                    else
+                    {
                         // Primary's own linear accel data
                         k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                         memcpy(&pending_bhi360_linear_msg, &msg, sizeof(msg));
@@ -1597,7 +1604,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_bhi360_step_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &bhi360_step_count_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &bhi360_step_count_work);
 
                     break;
 
@@ -1606,7 +1613,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_activity_step_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &activity_step_count_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_step_count_work);
 
                     break;
 
@@ -1615,7 +1622,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_command_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &command_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &command_work);
 
                     break;
 
@@ -1624,7 +1631,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_fota_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &fota_progress_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &fota_progress_work);
 
                     break;
 
@@ -1633,7 +1640,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_error_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &error_status_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &error_status_work);
 
                     break;
 
@@ -1642,7 +1649,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_log_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &new_activity_log_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &new_activity_log_work);
 
                     break;
 
@@ -1651,7 +1658,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_metrics_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
 
                     break;
 
@@ -1661,7 +1668,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     k_mutex_unlock(&bluetooth_msg_mutex);
                     // Check if work is already pending before submitting
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &device_info_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &device_info_work);
 
                     break;
 
@@ -1670,7 +1677,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_weight_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &weight_measurement_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &weight_measurement_work);
 
                     break;
 
@@ -1679,7 +1686,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_battery_primary_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &battery_level_primary_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &battery_level_primary_work);
 
                     break;
 
@@ -1688,7 +1695,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     memcpy(&pending_battery_secondary_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
 
-                        k_work_submit_to_queue(&bluetooth_work_q, &battery_level_secondary_work);
+                    k_work_submit_to_queue(&bluetooth_work_q, &battery_level_secondary_work);
 
                     break;
 
@@ -1786,27 +1793,29 @@ err_t bt_start_advertising(int err)
     // Only start timer if we're at max connections - otherwise keep advertising continuously
     int active_count = 0;
     auto count_conn_cb = [](struct bt_conn *conn, void *data) {
-        int *count = (int*)data;
+        int *count = (int *)data;
         struct bt_conn_info info;
-        if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+        if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED)
+        {
             (*count)++;
         }
     };
-    
+
     bt_conn_foreach(BT_CONN_TYPE_LE, count_conn_cb, &active_count);
-    
-    if (active_count >= CONFIG_BT_MAX_CONN - 1) {
+
+    if (active_count >= CONFIG_BT_MAX_CONN - 1)
+    {
         // Close to max connections, start timeout timer
-        LOG_INF("Near max connections (%d/%d), starting advertising timeout timer",
-                active_count, CONFIG_BT_MAX_CONN);
+        LOG_INF("Near max connections (%d/%d), starting advertising timeout timer", active_count, CONFIG_BT_MAX_CONN);
         k_timer_start(&ble_timer, K_MSEC(BLE_ADVERTISING_TIMEOUT_MS), K_NO_WAIT);
-    } else {
+    }
+    else
+    {
         // Stop any existing timer to keep advertising continuously
         k_timer_stop(&ble_timer);
-        LOG_INF("Advertising continuously - connection slots available (%d/%d)",
-                active_count, CONFIG_BT_MAX_CONN);
+        LOG_INF("Advertising continuously - connection slots available (%d/%d)", active_count, CONFIG_BT_MAX_CONN);
     }
-    
+
     return err_t::NO_ERROR;
 }
 #endif // CONFIG_PRIMARY_DEVICE
@@ -1877,24 +1886,28 @@ static void ble_timer_handler_function(struct k_work *work)
     // Count active connections to determine if we should restart advertising
     int active_count = 0;
     auto count_conn_cb = [](struct bt_conn *conn, void *data) {
-        int *count = (int*)data;
+        int *count = (int *)data;
         struct bt_conn_info info;
-        if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED) {
+        if (bt_conn_get_info(conn, &info) == 0 && info.state == BT_CONN_STATE_CONNECTED)
+        {
             (*count)++;
         }
     };
-    
+
     bt_conn_foreach(BT_CONN_TYPE_LE, count_conn_cb, &active_count);
-    
+
     // Always restart advertising if we have slots available
-    if (active_count < CONFIG_BT_MAX_CONN) {
+    if (active_count < CONFIG_BT_MAX_CONN)
+    {
         LOG_INF("Advertising timeout - connection slots available (%d/%d), restarting advertising immediately",
                 active_count, CONFIG_BT_MAX_CONN);
         bt_start_advertising(0);
         return;
-    } else {
-        LOG_INF("Advertising timeout - maximum connections reached (%d/%d), switching to hidden mode",
-                active_count, CONFIG_BT_MAX_CONN);
+    }
+    else
+    {
+        LOG_INF("Advertising timeout - maximum connections reached (%d/%d), switching to hidden mode", active_count,
+                CONFIG_BT_MAX_CONN);
     }
 #endif
 
@@ -1944,12 +1957,11 @@ static void weight_measurement_timeout_work_handler(struct k_work *work)
 static void foot_samples_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_foot_samples_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
 
-    
     foot_samples_t *foot_data = &msg.data.foot_samples;
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Primary device: This handler now only processes primary foot data
@@ -1968,48 +1980,45 @@ static void foot_samples_work_handler(struct k_work *work)
 static void foot_samples_secondary_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_foot_samples_secondary_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     foot_samples_t *foot_data = &msg.data.foot_samples;
-    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Primary device: Update global secondary foot data for Information Service aggregation
     LOG_DBG("Processing secondary foot sensor data");
-    
+
     // Update global secondary foot data for aggregation in Information Service
     memcpy(&g_secondary_foot_data, foot_data, sizeof(foot_samples_t));
     g_secondary_data_valid = true;
     g_secondary_last_timestamp = k_uptime_get_32();
-    
-    LOG_DBG("Updated global secondary foot data - values[0-3]: %u %u %u %u",
-            g_secondary_foot_data.values[0], g_secondary_foot_data.values[1],
-            g_secondary_foot_data.values[2], g_secondary_foot_data.values[3]);
-    LOG_DBG("Updated global secondary foot data - values[4-7]: %u %u %u %u",
-            g_secondary_foot_data.values[4], g_secondary_foot_data.values[5],
-            g_secondary_foot_data.values[6], g_secondary_foot_data.values[7]);
-    
+
+    LOG_DBG("Updated global secondary foot data - values[0-3]: %u %u %u %u", g_secondary_foot_data.values[0],
+            g_secondary_foot_data.values[1], g_secondary_foot_data.values[2], g_secondary_foot_data.values[3]);
+    LOG_DBG("Updated global secondary foot data - values[4-7]: %u %u %u %u", g_secondary_foot_data.values[4],
+            g_secondary_foot_data.values[5], g_secondary_foot_data.values[6], g_secondary_foot_data.values[7]);
+
     // Call the new update function which will check if we should send aggregated notification
     jis_foot_sensor_update_secondary(foot_data);
-    
+
     // Forward to data module for logging (if needed)
-   // extern struct k_msgq data_msgq;
-   // generic_message_t data_msg;
-   // data_msg.sender = SENDER_D2D_SECONDARY;
-   // data_msg.type = MSG_TYPE_FOOT_SAMPLES;
-   // memcpy(&data_msg.data.foot_samples, foot_data, sizeof(foot_samples_t));
-    
-   // if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
+    // extern struct k_msgq data_msgq;
+    // generic_message_t data_msg;
+    // data_msg.sender = SENDER_D2D_SECONDARY;
+    // data_msg.type = MSG_TYPE_FOOT_SAMPLES;
+    // memcpy(&data_msg.data.foot_samples, foot_data, sizeof(foot_samples_t));
+
+    // if (k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT) != 0) {
     //    LOG_WRN("Failed to forward secondary foot data to data module");
-   // }
+    // }
 #else
     // This handler should not be called on secondary device
     LOG_ERR("Unexpected: Secondary foot handler called on secondary device");
 #endif
 }
-
 
 /**
  * @brief Work handler for processing BHI360 3D mapping data
@@ -2017,11 +2026,11 @@ static void foot_samples_secondary_work_handler(struct k_work *work)
 static void bhi360_3d_mapping_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_bhi360_3d_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     bhi360_3d_mapping_t *mapping_data = &msg.data.bhi360_3d_mapping;
     LOG_INF("Received BHI360 3D Mapping from %s: Accel(%.2f,%.2f,%.2f), "
             "Gyro(%.2f,%.2f,%.2f)",
@@ -2044,17 +2053,17 @@ static void bhi360_3d_mapping_work_handler(struct k_work *work)
 static void bhi360_3d_mapping_secondary_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_bhi360_3d_secondary_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     bhi360_3d_mapping_t *mapping_data = &msg.data.bhi360_3d_mapping;
-    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Primary device: Update global secondary quaternion data for Information Service aggregation
     LOG_DBG("Processing secondary BHI360 3D mapping data");
-    
+
     // Update global secondary quaternion data for aggregation in Information Service
     // The BHI360 3D mapping uses accel_x/y/z fields for quaternion x/y/z and quat_w for w
     // Convert float quaternion to fixed-point format for storage
@@ -2064,17 +2073,15 @@ static void bhi360_3d_mapping_secondary_work_handler(struct k_work *work)
     g_secondary_quat_data.quat_w = float_to_fixed16(mapping_data->quat_w, FixedPoint::QUAT_SCALE);
     g_secondary_data_valid = true;
     g_secondary_last_timestamp = k_uptime_get_32();
-    
-    LOG_DBG("Updated global secondary quaternion data - (%.2f,%.2f,%.2f,%.2f)",
-            (double)mapping_data->accel_x, (double)mapping_data->accel_y,
-            (double)mapping_data->accel_z, (double)mapping_data->quat_w);
-    LOG_DBG("Quaternion (fixed): x=%d y=%d z=%d w=%d",
-            g_secondary_quat_data.quat_x, g_secondary_quat_data.quat_y,
+
+    LOG_DBG("Updated global secondary quaternion data - (%.2f,%.2f,%.2f,%.2f)", (double)mapping_data->accel_x,
+            (double)mapping_data->accel_y, (double)mapping_data->accel_z, (double)mapping_data->quat_w);
+    LOG_DBG("Quaternion (fixed): x=%d y=%d z=%d w=%d", g_secondary_quat_data.quat_x, g_secondary_quat_data.quat_y,
             g_secondary_quat_data.quat_z, g_secondary_quat_data.quat_w);
-    
+
     // Call the new update function which will check if we should send aggregated notification
     jis_bhi360_data1_update_secondary(mapping_data);
-    
+
     // Note: We don't forward raw BHI360 3D mapping to data module as it's not needed for storage
     // The calculated bilateral metrics are saved via MSG_TYPE_REALTIME_METRICS_DATA instead
 #else
@@ -2089,14 +2096,14 @@ static void bhi360_3d_mapping_secondary_work_handler(struct k_work *work)
 static void bhi360_linear_accel_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_bhi360_linear_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     bhi360_linear_accel_t *lacc_data = &msg.data.bhi360_linear_accel;
-    LOG_INF("Received BHI360 Linear Accel from %s: (%.2f,%.2f,%.2f)", get_sender_name(msg.sender),
-            (double)lacc_data->x, (double)lacc_data->y, (double)lacc_data->z);
+    LOG_INF("Received BHI360 Linear Accel from %s: (%.2f,%.2f,%.2f)", get_sender_name(msg.sender), (double)lacc_data->x,
+            (double)lacc_data->y, (double)lacc_data->z);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Primary device: This handler now only processes primary linear accel data
     // Secondary data is handled by bhi360_linear_accel_secondary_work_handler
@@ -2107,30 +2114,29 @@ static void bhi360_linear_accel_work_handler(struct k_work *work)
 #endif
 }
 
-
 /**
  * @brief Work handler for processing secondary BHI360 linear acceleration data
  */
 static void bhi360_linear_accel_secondary_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_bhi360_linear_secondary_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     bhi360_linear_accel_t *lacc_data = &msg.data.bhi360_linear_accel;
-    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Primary device: Handle secondary linear accel data properly
     LOG_DBG("Processing secondary BHI360 linear acceleration data");
-    LOG_INF("Secondary BHI360 Linear Accel: (%.2f,%.2f,%.2f)",
-            (double)lacc_data->x, (double)lacc_data->y, (double)lacc_data->z);
-    
+    LOG_INF("Secondary BHI360 Linear Accel: (%.2f,%.2f,%.2f)", (double)lacc_data->x, (double)lacc_data->y,
+            (double)lacc_data->z);
+
     // TODO: In future, we could have a separate characteristic for secondary linear accel data
     // Note: We don't forward raw linear accel to data module as it's not needed for storage
     // The calculated bilateral metrics are saved via MSG_TYPE_REALTIME_METRICS_DATA instead
-    
+
     // Note: We intentionally do NOT call jis_bhi360_data3_notify() here
     // as that would mix secondary data with primary data
 #else
@@ -2144,11 +2150,11 @@ static void bhi360_linear_accel_secondary_work_handler(struct k_work *work)
 static void bhi360_step_count_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_bhi360_step_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Check if this is activity step count (from SENDER_MOTION_SENSOR)
@@ -2161,8 +2167,7 @@ static void bhi360_step_count_work_handler(struct k_work *work)
         ams_update_activity_step_count(total_activity_steps);
         return;
     }
-    LOG_INF("Received BHI360 Step Count from %s: Steps=%u", get_sender_name(msg.sender),
-            step_data->step_count);
+    LOG_INF("Received BHI360 Step Count from %s: Steps=%u", get_sender_name(msg.sender), step_data->step_count);
     // Update step counts based on sender
     if (msg.sender == SENDER_BHI360_THREAD)
     {
@@ -2174,8 +2179,8 @@ static void bhi360_step_count_work_handler(struct k_work *work)
     }
     // Only notify aggregated counts
     uint32_t total_steps = primary_step_count + secondary_step_count;
-    LOG_DBG("Global step aggregation: Primary=%u, Secondary=%u, Total=%u", primary_step_count,
-            secondary_step_count, total_steps);
+    LOG_DBG("Global step aggregation: Primary=%u, Secondary=%u, Total=%u", primary_step_count, secondary_step_count,
+            total_steps);
     ams_update_total_step_count(total_steps);
 #else
     LOG_INF("Secondary device sending step count: %u", step_data->step_count);
@@ -2190,11 +2195,11 @@ static void bhi360_step_count_work_handler(struct k_work *work)
 static void activity_step_count_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_activity_step_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     // This is specifically for activity step counts
     bhi360_step_count_t *step_data = &msg.data.bhi360_step_count;
 
@@ -2206,8 +2211,8 @@ static void activity_step_count_work_handler(struct k_work *work)
 
         // Calculate total activity steps
         uint32_t total_activity_steps = primary_activity_steps + secondary_activity_steps;
-        LOG_INF("Secondary Activity Step Count Update - Secondary=%u, Total=%u",
-                secondary_activity_steps, total_activity_steps);
+        LOG_INF("Secondary Activity Step Count Update - Secondary=%u, Total=%u", secondary_activity_steps,
+                total_activity_steps);
 
         ams_update_activity_step_count(total_activity_steps);
     }
@@ -2220,11 +2225,11 @@ static void activity_step_count_work_handler(struct k_work *work)
 static void command_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_MSEC(100));
     generic_message_t msg = pending_command_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     char *command_str = msg.data.command_str;
     LOG_INF("Received Command from %s: '%s'", get_sender_name(msg.sender), command_str);
 
@@ -2257,19 +2262,19 @@ static void command_work_handler(struct k_work *work)
 static void fota_progress_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_fota_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     // Handle FOTA progress updates
     fota_progress_msg_t *progress = &msg.data.fota_progress;
 
     // Debug: Log stale messages
     if (!progress->is_active && progress->bytes_received > 0)
     {
-        LOG_WRN("Stale FOTA progress detected: bytes=%u, percent=%d%% (ignoring)",
-                progress->bytes_received, progress->percent_complete);
+        LOG_WRN("Stale FOTA progress detected: bytes=%u, percent=%d%% (ignoring)", progress->bytes_received,
+                progress->percent_complete);
         return; // Ignore stale messages
     }
 
@@ -2281,7 +2286,7 @@ static void fota_progress_work_handler(struct k_work *work)
     // Detect completion between app core and net core
     static bool app_core_done = false;
     static bool fota_was_active = false;
-    
+
     // App core complete: status=2 and large size
     if (progress->status == 2 && progress->bytes_received > 500000 && !app_core_done)
     {
@@ -2303,7 +2308,7 @@ static void fota_progress_work_handler(struct k_work *work)
         LOG_INF("===========================================");
         app_core_done = false;
     }
-    
+
     if (progress->is_active && progress->status == 1 && !fota_was_active)
     {
         LOG_WRN("FOTA update starting - stopping advertising and reducing "
@@ -2394,8 +2399,7 @@ static void fota_progress_work_handler(struct k_work *work)
         generic_message_t stop_logging_msg = {};
         stop_logging_msg.sender = SENDER_BTH;
         stop_logging_msg.type = MSG_TYPE_COMMAND;
-        strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING",
-                sizeof(stop_logging_msg.data.command_str) - 1);
+        strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING", sizeof(stop_logging_msg.data.command_str) - 1);
 
         // Stop all logging in data module (this will close all open files)
         if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0)
@@ -2520,8 +2524,7 @@ static void fota_progress_work_handler(struct k_work *work)
         generic_message_t fota_complete_msg = {};
         fota_complete_msg.sender = SENDER_BTH;
         fota_complete_msg.type = MSG_TYPE_COMMAND;
-        strncpy(fota_complete_msg.data.command_str, "FOTA_COMPLETE",
-                sizeof(fota_complete_msg.data.command_str) - 1);
+        strncpy(fota_complete_msg.data.command_str, "FOTA_COMPLETE", sizeof(fota_complete_msg.data.command_str) - 1);
 
         k_msgq_put(&data_msgq, &fota_complete_msg, K_NO_WAIT);
         k_msgq_put(&motion_sensor_msgq, &fota_complete_msg, K_NO_WAIT);
@@ -2557,11 +2560,11 @@ static void fota_progress_work_handler(struct k_work *work)
 static void error_status_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_error_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     // Handle error status updates from other modules
     error_status_msg_t *error_status = &msg.data.error_status;
     LOG_INF("Received Error Status from %s: error_code=%d, is_set=%s", get_sender_name(msg.sender),
@@ -2598,11 +2601,11 @@ static void error_status_work_handler(struct k_work *work)
 static void new_activity_log_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_log_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     // Handle new activity log file notification
     new_log_info_msg_t *log_info = &msg.data.new_hardware_log_file;
     LOG_INF("Received NEW ACTIVITY LOG FILE notification from %s:", get_sender_name(msg.sender));
@@ -2633,11 +2636,11 @@ static void new_activity_log_work_handler(struct k_work *work)
 static void activity_metrics_ble_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_metrics_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Handle activity metrics update from realtime_metrics module (primary only)
     if (msg.sender == SENDER_REALTIME_METRICS)
@@ -2651,8 +2654,8 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
         // Update the Activity Metrics Service
         ams_update_realtime_metrics(&metrics);
 
-        LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d", metrics.cadence_spm,
-                metrics.pace_sec_km, metrics.form_score);
+        LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d", metrics.cadence_spm, metrics.pace_sec_km,
+                metrics.form_score);
     }
 #else
     // Secondary device doesn't have Activity Metrics Service
@@ -2666,11 +2669,11 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
 static void device_info_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_device_info_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     // Handle device information
     device_info_msg_t *dev_info = &msg.data.device_info;
     LOG_INF("Received DEVICE INFO from %s:", get_sender_name(msg.sender));
@@ -2681,8 +2684,8 @@ static void device_info_work_handler(struct k_work *work)
     LOG_INF("  FW Rev: %s", dev_info->fw_rev);
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Update secondary device info in information service
-    jis_update_secondary_device_info(dev_info->manufacturer, dev_info->model, dev_info->serial,
-                                     dev_info->hw_rev, dev_info->fw_rev);
+    jis_update_secondary_device_info(dev_info->manufacturer, dev_info->model, dev_info->serial, dev_info->hw_rev,
+                                     dev_info->fw_rev);
 #else
     // Secondary device: Send to primary via D2D
     // Device info is automatically sent when secondary connects via
@@ -2697,11 +2700,11 @@ static void device_info_work_handler(struct k_work *work)
 static void weight_measurement_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_weight_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
     // Handle weight measurement
     weight_measurement_msg_t *weight_data = &msg.data.weight_measurement;
     LOG_INF("Received WEIGHT MEASUREMENT from %s: %.1f kg", get_sender_name(msg.sender),
@@ -2721,8 +2724,7 @@ static void weight_measurement_work_handler(struct k_work *work)
         if (d2d_conn != nullptr)
         {
             // Request weight from secondary device
-            LOG_INF("Primary weight measured: %.1f kg, requesting secondary weight",
-                    (double)primary_weight_kg);
+            LOG_INF("Primary weight measured: %.1f kg, requesting secondary weight", (double)primary_weight_kg);
         }
     }
     else if (msg.sender == SENDER_D2D_SECONDARY)
@@ -2750,16 +2752,15 @@ static void weight_measurement_work_handler(struct k_work *work)
 static void battery_level_primary_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_battery_primary_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Handle primary battery level updates
     battery_level_msg_t battery_level = msg.data.battery_level;
-    LOG_DBG("Received primary battery level: %d%% from %s", battery_level.level,
-            get_sender_name(msg.sender));
+    LOG_DBG("Received primary battery level: %d%% from %s", battery_level.level, get_sender_name(msg.sender));
     // Update the custom battery levels characteristic
     jis_update_primary_battery(battery_level.level);
 #endif // CONFIG_PRIMARY_DEVICE
@@ -2771,16 +2772,15 @@ static void battery_level_primary_work_handler(struct k_work *work)
 static void battery_level_secondary_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    
+
     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
     generic_message_t msg = pending_battery_secondary_msg;
     k_mutex_unlock(&bluetooth_msg_mutex);
-    
+
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Handle secondary battery level updates
     battery_level_msg_t battery_level = msg.data.battery_level;
-    LOG_DBG("Received secondary battery level: %d%% from %s", battery_level.level,
-            get_sender_name(msg.sender));
+    LOG_DBG("Received secondary battery level: %d%% from %s", battery_level.level, get_sender_name(msg.sender));
     d2d_tx_notify_battery_level(battery_level.level);
 #endif // !CONFIG_PRIMARY_DEVICE
 }
@@ -2796,7 +2796,7 @@ static void battery_level_secondary_work_handler(struct k_work *work)
  * This function is called from control_service.cpp when the reset bonds
  * characteristic is written with a value of 1.
  */
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE) 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 err_t ble_reset_bonds()
 {
     LOG_INF("Reset bonds");

@@ -34,14 +34,14 @@
 #include "ccc_callback_fix.hpp"
 #include <app.hpp>
 #include <app_fixed_point.hpp>
-#include <ble_services.hpp>
 #include <ble_connection_state.h>
+#include <ble_services.hpp>
 #include <status_codes.h>
 #include <util.hpp>
 #include <zephyr/random/random.h>
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-#include "d2d_data_handler.hpp"  // For accessing secondary data globals
+#include "d2d_data_handler.hpp" // For accessing secondary data globals
 #endif
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
@@ -67,7 +67,7 @@ static foot_samples_aggregated_t foot_sensor_aggregated_value = {0};
 static quaternion_aggregated_t quaternion_aggregated_value = {0};
 
 static bool status_subscribed = false;
-static bool foot_sensor_subscribed = false;  // Separate flag for foot sensor
+static bool foot_sensor_subscribed = false; // Separate flag for foot sensor
 static bool bhi360_data1_subscribed = false;
 
 static uint8_t ct[10];
@@ -701,31 +701,38 @@ void jis_foot_sensor_notify(const foot_samples_t *samples_data)
 
     // Always prepare aggregated data (for both notify and read)
     foot_sensor_aggregated_value.timestamp = k_uptime_get_32();
-    
+
     // Copy primary data
     memcpy(foot_sensor_aggregated_value.primary, samples_data->values, sizeof(samples_data->values));
-    
+
     // Copy secondary data if available
-    if (g_secondary_data_valid) {
-        memcpy(foot_sensor_aggregated_value.secondary, g_secondary_foot_data.values, sizeof(g_secondary_foot_data.values));
-      //  LOG_INF("Aggregated foot data prepared - Primary[0]=%u, Secondary[0]=%u",
-            //    foot_sensor_aggregated_value.primary[0], foot_sensor_aggregated_value.secondary[0]);
-    } else {
+    if (g_secondary_data_valid)
+    {
+        memcpy(foot_sensor_aggregated_value.secondary, g_secondary_foot_data.values,
+               sizeof(g_secondary_foot_data.values));
+        //  LOG_INF("Aggregated foot data prepared - Primary[0]=%u, Secondary[0]=%u",
+        //    foot_sensor_aggregated_value.primary[0], foot_sensor_aggregated_value.secondary[0]);
+    }
+    else
+    {
         // No secondary data, send zeros
         memset(foot_sensor_aggregated_value.secondary, 0, sizeof(foot_sensor_aggregated_value.secondary));
-      //  LOG_INF("Primary-only foot data prepared (secondary not available)");
+        //  LOG_INF("Primary-only foot data prepared (secondary not available)");
     }
-    
+
     // Send notification only if subscribed AND phone is connected
-    if (ble_phone_is_connected()) {
+    if (ble_phone_is_connected())
+    {
         auto *status_gatt =
             bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
-        if (status_gatt) {
+        if (status_gatt)
+        {
             // Send aggregated format
-            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_aggregated_value), sizeof(foot_sensor_aggregated_value));
+            bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_aggregated_value),
+                           sizeof(foot_sensor_aggregated_value));
         }
     }
-    
+
     // Store primary data for legacy compatibility
     memcpy(&foot_sensor_char_value, samples_data, sizeof(foot_samples_t));
 #else
@@ -739,7 +746,7 @@ void jis_foot_sensor_notify(const foot_samples_t *samples_data)
 // Helper function to send BLE format data directly (used by recovery)
 extern "C" void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data)
 {
-    if (foot_sensor_subscribed && data)  // Use correct subscription flag
+    if (foot_sensor_subscribed && data) // Use correct subscription flag
     {
         auto *status_gatt =
             bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
@@ -754,29 +761,33 @@ extern "C" void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data)
 void jis_foot_sensor_update_secondary(const foot_samples_t *secondary_data)
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    if (!secondary_data) return;
-    
+    if (!secondary_data)
+        return;
+
     // Update global secondary data
     memcpy(&g_secondary_foot_data, secondary_data, sizeof(foot_samples_t));
     g_secondary_data_valid = true;
     g_secondary_last_timestamp = k_uptime_get_32();
-    
+
     // Update aggregated structure with secondary data
     memcpy(foot_sensor_aggregated_value.secondary, secondary_data->values, sizeof(secondary_data->values));
-    
+
     LOG_DBG("Secondary foot data updated in aggregated structure");
-    
+
     // Check if we have recent primary data (within 500ms)
     uint32_t now = k_uptime_get_32();
-    if ((now - foot_sensor_aggregated_value.timestamp) < 500) {
+    if ((now - foot_sensor_aggregated_value.timestamp) < 500)
+    {
         // We have recent primary data, send aggregated notification
-        if (foot_sensor_subscribed) {
+        if (foot_sensor_subscribed)
+        {
             auto *status_gatt =
                 bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &foot_sensor_samples.uuid);
-            if (status_gatt) {
-                bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_aggregated_value), 
-                              sizeof(foot_sensor_aggregated_value));
-                LOG_DBG("Foot sensor aggregated notification sent after secondary update: %u bytes", 
+            if (status_gatt)
+            {
+                bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&foot_sensor_aggregated_value),
+                               sizeof(foot_sensor_aggregated_value));
+                LOG_DBG("Foot sensor aggregated notification sent after secondary update: %u bytes",
                         sizeof(foot_sensor_aggregated_value));
             }
         }
@@ -788,8 +799,9 @@ void jis_foot_sensor_update_secondary(const foot_samples_t *secondary_data)
 void jis_bhi360_data1_update_secondary(const bhi360_3d_mapping_t *secondary_data)
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    if (!secondary_data) return;
-    
+    if (!secondary_data)
+        return;
+
     // Update global secondary quaternion data
     g_secondary_quat_data.quat_x = float_to_fixed16(secondary_data->accel_x, FixedPoint::QUAT_SCALE);
     g_secondary_quat_data.quat_y = float_to_fixed16(secondary_data->accel_y, FixedPoint::QUAT_SCALE);
@@ -797,23 +809,25 @@ void jis_bhi360_data1_update_secondary(const bhi360_3d_mapping_t *secondary_data
     g_secondary_quat_data.quat_w = float_to_fixed16(secondary_data->quat_w, FixedPoint::QUAT_SCALE);
     g_secondary_data_valid = true;
     g_secondary_last_timestamp = k_uptime_get_32();
-    
+
     // Update aggregated structure with secondary data
     quaternion_aggregated_value.secondary_x = g_secondary_quat_data.quat_x;
     quaternion_aggregated_value.secondary_y = g_secondary_quat_data.quat_y;
     quaternion_aggregated_value.secondary_z = g_secondary_quat_data.quat_z;
     quaternion_aggregated_value.secondary_w = g_secondary_quat_data.quat_w;
-    
+
     LOG_DBG("Secondary quaternion data updated in aggregated structure");
-    
+
     // Check if we have recent primary data (within 500ms)
     uint32_t now = k_uptime_get_32();
-    if ((now - quaternion_aggregated_value.timestamp) < 500) {
+    if ((now - quaternion_aggregated_value.timestamp) < 500)
+    {
         // We have recent primary data, send aggregated notification
-        if (bhi360_data1_subscribed) {
-            safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&quaternion_aggregated_value), 
-                           sizeof(quaternion_aggregated_value));
-            LOG_DBG("Quaternion aggregated notification sent after secondary update: %u bytes", 
+        if (bhi360_data1_subscribed)
+        {
+            safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&quaternion_aggregated_value),
+                             sizeof(quaternion_aggregated_value));
+            LOG_DBG("Quaternion aggregated notification sent after secondary update: %u bytes",
                     sizeof(quaternion_aggregated_value));
         }
     }
@@ -845,7 +859,7 @@ static void jis_foot_sensor_ccc_cfg_changed(const struct bt_gatt_attr *attr, uin
         LOG_ERR("jis_foot_sensor_ccc_cfg_changed: attr is NULL");
         return;
     }
-    foot_sensor_subscribed = value == BT_GATT_CCC_NOTIFY;  // Use separate flag
+    foot_sensor_subscribed = value == BT_GATT_CCC_NOTIFY; // Use separate flag
     LOG_DBG("Foot Sensor CCC Notify: %d", (value == BT_GATT_CCC_NOTIFY));
 }
 
@@ -911,7 +925,8 @@ static ssize_t jis_foot_sensor_read(struct bt_conn *conn, const struct bt_gatt_a
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Return aggregated data for primary device
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &foot_sensor_aggregated_value, sizeof(foot_sensor_aggregated_value));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &foot_sensor_aggregated_value,
+                             sizeof(foot_sensor_aggregated_value));
 #else
     // Secondary device returns simple format
     const foot_samples_t *value_to_read = static_cast<const foot_samples_t *>(attr->user_data);
@@ -1098,7 +1113,8 @@ static ssize_t jis_bhi360_data1_read(struct bt_conn *conn, const struct bt_gatt_
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Return aggregated quaternion data for primary device
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &quaternion_aggregated_value, sizeof(quaternion_aggregated_value));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &quaternion_aggregated_value,
+                             sizeof(quaternion_aggregated_value));
 #else
     // Secondary device returns fixed-point format
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, sizeof(bhi360_3d_mapping_fixed_t));
@@ -1108,25 +1124,28 @@ extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // PRIMARY DEVICE ONLY - handles aggregation and BLE notifications to phone
-    
+
     // Always prepare aggregated quaternion data (for both notify and read)
     quaternion_aggregated_value.timestamp = k_uptime_get_32();
-    
+
     // Convert primary data to fixed-point
     quaternion_aggregated_value.primary_x = float_to_fixed16(data->accel_x, FixedPoint::QUAT_SCALE);
     quaternion_aggregated_value.primary_y = float_to_fixed16(data->accel_y, FixedPoint::QUAT_SCALE);
     quaternion_aggregated_value.primary_z = float_to_fixed16(data->accel_z, FixedPoint::QUAT_SCALE);
     quaternion_aggregated_value.primary_w = float_to_fixed16(data->quat_w, FixedPoint::QUAT_SCALE);
-    
+
     // Copy secondary data if available
-    if (g_secondary_data_valid) {
+    if (g_secondary_data_valid)
+    {
         quaternion_aggregated_value.secondary_x = g_secondary_quat_data.quat_x;
         quaternion_aggregated_value.secondary_y = g_secondary_quat_data.quat_y;
         quaternion_aggregated_value.secondary_z = g_secondary_quat_data.quat_z;
         quaternion_aggregated_value.secondary_w = g_secondary_quat_data.quat_w;
-        LOG_DBG("Aggregated quaternion prepared - Primary(%.2f,%.2f,%.2f,%.2f), Secondary(fixed)",
-                data->accel_x, data->accel_y, data->accel_z, data->quat_w);
-    } else {
+        LOG_DBG("Aggregated quaternion prepared - Primary(%.2f,%.2f,%.2f,%.2f), Secondary(fixed)", data->accel_x,
+                data->accel_y, data->accel_z, data->quat_w);
+    }
+    else
+    {
         // No secondary data, send zeros
         quaternion_aggregated_value.secondary_x = 0;
         quaternion_aggregated_value.secondary_y = 0;
@@ -1134,14 +1153,15 @@ extern "C" void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data)
         quaternion_aggregated_value.secondary_w = 0;
         LOG_DBG("Primary-only quaternion prepared (secondary not available)");
     }
-    
+
     // Send notification only if subscribed AND phone is connected
-    if (ble_phone_is_connected()) {
-        safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&quaternion_aggregated_value), sizeof(quaternion_aggregated_value));
+    if (ble_phone_is_connected())
+    {
+        safe_gatt_notify(&bhi360_data1_uuid.uuid, static_cast<const void *>(&quaternion_aggregated_value),
+                         sizeof(quaternion_aggregated_value));
         LOG_DBG("Quaternion aggregated notification sent: %u bytes", sizeof(quaternion_aggregated_value));
     }
 
-    
     // Store primary data for legacy compatibility
     convert_3d_mapping_to_fixed(*data, bhi360_data1_value_fixed);
 #else
@@ -1316,9 +1336,10 @@ static void jis_activity_log_available_primary_ccc_cfg_changed(const struct bt_g
 }
 
 static ssize_t jis_activity_log_available_primary_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
-                                               uint16_t len, uint16_t offset)
+                                                       uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, &activity_log_available_primary, sizeof(activity_log_available_primary));
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &activity_log_available_primary,
+                             sizeof(activity_log_available_primary));
 }
 
 extern "C" void jis_activity_log_available_primary_notify(uint8_t log_id)
@@ -1326,10 +1347,10 @@ extern "C" void jis_activity_log_available_primary_notify(uint8_t log_id)
     activity_log_available_primary = log_id;
     LOG_INF("Activity Log Available: ID=%u", log_id);
 
-     auto *status_gatt =
-            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &activity_log_available_primary_uuid.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&activity_log_available_primary), sizeof(activity_log_available_primary));
-
+    auto *status_gatt =
+        bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &activity_log_available_primary_uuid.uuid);
+    bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&activity_log_available_primary),
+                   sizeof(activity_log_available_primary));
 }
 
 static void jis_activity_log_path_primary_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
@@ -1344,9 +1365,9 @@ static void jis_activity_log_path_primary_ccc_cfg_changed(const struct bt_gatt_a
 }
 
 static ssize_t jis_activity_log_path_primary_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
-                                          uint16_t len, uint16_t offset)
+                                                  uint16_t len, uint16_t offset)
 {
-    
+
     return bt_gatt_attr_read(conn, attr, buf, len, offset, attr->user_data, strlen(activity_log_path_primary));
 }
 
@@ -1359,9 +1380,9 @@ extern "C" void jis_activity_log_path_primary_notify(const char *path)
     LOG_INF("Activity Log Path: %s", activity_log_path_primary);
 
     auto *status_gatt =
-            bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &activity_log_path_primary_uuid.uuid);
-        bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&activity_log_path_primary), sizeof(activity_log_path_primary));
-
+        bt_gatt_find_by_uuid(info_service.attrs, info_service.attr_count, &activity_log_path_primary_uuid.uuid);
+    bt_gatt_notify(nullptr, status_gatt, static_cast<void *>(&activity_log_path_primary),
+                   sizeof(activity_log_path_primary));
 }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -1501,8 +1522,8 @@ static void jis_secondary_activity_log_path_ccc_cfg_changed(const struct bt_gatt
 static ssize_t jis_secondary_activity_log_path_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
                                                     uint16_t len, uint16_t offset)
 {
-    return bt_gatt_attr_read(conn, attr, buf, len, offset, secondary_activity_log_path, 
-                            strlen(secondary_activity_log_path) + 1);
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, secondary_activity_log_path,
+                             strlen(secondary_activity_log_path) + 1);
 }
 
 void jis_secondary_activity_log_path_notify(const char *path)
@@ -1516,8 +1537,7 @@ void jis_secondary_activity_log_path_notify(const char *path)
     if (secondary_activity_log_path_subscribed)
     {
         safe_gatt_notify(&secondary_activity_log_path_uuid.uuid,
-                         static_cast<const void *>(&secondary_activity_log_path),
-                         strlen(secondary_activity_log_path));
+                         static_cast<const void *>(&secondary_activity_log_path), strlen(secondary_activity_log_path));
     }
 }
 #endif
