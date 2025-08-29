@@ -48,6 +48,12 @@
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
+// External message queue for analytics (defined in app.cpp)
+extern struct k_msgq analytics_queue;
+
+// Include the new streaming control event
+#include <events/streaming_control_event.h>
+
 // Constants
 #define VND_MAX_LEN 128 // Maximum length for vendor characteristic data
 
@@ -397,6 +403,7 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
   uint8_t value = *((const uint8_t *)buf);
 
   if (value == 1) {
+    // START ACTIVITY (New session)
     struct foot_sensor_start_activity_event *foot_evt =
         new_foot_sensor_start_activity_event();
     APP_EVENT_SUBMIT(foot_evt);
@@ -430,6 +437,90 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
 
     LOG_INF("Submitted start activity events for foot sensor and motion sensor "
             "(input=1).");
+  } else if (value == 2) {
+    // UNPAUSE ACTIVITY (Resume existing session)
+    struct foot_sensor_start_activity_event *foot_evt =
+        new_foot_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(foot_evt);
+
+    struct motion_sensor_start_activity_event *motion_evt =
+        new_motion_sensor_start_activity_event();
+    APP_EVENT_SUBMIT(motion_evt);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the unpause command to secondary device (value=2)
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
+                        D2D_TX_CMD_START_ACTIVITY, value,
+                        "unpause activity command");
+#endif
+
+    // Send UNPAUSE command to processing modules
+    generic_message_t unpause_msg = {};
+    unpause_msg.sender = SENDER_BTH;
+    unpause_msg.type = MSG_TYPE_COMMAND;
+    
+    // Send to realtime metrics
+    strncpy(unpause_msg.data.command_str, "UNPAUSE_REALTIME_PROCESSING",
+            sizeof(unpause_msg.data.command_str) - 1);
+    unpause_msg.data.command_str[sizeof(unpause_msg.data.command_str) - 1] = '\0';
+    k_msgq_put(&sensor_data_msgq, &unpause_msg, K_NO_WAIT);
+    
+    // Send to analytics
+    strncpy(unpause_msg.data.command_str, "UNPAUSE_ANALYTICS",
+            sizeof(unpause_msg.data.command_str) - 1);
+    unpause_msg.data.command_str[sizeof(unpause_msg.data.command_str) - 1] = '\0';
+    k_msgq_put(&analytics_queue, &unpause_msg, K_NO_WAIT);
+    
+    // NOTE: DO NOT send START_LOGGING_ACTIVITY to data module - files remain open
+    LOG_INF("Activity UNPAUSED - sensors resumed, data files continue (input=2).");
+  } else if (value == 3) {
+    // START FOOT SENSOR STREAMING
+    // Send streaming control event
+    struct streaming_control_event *evt = new_streaming_control_event();
+    evt->foot_sensor_streaming_enabled = true;
+    evt->quaternion_streaming_enabled = false;
+    APP_EVENT_SUBMIT(evt);
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device (value=3)
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
+                        D2D_TX_CMD_START_ACTIVITY, value,
+                        "start foot sensor streaming");
+#endif
+    
+    LOG_INF("Foot sensor streaming ENABLED (input=3).");
+  } else if (value == 4) {
+    // START QUATERNION STREAMING
+    // Send streaming control event
+    struct streaming_control_event *evt = new_streaming_control_event();
+    evt->foot_sensor_streaming_enabled = false;
+    evt->quaternion_streaming_enabled = true;
+    APP_EVENT_SUBMIT(evt);
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device (value=4)
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
+                        D2D_TX_CMD_START_ACTIVITY, value,
+                        "start quaternion streaming");
+#endif
+    
+    LOG_INF("Quaternion streaming ENABLED (input=4).");
+  } else if (value == 5) {
+    // START BOTH FOOT SENSOR AND QUATERNION STREAMING
+    // Send streaming control event
+    struct streaming_control_event *evt = new_streaming_control_event();
+    evt->foot_sensor_streaming_enabled = true;
+    evt->quaternion_streaming_enabled = true;
+    APP_EVENT_SUBMIT(evt);
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device (value=5)
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
+                        D2D_TX_CMD_START_ACTIVITY, value,
+                        "start both streams");
+#endif
+    
+    LOG_INF("Both foot sensor and quaternion streaming ENABLED (input=5).");
   } else {
     LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
   }
@@ -918,6 +1009,7 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
   uint8_t value = *((const uint8_t *)buf);
 
   if (value == 1) {
+    // STOP ACTIVITY (End session completely)
     struct foot_sensor_stop_activity_event *foot_evt =
         new_foot_sensor_stop_activity_event();
     APP_EVENT_SUBMIT(foot_evt);
@@ -953,6 +1045,99 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
 
     LOG_INF("Submitted stop activity events for foot sensor and motion sensor "
             "(input=1).");
+  } else if (value == 2) {
+    // PAUSE ACTIVITY (Suspend processing but keep files open)
+    struct foot_sensor_stop_activity_event *foot_evt =
+        new_foot_sensor_stop_activity_event();
+    APP_EVENT_SUBMIT(foot_evt);
+
+    struct motion_sensor_stop_activity_event *motion_evt =
+        new_motion_sensor_stop_activity_event();
+    APP_EVENT_SUBMIT(motion_evt);
+
+    LOG_INF("Sending PAUSE_ACTIVITY message");
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the pause command to secondary device (value=2)
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
+                        D2D_TX_CMD_STOP_ACTIVITY, value,
+                        "pause activity command");
+#endif
+
+    // Send PAUSE command to processing modules
+    generic_message_t pause_msg = {};
+    pause_msg.sender = SENDER_BTH;
+    pause_msg.type = MSG_TYPE_COMMAND;
+    
+    // Send to realtime metrics
+    strncpy(pause_msg.data.command_str, "PAUSE_REALTIME_PROCESSING",
+            sizeof(pause_msg.data.command_str) - 1);
+    pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+    k_msgq_put(&sensor_data_msgq, &pause_msg, K_NO_WAIT);
+    
+    // Send to analytics
+    strncpy(pause_msg.data.command_str, "PAUSE_ANALYTICS",
+            sizeof(pause_msg.data.command_str) - 1);
+    pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+    k_msgq_put(&analytics_queue, &pause_msg, K_NO_WAIT);
+    
+    // Send to sensor data
+    strncpy(pause_msg.data.command_str, "PAUSE_SENSOR_PROCESSING",
+            sizeof(pause_msg.data.command_str) - 1);
+    pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+    k_msgq_put(&sensor_data_msgq, &pause_msg, K_NO_WAIT);
+
+    // IMPORTANT: DO NOT send STOP_LOGGING_ACTIVITY to data module
+    // Files must remain open during pause
+    LOG_INF("Activity PAUSED - sensors stopped, data files remain open (input=2).");
+  } else if (value == 3) {
+    // STOP FOOT SENSOR STREAMING
+    // Send streaming control event (keep quaternion as-is, default enabled)
+    struct streaming_control_event *evt = new_streaming_control_event();
+    evt->foot_sensor_streaming_enabled = false;
+    evt->quaternion_streaming_enabled = true; // Keep current state (default enabled)
+    APP_EVENT_SUBMIT(evt);
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device (value=3)
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
+                        D2D_TX_CMD_STOP_ACTIVITY, value,
+                        "stop foot sensor streaming");
+#endif
+    
+    LOG_INF("Foot sensor streaming DISABLED (input=3).");
+  } else if (value == 4) {
+    // STOP QUATERNION STREAMING
+    // Send streaming control event (keep foot sensor as-is, default enabled)
+    struct streaming_control_event *evt = new_streaming_control_event();
+    evt->foot_sensor_streaming_enabled = true; // Keep current state (default enabled)
+    evt->quaternion_streaming_enabled = false;
+    APP_EVENT_SUBMIT(evt);
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device (value=4)
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
+                        D2D_TX_CMD_STOP_ACTIVITY, value,
+                        "stop quaternion streaming");
+#endif
+    
+    LOG_INF("Quaternion streaming DISABLED (input=4).");
+  } else if (value == 5) {
+    // STOP BOTH FOOT SENSOR AND QUATERNION STREAMING
+    // Send streaming control event
+    struct streaming_control_event *evt = new_streaming_control_event();
+    evt->foot_sensor_streaming_enabled = false;
+    evt->quaternion_streaming_enabled = false;
+    APP_EVENT_SUBMIT(evt);
+    
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Forward the command to secondary device (value=5)
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
+                        D2D_TX_CMD_STOP_ACTIVITY, value,
+                        "stop both streams");
+#endif
+    
+    LOG_INF("Both foot sensor and quaternion streaming DISABLED (input=5).");
   } else {
     LOG_WRN("Stop activity characteristic write ignored (input=%u).", value);
   }

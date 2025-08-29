@@ -5,10 +5,14 @@
 #include <cstring>
 #include <events/foot_sensor_event.h>
 #include <events/motion_sensor_event.h>
+#include <events/streaming_control_event.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(ble_d2d_rx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
+
+// External message queue for analytics (defined in app.cpp)
+extern struct k_msgq analytics_queue;
 
 /*
  * D2D RX Module - Device-to-Device Receive Service
@@ -183,6 +187,7 @@ static ssize_t d2d_start_activity_write(struct bt_conn *conn, const struct bt_ga
 
     if (value == 1)
     {
+        // START ACTIVITY (New session)
         // Start sensor events (same as primary device)
         struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
         APP_EVENT_SUBMIT(foot_evt);
@@ -205,6 +210,69 @@ static ssize_t d2d_start_activity_write(struct bt_conn *conn, const struct bt_ga
         }
 
         LOG_INF("D2D RX: Start Activity Command - submitted foot and motion sensor events, started activity logging");
+    }
+    else if (value == 2)
+    {
+        // UNPAUSE ACTIVITY (Resume existing session)
+        // Start sensor events (same as primary device)
+        struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+
+        struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+
+        // Send UNPAUSE commands to processing modules
+        generic_message_t unpause_msg = {};
+        unpause_msg.sender = SENDER_BTH;
+        unpause_msg.type = MSG_TYPE_COMMAND;
+        
+        // Send to realtime metrics
+        strncpy(unpause_msg.data.command_str, "UNPAUSE_REALTIME_PROCESSING",
+                sizeof(unpause_msg.data.command_str) - 1);
+        unpause_msg.data.command_str[sizeof(unpause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&sensor_data_msgq, &unpause_msg, K_NO_WAIT);
+        
+        // Send to analytics
+        strncpy(unpause_msg.data.command_str, "UNPAUSE_ANALYTICS",
+                sizeof(unpause_msg.data.command_str) - 1);
+        unpause_msg.data.command_str[sizeof(unpause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&analytics_queue, &unpause_msg, K_NO_WAIT);
+        
+        // NOTE: DO NOT send START_LOGGING_ACTIVITY to data module - files remain open
+        LOG_INF("D2D RX: Activity UNPAUSED - sensors resumed, data files continue (value=2)");
+    }
+    else if (value == 3)
+    {
+        // Start foot sensor streaming only
+        LOG_INF("D2D RX: Start foot sensor streaming only (value=3)");
+        
+        // Send streaming control event
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = true;
+        evt->quaternion_streaming_enabled = false;
+        APP_EVENT_SUBMIT(evt);
+    }
+    else if (value == 4)
+    {
+        // Start quaternion streaming only
+        LOG_INF("D2D RX: Start quaternion streaming only (value=4)");
+        
+        // Send streaming control event
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = false;
+        evt->quaternion_streaming_enabled = true;
+        APP_EVENT_SUBMIT(evt);
+    }
+    else if (value == 5)
+    {
+        // Start both streams
+        LOG_INF("D2D RX: Start both streams (value=5)");
+        
+        // Send streaming control event
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = true;
+        evt->quaternion_streaming_enabled = true;
+        APP_EVENT_SUBMIT(evt);
     }
     else
     {
@@ -230,9 +298,11 @@ static ssize_t d2d_stop_activity_write(struct bt_conn *conn, const struct bt_gat
     }
 
     uint8_t value = *((const uint8_t *)buf);
+    LOG_INF("D2D RX: Stop activity command value=%u", value);
 
     if (value == 1)
     {
+        // STOP ACTIVITY (End session completely)
         // Stop sensor events (same as primary device)
         struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
         APP_EVENT_SUBMIT(foot_evt);
@@ -255,6 +325,76 @@ static ssize_t d2d_stop_activity_write(struct bt_conn *conn, const struct bt_gat
         }
 
         LOG_INF("D2D RX: Stop Activity Command - submitted events and stopped activity logging");
+    }
+    else if (value == 2)
+    {
+        // PAUSE ACTIVITY (Suspend processing but keep files open)
+        // Stop sensor events (same as primary device)
+        struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+
+        struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+
+        // Send PAUSE commands to processing modules
+        generic_message_t pause_msg = {};
+        pause_msg.sender = SENDER_BTH;
+        pause_msg.type = MSG_TYPE_COMMAND;
+        
+        // Send to realtime metrics
+        strncpy(pause_msg.data.command_str, "PAUSE_REALTIME_PROCESSING",
+                sizeof(pause_msg.data.command_str) - 1);
+        pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&sensor_data_msgq, &pause_msg, K_NO_WAIT);
+        
+        // Send to analytics
+        strncpy(pause_msg.data.command_str, "PAUSE_ANALYTICS",
+                sizeof(pause_msg.data.command_str) - 1);
+        pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&analytics_queue, &pause_msg, K_NO_WAIT);
+        
+        // Send to sensor data
+        strncpy(pause_msg.data.command_str, "PAUSE_SENSOR_PROCESSING",
+                sizeof(pause_msg.data.command_str) - 1);
+        pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&sensor_data_msgq, &pause_msg, K_NO_WAIT);
+
+        // IMPORTANT: DO NOT send STOP_LOGGING_ACTIVITY to data module
+        // Files must remain open during pause
+        LOG_INF("D2D RX: Activity PAUSED - sensors stopped, data files remain open (value=2)");
+    }
+    else if (value == 3)
+    {
+        // Stop foot sensor streaming only
+        LOG_INF("D2D RX: Stop foot sensor streaming only (value=3)");
+        
+        // Send streaming control event (keep quaternion as-is, default to enabled)
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = false;
+        evt->quaternion_streaming_enabled = true; // Keep current state
+        APP_EVENT_SUBMIT(evt);
+    }
+    else if (value == 4)
+    {
+        // Stop quaternion streaming only
+        LOG_INF("D2D RX: Stop quaternion streaming only (value=4)");
+        
+        // Send streaming control event (keep foot sensor as-is, default to enabled)
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = true; // Keep current state
+        evt->quaternion_streaming_enabled = false;
+        APP_EVENT_SUBMIT(evt);
+    }
+    else if (value == 5)
+    {
+        // Stop both streams
+        LOG_INF("D2D RX: Stop both streams (value=5)");
+        
+        // Send streaming control event
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = false;
+        evt->quaternion_streaming_enabled = false;
+        APP_EVENT_SUBMIT(evt);
     }
     else
     {
@@ -350,10 +490,9 @@ static ssize_t d2d_trigger_bhi360_calibration_write(struct bt_conn *conn, const 
         }
         else
         {
-            LOG_ERR("D2D RX: Invalid calibration trigger length: %u", len);
-            return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+            LOG_WRN("D2D RX: Weight calibration command ignored (value=%u)", value);
         }
-
+    
         return len;
     }
 }

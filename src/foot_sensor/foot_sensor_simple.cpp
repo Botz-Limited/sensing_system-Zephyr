@@ -24,6 +24,7 @@
 #include <errors.hpp>
 #include <events/app_state_event.h>
 #include <events/foot_sensor_event.h>
+#include <events/streaming_control_event.h>
 #include <status_codes.h>
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL);
@@ -46,6 +47,9 @@ static k_tid_t foot_sensor_tid = NULL;
 
 // Use atomic for thread-safe access to logging state
 static atomic_t logging_active = ATOMIC_INIT(0);
+
+// Local streaming state
+static bool foot_sensor_streaming_enabled = false;
 
 // ADC device and configuration
 static const struct device *adc_dev;
@@ -157,7 +161,7 @@ static void process_adc_samples(int16_t *raw_data)
     else
     {
         // Normal operation - send calibrated data
-        if (atomic_get(&logging_active) == 1)
+        if ((atomic_get(&logging_active) == 1) || (foot_sensor_streaming_enabled == true))
         {
             generic_message_t msg;
             msg.sender = SENDER_FOOT_SENSOR_THREAD;
@@ -170,7 +174,8 @@ static void process_adc_samples(int16_t *raw_data)
                 msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
             }
 
-            // Always send to sensor_data module at 100Hz
+            if(atomic_get(&logging_active) == 1)
+            // Always send to sensor_data module at 100Hz only if activity started
             if (k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT) != 0)
             {
                 LOG_WRN("Failed to send foot sensor data to sensor_data module");
@@ -180,9 +185,17 @@ static void process_adc_samples(int16_t *raw_data)
             if (++ble_sample_counter >= BLUETOOTH_RATE_DIVIDER)
             {
                 ble_sample_counter = 0;
-                if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
+                // Check streaming flag before sending to bluetooth
+                if (foot_sensor_streaming_enabled == true)
                 {
-                    LOG_WRN("Failed to send foot sensor data to bluetooth module");
+                    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
+                    {
+                        LOG_WRN("Failed to send foot sensor data to bluetooth module");
+                    }
+                }
+                else
+                {
+                    LOG_DBG("Foot sensor BLE streaming disabled, skipping bluetooth_msgq");
                 }
             }
         }
@@ -292,6 +305,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         LOG_INF("Received start activity event - enabling foot sensor sampling");
         atomic_set(&logging_active, 1);
+        foot_sensor_streaming_enabled = false;
         return false;
     }
 
@@ -299,6 +313,15 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         LOG_INF("Received stop activity event - disabling foot sensor sampling");
         atomic_set(&logging_active, 0);
+        return false;
+    }
+
+    if (is_streaming_control_event(aeh))
+    {
+        auto *event = cast_streaming_control_event(aeh);
+        foot_sensor_streaming_enabled = event->foot_sensor_streaming_enabled;
+        LOG_INF("foot_samples_work %s",
+                foot_sensor_streaming_enabled ? "enabled" : "disabled");
         return false;
     }
 
@@ -311,3 +334,4 @@ APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
 APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_start_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_stop_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, streaming_control_event);

@@ -299,6 +299,7 @@ static void process_command_work_handler(struct k_work *work)
     LOG_WRN("Processing command: %s", pending_command);
     
     if (strcmp(pending_command, "START_REALTIME_PROCESSING") == 0) {
+        // START: Begin new session with state reset
         // Clear any pending messages in input queue before starting
         generic_message_t dummy_msg;
         while (k_msgq_get(&sensor_data_queue, &dummy_msg, K_NO_WAIT) == 0) {
@@ -312,6 +313,7 @@ static void process_command_work_handler(struct k_work *work)
         atomic_set(&processing_active, 1);
         LOG_INF("Realtime processing started - buffers cleared");
     } else if (strcmp(pending_command, "STOP_REALTIME_PROCESSING") == 0) {
+        // STOP: End session completely with state reset
         atomic_set(&processing_active, 0);
         
         // Clear all pending messages in output queues
@@ -329,6 +331,30 @@ static void process_command_work_handler(struct k_work *work)
         // Reset metrics state
         memset(&metrics_state, 0, sizeof(metrics_state));
         new_sensor_data_available = false;
+    } else if (strcmp(pending_command, "PAUSE_REALTIME_PROCESSING") == 0) {
+        // PAUSE: Suspend processing but preserve state
+        atomic_set(&processing_active, 0);
+        LOG_INF("Realtime metrics processing PAUSED - state preserved");
+        
+        // Clear pending messages to prevent buffer overflow during pause
+        generic_message_t dummy_msg;
+        while (k_msgq_get(&sensor_data_queue, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        while (k_msgq_get(&realtime_queue, &dummy_msg, K_NO_WAIT) == 0) {
+            // Discard message
+        }
+        LOG_INF("Message queues cleared for pause");
+        // NOTE: We do NOT reset metrics_state
+        // This preserves metrics continuity when unpaused
+    } else if (strcmp(pending_command, "UNPAUSE_REALTIME_PROCESSING") == 0) {
+        // UNPAUSE: Resume processing with preserved state
+        atomic_set(&processing_active, 1);
+        LOG_INF("Realtime metrics processing UNPAUSED - continuing with preserved state");
+        LOG_INF("  Cadence: %.1f spm preserved", (double)metrics_state.cadence_tracker.current_cadence_spm);
+        // Pace estimator state preserved but not logged due to struct member availability
+        LOG_INF("  Metrics state preserved, processing will resume");
+        // No state reset - continue from where we paused
         
         LOG_INF("Realtime processing stopped - all buffers cleared");
     } else {

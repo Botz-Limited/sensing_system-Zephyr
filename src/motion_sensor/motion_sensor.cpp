@@ -28,6 +28,7 @@
 #include <caf/events/module_state_event.h>
 #include <events/app_state_event.h>
 #include <events/motion_sensor_event.h>
+#include <events/streaming_control_event.h>
 #if defined(CONFIG_WIFI_MODULE)
 #include <events/wifi_event.h>
 #endif
@@ -74,6 +75,9 @@ static atomic_t logging_active = ATOMIC_INIT(0);
 static atomic_t wifi_active = ATOMIC_INIT(0);
 #endif
 static float configured_sample_rate = 50.0f;
+
+// Local streaming state - defaults to enabled for backward compatibility
+static bool quaternion_streaming_enabled = false;
 
 // Step count tracking variables (file scope for access across functions)
 static uint32_t latest_step_count = 0; // Global step count from sensor
@@ -763,33 +767,38 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
       if (motion_bt_sample_counter >= MOTION_SAMPLES_TO_SKIP) {
         motion_bt_sample_counter = 0;
         
-        // BLUETOOTH ONLY: Send quaternion data only - no gyro, no linear acceleration
-        // This reduces BLE bandwidth by ~60% while maintaining internal processing at 100Hz
-        generic_message_t qmsg{};
-        qmsg.sender = SENDER_BHI360_THREAD;
-        qmsg.type = MSG_TYPE_BHI360_3D_MAPPING;
-        
-        // Zero out gyro data for Bluetooth - not needed for phone display
-        // Internal processing still uses full gyro data at 100Hz
-        qmsg.data.bhi360_3d_mapping.gyro_x = 0;  // Zeroed to reduce BLE bandwidth
-        qmsg.data.bhi360_3d_mapping.gyro_y = 0;  // Zeroed to reduce BLE bandwidth
-        qmsg.data.bhi360_3d_mapping.gyro_z = 0;  // Zeroed to reduce BLE bandwidth
-        
-        // Quaternion data is sent (using accel fields for x,y,z components)
-        qmsg.data.bhi360_3d_mapping.accel_x = latest_quat_x;
-        qmsg.data.bhi360_3d_mapping.accel_y = latest_quat_y;
-        qmsg.data.bhi360_3d_mapping.accel_z = latest_quat_z;
-        qmsg.data.bhi360_3d_mapping.quat_w = latest_quat_w;
-        
+        // Check streaming flag before sending quaternion to bluetooth
+        if (quaternion_streaming_enabled) {
+          // BLUETOOTH ONLY: Send quaternion data only - no gyro, no linear acceleration
+          // This reduces BLE bandwidth by ~60% while maintaining internal processing at 100Hz
+          generic_message_t qmsg{};
+          qmsg.sender = SENDER_BHI360_THREAD;
+          qmsg.type = MSG_TYPE_BHI360_3D_MAPPING;
+          
+          // Zero out gyro data for Bluetooth - not needed for phone display
+          // Internal processing still uses full gyro data at 100Hz
+          qmsg.data.bhi360_3d_mapping.gyro_x = 0;  // Zeroed to reduce BLE bandwidth
+          qmsg.data.bhi360_3d_mapping.gyro_y = 0;  // Zeroed to reduce BLE bandwidth
+          qmsg.data.bhi360_3d_mapping.gyro_z = 0;  // Zeroed to reduce BLE bandwidth
+          
+          // Quaternion data is sent (using accel fields for x,y,z components)
+          qmsg.data.bhi360_3d_mapping.accel_x = latest_quat_x;
+          qmsg.data.bhi360_3d_mapping.accel_y = latest_quat_y;
+          qmsg.data.bhi360_3d_mapping.accel_z = latest_quat_z;
+          qmsg.data.bhi360_3d_mapping.quat_w = latest_quat_w;
+          
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-        k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
+          k_msgq_put(&bluetooth_msgq, &qmsg, K_NO_WAIT);
 #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
 // k_msgq_put(&sensor_data_msgq, &qmsg, K_NO_WAIT);
 #endif
 #else
-        // Secondary device: Send to primary via D2D (quaternion only)
-        ble_d2d_tx_send_bhi360_data1(&qmsg.data.bhi360_3d_mapping);
+          // Secondary device: Send to primary via D2D (quaternion only)
+          ble_d2d_tx_send_bhi360_data1(&qmsg.data.bhi360_3d_mapping);
 #endif
+        } else {
+          LOG_DBG("Quaternion BLE streaming disabled, skipping bluetooth_msgq");
+        }
 
         // Linear acceleration - COMMENTED OUT to reduce BLE bandwidth
         // Internal processing still uses linear acceleration at 100Hz
@@ -1162,6 +1171,7 @@ static bool app_event_handler(const struct app_event_header *aeh) {
     if (atomic_get(&logging_active) == 0) {
       // Mark activity as started and capture current step count
       activity_logging_active = true;
+      quaternion_streaming_enabled=false;
       atomic_set(&logging_active, 1);
 
       // Also start activity logging
@@ -1178,19 +1188,14 @@ static bool app_event_handler(const struct app_event_header *aeh) {
     }
     return false;
   }
-#if defined(CONFIG_WIFI_MODULE)
-  if (is_wifi_connected_event(aeh)) {
-    LOG_INF("Motion sensor: WiFi connected - enabling WiFi data transmission");
-    atomic_set(&wifi_active, 1);
+
+  if (is_streaming_control_event(aeh)) {
+    auto *event = cast_streaming_control_event(aeh);
+    quaternion_streaming_enabled = event->quaternion_streaming_enabled;
+    LOG_INF("Quaternion streaming %s",
+            quaternion_streaming_enabled ? "enabled" : "disabled");
     return false;
   }
-  if (is_wifi_disconnected_event(aeh)) {
-    LOG_INF(
-        "Motion sensor: WiFi disconnected - disabling WiFi data transmission");
-    atomic_set(&wifi_active, 0);
-    return false;
-  }
-#endif
   return false;
 }
 
@@ -1204,6 +1209,7 @@ APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_stop_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, wifi_connected_event);
 APP_EVENT_SUBSCRIBE(MODULE, wifi_disconnected_event);
 #endif
+APP_EVENT_SUBSCRIBE(MODULE, streaming_control_event);
 
 /*
  * DRIVER_INTEGRATION SUMMARY:

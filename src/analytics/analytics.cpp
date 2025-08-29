@@ -294,6 +294,7 @@ static void process_command_work_handler(struct k_work *work)
    // LOG_WRN("Processing command: %s", pending_command);
     
     if (strcmp(pending_command, "START_REALTIME_PROCESSING") == 0) {
+        // START: Begin new session with state reset
         // Clear any pending messages before starting
         generic_message_t dummy_msg;
         while (k_msgq_get(&analytics_queue, &dummy_msg, K_NO_WAIT) == 0) {
@@ -323,6 +324,7 @@ static void process_command_work_handler(struct k_work *work)
         k_msgq_put(&sensor_data_queue, &fwd_msg, K_NO_WAIT);
         LOG_INF("Also forwarded START_REALTIME_PROCESSING for realtime_metrics");
     } else if (strcmp(pending_command, "STOP_REALTIME_PROCESSING") == 0) {
+        // STOP: End session completely with state reset
         // Analytics should stop when realtime metrics stop
         atomic_set(&processing_active, 0);
         LOG_INF("Analytics processing stopped");
@@ -355,6 +357,26 @@ static void process_command_work_handler(struct k_work *work)
         extern struct k_msgq sensor_data_queue;
         k_msgq_put(&sensor_data_queue, &fwd_msg, K_NO_WAIT);
         LOG_INF("Also forwarded STOP_REALTIME_PROCESSING for realtime_metrics");
+    } else if (strcmp(pending_command, "PAUSE_ANALYTICS") == 0) {
+        // PAUSE: Suspend processing but preserve state
+        atomic_set(&processing_active, 0);
+        k_work_cancel_delayable(&analytics_periodic_work);
+        LOG_INF("Analytics processing PAUSED - state preserved");
+        LOG_INF("  History buffer: %u samples preserved", history_count);
+        LOG_INF("  Baseline data preserved: contact=%.1f, cadence=%.1f",
+                (double)analytics_state.baseline_contact_time,
+                (double)analytics_state.baseline_cadence);
+        
+        // NOTE: Do NOT reset analytics_state or history buffers
+    } else if (strcmp(pending_command, "UNPAUSE_ANALYTICS") == 0) {
+        // UNPAUSE: Resume processing with preserved state
+        atomic_set(&processing_active, 1);
+        LOG_INF("Analytics processing UNPAUSED - continuing with preserved state");
+        LOG_INF("  History buffer: %u samples available", history_count);
+        LOG_INF("  Baseline: %s",
+                analytics_state.baseline_established ? "established" : "in progress");
+        // Resume periodic work
+        k_work_schedule_for_queue(&analytics_work_q, &analytics_periodic_work, K_MSEC(200));
     } else if (strcmp(pending_command, "START_SENSOR_PROCESSING") == 0) {
         // Analytics doesn't directly handle sensor processing, but should forward
         LOG_INF("Forwarding START_SENSOR_PROCESSING command");

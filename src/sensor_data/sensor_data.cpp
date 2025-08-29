@@ -723,6 +723,7 @@ static void process_command_work_handler(struct k_work *work) {
     LOG_WRN("Processing command: %s", command);
 
     if (strcmp(command, "START_SENSOR_PROCESSING") == 0) {
+      // START: Begin new session with state reset
       // Clear any pending messages in output queues before starting
       generic_message_t dummy_msg;
       while (k_msgq_get(&sensor_data_queue, &dummy_msg, K_NO_WAIT) == 0) {
@@ -756,6 +757,7 @@ static void process_command_work_handler(struct k_work *work) {
       atomic_set(&processing_active, 1);
       LOG_INF("Sensor processing started - buffers cleared");
     } else if (strcmp(command, "STOP_SENSOR_PROCESSING") == 0) {
+      // STOP: End session completely with state reset
       atomic_set(&processing_active, 0);
       
       // Clear all pending messages in output queues
@@ -790,6 +792,47 @@ static void process_command_work_handler(struct k_work *work) {
       memset(&sensor_state, 0, sizeof(sensor_state));
       
       LOG_INF("Sensor processing stopped - all buffers cleared");
+    } else if (strcmp(command, "PAUSE_SENSOR_PROCESSING") == 0) {
+      // PAUSE: Suspend processing but preserve state
+      atomic_set(&processing_active, 0);
+      LOG_INF("Sensor processing PAUSED - state preserved");
+      LOG_INF("  Left contact: %s (%u ms)",
+              sensor_state.left_foot_contact ? "yes" : "no",
+              sensor_state.left_contact_elapsed_ms);
+      LOG_INF("  Right contact: %s (%u ms)",
+              sensor_state.right_foot_contact ? "yes" : "no",
+              sensor_state.right_contact_elapsed_ms);
+      
+      // Clear ring buffers to prevent overflow during pause
+      atomic_set(&foot_ring.count, 0);
+      foot_ring.read_idx = 0;
+      foot_ring.write_idx = 0;
+      atomic_set(&imu_ring.count, 0);
+      imu_ring.read_idx = 0;
+      imu_ring.write_idx = 0;
+      
+      // Clear message queues
+      generic_message_t dummy_msg;
+      while (k_msgq_get(&sensor_data_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        // Discard message
+      }
+      #if IS_ENABLED(CONFIG_REALTIME_METRICS_MODULE)
+      extern struct k_msgq realtime_queue;
+      while (k_msgq_get(&realtime_queue, &dummy_msg, K_NO_WAIT) == 0) {
+        // Discard message
+      }
+      #endif
+      
+      // NOTE: Do NOT reset sensor_state - preserve contact times and metrics
+    } else if (strcmp(command, "UNPAUSE_SENSOR_PROCESSING") == 0) {
+      // UNPAUSE: Resume processing with preserved state
+      atomic_set(&processing_active, 1);
+      LOG_INF("Sensor processing UNPAUSED - continuing with preserved state");
+      LOG_INF("  Sample count: %u preserved", sensor_state.sample_count);
+      LOG_INF("  Contact states preserved: L=%s, R=%s",
+              sensor_state.left_foot_contact ? "contact" : "swing",
+              sensor_state.right_foot_contact ? "contact" : "swing");
+      // No state reset - continue from where we paused
     } else if (strcmp(command, "SENSOR_STATS") == 0) {
       LOG_INF("Sensor Data Statistics:");
       LOG_INF("  Foot data: %u received, %u dropped (max depth: %u)",
