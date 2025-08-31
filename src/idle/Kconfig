@@ -1,0 +1,29 @@
+# Activity Metrics Module Configuration
+
+config IDLE_MODULE
+    bool "Enable Idle module"
+    default y
+    help
+      Enable the idle module for power management activities
+
+if IDLE_MODULE
+
+module = IDLE_MODULE
+module-str = idle module
+source "subsys/logging/Kconfig.template.log_config"
+
+config IDLE_MODULE_STACK_SIZE
+    int "Stack size for activity metrics thread"
+    default 2048
+    help
+      Stack size for the idle thread.
+
+config IDLE_MODULE_PRIORITY
+    int "Priority of the idle thread"
+    default 7
+    range 1 10
+    help
+      Thread priority for idle module.
+      Lower number means higher priority.
+
+endif # IDLE_MODULE

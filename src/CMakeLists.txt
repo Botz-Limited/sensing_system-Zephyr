@@ -8,9 +8,8 @@ add_subdirectory(activity_metrics)
 add_subdirectory(sensor_data)
 add_subdirectory(realtime_metrics)
 add_subdirectory(analytics)
-add_subdirectory(packetizer)
 add_subdirectory(battery)
-add_subdirectory(wifi)
+add_subdirectory(idle)
 
 # Add gait analysis source files to the build
 target_sources(app PRIVATE

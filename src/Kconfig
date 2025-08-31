@@ -8,9 +8,9 @@ rsource "activity_metrics/Kconfig"
 rsource "sensor_data/Kconfig"
 rsource "realtime_metrics/Kconfig"
 rsource "analytics/Kconfig"
-rsource "packetizer/Kconfig"
 rsource "battery/Kconfig"
 rsource "wifi/Kconfig"
+rsource "idle/Kconfig"
 rsource "Kconfig.fota"
 
 
