@@ -1699,6 +1699,26 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                     break;
 
+                case MSG_TYPE_BIOMECHANICS_EXTENDED:
+                    // Handle biomechanics extended data
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_metrics_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    
+                    // Process via existing activity metrics handler
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
+                    break;
+
+                case MSG_TYPE_SESSION_SUMMARY:
+                    // Handle session summary data
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_metrics_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    
+                    // Process via existing activity metrics handler
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
+                    break;
+
                 case MSG_TYPE_EXTERNAL_FLASH_ERASE_COMPLETE:
                     LOG_INF("Received external flash erase complete notification");
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -2642,20 +2662,74 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
     k_mutex_unlock(&bluetooth_msg_mutex);
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Handle activity metrics update from realtime_metrics module (primary only)
-    if (msg.sender == SENDER_REALTIME_METRICS)
-    {
-        // Extract metrics data from message
-        // Note: We need to properly define how metrics are passed in the
-        // message For now, we'll cast the data assuming it fits
-        realtime_metrics_t metrics;
-        memcpy(&metrics, &msg.data, sizeof(metrics));
+    // Handle different types of activity metrics updates
+    switch (msg.type) {
+        case MSG_TYPE_ACTIVITY_METRICS_BLE:
+            // Handle realtime metrics from activity_metrics or realtime_metrics module
+            if (msg.sender == SENDER_REALTIME_METRICS || msg.sender == SENDER_ACTIVITY_METRICS)
+            {
+                // Extract metrics data from message
+                realtime_metrics_t metrics;
+                memcpy(&metrics, &msg.data.realtime_metrics, sizeof(metrics));
 
-        // Update the Activity Metrics Service
-        ams_update_realtime_metrics(&metrics);
+                // Update the Activity Metrics Service
+                ams_update_realtime_metrics(&metrics);
 
-        LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d", metrics.cadence_spm, metrics.pace_sec_km,
-                metrics.form_score);
+                LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d",
+                        metrics.cadence_spm, metrics.pace_sec_km, metrics.form_score);
+            }
+            break;
+            
+        case MSG_TYPE_BIOMECHANICS_EXTENDED:
+            // Handle biomechanics extended data
+            {
+                biomechanics_extended_msg_t *bio_data = &msg.data.biomechanics_extended;
+                
+                // Convert to BLE structure format
+                biomechanics_extended_ble_t ble_bio_data;
+                ble_bio_data.pronation_left = bio_data->pronation_left;
+                ble_bio_data.pronation_right = bio_data->pronation_right;
+                ble_bio_data.loading_rate_left = bio_data->loading_rate_left;
+                ble_bio_data.loading_rate_right = bio_data->loading_rate_right;
+                ble_bio_data.arch_collapse_left = bio_data->arch_collapse_left;
+                ble_bio_data.arch_collapse_right = bio_data->arch_collapse_right;
+                
+                // Update Activity Metrics Service with biomechanics data
+                ams_update_biomechanics_extended(&ble_bio_data);
+                
+                LOG_DBG("Updated biomechanics: pronation L/R=%d/%d, loading L/R=%u/%u",
+                        bio_data->pronation_left, bio_data->pronation_right,
+                        bio_data->loading_rate_left, bio_data->loading_rate_right);
+            }
+            break;
+            
+        case MSG_TYPE_SESSION_SUMMARY:
+            // Handle session summary data
+            {
+                session_summary_msg_t *summary = &msg.data.session_summary;
+                
+                // Convert to BLE structure format
+                session_summary_ble_t ble_summary;
+                ble_summary.total_distance_m = summary->total_distance_m;
+                ble_summary.avg_pace_sec_km = summary->avg_pace_sec_km;
+                ble_summary.avg_cadence_spm = summary->avg_cadence_spm;
+                ble_summary.total_steps = summary->total_steps;
+                ble_summary.calories_kcal = summary->calories_kcal;
+                ble_summary.avg_form_score = summary->avg_form_score;
+                ble_summary.duration_sec = summary->duration_sec;
+                
+                // Update Activity Metrics Service with session summary
+                ams_update_session_summary(&ble_summary);
+                
+                LOG_INF("Session summary: distance=%um, pace=%us/km, cadence=%uspm, steps=%u",
+                        summary->total_distance_m, summary->avg_pace_sec_km,
+                        summary->avg_cadence_spm, summary->total_steps);
+            }
+            break;
+            
+        default:
+            LOG_WRN("Unexpected message type %d in activity_metrics_ble_work_handler", msg.type);
+            break;
     }
 #else
     // Secondary device doesn't have Activity Metrics Service

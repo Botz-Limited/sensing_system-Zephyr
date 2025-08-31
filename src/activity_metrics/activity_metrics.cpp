@@ -1128,8 +1128,48 @@ static void send_ble_update(void)
     packet.fatigue_level = calculate_fatigue_level();
     
     // Send to Bluetooth module
-    // TODO: Define proper message type for activity metrics
-    LOG_WRN("BLE update: pace=%d s/km, cadence=%d, form=%d",
+    // Send real-time metrics to Bluetooth
+    generic_message_t ble_msg;
+    ble_msg.sender = SENDER_ACTIVITY_METRICS;
+    ble_msg.type = MSG_TYPE_ACTIVITY_METRICS_BLE;
+    
+    // Create local metrics structure with current data
+    realtime_metrics_t local_metrics;
+    memset(&local_metrics, 0, sizeof(local_metrics));
+    local_metrics.cadence_spm = (uint16_t)sensor_data.current_cadence;
+    local_metrics.pace_sec_km = packet.pace_sec_per_km;
+    local_metrics.distance_m = session_state.total_distance_cm / 100;
+    local_metrics.form_score = packet.form_score;
+    local_metrics.balance_lr_pct = packet.balance_lr;
+    local_metrics.ground_contact_ms = (uint16_t)sensor_data.avg_contact_time;
+    local_metrics.flight_time_ms = (uint16_t)sensor_data.avg_flight_time;
+    local_metrics.efficiency_score = packet.efficiency;
+    local_metrics.alerts = 0; // No alerts for now
+    
+    memcpy(&ble_msg.data.realtime_metrics, &local_metrics, sizeof(realtime_metrics_t));
+    
+    if (k_msgq_put(&bluetooth_msgq, &ble_msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send realtime metrics to Bluetooth queue");
+    }
+    
+    // Also send biomechanics extended data
+    generic_message_t bio_msg;
+    bio_msg.sender = SENDER_ACTIVITY_METRICS;
+    bio_msg.type = MSG_TYPE_BIOMECHANICS_EXTENDED;
+    
+    // Fill biomechanics data from local metrics (these are placeholders - update with actual calculated values)
+    bio_msg.data.biomechanics_extended.pronation_left = 0;  // TODO: Get from actual calculations
+    bio_msg.data.biomechanics_extended.pronation_right = 0; // TODO: Get from actual calculations
+    bio_msg.data.biomechanics_extended.loading_rate_left = 0; // TODO: Get from actual calculations
+    bio_msg.data.biomechanics_extended.loading_rate_right = 0; // TODO: Get from actual calculations
+    bio_msg.data.biomechanics_extended.arch_collapse_left = 0; // TODO: Get from actual calculations
+    bio_msg.data.biomechanics_extended.arch_collapse_right = 0; // TODO: Get from actual calculations
+    
+    if (k_msgq_put(&bluetooth_msgq, &bio_msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send biomechanics data to Bluetooth queue");
+    }
+    
+    LOG_WRN("BLE update sent: pace=%d s/km, cadence=%d, form=%d",
             packet.pace_sec_per_km, packet.cadence_x2/2, packet.form_score);
 }
 #else
@@ -1342,7 +1382,47 @@ void activity_session_stop(void)
     LOG_INF("Activity session stopped: duration=%us, steps=%u, distance=%um",
             duration_ms/1000, total_steps, distance_m);
     
-    // TODO: Send session summary to data module
+    // Send session summary to Bluetooth module
+    generic_message_t summary_msg;
+    summary_msg.sender = SENDER_ACTIVITY_METRICS;
+    summary_msg.type = MSG_TYPE_SESSION_SUMMARY;
+    
+    // Calculate session statistics
+    summary_msg.data.session_summary.total_distance_m = distance_m;
+    summary_msg.data.session_summary.total_steps = total_steps;
+    summary_msg.data.session_summary.duration_sec = duration_ms / 1000;
+    
+    // Calculate average pace (seconds per km)
+    if (distance_m > 0) {
+        float pace_sec_km = (duration_ms / 1000.0f) / (distance_m / 1000.0f);
+        summary_msg.data.session_summary.avg_pace_sec_km = (uint16_t)pace_sec_km;
+    } else {
+        summary_msg.data.session_summary.avg_pace_sec_km = 0;
+    }
+    
+    // Calculate average cadence
+    if (duration_ms > 0) {
+        float avg_cadence = (total_steps * 60000.0f) / duration_ms; // steps per minute
+        summary_msg.data.session_summary.avg_cadence_spm = (uint16_t)avg_cadence;
+    } else {
+        summary_msg.data.session_summary.avg_cadence_spm = 0;
+    }
+    
+    // Estimate calories (simplified: ~1 kcal per kg per km)
+    float weight_kg = session_state.header.user_weight_kg / 10.0f; // Convert from 0.1kg units
+    float distance_km = distance_m / 1000.0f;
+    summary_msg.data.session_summary.calories_kcal = (uint16_t)(weight_kg * distance_km);
+    
+    // Average form score (use last calculated or default)
+    summary_msg.data.session_summary.avg_form_score = calculate_form_score();
+    
+    if (k_msgq_put(&bluetooth_msgq, &summary_msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send session summary to Bluetooth queue");
+    } else {
+        LOG_INF("Session summary sent to Bluetooth: distance=%dm, avg_pace=%ds/km, avg_cadence=%dspm",
+                distance_m, summary_msg.data.session_summary.avg_pace_sec_km,
+                summary_msg.data.session_summary.avg_cadence_spm);
+    }
 }
 
 // Calculate pace without GPS (sensor-only)

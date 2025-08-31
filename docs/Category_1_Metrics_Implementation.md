@@ -2,7 +2,7 @@
 
 **Version:** 1.0  
 **Date:** August 2025  
-**Scope:** Category 1 metrics from colleague's proposal  
+**Scope:** Category 1 metrics from    proposal  
 **Service:** Activity Metrics Service  
 **Service UUID:** `4fd5b690-9d89-4061-92aa-319ca786baae`
 

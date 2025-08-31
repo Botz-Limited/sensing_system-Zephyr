@@ -217,6 +217,27 @@ typedef struct {
     uint32_t timestamp_ms;      // When calculated
 } analytics_results_t;
 
+// Biomechanics extended data for BLE transmission
+typedef struct {
+    int8_t pronation_left;
+    int8_t pronation_right;
+    uint16_t loading_rate_left;
+    uint16_t loading_rate_right;
+    uint8_t arch_collapse_left;
+    uint8_t arch_collapse_right;
+} biomechanics_extended_msg_t;
+
+// Session summary data for BLE transmission
+typedef struct {
+    uint32_t total_distance_m;
+    uint16_t avg_pace_sec_km;
+    uint16_t avg_cadence_spm;
+    uint32_t total_steps;
+    uint16_t calories_kcal;
+    uint8_t avg_form_score;
+    uint32_t duration_sec;
+} session_summary_msg_t;
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -253,6 +274,8 @@ typedef struct
         analytics_results_t analytics_results;  // Analytics calculation results
         battery_level_msg_t battery_level;  // Battery level from secondary device
         d2d_metrics_packet_t d2d_metrics;  // D2D calculated metrics packet
+        biomechanics_extended_msg_t biomechanics_extended;  // Biomechanics extended data
+        session_summary_msg_t session_summary;  // Session summary data
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

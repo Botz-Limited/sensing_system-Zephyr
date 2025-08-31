@@ -85,6 +85,8 @@ typedef enum
     MSG_TYPE_D2D_METRICS_RECEIVED, // Notification that D2D metrics were received
     MSG_TYPE_ERASE_EXTERNAL_FLASH, // Command to erase external flash
     MSG_TYPE_EXTERNAL_FLASH_ERASE_COMPLETE, // Notification that flash erase is complete
+    MSG_TYPE_BIOMECHANICS_EXTENDED, // Biomechanics extended data for BLE
+    MSG_TYPE_SESSION_SUMMARY, // Session summary data for BLE
 } msg_type_t;
 
 // Define sender types
