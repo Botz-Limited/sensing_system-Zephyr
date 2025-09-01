@@ -29,7 +29,3 @@ west build --build-dir /home/ee/sensing_fw/build /home/ee/sensing_fw/ --board nr
 - **`-DCONFIG_PRIMARY_DEVICE=n`**: Configures the device as a non-primary (secondary) device
 
 
-3. **Permission Errors**: The build_flash.sh script may need execute permissions: `chmod +x ./tools/build_flash.sh`
-4. **FOTA Issues**: 
-   - For primary device: Ensure MCUmgr is properly configured and the device is bonded
-   - For secondary device: Verify the device is connected to the primary and the FOTA proxy service is running
