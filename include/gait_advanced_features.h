@@ -16,7 +16,7 @@ extern "C" {
 
 /* Define buffer size here to avoid dependency issues */
 #ifndef GAIT_BUFFER_SIZE_SAMPLES
-#define GAIT_BUFFER_SIZE_SAMPLES   600    /* 3 seconds @ 200Hz */
+#define GAIT_BUFFER_SIZE_SAMPLES   300    /* 3 seconds @ 100Hz */
 #endif
 
 /* Constants */
