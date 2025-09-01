@@ -387,9 +387,14 @@ static void process_gps_update_work_handler(struct k_work *work) {
 }
 
 // Calculate real-time metrics
+// NOTE: Event-based parameter calculation happens in sensor_data_events module:
+// - sensor_data_events calculates: cadence, GCT, stride length, pronation from gait events
+// - Those parameters are sent via D2D every 1-2 seconds (sensor_data_1hz_timer_callback)
+// - This function provides fallback calculation when event-based data unavailable
+// - Primary device: Calculates bilateral metrics from both feet
+// - Secondary device: Calculates left foot metrics only for D2D transmission
 static void calculate_realtime_metrics(void)
 {
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Copy sensor data with mutex protection
     sensor_data_consolidated_t local_data;
     k_mutex_lock(&sensor_data_mutex, K_FOREVER);
@@ -398,12 +403,82 @@ static void calculate_realtime_metrics(void)
     
     sensor_data_consolidated_t *data = &local_data;
     
-    // Update cadence tracker
-    cadence_tracker_update(&metrics_state.cadence_tracker, 
-                          data->step_count, 
-                          metrics_state.current_time_ms);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // PRIMARY DEVICE - Calculate bilateral metrics from both feet
     
-    float current_cadence = cadence_tracker_get_current(&metrics_state.cadence_tracker);
+    // Check if we have BHI360 data (step_count > 0 or changing)
+    static uint32_t last_step_count = 0;
+    bool has_bhi360 = (data->step_count > 0) || (data->step_count != last_step_count);
+    last_step_count = data->step_count;
+    
+    float current_cadence = 0;
+    
+    if (has_bhi360) {
+        // Use BHI360-based cadence calculation (original method)
+        cadence_tracker_update(&metrics_state.cadence_tracker,
+                              data->step_count,
+                              metrics_state.current_time_ms);
+        
+        current_cadence = cadence_tracker_get_current(&metrics_state.cadence_tracker);
+    } else {
+        // Fallback: Calculate cadence from foot contact events
+        static uint16_t last_left_contact_duration = 0;
+        static uint16_t last_right_contact_duration = 0;
+        static uint32_t last_step_time_ms = 0;
+        static uint32_t step_intervals[10] = {0};  // Buffer for averaging
+        static uint8_t step_interval_idx = 0;
+        static uint32_t step_count_fallback = 0;
+        
+        // Detect step from increasing contact duration (contact detected)
+        // The duration accumulates during contact, so we detect when it starts increasing
+        bool left_step = (data->left_contact_duration_ms > 100 &&
+                         data->left_contact_duration_ms > last_left_contact_duration);
+        bool right_step = (data->right_contact_duration_ms > 100 &&
+                          data->right_contact_duration_ms > last_right_contact_duration);
+        
+        if (left_step || right_step) {
+            step_count_fallback++;
+            
+            // Calculate interval since last step
+            if (last_step_time_ms > 0) {
+                uint32_t interval = metrics_state.current_time_ms - last_step_time_ms;
+                
+                // Store interval for averaging (filter outliers)
+                if (interval > 200 && interval < 2000) {  // 30-300 spm range
+                    step_intervals[step_interval_idx] = interval;
+                    step_interval_idx = (step_interval_idx + 1) % 10;
+                    
+                    // Calculate average interval
+                    uint32_t sum = 0;
+                    uint8_t count = 0;
+                    for (int i = 0; i < 10; i++) {
+                        if (step_intervals[i] > 0) {
+                            sum += step_intervals[i];
+                            count++;
+                        }
+                    }
+                    
+                    if (count > 0) {
+                        uint32_t avg_interval = sum / count;
+                        // Convert to steps per minute
+                        current_cadence = 60000.0f / avg_interval;
+                        LOG_DBG("Foot-based cadence: %.1f spm (interval: %u ms)",
+                                (double)current_cadence, avg_interval);
+                    }
+                }
+            }
+            last_step_time_ms = metrics_state.current_time_ms;
+        }
+        
+        // Update for next iteration
+        last_left_contact_duration = data->left_contact_duration_ms;
+        last_right_contact_duration = data->right_contact_duration_ms;
+        
+        // Also update the cadence tracker with our fallback count for consistency
+        cadence_tracker_update(&metrics_state.cadence_tracker,
+                              step_count_fallback,
+                              metrics_state.current_time_ms);
+    }
     
     // Update pace estimator with GPS if available
     if (metrics_state.last_gps_timestamp > 0 && (metrics_state.current_time_ms - metrics_state.last_gps_timestamp) < 5000) {
@@ -509,10 +584,36 @@ static void calculate_realtime_metrics(void)
         metrics_state.right_stride_duration
     );
 
-    // Estimate stride length (simple model: speed * stride time)
-    float speed_ms = 1000.0f / metrics_state.current_metrics.pace_sec_km; // m/s
-    metrics_state.left_stride_length = speed_ms * (metrics_state.left_stride_duration / 1000.0f);
-    metrics_state.right_stride_length = speed_ms * (metrics_state.right_stride_duration / 1000.0f);
+    // Estimate stride length - check if we have valid pace first
+    float speed_ms = 0;
+    if (metrics_state.current_metrics.pace_sec_km > 0) {
+        speed_ms = 1000.0f / metrics_state.current_metrics.pace_sec_km; // m/s
+    }
+    
+    // If no BHI360 or no valid speed, use empirical formula based on GCT
+    if (!has_bhi360 || speed_ms == 0) {
+        // Estimate stride length from ground contact time (empirical formula)
+        if (data->left_contact_duration_ms > 0 || data->right_contact_duration_ms > 0) {
+            uint16_t avg_gct = (data->left_contact_duration_ms + data->right_contact_duration_ms) / 2;
+            if (avg_gct > 0) {
+                // Empirical formula: stride_length ≈ 1.8 - (GCT_ms / 500)
+                // Adjusted for typical running (GCT 200-400ms -> stride 1.0-1.4m)
+                float estimated_stride = 1.8f - (avg_gct / 500.0f);
+                if (estimated_stride < 0.5f) estimated_stride = 0.5f;
+                if (estimated_stride > 2.0f) estimated_stride = 2.0f;
+                
+                metrics_state.left_stride_length = estimated_stride;
+                metrics_state.right_stride_length = estimated_stride;
+                
+                LOG_DBG("Estimated stride from GCT: %.2f m (GCT: %u ms)",
+                        estimated_stride, avg_gct);
+            }
+        }
+    } else {
+        // Original calculation when we have valid speed
+        metrics_state.left_stride_length = speed_ms * (metrics_state.left_stride_duration / 1000.0f);
+        metrics_state.right_stride_length = speed_ms * (metrics_state.right_stride_duration / 1000.0f);
+    }
     
     // Add to stride length buffer for averaging
     float current_stride_length = (metrics_state.left_stride_length + metrics_state.right_stride_length) / 2;
@@ -535,8 +636,8 @@ static void calculate_realtime_metrics(void)
         // Update metric with averaged value
         metrics_state.current_metrics.stride_length_cm = (uint16_t)(avg_stride_length * 100);
         
-        LOG_WRN("Stride length: current=%.2fm, avg=%.2fm (n=%d)",
-                current_stride_length, avg_stride_length, metrics_state.stride_length_count);
+      //  LOG_WRN("Stride length: current=%.2fm, avg=%.2fm (n=%d)",
+        //        current_stride_length, avg_stride_length, metrics_state.stride_length_count);
     } else {
         // No valid stride, use last known value
         metrics_state.current_metrics.stride_length_cm = metrics_state.current_metrics.stride_length_cm;
@@ -618,13 +719,49 @@ static void calculate_realtime_metrics(void)
     // Update current metrics structure
     metrics_state.current_metrics.timestamp_ms = metrics_state.current_time_ms;
     metrics_state.current_metrics.cadence_spm = (uint16_t)current_cadence;
-    metrics_state.current_metrics.pace_sec_km = (uint16_t)pace_estimator_get_pace(&metrics_state.pace_estimator);
+    
+    // Calculate pace - either from estimator or fallback from cadence
+    uint16_t estimated_pace = (uint16_t)pace_estimator_get_pace(&metrics_state.pace_estimator);
+    if (estimated_pace == 0 && current_cadence > 0) {
+        // Fallback: Calculate pace from cadence and estimated stride length
+        // Pace (s/km) = 1000 / (cadence * stride_length / 60)
+        // Using average stride length of 1.2m for moderate running
+        float stride_length_m = metrics_state.current_metrics.stride_length_cm / 100.0f;
+        if (stride_length_m == 0) stride_length_m = 1.2f; // Default 1.2m
+        float speed_mps = (current_cadence / 60.0f) * stride_length_m;
+        if (speed_mps > 0) {
+            estimated_pace = (uint16_t)(1000.0f / speed_mps);
+            LOG_DBG("Pace from cadence fallback: %d s/km (cadence: %.1f, stride: %.2fm)",
+                    estimated_pace, current_cadence, stride_length_m);
+        }
+    }
+    metrics_state.current_metrics.pace_sec_km = estimated_pace;
     metrics_state.current_metrics.distance_m = metrics_state.pace_estimator.distance_m;  // No cast needed, both are uint32_t now
     
     metrics_state.current_metrics.form_score = (uint8_t)metrics_state.form_score.overall_score;
     metrics_state.current_metrics.balance_lr_pct = balance;
-    metrics_state.current_metrics.ground_contact_ms = (avg_left_contact + avg_right_contact) / 2;
-    metrics_state.current_metrics.flight_time_ms = data->true_flight_time_ms;
+    
+    // Calculate ground contact time
+    if (avg_left_contact > 0 || avg_right_contact > 0) {
+        metrics_state.current_metrics.ground_contact_ms = (avg_left_contact + avg_right_contact) / 2;
+    } else if (current_cadence > 0) {
+        // Fallback: estimate from cadence if no contact data available
+        // Typical GCT is 30-40% of step cycle
+        uint32_t step_cycle_ms = 60000 / current_cadence;
+        metrics_state.current_metrics.ground_contact_ms = step_cycle_ms * 0.35f;
+    }
+    
+    // Calculate flight time
+    if (data->true_flight_time_ms > 0) {
+        metrics_state.current_metrics.flight_time_ms = data->true_flight_time_ms;
+    } else if (current_cadence > 0 && metrics_state.current_metrics.ground_contact_ms > 0) {
+        // Estimate flight time from cadence and GCT
+        uint32_t step_cycle_ms = 60000 / current_cadence;
+        uint32_t estimated_flight = step_cycle_ms - metrics_state.current_metrics.ground_contact_ms;
+        if (estimated_flight > 0 && estimated_flight < 1000) {
+            metrics_state.current_metrics.flight_time_ms = estimated_flight;
+        }
+    }
     
     // Calculate asymmetries
     metrics_state.current_metrics.contact_time_asymmetry = 
@@ -687,11 +824,16 @@ static void calculate_realtime_metrics(void)
     
     // Log periodically
     if (metrics_state.metrics_count % 50 == 0) {
-       // LOG_INF("Metrics: Cadence=%d spm, Pace=%d s/km, Form=%d%%, Balance=%d%%",
-        //        metrics_state.current_metrics.cadence_spm,
-         //       metrics_state.current_metrics.pace_sec_km,
-          //      metrics_state.current_metrics.form_score,
-           //     balance);
+        LOG_INF("Metrics: Cadence=%d spm, Pace=%d s/km, Form=%d%%, Balance=%d%%",
+                metrics_state.current_metrics.cadence_spm,
+                metrics_state.current_metrics.pace_sec_km,
+                metrics_state.current_metrics.form_score,
+                balance);
+        
+        // Also log if using fallback mode
+        if (!has_bhi360) {
+            LOG_INF("  Using foot-sensor fallback mode (no BHI360 data)");
+        }
     }
     
     // Send to analytics thread with actual metrics data
@@ -707,10 +849,179 @@ static void calculate_realtime_metrics(void)
     
     // No longer need periodic reset - overflow protection handles it
     // Removed the periodic reset code that was here
-#else
-    // On secondary device, only process local data if needed
-    // For now, skip bilateral calculations
-#endif
+    
+#else  // SECONDARY DEVICE
+    
+    // Secondary device calculates metrics for LEFT foot only
+    // These metrics will be sent via D2D to primary for bilateral calculations
+    
+    // Check if we have BHI360 data (step_count > 0 or changing)
+    static uint32_t last_step_count = 0;
+    bool has_bhi360 = (data->step_count > 0) || (data->step_count != last_step_count);
+    last_step_count = data->step_count;
+    
+    float current_cadence = 0;
+    
+    if (has_bhi360) {
+        // Use BHI360-based cadence calculation (original method)
+        cadence_tracker_update(&metrics_state.cadence_tracker,
+                              data->step_count,
+                              metrics_state.current_time_ms);
+        
+        current_cadence = cadence_tracker_get_current(&metrics_state.cadence_tracker);
+    } else {
+        // Fallback: Calculate cadence from foot contact events (LEFT FOOT ONLY)
+        static uint16_t last_left_contact_duration = 0;
+        static uint32_t last_step_time_ms = 0;
+        static uint32_t step_intervals[10] = {0};  // Buffer for averaging
+        static uint8_t step_interval_idx = 0;
+        static uint32_t step_count_fallback = 0;
+        
+        // Detect step from increasing contact duration (LEFT foot only for secondary)
+        bool left_step = (data->left_contact_duration_ms > 100 &&
+                         data->left_contact_duration_ms > last_left_contact_duration);
+        
+        if (left_step) {
+            step_count_fallback++;
+            
+            // Calculate interval since last step
+            if (last_step_time_ms > 0) {
+                uint32_t interval = metrics_state.current_time_ms - last_step_time_ms;
+                
+                // Store interval for averaging (filter outliers)
+                if (interval > 200 && interval < 2000) {  // 30-300 spm range
+                    step_intervals[step_interval_idx] = interval;
+                    step_interval_idx = (step_interval_idx + 1) % 10;
+                    
+                    // Calculate average interval
+                    uint32_t sum = 0;
+                    uint8_t count = 0;
+                    for (int i = 0; i < 10; i++) {
+                        if (step_intervals[i] > 0) {
+                            sum += step_intervals[i];
+                            count++;
+                        }
+                    }
+                    
+                    if (count > 0) {
+                        uint32_t avg_interval = sum / count;
+                        // Convert to steps per minute (multiply by 2 for bilateral cadence)
+                        current_cadence = (60000.0f / avg_interval) * 2;  // x2 because we only see left steps
+                        LOG_DBG("Secondary foot-based cadence: %.1f spm (interval: %u ms)",
+                                (double)current_cadence, avg_interval);
+                    }
+                }
+            }
+            last_step_time_ms = metrics_state.current_time_ms;
+        }
+        
+        // Update for next iteration
+        last_left_contact_duration = data->left_contact_duration_ms;
+        
+        // Also update the cadence tracker with our fallback count for consistency
+        cadence_tracker_update(&metrics_state.cadence_tracker,
+                              step_count_fallback * 2,  // x2 for bilateral equivalent
+                              metrics_state.current_time_ms);
+    }
+    
+    // Update pace estimator (simplified for secondary)
+    pace_estimator_update(&metrics_state.pace_estimator, current_cadence, data->delta_time_ms);
+    
+    // Track LEFT foot contact times only
+    if (data->left_contact_duration_ms > 0) {
+        metrics_state.left_contact_sum_ms += data->left_contact_duration_ms;
+        metrics_state.contact_count++;
+        
+        // Check for overflow and reset with running average
+        if (metrics_state.contact_count >= 1000) {
+            metrics_state.avg_left_contact_ms = metrics_state.left_contact_sum_ms / metrics_state.contact_count;
+            metrics_state.left_contact_sum_ms = metrics_state.avg_left_contact_ms * 100;
+            metrics_state.contact_count = 100;
+            LOG_WRN("Secondary: Contact time accumulator reset");
+        }
+    }
+    
+    // Calculate average contact time for left foot
+    uint16_t avg_left_contact = 0;
+    if (metrics_state.contact_count > 0) {
+        avg_left_contact = metrics_state.left_contact_sum_ms / metrics_state.contact_count;
+    }
+    
+    // Estimate stride length for left foot
+    if (!has_bhi360 || metrics_state.current_metrics.pace_sec_km == 0) {
+        // Estimate stride length from ground contact time
+        if (data->left_contact_duration_ms > 0) {
+            float estimated_stride = 1.8f - (data->left_contact_duration_ms / 500.0f);
+            if (estimated_stride < 0.5f) estimated_stride = 0.5f;
+            if (estimated_stride > 2.0f) estimated_stride = 2.0f;
+            
+            metrics_state.left_stride_length = estimated_stride;
+            LOG_DBG("Secondary estimated stride from GCT: %.2f m", estimated_stride);
+        }
+    }
+    
+    // Update current metrics structure (LEFT foot data only)
+    metrics_state.current_metrics.timestamp_ms = metrics_state.current_time_ms;
+    metrics_state.current_metrics.cadence_spm = (uint16_t)current_cadence;
+    metrics_state.current_metrics.pace_sec_km = (uint16_t)pace_estimator_get_pace(&metrics_state.pace_estimator);
+    
+    // Ground contact time (left foot only)
+    if (avg_left_contact > 0) {
+        metrics_state.current_metrics.ground_contact_ms = avg_left_contact;
+    } else if (current_cadence > 0) {
+        // Fallback: estimate from cadence
+        uint32_t step_cycle_ms = 60000 / current_cadence;
+        metrics_state.current_metrics.ground_contact_ms = step_cycle_ms * 0.35f;
+    }
+    
+    // Flight time estimation
+    if (current_cadence > 0 && metrics_state.current_metrics.ground_contact_ms > 0) {
+        uint32_t step_cycle_ms = 60000 / current_cadence;
+        uint32_t estimated_flight = step_cycle_ms - metrics_state.current_metrics.ground_contact_ms;
+        if (estimated_flight > 0 && estimated_flight < 1000) {
+            metrics_state.current_metrics.flight_time_ms = estimated_flight;
+        }
+    }
+    
+    // Set strike pattern for left foot
+    metrics_state.current_metrics.left_strike_pattern = data->left_contact_phase == 1 ? 0 :
+                                                       (data->left_fore_pct > 50 ? 2 : 1);
+    
+    // Set pronation for left foot
+    metrics_state.current_metrics.avg_pronation_deg = data->left_pronation_deg;
+    
+    // Simple form score based on left foot only
+    metrics_state.current_metrics.form_score = 85;  // Default reasonable value
+    
+    // No bilateral metrics on secondary (balance, asymmetry set to neutral)
+    metrics_state.current_metrics.balance_lr_pct = 50;  // Neutral balance
+    metrics_state.current_metrics.contact_time_asymmetry = 0;
+    metrics_state.current_metrics.force_asymmetry = 0;
+    metrics_state.current_metrics.pronation_asymmetry = 0;
+    
+    // Log periodically
+    if (metrics_state.metrics_count % 50 == 0) {
+        LOG_INF("Secondary Metrics: Cadence=%d spm, GCT=%d ms, Pace=%d s/km",
+                metrics_state.current_metrics.cadence_spm,
+                metrics_state.current_metrics.ground_contact_ms,
+                metrics_state.current_metrics.pace_sec_km);
+        
+        if (!has_bhi360) {
+            LOG_INF("  Secondary using foot-sensor fallback mode (no BHI360)");
+        }
+    }
+    
+    // Send metrics to analytics/data modules (these will be transmitted via D2D)
+    generic_message_t out_msg = {};
+    out_msg.sender = SENDER_REALTIME_METRICS;
+    out_msg.type = MSG_TYPE_REALTIME_METRICS;
+    
+    memcpy(&out_msg.data.realtime_metrics, &metrics_state.current_metrics,
+           sizeof(realtime_metrics_t));
+    
+    k_msgq_put(&realtime_queue, &out_msg, K_NO_WAIT);
+    
+#endif  // CONFIG_PRIMARY_DEVICE
 }
 
 // Send BLE update
