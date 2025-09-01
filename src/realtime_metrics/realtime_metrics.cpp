@@ -265,6 +265,18 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                     k_mutex_unlock(&sensor_data_mutex);
                     k_work_submit_to_queue(&realtime_metrics_work_q, &process_gps_update_work);
                     break;
+
+                case MSG_TYPE_REALTIME_METRICS:
+                    // Directly use the calculated bilateral metrics from gait events
+                    LOG_INF("Received bilateral metrics from gait events system");
+                    // Copy the metrics and update timestamp
+                    memcpy(&metrics_state.current_metrics, &msg.data.realtime_metrics, sizeof(realtime_metrics_t));
+                    metrics_state.current_metrics.timestamp_ms = k_uptime_get_32();
+                    metrics_state.metrics_count++;
+                    
+                    // Send the metrics immediately since they're already calculated
+                    send_ble_update();
+                    break;
                     
                 default:
                     LOG_WRN("Received unsupported message type %d", msg.type);

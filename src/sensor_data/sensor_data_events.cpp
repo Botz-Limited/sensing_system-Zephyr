@@ -255,7 +255,7 @@ void sensor_data_1hz_timer_callback(void)
     int buffer_usage_percent = (event_detector.buffer_count * 100) / GAIT_BUFFER_SIZE_SAMPLES;
     adjust_flow_control_mode(buffer_usage_percent);
     
-    // Monitor buffer health every 10 callbacks (20 seconds at 0.5Hz)
+    // Monitor buffer health every 10 callbacks (10 seconds at 1Hz)
     if (callback_count % 10 == 0) {
         LOG_DBG("Gait buffer health check #%u: count=%d, full=%d, waiting=%d",
                 callback_count,
@@ -282,23 +282,42 @@ void sensor_data_1hz_timer_callback(void)
         last_buffer_count = event_detector.buffer_count;
     }
     
-    // Emergency buffer management - prevent overflow
-    // Skip this if we're not actively processing to avoid spurious warnings
-    if (event_detector.buffer_full || event_detector.buffer_count > (GAIT_BUFFER_SIZE_SAMPLES * 3 / 4)) {
-        LOG_WRN("Buffer nearing capacity (%d/%d) after safety check, clearing oldest 25%%",
+    // Process buffer more aggressively to prevent overflow
+    // If buffer is more than 50% full, force processing
+    int metrics_count = 0;
+    if (event_detector.buffer_count > GAIT_BUFFER_SIZE_SAMPLES / 2) {
+        LOG_DBG("Buffer >50%% full (%d/%d), forcing processing",
                 event_detector.buffer_count, GAIT_BUFFER_SIZE_SAMPLES);
-        int samples_to_clear = GAIT_BUFFER_SIZE_SAMPLES / 4;
+        // Process immediately instead of waiting
+        metrics_count = gait_events_process(&event_detector);
+    }
+    
+    // Only clear buffer if absolutely full AND no processing is happening
+    // Don't destroy data that hasn't been processed yet
+    if (event_detector.buffer_full) {
+        LOG_WRN("Buffer completely full (%d/%d), clearing oldest 10%% for emergency recovery",
+                event_detector.buffer_count, GAIT_BUFFER_SIZE_SAMPLES);
+        int samples_to_clear = GAIT_BUFFER_SIZE_SAMPLES / 10;  // Only 10%, not 30%
         event_detector.read_index = (event_detector.read_index + samples_to_clear) % GAIT_BUFFER_SIZE_SAMPLES;
-        event_detector.buffer_count = (event_detector.buffer_count > samples_to_clear) ?
-                                      event_detector.buffer_count - samples_to_clear : 0;
+        event_detector.buffer_count = MAX(0, event_detector.buffer_count - samples_to_clear);
         event_detector.buffer_full = false;
     }
     
-    // Process any pending data
-    int metrics_count = gait_events_process(&event_detector);
+    // Process any pending data (reuse metrics_count if already processed above)
+    if (metrics_count == 0) {
+        metrics_count = gait_events_process(&event_detector);
+    }
     
     if (metrics_count > 0) {
         LOG_DBG("1Hz timer: processed %d metrics", metrics_count);
+        LOG_DBG("Buffer state after processing: count=%d, read=%d, write=%d",
+                event_detector.buffer_count, event_detector.read_index, event_detector.write_index);
+        
+        // After processing, clear the processed data properly
+        // The gait_events_process should have consumed data, update buffer count
+        // Don't aggressively trim to a fixed size - let natural processing flow work
+        LOG_DBG("Post-process buffer state: count=%d, allowing natural flow",
+                event_detector.buffer_count);
         
         // Get metrics and prepare for transmission
         gait_metrics_t metrics[GAIT_MAX_EVENTS_PER_CHUNK];
@@ -407,16 +426,27 @@ void sensor_data_1hz_timer_callback(void)
             
             // Send d2d_packet via D2D interface
             #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-            // Only secondary devices send metrics to primary
-            extern int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics);
-            int err = d2d_tx_notify_metrics(&d2d_packet);
-            if (err == 0) {
-                LOG_INF("D2D metrics packet sent successfully with %d valid metrics", valid_count);
+            // Only secondary devices send metrics to primary every 1 seconds (every other callback)
+            if (callback_count % 1 == 0) {
+                LOG_INF("SECONDARY: Sending D2D metrics every 2 seconds (callback #%u)", callback_count);
+                LOG_INF("  GCT=%.1f ms, Cadence=%.1f spm, Stride=%.2f cm",
+                        (double)d2d_packet.metrics[IDX_GCT],
+                        (double)d2d_packet.metrics[IDX_CADENCE],
+                        (double)d2d_packet.metrics[IDX_STRIDE_LENGTH]);
+                LOG_INF("  Valid metrics count: %d", valid_count);
+                
+                extern int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics);
+                int err = d2d_tx_notify_metrics(&d2d_packet);
+                if (err == 0) {
+                    LOG_INF("SECONDARY: D2D metrics packet sent successfully (seq=%u)", d2d_packet.sequence_num);
+                } else {
+                    LOG_ERR("SECONDARY: Failed to send D2D metrics packet: %d", err);
+                }
             } else {
-                LOG_ERR("Failed to send D2D metrics packet: %d", err);
+                LOG_DBG("SECONDARY: Skipping D2D transmission (callback #%u, sending every 2 seconds)", callback_count);
             }
             #else
-            LOG_DBG("Primary device - not sending D2D metrics (would have %d valid metrics)", valid_count);
+            LOG_DBG("PRIMARY: Stored metrics locally - waiting for secondary D2D data (%d valid metrics)", valid_count);
             #endif
         }
         
@@ -424,7 +454,7 @@ void sensor_data_1hz_timer_callback(void)
         gait_events_clear_metrics(&event_detector);
     }
     
-    // Memory health check every 60 callbacks (2 minutes at 0.5Hz)
+    // Memory health check every 60 callbacks (1 minute at 1Hz)
     if (callback_count % 60 == 0) {
         // Report flow control statistics
         flow_control_mode_t current_mode = (flow_control_mode_t)atomic_get(&flow_control.current_mode);
@@ -581,7 +611,7 @@ static void calculate_bilateral_metrics(void)
     
     // Send bilateral metrics to realtime_metrics module for aggregation and forwarding
     // The realtime_metrics module will then send to both bluetooth and data modules
-    extern struct k_msgq realtime_queue;
+    extern struct k_msgq sensor_data_queue;  // Send to realtime_metrics module
     generic_message_t metrics_msg;
     metrics_msg.sender = SENDER_SENSOR_DATA;
     metrics_msg.type = MSG_TYPE_REALTIME_METRICS;
@@ -708,7 +738,7 @@ static void calculate_bilateral_metrics(void)
     }
     
     // Send to realtime_metrics module which will forward to bluetooth and data modules
-    if (k_msgq_put(&realtime_queue, &metrics_msg, K_NO_WAIT) != 0) {
+    if (k_msgq_put(&sensor_data_queue, &metrics_msg, K_NO_WAIT) != 0) {
         LOG_WRN("Failed to send bilateral metrics to realtime_metrics module");
     } else {
         LOG_INF("Bilateral metrics sent to realtime_metrics module for distribution");
@@ -726,7 +756,7 @@ extern "C" void sensor_data_process_received_metrics(const d2d_metrics_packet_t 
         return;
     }
     
-    LOG_DBG("Processing received D2D metrics: seq=%u, timestamp=%u",
+    LOG_INF("PRIMARY: Received D2D metrics from secondary: seq=%u, timestamp=%u",
             metrics->sequence_num, metrics->timestamp);
     
     // Synchronize timestamps
@@ -770,7 +800,10 @@ extern "C" void sensor_data_process_received_metrics(const d2d_metrics_packet_t 
     #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // On primary device, calculate bilateral metrics if we have both sides
     if (bilateral_data.primary_valid) {
+        LOG_INF("PRIMARY: Have both primary and secondary data - calculating bilateral metrics");
         calculate_bilateral_metrics();
+    } else {
+        LOG_WRN("PRIMARY: Received secondary data but no primary data available yet");
     }
     #endif
     

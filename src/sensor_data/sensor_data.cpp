@@ -910,10 +910,13 @@ static void periodic_sample_work_handler(struct k_work *work) {
   }
   
   // Trigger timer callback for event-based metrics transmission
-  // Process every 2 seconds to allow buffer to accumulate enough data
+  // Process every 1 second for both primary and secondary devices
   static uint32_t last_metrics_callback = 0;
   uint32_t current = k_uptime_get_32();
-  if (current - last_metrics_callback >= 2000) {  // 0.5Hz to prevent buffer overflow
+  
+  // Both primary and secondary process at 1Hz
+  // Secondary needs to process to calculate and send D2D metrics
+  if (current - last_metrics_callback >= 1000) {  // 1Hz for all devices
     // Only call timer callback when processing is active
     if (atomic_get(&processing_active) == 1) {
       sensor_data_1hz_timer_callback();

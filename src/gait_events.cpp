@@ -132,7 +132,22 @@ static float calculate_adaptive_threshold(const foot_samples_t *buffer,
     float low_val = (float)total_pressures[low_idx];
     float high_val = (float)total_pressures[high_idx];
     
-    return low_val + (high_val - low_val) * 0.5f;
+    float threshold = low_val + (high_val - low_val) * 0.5f;
+    
+    /* Sanity check for 14-bit ADC with 8 channels */
+    /* Maximum reasonable threshold would be 8 sensors * 11000 = 88000 */
+    /* But typical walking would have much lower values */
+    if (threshold > 20000) {
+        LOG_WRN("Adaptive threshold %.1f seems too high, clamping to 5000", threshold);
+        threshold = 5000.0f;  /* Reasonable threshold for walking */
+    }
+    
+    /* Also ensure minimum threshold */
+    if (threshold < GAIT_PRESSURE_THRESHOLD) {
+        threshold = GAIT_PRESSURE_THRESHOLD;  /* Use default minimum */
+    }
+    
+    return threshold;
 }
 
 /**
@@ -144,8 +159,8 @@ void gait_events_add_data(gait_event_detector_t *detector,
                           const imu_data_t *imu_data,
                           float timestamp)
 {
-    if (!detector || !foot_data || !imu_data) {
-        return;
+    if (!detector || !foot_data) {
+        return;  // Only foot_data is required, IMU is optional
     }
     
     int idx = detector->write_index;
@@ -158,16 +173,24 @@ void gait_events_add_data(gait_event_detector_t *detector,
     
     /* Copy data to buffer with bounds checking */
     memcpy(&detector->foot_buffer[idx], foot_data, sizeof(foot_samples_t));
-    memcpy(&detector->imu_buffer[idx], imu_data, sizeof(imu_data_t));
-    detector->timestamps[idx] = timestamp;
     
-    /* Update velocity integration if we have previous data */
-    if (detector->buffer_count > 0) {
-        float dt = timestamp - detector->last_timestamp;
-        if (dt > 0 && dt < 0.1f) { /* Sanity check on dt */
-            update_velocity_integration(detector, imu_data, dt);
+    /* Only copy IMU data if available */
+    if (imu_data) {
+        memcpy(&detector->imu_buffer[idx], imu_data, sizeof(imu_data_t));
+        
+        /* Update velocity integration if we have previous data and IMU */
+        if (detector->buffer_count > 0) {
+            float dt = timestamp - detector->last_timestamp;
+            if (dt > 0 && dt < 0.1f) { /* Sanity check on dt */
+                update_velocity_integration(detector, imu_data, dt);
+            }
         }
+    } else {
+        /* No IMU data - zero out the buffer entry */
+        memset(&detector->imu_buffer[idx], 0, sizeof(imu_data_t));
     }
+    
+    detector->timestamps[idx] = timestamp;
     
     /* Store current velocity and position */
     detector->velocities[idx] = detector->current_velocity;
@@ -461,11 +484,32 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
     int samples_to_process = MIN(detector->buffer_count, GAIT_BUFFER_SIZE_SAMPLES);
     
     /* ADVANCED: Build motion mask to reduce false positives */
+    /* Check if we actually have IMU data before using advanced features */
+    bool has_imu_data = false;
     if (detector->use_advanced_features) {
-        build_motion_mask(&detector->motion_mask,
-                         detector->imu_buffer,
-                         samples_to_process,
-                         detector->motion_mask_buffer);
+        /* Check if IMU buffer has any non-zero data */
+        for (int i = 0; i < MIN(10, samples_to_process); i++) {
+            int idx = (start_idx + i) % GAIT_BUFFER_SIZE_SAMPLES;
+            imu_data_t *imu = &detector->imu_buffer[idx];
+            if (imu->accel_x != 0 || imu->accel_y != 0 || imu->accel_z != 0 ||
+                imu->gyro_x != 0 || imu->gyro_y != 0 || imu->gyro_z != 0) {
+                has_imu_data = true;
+                break;
+            }
+        }
+        
+        if (has_imu_data) {
+            build_motion_mask(&detector->motion_mask,
+                             detector->imu_buffer,
+                             samples_to_process,
+                             detector->motion_mask_buffer);
+        } else {
+            /* No IMU data - set all motion mask to true (allow all samples) */
+            for (int i = 0; i < samples_to_process; i++) {
+                detector->motion_mask_buffer[i] = true;
+            }
+            LOG_DBG("No IMU data detected - motion mask disabled");
+        }
         
         /* Fill gaps in pressure signal using Kalman filter */
         for (int i = 0; i < samples_to_process; i++) {
@@ -489,6 +533,13 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
     float adaptive_threshold = calculate_adaptive_threshold(detector->foot_buffer,
                                                            start_idx,
                                                            samples_to_process);
+    
+    /* Log threshold for debugging */
+    static int threshold_log_counter = 0;
+    if (++threshold_log_counter % 10 == 0) {  // Log every 10th call
+        LOG_INF("Adaptive threshold: %.1f (processing %d samples)", 
+                adaptive_threshold, samples_to_process);
+    }
     
     /* Timing constraints in samples */
     int min_stride_samples = (int)(GAIT_MIN_STRIDE_TIME * detector->sampling_rate);
@@ -962,10 +1013,12 @@ int gait_events_process(gait_event_detector_t *detector)
         LOG_DBG("No events detected in current chunk");
         
         /* Move read index forward to process next chunk */
-        int samples_to_skip = detector->sampling_rate / 3; /* Keep 1/3 second overlap */
+        /* Clear more aggressively when no events detected to prevent overflow */
+        int samples_to_skip = detector->sampling_rate / 2; /* Clear half second of data */
         if (samples_to_skip > 0 && samples_to_skip < detector->buffer_count) {
             detector->read_index = (detector->read_index + samples_to_skip) % GAIT_BUFFER_SIZE_SAMPLES;
             detector->buffer_count -= samples_to_skip;
+            LOG_DBG("No events: cleared %d samples, %d remain", samples_to_skip, detector->buffer_count);
         }
         return 0;
     }
@@ -981,19 +1034,40 @@ int gait_events_process(gait_event_detector_t *detector)
     /* Step 3: Calculate metrics for each stride */
     calculate_stride_metrics(detector);
     
-    /* Step 4: Update read index to keep overlap (similar to    implementation) */
+    /* Step 4: Update read index to keep minimal overlap for continuous processing */
     if (detector->stride_count > 0) {
-        /* Move read index past the last processed stride, keeping 1/3 second overlap */
+        /* Move read index past the last processed stride, keeping only 0.2 second overlap */
+        /* This prevents buffer overflow while maintaining continuity */
         stride_segment_t *last_segment = &detector->stride_segments[detector->stride_count - 1];
-        int samples_to_skip = last_segment->next_ic_index - (int)(detector->sampling_rate / 3);
+        int overlap_samples = (int)(detector->sampling_rate * 0.2f);  /* 20 samples at 100Hz */
+        int samples_to_skip = last_segment->next_ic_index - overlap_samples;
+        
+        /* Ensure we clear at least 50% of processed data to prevent overflow */
+        int min_clear = last_segment->next_ic_index / 2;
+        if (samples_to_skip < min_clear) {
+            samples_to_skip = min_clear;
+        }
+        
         if (samples_to_skip > 0 && samples_to_skip < detector->buffer_count) {
             detector->read_index = (detector->read_index + samples_to_skip) % GAIT_BUFFER_SIZE_SAMPLES;
             detector->buffer_count -= samples_to_skip;
+            
+            LOG_DBG("Cleared %d samples after processing, %d remain in buffer (overlap: %d)",
+                    samples_to_skip, detector->buffer_count, overlap_samples);
             
             /* Reset velocity/position at stride boundary for drift correction */
             detector->current_position.x = 0;
             detector->current_position.y = 0;
             detector->current_position.z = 0;
+        }
+    } else {
+        /* No complete strides found - clear some buffer to prevent overflow */
+        /* But be more conservative to avoid losing potential events */
+        int samples_to_clear = detector->sampling_rate / 4;  /* Clear 0.25 seconds worth */
+        if (samples_to_clear > 0 && samples_to_clear < detector->buffer_count) {
+            detector->read_index = (detector->read_index + samples_to_clear) % GAIT_BUFFER_SIZE_SAMPLES;
+            detector->buffer_count -= samples_to_clear;
+            LOG_DBG("No strides: cleared %d samples, %d remain", samples_to_clear, detector->buffer_count);
         }
     }
     

@@ -175,14 +175,84 @@ static void process_adc_samples(int16_t *raw_data)
             }
 
 #if IS_ENABLED(CONFIG_FOOT_SIMULATION)
-            // Get current uptime and calculate toggle state based on 800ms cycle (400ms high, 400ms low)
+            // Simulate realistic gait pattern with proper 14-bit ADC values (0-16383)
+            // Gait cycle: ~600ms total (300ms stance, 300ms swing) for ~100 spm cadence
+            // Using high pressure values (up to 8000) to ensure clear event detection
             int64_t current_time = k_uptime_get();
-            bool is_high = (current_time / 400) % 2 == 0;
-
+            int cycle_time = current_time % 600;  // 600ms gait cycle for ~100 spm
+            
+            // Create realistic pressure pattern with 14-bit ADC range
+            // Peak pressure around 8000 (well above any threshold)
+            int16_t pressure_value = 0;
+            
+            if (cycle_time < 300) {
+                // Stance phase (0-300ms) - foot is on ground
+                if (cycle_time < 50) {
+                    // Initial contact/loading (0-50ms) - heel strike
+                    // Sharp ramp up pressure from 0 to 8000
+                    pressure_value = (cycle_time * 160);  // 0 to 8000 in 50ms
+                    // Heel sensors get most pressure during heel strike
+                    msg.data.foot_samples.values[0] = pressure_value;        // Heel lateral
+                    msg.data.foot_samples.values[1] = pressure_value;        // Heel medial
+                    msg.data.foot_samples.values[2] = pressure_value / 4;    // Midfoot lateral
+                    msg.data.foot_samples.values[3] = pressure_value / 4;    // Midfoot medial
+                    msg.data.foot_samples.values[4] = 0;                     // Forefoot lateral
+                    msg.data.foot_samples.values[5] = 0;                     // Forefoot medial
+                    msg.data.foot_samples.values[6] = 0;                     // Toe lateral
+                    msg.data.foot_samples.values[7] = 0;                     // Toe medial
+                } else if (cycle_time < 150) {
+                    // Midstance (50-150ms) - full foot contact, weight bearing
+                    // All sensors have significant pressure
+                    msg.data.foot_samples.values[0] = 6000;   // Heel lateral
+                    msg.data.foot_samples.values[1] = 6000;   // Heel medial
+                    msg.data.foot_samples.values[2] = 8000;   // Midfoot lateral (max pressure)
+                    msg.data.foot_samples.values[3] = 8000;   // Midfoot medial
+                    msg.data.foot_samples.values[4] = 7000;   // Forefoot lateral
+                    msg.data.foot_samples.values[5] = 7000;   // Forefoot medial
+                    msg.data.foot_samples.values[6] = 4000;   // Toe lateral
+                    msg.data.foot_samples.values[7] = 4000;   // Toe medial
+                } else if (cycle_time < 250) {
+                    // Push-off (150-250ms) - weight shifts to forefoot/toes
+                    // Heel lifts off, pressure on forefoot and toes
+                    msg.data.foot_samples.values[0] = 0;      // Heel lateral (off ground)
+                    msg.data.foot_samples.values[1] = 0;      // Heel medial
+                    msg.data.foot_samples.values[2] = 2000;   // Midfoot lateral
+                    msg.data.foot_samples.values[3] = 2000;   // Midfoot medial
+                    msg.data.foot_samples.values[4] = 8000;   // Forefoot lateral (max pressure)
+                    msg.data.foot_samples.values[5] = 8000;   // Forefoot medial
+                    msg.data.foot_samples.values[6] = 7500;   // Toe lateral
+                    msg.data.foot_samples.values[7] = 7500;   // Toe medial
+                } else {
+                    // Toe-off transition (250-300ms) - leaving ground
+                    // Pressure rapidly decreasing as foot leaves ground
+                    int16_t fade_factor = (300 - cycle_time) * 150;  // Ramp down from 7500 to 0
+                    msg.data.foot_samples.values[0] = 0;                    // Heel lateral
+                    msg.data.foot_samples.values[1] = 0;                    // Heel medial
+                    msg.data.foot_samples.values[2] = 0;                    // Midfoot lateral
+                    msg.data.foot_samples.values[3] = 0;                    // Midfoot medial
+                    msg.data.foot_samples.values[4] = fade_factor / 3;      // Forefoot lateral
+                    msg.data.foot_samples.values[5] = fade_factor / 3;      // Forefoot medial
+                    msg.data.foot_samples.values[6] = fade_factor;          // Toe lateral (last to leave)
+                    msg.data.foot_samples.values[7] = fade_factor;          // Toe medial
+                }
+            } else {
+                // Swing phase (300-600ms) - foot is in air, no ground contact
+                // All pressure sensors read 0 with minimal noise
+                for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+                {
+                    // Add small random noise for realism (0-50 range)
+                   // msg.data.foot_samples.values[i] = (rand() % 51);  // 0-50 noise
+                }
+            }
+            
+            // Ensure all values are within 14-bit ADC range (0-16383)
             for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
             {
-                int16_t calibrated_value = is_high ? 11000 : 0;
-                msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
+                if (msg.data.foot_samples.values[i] < 0) {
+                    msg.data.foot_samples.values[i] = 0;
+                } else if (msg.data.foot_samples.values[i] > 16383) {
+                    msg.data.foot_samples.values[i] = 16383;
+                }
             }
 #endif
 
