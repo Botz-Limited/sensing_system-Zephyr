@@ -494,6 +494,30 @@ static void process_sensor_data_work_handler(struct k_work *work)
                                                     .efficiency_score = metrics->efficiency_score,
                                                     .alerts = metrics->alerts};
 
+        LOG_WRN("activity_packet_counter = %u\n"
+                "timestamp = %u\n"
+                "cadence = %u\n"
+                "pace = %u\n"
+                "form_score = %u\n"
+                "balance = %d\n"
+                "ground_contact = %u\n"
+                "flight_time = %u\n"
+                "contact_time_asymmetry = %d\n"
+                "force_asymmetry = %d\n"
+                "pronation_asymmetry = %d\n"
+                "left_strike_pattern = %u\n"
+                "right_strike_pattern = %u\n"
+                "avg_pronation_deg = %d\n"
+                "vertical_ratio = %u\n"
+                "efficiency_score = %u\n"
+                "alerts = 0x%02X",
+                binary_metrics.packet_number, binary_metrics.timestamp_ms, binary_metrics.cadence_spm,
+                binary_metrics.pace_sec_km, binary_metrics.form_score, binary_metrics.balance_lr_pct,
+                binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms, binary_metrics.contact_time_asymmetry,
+                binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry, binary_metrics.left_strike_pattern,
+                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio,
+                binary_metrics.efficiency_score, binary_metrics.alerts);
+
         // Add to batch buffer if there's space
         if (activity_batch_bytes + sizeof(binary_metrics) <= sizeof(activity_batch_buffer))
         {

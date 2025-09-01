@@ -174,12 +174,24 @@ static void process_adc_samples(int16_t *raw_data)
                 msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
             }
 
-            if(atomic_get(&logging_active) == 1)
-            // Always send to sensor_data module at 100Hz only if activity started
-            if (k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT) != 0)
+#if IS_ENABLED(CONFIG_FOOT_SIMULATION)
+            // Get current uptime and calculate toggle state based on 800ms cycle (400ms high, 400ms low)
+            int64_t current_time = k_uptime_get();
+            bool is_high = (current_time / 400) % 2 == 0;
+
+            for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
             {
-                LOG_WRN("Failed to send foot sensor data to sensor_data module");
+                int16_t calibrated_value = is_high ? 11000 : 0;
+                msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
             }
+#endif
+
+            if (atomic_get(&logging_active) == 1)
+                // Always send to sensor_data module at 100Hz only if activity started
+                if (k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT) != 0)
+                {
+                    LOG_WRN("Failed to send foot sensor data to sensor_data module");
+                }
 
             // Send to Bluetooth at 5Hz (every 20th sample)
             if (++ble_sample_counter >= BLUETOOTH_RATE_DIVIDER)
@@ -253,12 +265,12 @@ static void foot_sensor_thread(void *p1, void *p2, void *p3)
         if (atomic_get(&logging_active) == 1)
         {
             static uint32_t debug_counter = 0;
-        //    if (++debug_counter % 100 == 0)
-         //   { // Every second at 100Hz
-              //  LOG_INF("ADC values during activity: %d %d %d %d | %d %d %d %d",
-                //        adc_buffer[0], adc_buffer[1], adc_buffer[2], adc_buffer[3],
-                  //      adc_buffer[4], adc_buffer[5], adc_buffer[6], adc_buffer[7]);
-           // }
+            //    if (++debug_counter % 100 == 0)
+            //   { // Every second at 100Hz
+            //  LOG_INF("ADC values during activity: %d %d %d %d | %d %d %d %d",
+            //        adc_buffer[0], adc_buffer[1], adc_buffer[2], adc_buffer[3],
+            //      adc_buffer[4], adc_buffer[5], adc_buffer[6], adc_buffer[7]);
+            // }
         }
         // Sleep for sampling period (10ms for 100Hz)
         k_msleep(SAMPLE_PERIOD_MS);
@@ -320,8 +332,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         auto *event = cast_streaming_control_event(aeh);
         foot_sensor_streaming_enabled = event->foot_sensor_streaming_enabled;
-        LOG_INF("foot_samples_work %s",
-                foot_sensor_streaming_enabled ? "enabled" : "disabled");
+        LOG_INF("foot_samples_work %s", foot_sensor_streaming_enabled ? "enabled" : "disabled");
         return false;
     }
 

@@ -687,11 +687,11 @@ static void calculate_realtime_metrics(void)
     
     // Log periodically
     if (metrics_state.metrics_count % 50 == 0) {
-        LOG_INF("Metrics: Cadence=%d spm, Pace=%d s/km, Form=%d%%, Balance=%d%%",
-                metrics_state.current_metrics.cadence_spm,
-                metrics_state.current_metrics.pace_sec_km,
-                metrics_state.current_metrics.form_score,
-                balance);
+       // LOG_INF("Metrics: Cadence=%d spm, Pace=%d s/km, Form=%d%%, Balance=%d%%",
+        //        metrics_state.current_metrics.cadence_spm,
+         //       metrics_state.current_metrics.pace_sec_km,
+          //      metrics_state.current_metrics.form_score,
+           //     balance);
     }
     
     // Send to analytics thread with actual metrics data
@@ -717,10 +717,10 @@ static void calculate_realtime_metrics(void)
 static void send_ble_update(void)
 {
   
-    LOG_INF("Sending BLE update: cadence=%d spm, pace=%d s/km, form=%d%%",
-            metrics_state.current_metrics.cadence_spm,
-            metrics_state.current_metrics.pace_sec_km,
-            metrics_state.current_metrics.form_score);
+  //  LOG_INF("Sending BLE update: cadence=%d spm, pace=%d s/km, form=%d%%",
+    //        metrics_state.current_metrics.cadence_spm,
+      //      metrics_state.current_metrics.pace_sec_km,
+        //    metrics_state.current_metrics.form_score);
     
     // Create message for bluetooth module
     generic_message_t ble_msg = {};

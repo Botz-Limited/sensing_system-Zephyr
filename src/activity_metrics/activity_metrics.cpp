@@ -1081,8 +1081,8 @@ static void calculate_realtime_metrics(void)
 static void send_periodic_record(void)
 {
     // For now, just log the metrics
-    LOG_WRN("Periodic update: cadence=%.1f, contact=%.1fms, flight=%.1fms",
-            (double)sensor_data.current_cadence, (double)sensor_data.avg_contact_time, (double)sensor_data.avg_flight_time);
+  //  LOG_WRN("Periodic update: cadence=%.1f, contact=%.1fms, flight=%.1fms",
+    //        (double)sensor_data.current_cadence, (double)sensor_data.avg_contact_time, (double)sensor_data.avg_flight_time);
     
     // TODO: Create proper message structure for activity records
     // This would send to data module for logging
@@ -1169,8 +1169,8 @@ static void send_ble_update(void)
         LOG_WRN("Failed to send biomechanics data to Bluetooth queue");
     }
     
-    LOG_WRN("BLE update sent: pace=%d s/km, cadence=%d, form=%d",
-            packet.pace_sec_per_km, packet.cadence_x2/2, packet.form_score);
+   // LOG_WRN("BLE update sent: pace=%d s/km, cadence=%d, form=%d",
+     //       packet.pace_sec_per_km, packet.cadence_x2/2, packet.form_score);
 }
 #else
 static void send_ble_update(void)
