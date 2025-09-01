@@ -1,0 +1,6 @@
+name: data
+build:
+  # Path to the module's CMakeLists.txt relative to the 'zephyr' subdirectory.
+  cmake: ../.
+  # Path to the module's Kconfig file relative to the 'zephyr' subdirectory.
+  kconfig: ../Kconfig

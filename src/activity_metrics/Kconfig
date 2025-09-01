@@ -1,0 +1,31 @@
+# Activity Metrics Module Configuration
+
+config ACTIVITY_METRICS_MODULE
+    bool "Enable activity metrics processing module"
+    default y
+    help
+      Enable the activity metrics module that processes sensor data
+      to calculate running metrics like cadence, contact time, form score, etc.
+
+if ACTIVITY_METRICS_MODULE
+
+module = ACTIVITY_METRICS_MODULE
+module-str = activity metrics module
+source "subsys/logging/Kconfig.template.log_config"
+
+config ACTIVITY_METRICS_MODULE_STACK_SIZE
+    int "Stack size for activity metrics thread"
+    default 4096
+    help
+      Stack size for the activity metrics processing thread.
+      Increase if stack overflow occurs.
+
+config ACTIVITY_METRICS_MODULE_PRIORITY
+    int "Priority of activity metrics thread"
+    default 6
+    range 1 10
+    help
+      Thread priority for activity metrics processing.
+      Lower number means higher priority.
+
+endif # ACTIVITY_METRICS_MODULE

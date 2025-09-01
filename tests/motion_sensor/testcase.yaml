@@ -1,0 +1,4 @@
+tests:
+  motion_sensor.test:
+    platform_allow: native_posix
+    tags: motion_sensor

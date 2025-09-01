@@ -1,0 +1,247 @@
+/**
+ * @file fota_progress_example.cpp
+ * @brief Example of comprehensive FOTA progress tracking using MCUmgr callbacks
+ * 
+ * NOTE: This is an example file demonstrating how to implement FOTA progress tracking.
+ * To exclude it from the build, either:
+ * 1. Remove this file from src/app/
+ * 2. Rename it to .cpp.example
+ * 3. Modify src/app/CMakeLists.txt to exclude it
+ */
+
+#include <zephyr/mgmt/mcumgr/mgmt/callbacks.h>
+#include <zephyr/mgmt/mcumgr/grp/img_mgmt/img_mgmt_callbacks.h>
+#include <zephyr/logging/log.h>
+
+LOG_MODULE_REGISTER(fota_progress, LOG_LEVEL_INF);
+
+// Structure to track FOTA progress
+struct fota_progress_state {
+    bool is_active;
+    uint32_t total_size;
+    uint32_t bytes_received;
+    uint8_t percent_complete;
+    uint32_t chunks_received;
+    uint32_t chunks_written;
+} fota_state = {0};
+
+// Callback for DFU start
+mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_status, 
+                                    int32_t *rc, uint16_t *group,
+                                    bool *abort_more, void *data, size_t data_size)
+{
+    ARG_UNUSED(event);
+    ARG_UNUSED(prev_status);
+    ARG_UNUSED(rc);
+    ARG_UNUSED(group);
+    ARG_UNUSED(abort_more);
+    ARG_UNUSED(data);
+    ARG_UNUSED(data_size);
+    
+    LOG_INF("FOTA Started!");
+    
+    // Reset progress tracking
+    memset(&fota_state, 0, sizeof(fota_state));
+    fota_state.is_active = true;
+    
+    // You could send a notification to the app here
+    // notify_fota_status(FOTA_STATUS_STARTED);
+    
+    return MGMT_CB_OK;
+}
+
+// Callback for each chunk received
+mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_status,
+                                  int32_t *rc, uint16_t *group,
+                                  bool *abort_more, void *data, size_t data_size)
+{
+    ARG_UNUSED(prev_status);
+    ARG_UNUSED(rc);
+    ARG_UNUSED(group);
+    ARG_UNUSED(abort_more);
+    
+    if (data && data_size >= sizeof(struct img_mgmt_upload_check)) {
+        struct img_mgmt_upload_check *check = (struct img_mgmt_upload_check *)data;
+        
+        if (check->req) {
+            fota_state.chunks_received++;
+            fota_state.bytes_received = check->req->off + check->req->size;
+            
+            // First chunk contains total size
+            if (check->req->off == 0) {
+                fota_state.total_size = check->req->size;
+                LOG_INF("FOTA Total size: %u bytes", fota_state.total_size);
+            }
+        }
+        
+        // Calculate progress
+        if (fota_state.total_size > 0) {
+            uint8_t new_percent = (fota_state.bytes_received * 100) / fota_state.total_size;
+            
+            // Only log when percentage changes
+            if (new_percent != fota_state.percent_complete) {
+                fota_state.percent_complete = new_percent;
+                LOG_INF("FOTA Progress: %u%% (%u/%u bytes)", 
+                        fota_state.percent_complete,
+                        fota_state.bytes_received,
+                        fota_state.total_size);
+                
+                // Notify app/UI about progress
+                // notify_fota_progress(fota_state.percent_complete);
+            }
+        }
+    }
+    
+    return MGMT_CB_OK;
+}
+
+// Callback when chunk is written to flash
+mgmt_cb_return fota_chunk_written_callback(uint32_t event, enum mgmt_cb_return prev_status,
+                                          int32_t *rc, uint16_t *group,
+                                          bool *abort_more, void *data, size_t data_size)
+{
+    ARG_UNUSED(prev_status);
+    ARG_UNUSED(rc);
+    ARG_UNUSED(group);
+    ARG_UNUSED(abort_more);
+    ARG_UNUSED(data);
+    ARG_UNUSED(data_size);
+    
+    fota_state.chunks_written++;
+    
+    // You could track write performance here
+    LOG_DBG("Chunk written to flash (total: %u)", fota_state.chunks_written);
+    
+    return MGMT_CB_OK;
+}
+
+// Callback when transfer is complete (pending verification)
+mgmt_cb_return fota_pending_callback(uint32_t event, enum mgmt_cb_return prev_status,
+                                    int32_t *rc, uint16_t *group,
+                                    bool *abort_more, void *data, size_t data_size)
+{
+    ARG_UNUSED(prev_status);
+    ARG_UNUSED(rc);
+    ARG_UNUSED(group);
+    ARG_UNUSED(abort_more);
+    ARG_UNUSED(data);
+    ARG_UNUSED(data_size);
+    
+    LOG_INF("FOTA Transfer complete, pending verification");
+    LOG_INF("Total chunks: %u received, %u written", 
+            fota_state.chunks_received, fota_state.chunks_written);
+    
+    // notify_fota_status(FOTA_STATUS_PENDING);
+    
+    return MGMT_CB_OK;
+}
+
+// Callback when image is confirmed
+mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_status,
+                                      int32_t *rc, uint16_t *group,
+                                      bool *abort_more, void *data, size_t data_size)
+{
+    ARG_UNUSED(prev_status);
+    ARG_UNUSED(rc);
+    ARG_UNUSED(group);
+    ARG_UNUSED(abort_more);
+    ARG_UNUSED(data);
+    ARG_UNUSED(data_size);
+    
+    LOG_INF("FOTA Image confirmed!");
+    fota_state.is_active = false;
+    
+    // notify_fota_status(FOTA_STATUS_CONFIRMED);
+    
+    return MGMT_CB_OK;
+}
+
+// Callback when DFU is stopped
+mgmt_cb_return fota_stopped_callback(uint32_t event, enum mgmt_cb_return prev_status,
+                                    int32_t *rc, uint16_t *group,
+                                    bool *abort_more, void *data, size_t data_size)
+{
+    ARG_UNUSED(prev_status);
+    ARG_UNUSED(rc);
+    ARG_UNUSED(group);
+    ARG_UNUSED(abort_more);
+    ARG_UNUSED(data);
+    ARG_UNUSED(data_size);
+    
+    LOG_WRN("FOTA Stopped/Aborted");
+    fota_state.is_active = false;
+    
+    // notify_fota_status(FOTA_STATUS_ABORTED);
+    
+    return MGMT_CB_OK;
+}
+
+// Register all callbacks
+void fota_progress_init(void)
+{
+    static struct mgmt_callback callbacks[] = {
+        {
+            .callback = fota_started_callback,
+            .event_id = MGMT_EVT_OP_IMG_MGMT_DFU_STARTED,
+        },
+        {
+            .callback = fota_chunk_callback,
+            .event_id = MGMT_EVT_OP_IMG_MGMT_DFU_CHUNK,
+        },
+        {
+            .callback = fota_chunk_written_callback,
+            .event_id = MGMT_EVT_OP_IMG_MGMT_DFU_CHUNK_WRITE_COMPLETE,
+        },
+        {
+            .callback = fota_pending_callback,
+            .event_id = MGMT_EVT_OP_IMG_MGMT_DFU_PENDING,
+        },
+        {
+            .callback = fota_confirmed_callback,
+            .event_id = MGMT_EVT_OP_IMG_MGMT_DFU_CONFIRMED,
+        },
+        {
+            .callback = fota_stopped_callback,
+            .event_id = MGMT_EVT_OP_IMG_MGMT_DFU_STOPPED,
+        },
+    };
+    
+    for (int i = 0; i < ARRAY_SIZE(callbacks); i++) {
+        mgmt_callback_register(&callbacks[i]);
+    }
+    
+    LOG_INF("FOTA progress tracking initialized");
+}
+
+// Get current FOTA progress
+uint8_t fota_get_progress_percent(void)
+{
+    return fota_state.percent_complete;
+}
+
+bool fota_is_active(void)
+{
+    return fota_state.is_active;
+}
+
+// Example of how to integrate with BLE notifications
+void notify_fota_progress_via_ble(void)
+{
+    if (fota_state.is_active) {
+        // Create a progress packet
+        struct {
+            uint8_t status;
+            uint8_t percent;
+            uint32_t bytes_received;
+            uint32_t total_size;
+        } __packed progress_data = {
+            .status = 0x01, // In progress
+            .percent = fota_state.percent_complete,
+            .bytes_received = fota_state.bytes_received,
+            .total_size = fota_state.total_size,
+        };
+        
+        // Send via your custom characteristic or existing status characteristic
+        // bt_gatt_notify(NULL, &your_progress_char, &progress_data, sizeof(progress_data));
+    }
+}

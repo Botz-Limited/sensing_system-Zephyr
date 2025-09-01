@@ -1,0 +1,10 @@
+# Warnings that cause a lot of issues due to how cppcheck works
+unmatchedSuppression
+missingInclude
+missingIncludeSystem
+unusedFunction
+
+# Library Code
+*:*/include/tl/*
+*:*/boost/*
+*:*/lib/nanopb*

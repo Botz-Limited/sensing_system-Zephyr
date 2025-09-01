@@ -1,0 +1,84 @@
+
+config DATA_MODULE
+	bool "Data Storage System"
+	select NORDIC_QSPI_NOR
+	select FLASH
+	select FILE_SYSTEM
+	select FLASH_MAP
+	select FLASH_PAGE_LAYOUT
+	select HWINFO
+	select FILE_SYSTEM_LITTLEFS
+	select FS_LITTLEFS_FMP_DEV
+	select CONFIG_PM_PARTITION_REGION_LITTLEFS_EXTERNAL
+	select FILE_SYSTEM_SHELL 
+	select SETTINGS
+
+# kconfigs required for shell test commands
+	#select FLASH_JESD216_API
+	select CONFIG_ENTROPY_DEVICE_RANDOM_GENERATOR
+
+	help
+	  DATA_MODULE
+
+if DATA_MODULE
+
+config NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE
+	int
+	default 4096
+
+config FILE_SYSTEM_MOUNT
+	string
+	default "/lfs1"
+
+config SETTINGS_FS_DIR
+	string
+	default "/lfs1/"
+
+config SETTINGS_FILE_PATH 
+	string
+	default "/lfs1/settings"
+
+config LOG_BACKEND_FS_DIR
+	string
+	default "/lfs1/"
+
+config DATA_MODULE_RESET_SETTINGS_FILE_ON_BOOT
+	bool "Will wipe the settings file used by the setting subsytem on boot"
+	default n
+
+config DATA_MODULE_STACK_SIZE
+	int "Data module thread stack size"
+	default 6148
+
+config DATA_MODULE_PRIORITY
+	int "Data module thread priority"
+	default 7
+
+config BT_LONG_WQ_STACK_SIZE
+	int
+	default 4096	
+
+config DATA_LOG_SPACE_LEFT_THRESHOLD_KB
+	int  "Flash memory minimum free space in Kbytes to trigger file deletion"
+	default 200
+
+config DATA_DELETE_DAYS
+	int "Number of logg days to delete if not enough space on the external flash"	
+	default 7
+
+config APP_WIPE_STORAGE
+	bool "Option to clear the flash area before mounting"
+	default n
+	help
+	  Use this to force an existing file system to be created.
+
+config APP_LITTLEFS_STORAGE_FLASH
+	bool "Use flash memory backend"
+	default n
+
+
+module = DATA_MODULE
+module-str = data module
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # DATA_MODULE

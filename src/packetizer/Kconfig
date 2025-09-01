@@ -1,0 +1,12 @@
+config PACKETIZER_MODULE
+	bool "Packetizer Module"
+	help
+	  PACKETIZER MODULE
+
+if PACKETIZER_MODULE
+
+module = PACKETIZER_MODULE
+module-str = packetizer module
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # PACKETIZER_MODULE

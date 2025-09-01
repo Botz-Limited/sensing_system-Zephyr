@@ -1,0 +1,16 @@
+/* Overlay for BHI360 sensor on nRF5340 DK */
+
+&spi1 {
+    bhi360@0 {
+        compatible = "bosch,bhi360";
+        reg = <0>; // Chip select 0
+        label = "BHI360";
+        spi-max-frequency = <8000000>; // 8 MHz, adjust as needed
+        /*
+         * Specify the chip select GPIO if required by your board, e.g.:
+         * cs-gpios = <&gpio0 15 GPIO_ACTIVE_LOW>;
+         * irq-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>;
+         * reset-gpios = <&gpio0 12 GPIO_ACTIVE_LOW>;
+         */
+    };
+};

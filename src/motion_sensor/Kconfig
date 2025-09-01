@@ -1,0 +1,24 @@
+config MOTION_SENSOR_MODULE
+	bool "Motion Sensor Module"
+	select GPIO
+	select SPI
+	select SPIM
+	help
+	  MOTION_SENSOR MODULE
+
+if MOTION_SENSOR_MODULE
+
+module = MOTION_SENSOR_MODULE
+module-str = MOTION_SENSOR module
+source "subsys/logging/Kconfig.template.log_config"
+
+
+config MOTION_SENSOR_MODULE_STACK_SIZE
+	int "Motion Sensor module thread stack size"
+	default 3072
+
+config MOTION_SENSOR_MODULE_PRIORITY
+	int "Motion Sensor module thread priority"
+	default 4
+
+endif # MOTION_SENSOR_MODULE

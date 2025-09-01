@@ -1,0 +1,15 @@
+# Add these lines to src/bluetooth/CMakeLists.txt
+
+# New thread-safe components
+target_sources(app PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/ble_connection_manager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fota_sync_manager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/retry_manager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/smp_proxy_safe.cpp
+)
+
+# If using C++17 features (for std::function)
+set_property(SOURCE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/retry_manager.cpp
+    PROPERTY COMPILE_FLAGS "-std=c++17"
+)

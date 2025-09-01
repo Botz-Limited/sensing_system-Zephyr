@@ -1,0 +1,43 @@
+#
+# Copyright (c) 2025 Botz Innovation
+#
+
+menu "Sensor Data Module"
+
+config SENSOR_DATA_MODULE
+	bool "Enable sensor data consolidation module"
+	default y
+	help
+	  Enable the sensor data module for high-frequency sensor consolidation
+
+config SENSOR_DATA_MODULE_LOG_LEVEL
+	int "Sensor data module log level"
+	depends on SENSOR_DATA_MODULE && LOG
+	default 2
+	help
+	  Sets log level for sensor data module
+
+config SENSOR_DATA_MODULE_STACK_SIZE
+	int "Sensor data module thread stack size"
+	default 4096
+	depends on SENSOR_DATA_MODULE
+	help
+	  Stack size for sensor data processing thread
+
+config SENSOR_DATA_MODULE_PRIORITY
+	int "Sensor data module thread priority"
+	default 4
+	depends on SENSOR_DATA_MODULE
+	help
+	  Priority for sensor data processing thread (lower number = higher priority)
+
+config SENSOR_DATA_MSGQ_SIZE
+    int "Sensor data message queue size"
+    default 64
+    range 16 128
+    help
+      Size of the sensor data message queue. Increase this if you see
+      "Failed to send foot sensor data to sensor data module" warnings.
+      Primary devices need larger queues to handle data from both feet.
+
+endmenu

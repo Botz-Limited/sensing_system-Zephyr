@@ -1,0 +1,4 @@
+tests:
+  control_service.test:
+    platform_allow: native_posix
+    tags: control_service

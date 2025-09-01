@@ -1,0 +1,4 @@
+/* Secondary device overlay file
+ * This file can be used for device-specific configurations
+ * Currently empty as we handle everything in Kconfig
+ */

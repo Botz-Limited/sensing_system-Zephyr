@@ -1,0 +1,34 @@
+#
+# Copyright (c) 2025 Botz Innovation
+#
+
+menu "Realtime Metrics Module"
+
+config REALTIME_METRICS_MODULE
+	bool "Enable realtime metrics calculation module"
+	default y
+	help
+	  Enable the realtime metrics module for BLE updates
+
+config REALTIME_METRICS_MODULE_LOG_LEVEL
+	int "Realtime metrics module log level"
+	depends on REALTIME_METRICS_MODULE && LOG
+	default 2
+	help
+	  Sets log level for realtime metrics module
+
+config REALTIME_METRICS_MODULE_STACK_SIZE
+	int "Realtime metrics module thread stack size"
+	default 4096
+	depends on REALTIME_METRICS_MODULE
+	help
+	  Stack size for realtime metrics processing thread
+
+config REALTIME_METRICS_MODULE_PRIORITY
+	int "Realtime metrics module thread priority"
+	default 6
+	depends on REALTIME_METRICS_MODULE
+	help
+	  Priority for realtime metrics processing thread (lower number = higher priority)
+
+endmenu

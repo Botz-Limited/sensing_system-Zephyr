@@ -1,0 +1,166 @@
+DT_CHOSEN_EXT_FLASH:= nordic,pm-ext-flash
+
+config BLUETOOTH_MODULE
+	bool "Bluetooth Module"
+	# Bluetooth Stack
+	select BT
+	select BT_SMP
+	select BT_PERIPHERAL
+	select CBPRINTF_FP_SUPPORT
+	# Bluetooth Battery Service
+	select BT_BAS
+	# Paring
+	select BT_PRIVACY
+	select BT_KEYS_OVERWRITE_OLDEST
+	# Settings
+	select SETTINGS
+	select SETTINGS_RUNTIME
+	select SHELL
+	select BT_SETTINGS
+	select MCUMGR_SMP_BT
+	select MCUMGR_SMP_BT_CONN_PARAM_CONTROL
+	select MCUMGR_SMP_REASSEMBLY_BT
+
+	# MCUMGR + SMP
+	select MCUMGR
+	select NET_BUF
+	select ZCBOR
+	select CRC
+	select MCUMGR_TRANSPORT_BT
+	select MCUMGR_TRANSPORT_BT_CONN_PARAM_CONTROL
+	select IMG_MANAGER
+	select STREAM_FLASH
+	select FLASH_MAP
+	select FLASH
+	select MCUMGR_GRP_OS
+	select MCUMGR_GRP_OS_BOOTLOADER_INFO
+	select MCUMGR_TRANSPORT_BT_REASSEMBLY
+	select MCUMGR_GRP_FS
+	select MCUMGR_CMD_FS_MGMT
+	select MCUMGR_SMP_SHELL
+	select MCUMGR_GRP_ZEPHYR_BASIC
+	select MCUMGR_GRP_BASIC_CMD_STORAGE_ERASE
+	select MCUMGR_CMD_IMG_MGMT
+	select MCUMGR_CMD_OS_MGMT
+	select MCUMGR_CMD_STAT_MGMT
+	select MCUMGR_SMP_CLIENT
+
+	#config BOOTLOADER_MCUBOOT
+	#bool "mcuboot support"
+	select MCUMGR_GRP_IMG
+	# CONFIG_MCUMGR_GRP_IMG dependencies
+	select FLASH
+	select IMG_MANAGER
+	select FLASH_MAP
+	# CONFIG_IMG_MANAGER dependencies
+	select STREAM_FLASH
+	# DFU
+	select NORDIC_SPI_NOR
+	select NCS_SAMPLE_MCUMGR_BT_OTA_DFU_SPEEDUP
+	help
+		Bluetooth Module
+
+
+config MCUMGR_TRANSPORT_BT_AUTHEN
+	bool "Transport Auth"
+	default n
+
+config IMG_ERASE_PROGRESSIVELY
+	bool
+	default y
+
+config MCUMGR_TRANSPORT_NETBUF_SIZE
+	int
+	default 2475
+
+config MCUMGR_GRP_OS_MCUMGR_PARAMS
+	bool
+	default y
+
+
+	help
+	  BLUETOOTH_MODULE
+
+
+if BLUETOOTH_MODULE
+
+# Setting Configs
+config BT_DEVICE_APPEARANCE
+	int
+	default 768
+
+config BT_ATT_ENFORCE_FLOW
+	bool "flow enforcement"
+	default n
+
+config BT_MAX_PAIRED
+	int
+	default 6
+
+
+module = BLUETOOTH_MODULE
+module-str = bluetooth module
+source "subsys/logging/Kconfig.template.log_config"
+
+config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
+	int "Duration the system with advertise for"
+	default 60
+
+config BLUETOOTH_MODULE_STACK_SIZE
+	int "BTH  module thread stack size"
+	default 8192
+
+config BLUETOOTH_MODULE_PRIORITY
+	int "BTH module thread priority"
+	default 3
+
+config FOTA_PROXY_TIMEOUT_SEC
+	int "FOTA proxy operation timeout in seconds"
+	default 300
+	help
+	  Timeout for FOTA proxy operations. If a FOTA operation
+	  doesn't complete within this time, it will be aborted.
+
+config FOTA_SYNC_TIMEOUT_SEC
+	int "FOTA synchronization timeout in seconds"
+	default 30
+	help
+	  Timeout for waiting for secondary device to complete FOTA
+	  when updating both devices. After this timeout, primary
+	  will reset anyway.
+
+config FILE_PROXY_TIMEOUT_SEC
+	int "File proxy operation timeout in seconds"
+	default 60
+	help
+	  Timeout for file proxy operations like file transfer.
+
+config D2D_DISCOVERY_RETRY_COUNT
+	int "D2D service discovery retry count"
+	default 3
+	help
+	  Number of times to retry D2D service discovery if it fails.
+
+config D2D_DISCOVERY_RETRY_DELAY_MS
+	int "D2D service discovery retry delay in milliseconds"
+	default 1000
+	help
+	  Delay between D2D service discovery retry attempts.
+
+config LEGACY_BLE_ENABLED
+	bool "Enable legacy BLE services for old app compatibility"
+	default n
+	help
+	  Temporarily enable legacy BLE services to mimic old firmware for mobile app compatibility.
+	  This is isolated and won't affect current BLE functionality.
+
+config D2D_PARAMETERS_ONLY_MODE
+	bool "Enable D2D Parameters-Only Mode for 99% battery savings"
+	default y
+	help
+	  When enabled, bilateral calculations use 1Hz parameter packets instead of 100Hz raw data
+	  for 99% battery savings. Parameters include GCT, stance time, swing time, peak pressure,
+	  COP coordinates, and pronation. Legacy BLE continues to work with raw data for phone
+	  compatibility. Seamless fallback to raw data when parameters unavailable.
+
+endif # BLUETOOTH_MODULE

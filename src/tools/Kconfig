@@ -1,0 +1,20 @@
+menuconfig LOG_DECODER_TOOL
+    bool "Enable log decoder tool"
+    default n
+    depends on FILE_SYSTEM
+    help
+      Enable the log decoder tool that can decode and display
+      foot sensor and BHI360 log files. This adds shell commands
+      to list and decode log files.
+
+if LOG_DECODER_TOOL
+
+config LOG_DECODER_SHELL_CMDS
+    bool "Enable shell commands for log decoder"
+    default y
+    depends on SHELL
+    help
+      Enable shell commands for the log decoder tool.
+      Commands include: log list, log foot, log bhi360, log decode <path>
+
+endif # LOG_DECODER_TOOL

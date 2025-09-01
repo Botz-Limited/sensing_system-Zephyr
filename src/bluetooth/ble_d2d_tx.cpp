@@ -1,0 +1,1164 @@
+#include "ble_d2d_tx.hpp"
+#include <app_fixed_point.hpp>
+
+#include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/gatt.h>
+#include <zephyr/logging/log.h>
+#include "ble_d2d_tx_service.hpp"
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "ble_d2d_tx_service.hpp"
+#endif
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+#include "ble_d2d_tx_queue.hpp"
+#endif
+
+LOG_MODULE_REGISTER(ble_d2d_tx, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
+
+/*
+ * D2D TX Module - Device-to-Device Transmit Service
+ *
+ * DEVICE ROLES:
+ * - PRIMARY DEVICE (Right shoe):
+ *   - Acts as GATT client for D2D RX service on secondary
+ *   - Sends control commands to secondary: start/stop activity, set time, calibration
+ *   - Ensures both devices operate in sync
+ *   - Commands are queued if D2D connection is not ready
+ *
+ * - SECONDARY DEVICE (Left shoe):
+ *   - Acts as GATT server providing D2D TX service
+ *   - Sends sensor data to primary: foot sensor samples, BHI360 data, status
+ *   - Notifies primary of log availability and device status
+ *
+ * This architecture ensures the primary device (right shoe) maintains control
+ * while the secondary device (left shoe) follows commands and reports data.
+ */
+
+// D2D TX Service UUID: 75ad68d6-200c-437d-98b5-061862076c5f
+// static struct bt_uuid_128 d2d_tx_service_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x75ad68d6, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
+// D2D TX Characteristics (increment first byte from information_service.cpp)
+// These are currently unused but may be needed for future TX service implementation
+// static struct bt_uuid_128 d2d_status_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68d6, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_foot_sensor_log_available_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68d7, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_charge_status_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68d8, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_foot_sensor_req_id_path_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68d9, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_bhi360_log_available_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68da, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_bhi360_req_id_path_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68db, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_foot_sensor_samples_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68dc, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_bhi360_data1_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68dd, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_bhi360_data2_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68de, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_bhi360_data3_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68df, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+// static struct bt_uuid_128 d2d_current_time_uuid =
+//     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x76ad68e0, 0x200c, 0x437d, 0x98b5, 0x061862076c5f));
+
+// Connection handle
+static struct bt_conn *d2d_conn = NULL;
+
+// D2D RX Service and Characteristic UUIDs (must match ble_d2d_rx.cpp)
+static struct bt_uuid_128 d2d_rx_service_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe060ca1f, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
+// D2D RX Characteristic UUIDs for commands
+static struct bt_uuid_128 d2d_rx_set_time_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca1f, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_delete_foot_log_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca82, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_delete_bhi360_log_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca83, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_start_activity_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca84, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_stop_activity_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca85, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_erase_flash_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8e, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_fota_status_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca86, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_trigger_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca87, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
+static struct bt_uuid_128 d2d_rx_delete_activity_log_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca88, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_request_device_info_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca89, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+static struct bt_uuid_128 d2d_rx_gps_update_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8a, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+// Note: This UUID must match d2d_weight_calibration_uuid in ble_d2d_rx.cpp
+static struct bt_uuid_128 d2d_rx_weight_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8b, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+// D2D batch characteristic UUID (must match on both sides)
+static struct bt_uuid_128 d2d_rx_d2d_batch_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8c, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
+// Connection parameter control characteristic UUID (must match on both sides)
+static struct bt_uuid_128 d2d_rx_conn_param_control_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0xe160ca8d, 0x3115, 0x4ad6, 0x9709, 0x8c5ff3bf558b));
+
+// Discovered characteristic handles
+struct d2d_discovered_handles
+{
+    uint16_t set_time_handle;
+    uint16_t delete_foot_log_handle;
+    uint16_t delete_bhi360_log_handle;
+    uint16_t delete_activity_log_handle;
+    uint16_t start_activity_handle;
+    uint16_t stop_activity_handle;
+    uint16_t erase_flash_handle;
+    uint16_t fota_status_handle;
+    uint16_t trigger_calibration_handle;
+    uint16_t request_device_info_handle;
+    uint16_t gps_update_handle;
+    uint16_t weight_calibration_handle;
+    uint16_t d2d_batch_handle;
+    uint16_t conn_param_control_handle;
+    bool discovery_complete;
+};
+
+
+static struct d2d_discovered_handles d2d_handles = {.set_time_handle = 0,
+                                                    .delete_foot_log_handle = 0,
+                                                    .delete_bhi360_log_handle = 0,
+                                                    .delete_activity_log_handle = 0,
+                                                    .start_activity_handle = 0,
+                                                    .stop_activity_handle = 0,
+                                                    .erase_flash_handle = 0,
+                                                    .fota_status_handle = 0,
+                                                    .trigger_calibration_handle = 0,
+                                                    .request_device_info_handle = 0,
+                                                    .gps_update_handle = 0,
+                                                    .weight_calibration_handle = 0,
+                                                    .discovery_complete = false};
+
+// Discovery parameters
+static struct bt_gatt_discover_params discover_params;
+static uint16_t discover_start_handle = 0x0001;
+static uint16_t discover_end_handle = 0xffff;
+
+// Forward declarations
+static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                             struct bt_gatt_discover_params *params);
+static void continue_discovery(void);
+
+// Discovery state machine states - simplified for batch discovery
+enum discover_state
+{
+    DISCOVER_SERVICE,
+    DISCOVER_CHARACTERISTICS,  // Discover all characteristics at once
+    DISCOVER_COMPLETE
+};
+
+static enum discover_state discovery_state = DISCOVER_SERVICE;
+
+
+// OLD BATCHING CODE - DISABLED
+// The new batching implementation is in ble_d2d_tx_service.cpp
+// These functions are no longer used but kept for reference
+#if 0
+// Extern declarations for batching symbols defined in the header
+extern d2d_pending_sample_t pending_sample;
+extern d2d_sample_batch_t d2d_batch_buffer;
+extern uint8_t d2d_batch_count;
+void try_combine_and_buffer();
+void d2d_flush_buffer();
+void on_new_foot_sample(const foot_samples_t* foot, uint32_t timestamp);
+void on_new_imu_sample(const bhi360_log_record_t* imu, uint32_t timestamp);
+#endif
+
+
+// Service discovery callback
+static uint8_t discover_func(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                             struct bt_gatt_discover_params *params)
+{
+    ARG_UNUSED(conn);
+    if (!attr)
+    {
+        LOG_DBG("Discovery complete for state %d", discovery_state);
+        
+        if (discovery_state == DISCOVER_SERVICE)
+        {
+            // No D2D RX service found
+            LOG_ERR("D2D RX service not found on secondary device");
+            discovery_state = DISCOVER_COMPLETE;
+            return BT_GATT_ITER_STOP;
+        }
+        else if (discovery_state == DISCOVER_CHARACTERISTICS)
+        {
+            // All characteristics discovered, mark as complete
+            discovery_state = DISCOVER_COMPLETE;
+            d2d_handles.discovery_complete = true;
+            
+            // Log what we found
+            LOG_INF("D2D TX discovery complete - found characteristics:");
+            if (d2d_handles.set_time_handle) LOG_INF("  Set Time: handle %u", d2d_handles.set_time_handle);
+            if (d2d_handles.delete_foot_log_handle) LOG_INF("  Delete Foot Log: handle %u", d2d_handles.delete_foot_log_handle);
+            if (d2d_handles.delete_bhi360_log_handle) LOG_INF("  Delete BHI360 Log: handle %u", d2d_handles.delete_bhi360_log_handle);
+            if (d2d_handles.delete_activity_log_handle) LOG_INF("  Delete Activity Log: handle %u", d2d_handles.delete_activity_log_handle);
+            if (d2d_handles.start_activity_handle) LOG_INF("  Start Activity: handle %u", d2d_handles.start_activity_handle);
+            if (d2d_handles.stop_activity_handle) LOG_INF("  Stop Activity: handle %u", d2d_handles.stop_activity_handle);
+            if (d2d_handles.erase_flash_handle) LOG_INF("  Erase Flash: handle %u", d2d_handles.erase_flash_handle);
+            if (d2d_handles.fota_status_handle) LOG_INF("  FOTA Status: handle %u", d2d_handles.fota_status_handle);
+            if (d2d_handles.trigger_calibration_handle) LOG_INF("  Trigger Calibration: handle %u", d2d_handles.trigger_calibration_handle);
+            if (d2d_handles.request_device_info_handle) LOG_INF("  Request Device Info: handle %u", d2d_handles.request_device_info_handle);
+            if (d2d_handles.gps_update_handle) LOG_INF("  GPS Update: handle %u", d2d_handles.gps_update_handle);
+            if (d2d_handles.weight_calibration_handle) LOG_INF("  Weight Calibration: handle %u", d2d_handles.weight_calibration_handle);
+            if (d2d_handles.d2d_batch_handle) LOG_INF("  D2D Batch: handle %u", d2d_handles.d2d_batch_handle);
+            if (d2d_handles.conn_param_control_handle) LOG_INF("  Conn Param Control: handle %u", d2d_handles.conn_param_control_handle);
+            
+            // Check if we have essential characteristics
+            if (d2d_handles.start_activity_handle != 0 && d2d_handles.stop_activity_handle != 0)
+            {
+                LOG_INF("Essential characteristics found, discovery successful");
+            }
+            else
+            {
+                LOG_WRN("Some essential characteristics not found");
+            }
+            
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            // Process any queued commands
+            ble_d2d_tx_process_queued_commands();
+#endif
+        }
+        
+        return BT_GATT_ITER_STOP;
+    }
+
+    LOG_DBG("[ATTRIBUTE] handle %u", attr->handle);
+
+    if (discovery_state == DISCOVER_SERVICE)
+    {
+        // Looking for the D2D RX service
+        if (bt_uuid_cmp(params->uuid, &d2d_rx_service_uuid.uuid) == 0)
+        {
+            LOG_INF("Found D2D RX service, handle: %u", attr->handle);
+            discover_start_handle = attr->handle + 1;
+            discover_end_handle = 0xffff;
+            
+            // Now discover ALL characteristics at once
+            discovery_state = DISCOVER_CHARACTERISTICS;
+            discover_params.uuid = NULL;  // Discover all characteristics
+            discover_params.func = discover_func;
+            discover_params.start_handle = discover_start_handle;
+            discover_params.end_handle = discover_end_handle;
+            discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
+            
+            int err = bt_gatt_discover(d2d_conn, &discover_params);
+            if (err)
+            {
+                LOG_ERR("Failed to start characteristic discovery: %d", err);
+                discovery_state = DISCOVER_COMPLETE;
+            }
+            else
+            {
+                LOG_INF("Started discovery of all characteristics");
+            }
+            
+            return BT_GATT_ITER_STOP;
+        }
+    }
+    else if (discovery_state == DISCOVER_CHARACTERISTICS)
+    {
+        // We're discovering all characteristics - check each one against our UUIDs
+        struct bt_gatt_chrc *chrc = (struct bt_gatt_chrc *)attr->user_data;
+        uint16_t value_handle = bt_gatt_attr_value_handle(attr);
+        
+        // Check against all our characteristic UUIDs
+        if (bt_uuid_cmp(chrc->uuid, &d2d_rx_set_time_uuid.uuid) == 0)
+        {
+            d2d_handles.set_time_handle = value_handle;
+            LOG_INF("Found set time characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_delete_foot_log_uuid.uuid) == 0)
+        {
+            d2d_handles.delete_foot_log_handle = value_handle;
+            LOG_INF("Found delete foot log characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_delete_bhi360_log_uuid.uuid) == 0)
+        {
+            d2d_handles.delete_bhi360_log_handle = value_handle;
+            LOG_INF("Found delete BHI360 log characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_delete_activity_log_uuid.uuid) == 0)
+        {
+            d2d_handles.delete_activity_log_handle = value_handle;
+            LOG_INF("Found delete activity log characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_start_activity_uuid.uuid) == 0)
+        {
+            d2d_handles.start_activity_handle = value_handle;
+            LOG_INF("Found start activity characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_stop_activity_uuid.uuid) == 0)
+        {
+            d2d_handles.stop_activity_handle = value_handle;
+            LOG_INF("Found stop activity characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_erase_flash_uuid.uuid) == 0)
+        {
+            d2d_handles.erase_flash_handle = value_handle;
+            LOG_INF("Found erase flash characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_fota_status_uuid.uuid) == 0)
+        {
+            d2d_handles.fota_status_handle = value_handle;
+            LOG_INF("Found FOTA status characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_trigger_calibration_uuid.uuid) == 0)
+        {
+            d2d_handles.trigger_calibration_handle = value_handle;
+            LOG_INF("Found trigger calibration characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_request_device_info_uuid.uuid) == 0)
+        {
+            d2d_handles.request_device_info_handle = value_handle;
+            LOG_INF("Found request device info characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_gps_update_uuid.uuid) == 0)
+        {
+            d2d_handles.gps_update_handle = value_handle;
+            LOG_INF("Found GPS update characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_weight_calibration_uuid.uuid) == 0)
+        {
+            d2d_handles.weight_calibration_handle = value_handle;
+            LOG_INF("Found weight calibration characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_d2d_batch_uuid.uuid) == 0)
+        {
+            d2d_handles.d2d_batch_handle = value_handle;
+            LOG_INF("Found D2D batch characteristic, handle: %u", value_handle);
+        }
+        else if (bt_uuid_cmp(chrc->uuid, &d2d_rx_conn_param_control_uuid.uuid) == 0)
+        {
+            d2d_handles.conn_param_control_handle = value_handle;
+            LOG_INF("Found connection parameter control characteristic, handle: %u", value_handle);
+        }
+    }
+
+    return BT_GATT_ITER_CONTINUE;
+}
+
+// Start the discovery process
+static void start_discovery(void)
+{
+    int err;
+
+    if (!d2d_conn)
+    {
+        LOG_ERR("No D2D connection for discovery");
+        return;
+    }
+
+    // Reset discovery state
+    discovery_state = DISCOVER_SERVICE;
+    memset(&d2d_handles, 0, sizeof(d2d_handles));
+
+    // Start with service discovery
+    discover_params.uuid = &d2d_rx_service_uuid.uuid;
+    discover_params.func = discover_func;
+    discover_params.start_handle = discover_start_handle;
+    discover_params.end_handle = discover_end_handle;
+    discover_params.type = BT_GATT_DISCOVER_PRIMARY;
+
+    err = bt_gatt_discover(d2d_conn, &discover_params);
+    if (err)
+    {
+        LOG_ERR("Discover failed (err %d)", err);
+    }
+    else
+    {
+        LOG_INF("Started D2D service discovery");
+    }
+}
+
+// Continue discovery is no longer needed with batch discovery
+static void continue_discovery(void)
+{
+    // This function is kept for compatibility but is no longer used
+    // with the new batch discovery approach
+    LOG_DBG("continue_discovery called but not needed with batch discovery");
+}
+void ble_d2d_tx_init(void)
+{
+    LOG_INF("D2D TX initialized");
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Initialize the GATT service for secondary device
+    d2d_tx_service_init();
+#else
+    // Initialize the command queue for primary device
+    ble_d2d_tx_queue_init();
+#endif
+}
+
+void ble_d2d_tx_set_connection(struct bt_conn *conn)
+{
+    d2d_conn = conn;
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Secondary device: Update the GATT service connection
+    LOG_INF("D2D TX: Setting connection for secondary device GATT service");
+    d2d_tx_service_set_connection(conn);
+#endif
+
+    if (conn)
+    {
+        LOG_INF("D2D TX connection set (conn=%p)", (void *)conn);
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Primary device: Start service discovery when connection is established
+        k_sleep(K_MSEC(100)); // Small delay to ensure connection is stable
+        start_discovery();
+#endif
+    }
+    else
+    {
+        LOG_INF("D2D TX connection cleared");
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Clear discovered handles
+        memset(&d2d_handles, 0, sizeof(d2d_handles));
+        // Reset discovery parameters for next connection
+        discover_start_handle = 0x0001;
+        discover_end_handle = 0xffff;
+        discovery_state = DISCOVER_SERVICE;
+#endif
+    }
+}
+
+int ble_d2d_tx_send_foot_sensor_data(const foot_samples_t *samples)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+
+    LOG_INF("D2D TX: Sending foot sensor data");
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Call the function to add foot data to the batch buffer
+    // but it will not send via individual characteristic anymore
+    return d2d_tx_notify_foot_sensor_data(samples);
+#else
+    // Primary device shouldn't call this
+    LOG_WRN("Primary device shouldn't send foot sensor data via D2D");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_gps_update(const GPSUpdateCommand *gps_data)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete, cannot send GPS update");
+        // TODO: Add queuing support for GPS updates if needed
+        return -EBUSY;
+    }
+
+    // Use the dedicated GPS update characteristic
+    if (d2d_handles.gps_update_handle == 0)
+    {
+        LOG_WRN("D2D TX: GPS update handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding GPS update - lat=%d, lon=%d, speed=%u cm/s", 
+            gps_data->latitude_e7, gps_data->longitude_e7, gps_data->speed_cms);
+
+    // Send GPS data using the dedicated GPS characteristic
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.gps_update_handle, 
+                                            gps_data, sizeof(GPSUpdateCommand), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send GPS update (err %d)", err);
+        return err;
+    }
+
+    return 0;
+#else
+    // Secondary device doesn't send GPS updates
+    LOG_WRN("Secondary device shouldn't send GPS updates");
+    return -EINVAL;
+#endif
+}
+
+// Send FOTA completion status from secondary to primary
+int ble_d2d_tx_send_fota_complete(void)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.fota_status_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    uint8_t status = 1; // 1 = complete
+
+    LOG_INF("D2D TX: Sending FOTA complete status to primary (handle: %u)", d2d_handles.fota_status_handle);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.fota_status_handle, &status, sizeof(status), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send FOTA complete status (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_trigger_bhi360_calibration_command(uint8_t value)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.trigger_calibration_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding trigger BHI360 calibration command - value: %u to handle: %u", value,
+            d2d_handles.trigger_calibration_handle);
+
+    int err =
+        bt_gatt_write_without_response(d2d_conn, d2d_handles.trigger_calibration_handle, &value, sizeof(value), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send trigger calibration command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_foot_sensor_log_available(uint8_t log_id)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+    LOG_DBG("D2D TX: Sending foot sensor log available: %u", log_id);
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_foot_log_available(log_id);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_foot_sensor_req_id_path(const char *path)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+    LOG_DBG("D2D TX: Sending foot sensor path: %s", path);
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_foot_log_path(path);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_bhi360_log_available(uint8_t log_id)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+    LOG_DBG("D2D TX: Sending BHI360 log available: %u", log_id);
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_bhi360_log_available(log_id);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_bhi360_req_id_path(const char *path)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+    LOG_DBG("D2D TX: Sending BHI360 path: %s", path);
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_bhi360_log_path(path);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_bhi360_data1(const bhi360_3d_mapping_t *data)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+
+    LOG_DBG("D2D TX: Sending BHI360 3D mapping data");
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Call the function to add quaternion to batch buffer
+    // but it will not send via individual characteristic anymore
+    return d2d_tx_notify_bhi360_data1(data);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_bhi360_data2(const bhi360_step_count_t *data)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+
+    LOG_DBG("D2D TX: Sending BHI360 step count data");
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_bhi360_data2(data);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_activity_step_count(const bhi360_step_count_t *data)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+
+    LOG_DBG("D2D TX: Sending activity step count data");
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_activity_step_count(data);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_bhi360_data3(const bhi360_linear_accel_t *data)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+
+    LOG_DBG("D2D TX: Sending BHI360 linear accel data");
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Linear acceleration no longer sent to primary
+    // Not via individual characteristic or batch
+    return 0;
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_status(uint32_t status)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+    LOG_DBG("D2D TX: Sending status: 0x%08x", status);
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_status(status);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_charge_status(uint8_t status)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+    LOG_DBG("D2D TX: Sending charge status: %u", status);
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_charge_status(status);
+#else
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_metrics(const d2d_metrics_packet_t *metrics)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+    LOG_DBG("D2D TX: Sending calculated metrics: seq=%u, status=%u",
+            metrics->sequence_num, metrics->calculation_status);
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return d2d_tx_notify_metrics(metrics);
+#else
+    return -EINVAL;
+#endif
+}
+
+// Control command forwarding functions (primary -> secondary)
+int ble_d2d_tx_send_set_time_command(uint32_t epoch_time)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.set_time_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding set time command - epoch: %u to handle: %u", epoch_time, d2d_handles.set_time_handle);
+
+    // Write the epoch time to the secondary device
+    int err =
+        bt_gatt_write_without_response(d2d_conn, d2d_handles.set_time_handle, &epoch_time, sizeof(epoch_time), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send set time command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_delete_foot_log_command(uint8_t log_id)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.delete_foot_log_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding delete foot log command - ID: %u to handle: %u", log_id,
+            d2d_handles.delete_foot_log_handle);
+
+    int err =
+        bt_gatt_write_without_response(d2d_conn, d2d_handles.delete_foot_log_handle, &log_id, sizeof(log_id), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send delete foot log command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_delete_bhi360_log_command(uint8_t log_id)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.delete_bhi360_log_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding delete BHI360 log command - ID: %u to handle: %u", log_id,
+            d2d_handles.delete_bhi360_log_handle);
+
+    int err =
+        bt_gatt_write_without_response(d2d_conn, d2d_handles.delete_bhi360_log_handle, &log_id, sizeof(log_id), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send delete BHI360 log command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_delete_activity_log_command(uint8_t log_id)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.delete_activity_log_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding delete activity log command - ID: %u to handle: %u", log_id,
+            d2d_handles.delete_activity_log_handle);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.delete_activity_log_handle, &log_id, sizeof(log_id),
+                                             false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send delete activity log command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_start_activity_command(uint8_t value)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.start_activity_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding start activity command - value: %u to handle: %u", value,
+            d2d_handles.start_activity_handle);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.start_activity_handle, &value, sizeof(value), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send start activity command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_stop_activity_command(uint8_t value)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.stop_activity_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding stop activity command - value: %u to handle: %u", value,
+            d2d_handles.stop_activity_handle);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.stop_activity_handle, &value, sizeof(value), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send stop activity command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_erase_flash_command(uint8_t value)
+{
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.erase_flash_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding erase flash command - value: %u to handle: %u", value,
+            d2d_handles.erase_flash_handle);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.erase_flash_handle, &value, sizeof(value), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send erase flash command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+}
+
+int ble_d2d_tx_send_device_info(const device_info_msg_t *info)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+
+    LOG_INF("D2D TX: Sending device info");
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Secondary device: Send via GATT notification
+    return d2d_tx_notify_device_info(info);
+#else
+    // Primary device shouldn't call this
+    LOG_WRN("Primary device shouldn't send device info via D2D");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_fota_progress(const fota_progress_msg_t *progress)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+
+    LOG_DBG("D2D TX: Sending FOTA progress: active=%d, status=%d, percent=%d%%", progress->is_active, progress->status,
+            progress->percent_complete);
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Secondary device: Send via GATT notification
+    return d2d_tx_notify_fota_progress(progress);
+#else
+    // Primary device shouldn't send FOTA progress via D2D
+    LOG_WRN("Primary device shouldn't send FOTA progress via D2D");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_request_device_info(void)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete || d2d_handles.request_device_info_handle == 0)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete or handle not found");
+        return -EINVAL;
+    }
+
+    uint8_t value = 1;
+    LOG_INF("D2D TX: Requesting device info from secondary (handle: %u)", d2d_handles.request_device_info_handle);
+
+    int err =
+        bt_gatt_write_without_response(d2d_conn, d2d_handles.request_device_info_handle, &value, sizeof(value), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to request device info (err %d)", err);
+        return err;
+    }
+
+    return 0;
+#else
+    // Secondary device doesn't request device info
+    LOG_WRN("Secondary device shouldn't request device info");
+    return -EINVAL;
+#endif
+}
+
+int ble_d2d_tx_send_weight_measurement(float weight_kg)
+{
+    if (!d2d_conn)
+        return -ENOTCONN;
+
+    LOG_INF("D2D TX: Sending weight measurement: %.1f kg", (double)weight_kg);
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Secondary device: Send via GATT notification
+    return d2d_tx_notify_weight_measurement(weight_kg);
+#else
+    // Primary device shouldn't send weight measurements via D2D
+    LOG_WRN("Primary device shouldn't send weight measurement via D2D");
+    return -EINVAL;
+#endif
+}
+
+
+
+int ble_d2d_tx_send_weight_calibration_trigger_command(uint8_t value)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete, queueing weight calibration trigger command");
+        return ble_d2d_tx_queue_weight_calibration_trigger_command(value);
+    }
+
+    // Weight calibration trigger is sent to the same characteristic as BHI360 calibration
+    // This is intentional as both trigger calibration procedures
+    if (d2d_handles.trigger_calibration_handle == 0)
+    {
+        LOG_WRN("D2D TX: Trigger calibration handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding weight calibration trigger command - value: %u", value);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.trigger_calibration_handle, &value, sizeof(value), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send weight calibration trigger command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+#else
+    // Secondary device doesn't send weight calibration trigger commands
+    LOG_WRN("Secondary device shouldn't send weight calibration trigger commands");
+    return -EINVAL;
+#endif
+}
+
+// Send weight calibration with known weight (primary -> secondary)
+int ble_d2d_tx_send_weight_calibration_with_weight(const weight_calibration_step_t *calib_data)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete, cannot send weight calibration with weight");
+        // TODO: Add queuing support for weight_calibration_step_t
+        return -EBUSY;
+    }
+
+    // Weight calibration with known weight is sent to the same characteristic as BHI360 calibration
+    if (!d2d_handles.trigger_calibration_handle)
+    {
+        LOG_ERR("D2D TX: Trigger calibration characteristic handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding weight calibration with known weight: %.1f kg",
+            (double)calib_data->known_weight_kg);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.trigger_calibration_handle,
+                                            calib_data, sizeof(weight_calibration_step_t), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send weight calibration with weight (err %d)", err);
+        return err;
+    }
+
+    return 0;
+#else
+    // Secondary device doesn't send weight calibration commands
+    LOG_WRN("Secondary device shouldn't send weight calibration commands");
+    return -EINVAL;
+#endif
+}
+
+// Send connection parameter control command (primary -> secondary)
+int ble_d2d_tx_send_conn_param_control_command(uint8_t profile)
+{
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!d2d_conn)
+    {
+        LOG_WRN("D2D TX: No connection");
+        return -ENOTCONN;
+    }
+
+    if (!d2d_handles.discovery_complete)
+    {
+        LOG_WRN("D2D TX: Service discovery not complete, cannot send connection parameter control command");
+        // TODO: Add queuing support for connection parameter control if needed
+        return -EBUSY;
+    }
+
+    if (d2d_handles.conn_param_control_handle == 0)
+    {
+        LOG_WRN("D2D TX: Connection parameter control handle not found");
+        return -EINVAL;
+    }
+
+    LOG_INF("D2D TX: Forwarding connection parameter control command - profile: %u", profile);
+
+    int err = bt_gatt_write_without_response(d2d_conn, d2d_handles.conn_param_control_handle,
+                                            &profile, sizeof(profile), false);
+    if (err)
+    {
+        LOG_ERR("D2D TX: Failed to send connection parameter control command (err %d)", err);
+        return err;
+    }
+
+    return 0;
+#else
+    // Secondary device doesn't send connection parameter control commands
+    LOG_WRN("Secondary device shouldn't send connection parameter control commands");
+    return -EINVAL;
+#endif
+}
+
+// OLD BATCHING IMPLEMENTATION - DISABLED
+// These functions have been replaced by the new implementation in ble_d2d_tx_service.cpp
+// The new implementation handles single-sample batching with timeout instead of
+// waiting for D2D_BATCH_SIZE samples
+#if 0
+void try_combine_and_buffer()
+{
+    if (pending_sample.foot_ready && pending_sample.quat_ready)
+    {
+        d2d_batch_buffer.foot[d2d_batch_count] = pending_sample.foot;
+        d2d_batch_buffer.quat[d2d_batch_count] = pending_sample.quat;
+        d2d_batch_buffer.timestamp[d2d_batch_count] = pending_sample.timestamp;
+        d2d_batch_count++;
+
+        pending_sample.foot_ready = false;
+        pending_sample.quat_ready = false;
+
+        if (d2d_batch_count == D2D_BATCH_SIZE)
+        {
+            d2d_tx_notify_d2d_batch(&d2d_batch_buffer);
+            d2d_batch_count = 0;
+        }
+    }
+}
+
+void d2d_flush_buffer()
+{
+    if (d2d_batch_count > 0)
+    {
+        d2d_tx_notify_d2d_batch(&d2d_batch_buffer);
+        d2d_batch_count = 0;
+    }
+}
+
+void on_new_foot_sample(const foot_samples_t* foot, uint32_t timestamp)
+{
+    pending_sample.foot = *foot;
+    pending_sample.foot_ready = true;
+    pending_sample.timestamp = timestamp;
+    try_combine_and_buffer();
+}
+
+// Call this when a new IMU sample arrives (now extracts only quaternion)
+void on_new_imu_sample(const bhi360_log_record_t* imu, uint32_t timestamp)
+{
+    // Extract quaternion data from full IMU record and convert to fixed-point
+    pending_sample.quat.quat_x = (int16_t)(imu->quat_x * 10000.0f);
+    pending_sample.quat.quat_y = (int16_t)(imu->quat_y * 10000.0f);
+    pending_sample.quat.quat_z = (int16_t)(imu->quat_z * 10000.0f);
+    pending_sample.quat.quat_w = (int16_t)(imu->quat_w * 10000.0f);
+    pending_sample.quat_ready = true;
+    if (timestamp > pending_sample.timestamp)
+        pending_sample.timestamp = timestamp;
+    try_combine_and_buffer();
+}
+#endif

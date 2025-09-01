@@ -1,0 +1,65 @@
+# Build directories
+build/
+build_*/
+_build/
+
+# External modules (managed by west)
+external/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Clang files
+.clang*
+*.clang
+
+# Hidden directories
+.*/
+.devcontainer/
+.github/
+.qodo/
+
+# Compiled files
+*.o
+*.a
+*.so
+*.elf
+*.hex
+*.bin
+*.map
+
+# Log files
+*.log
+log.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+
+# Documentation build
+docs/_build/
+docs/html/
+docs/latex/
+
+# Cache directories
+.cache/
+
+# Compile commands (generated)
+compile_commands.json
+
+# West workspace
+.west/
+
+# Test environments
+smp_test_env/

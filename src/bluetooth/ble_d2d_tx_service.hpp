@@ -1,0 +1,190 @@
+#pragma once
+
+#include <zephyr/types.h>
+#include <zephyr/bluetooth/conn.h>
+#include <app.hpp>
+#include <d2d_metrics.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief Send D2D batch notification to primary device
+ * @param batch Pointer to d2d_sample_batch_t
+ * @return 0 on success, negative error code on failure
+ */
+
+
+#define D2D_BATCH_SIZE 1
+
+// Simplified quaternion-only structure for D2D transmission (8 bytes)
+typedef struct __attribute__((packed)) {
+    int16_t quat_x;  // Scaled by 10000
+    int16_t quat_y;
+    int16_t quat_z;
+    int16_t quat_w;
+} d2d_quaternion_fixed_t;
+
+// Simplified D2D batch structure - quaternion only, no gyro or linear accel
+// This reduces BLE bandwidth by ~65% (28 bytes vs 80+ bytes)
+typedef struct __attribute__((packed)) {
+    uint32_t timestamp[D2D_BATCH_SIZE];           // 4 bytes
+    foot_samples_t foot[D2D_BATCH_SIZE];          // 16 bytes (8 channels x 2 bytes)
+    d2d_quaternion_fixed_t quat[D2D_BATCH_SIZE];  // 8 bytes (4 x int16_t)
+} d2d_sample_batch_t;  // Total: 28 bytes
+
+typedef struct {
+    bool foot_ready;
+    bool quat_ready;
+    foot_samples_t foot;
+    d2d_quaternion_fixed_t quat;  // Only quaternion data
+    uint32_t timestamp;
+} d2d_pending_sample_t;
+
+
+// These must be extern to avoid multiple definitions
+extern d2d_pending_sample_t pending_sample;
+extern d2d_sample_batch_t d2d_batch_buffer;
+int d2d_tx_notify_d2d_batch(const d2d_sample_batch_t *batch);
+
+/**
+ * @brief Initialize the D2D TX GATT service
+ */
+void d2d_tx_service_init(void);
+
+/**
+ * @brief Set the connection handle for the primary device
+ * @param conn Connection handle (NULL to clear)
+ */
+void d2d_tx_service_set_connection(struct bt_conn *conn);
+
+/**
+ * @brief Send foot sensor data notification to primary device
+ * @param samples Foot sensor sample data
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_foot_sensor_data(const foot_samples_t *samples);
+
+/**
+ * @brief Send BHI360 3D mapping data notification to primary device
+ * @param data BHI360 3D mapping data
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_bhi360_data1(const bhi360_3d_mapping_t *data);
+
+/**
+ * @brief Send BHI360 step count notification to primary device
+ * @param data BHI360 step count data
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_bhi360_data2(const bhi360_step_count_t *data);
+
+/**
+ * @brief Send BHI360 linear acceleration notification to primary device
+ * @param data BHI360 linear acceleration data
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_bhi360_data3(const bhi360_linear_accel_t *data);
+
+/**
+ * @brief Send device status notification to primary device
+ * @param status Device status bitfield
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_status(uint32_t status);
+
+/**
+ * @brief Send charge status notification to primary device
+ * @param status Charge status value
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_charge_status(uint8_t status);
+
+/**
+ * @brief Send foot sensor log available notification to primary device
+ * @param log_id Log ID that is available
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_foot_log_available(uint8_t log_id);
+
+/**
+ * @brief Send BHI360 log available notification to primary device
+ * @param log_id Log ID that is available
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_bhi360_log_available(uint8_t log_id);
+
+/**
+ * @brief Send device info notification to primary device
+ * @param info Device information structure
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_device_info(const device_info_msg_t *info);
+
+/**
+ * @brief Send FOTA progress notification to primary device
+ * @param progress FOTA progress information
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_fota_progress(const fota_progress_msg_t *progress);
+
+/**
+ * @brief Send foot log path notification to primary device
+ * @param path File path string
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_foot_log_path(const char *path);
+
+/**
+ * @brief Send BHI360 log path notification to primary device
+ * @param path File path string
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_bhi360_log_path(const char *path);
+
+/**
+ * @brief Send activity log available notification to primary device
+ * @param log_id Log ID that is available
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_activity_log_available(uint8_t log_id);
+
+/**
+ * @brief Send activity log path notification to primary device
+ * @param path File path string
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_activity_log_path(const char *path);
+
+/**
+ * @brief Send activity step count notification to primary device
+ * @param data Activity step count data
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_activity_step_count(const bhi360_step_count_t *data);
+
+/**
+ * @brief Send weight measurement notification to primary device
+ * @param weight_kg Weight in kilograms
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_weight_measurement(float weight_kg);
+
+/**
+ * @brief Send battery level notification to primary device
+ * @param level Battery level percentage (0-100)
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_battery_level(uint8_t level);
+
+/**
+ * @brief Send calculated metrics notification to primary device
+ * @param metrics D2D metrics packet with calculated parameters
+ * @return 0 on success, negative error code on failure
+ */
+int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics);
+
+#ifdef __cplusplus
+}
+#endif

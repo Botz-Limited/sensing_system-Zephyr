@@ -1,0 +1,133 @@
+diff --git a/src/app/app.cpp b/src/app/app.cpp
+index 1234567..abcdefg 100644
+--- a/src/app/app.cpp
++++ b/src/app/app.cpp
+@@ -35,6 +35,8 @@
+ #include <app_version.h>
+ #include <errors.hpp>
+ #include <zephyr/sys/reboot.h>
++#include "../bluetooth/fota_sync_manager.hpp"
++#include "../bluetooth/retry_manager.hpp"
+ 
+ #if IS_ENABLED(CONFIG_SECONDARY_DEVICE)
+ #include "../bluetooth/ble_d2d_tx.hpp"
+@@ -42,9 +44,6 @@
+ 
+ LOG_MODULE_REGISTER(MODULE, CONFIG_APP_MODULE_LOG_LEVEL); // NOLINT
+ 
+-// FOTA reset work
+-static struct k_work_delayable fota_reset_work;
+-
+ // FOTA progress tracking structure
+ struct fota_progress_state {
+     bool is_active;
+@@ -59,14 +58,6 @@ struct fota_progress_state {
+ 
+ void initializing_entry();
+ 
+-// FOTA reset handler
+-static void fota_reset_handler(struct k_work *work)
+-{
+-    ARG_UNUSED(work);
+-    LOG_INF("Performing system reset to apply new firmware...");
+-    sys_reboot(SYS_REBOOT_WARM);
+-}
+-
+ K_MSGQ_DEFINE(bluetooth_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+ K_MSGQ_DEFINE(data_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+ K_MSGQ_DEFINE(motion_sensor_msgq, MSG_QUEUE_MESSAGE_SIZE, MSG_QUEUE_DEPTH, 4);
+@@ -100,6 +91,11 @@ mgmt_cb_return fota_started_callback(uint32_t event, enum mgmt_cb_return prev_st
+     fota_progress.is_active = true;
+     fota_progress.status = 1; // in_progress
+     
++    // Initialize FOTA sync manager for this update
++    FotaSyncManager& sync_mgr = FotaSyncManager::getInstance();
++    enum fota_device_role target = IS_ENABLED(CONFIG_PRIMARY_DEVICE) ? 
++                                   FOTA_DEVICE_PRIMARY : FOTA_DEVICE_SECONDARY;
++    sync_mgr.startFota(target, 0); // Size will be updated in chunk callback
++    
+     // Send FOTA progress message to Bluetooth thread
+     generic_message_t msg;
+     msg.sender = SENDER_NONE;
+@@ -135,6 +131,11 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
+             if (check->req->off == 0) {
+                 fota_progress.total_size = check->req->size;
+                 LOG_INF("FOTA Total size: %u bytes", fota_progress.total_size);
++                
++                // Update sync manager with actual size
++                FotaSyncManager& sync_mgr = FotaSyncManager::getInstance();
++                enum fota_device_role target = IS_ENABLED(CONFIG_PRIMARY_DEVICE) ? 
++                                               FOTA_DEVICE_PRIMARY : FOTA_DEVICE_SECONDARY;
++                sync_mgr.startFota(target, fota_progress.total_size);
+             }
+         }
+         
+@@ -147,6 +148,12 @@ mgmt_cb_return fota_chunk_callback(uint32_t event, enum mgmt_cb_return prev_stat
+                 fota_progress.percent_complete = new_percent;
+                 LOG_INF("FOTA Progress: %u%% (%u/%u bytes)", 
+                         fota_progress.percent_complete,
+                         fota_progress.bytes_received,
+                         fota_progress.total_size);
++                
++                // Update sync manager
++                FotaSyncManager& sync_mgr = FotaSyncManager::getInstance();
++                enum fota_device_role target = IS_ENABLED(CONFIG_PRIMARY_DEVICE) ? 
++                                               FOTA_DEVICE_PRIMARY : FOTA_DEVICE_SECONDARY;
++                sync_mgr.updateProgress(target, new_percent, fota_progress.bytes_received);
+                 
+                 // Send FOTA progress message to Bluetooth thread
+                 generic_message_t msg;
+@@ -239,6 +246,11 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
+     fota_progress.is_active = false;
+     fota_progress.status = 3; // confirmed
+     
++    // Mark device ready for reset in sync manager
++    FotaSyncManager& sync_mgr = FotaSyncManager::getInstance();
++    enum fota_device_role target = IS_ENABLED(CONFIG_PRIMARY_DEVICE) ? 
++                                   FOTA_DEVICE_PRIMARY : FOTA_DEVICE_SECONDARY;
++    
+     // Send FOTA progress message to Bluetooth thread
+     generic_message_t msg;
+     msg.sender = SENDER_NONE;
+@@ -263,9 +275,23 @@ mgmt_cb_return fota_confirmed_callback(uint32_t event, enum mgmt_cb_return prev_
+     }
+     #endif
+     
+-    // Schedule a system reset to apply the new firmware
+-    LOG_INF("Scheduling system reset in 2 seconds to apply new firmware...");
+-    k_work_schedule(&fota_reset_work, K_SECONDS(2));
++    // Use retry manager for critical reset operation
++    RetryManager retry("FOTA_RESET", RetryConfigs::CRITICAL_OPERATION);
++    
++    retry_result result = retry.execute([&sync_mgr, target]() -> int {
++        // Mark this device as ready
++        int ret = sync_mgr.markReadyForReset(target);
++        if (ret != 0) {
++            LOG_ERR("Failed to mark ready for reset: %d", ret);
++            return ret;
++        }
++        
++        // The sync manager will handle the actual reset
++        return 0;
++    });
++    
++    if (result != RETRY_SUCCESS) {
++        LOG_ERR("Failed to schedule FOTA reset after retries");
++    }
+     
+     return MGMT_CB_OK;
+ }
+@@ -380,9 +406,8 @@ static void app_init()
+ {
+     initializing_entry();
+ 
+-    // Initialize FOTA reset work
+-    k_work_init_delayable(&fota_reset_work, fota_reset_handler);
+-
++    // Initialize FOTA sync manager
++    FotaSyncManager::getInstance().init();
++    
+     // Register all FOTA callbacks
+     for (size_t i = 0; i < ARRAY_SIZE(fota_callbacks); i++) {
+         mgmt_callback_register(&fota_callbacks[i]);
+     }

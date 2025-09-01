@@ -1,0 +1,26 @@
+config APP_MODULE
+	bool "App Module"
+	default y
+	select GPIO
+	help
+	  APP MODULE
+
+if APP_MODULE
+
+module = APP_MODULE
+module-str = app module
+source "subsys/logging/Kconfig.template.log_config"
+
+config APP_PAUSED_TIMEOUT_MINS
+	int "Duration the system will stay paused before power off"
+	default 5
+
+config APP_MODULE_STACK_SIZE
+	int "App module thread stack size"
+	default 3072
+
+config APP_MODULE_PRIORITY
+	int "App module thread priority"
+	default 9
+
+endif # APP_MODULE

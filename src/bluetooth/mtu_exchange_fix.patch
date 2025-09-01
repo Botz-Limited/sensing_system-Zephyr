@@ -1,0 +1,30 @@
+--- bluetooth.cpp.orig	2024-01-01 00:00:00.000000000 +0000
++++ bluetooth.cpp	2024-01-01 00:00:00.000000000 +0000
+@@ -XXX,6 +XXX,XX @@ static void connected(struct bt_conn *conn, uint8_t err)
+ {
+     if (err)
+     {
+         LOG_ERR("Connection failed (err 0x%02x)", err);
+         return;
+     }
+ 
++    // Request MTU exchange to avoid small MTU issues
++    static struct bt_gatt_exchange_params exchange_params;
++    exchange_params.func = [](struct bt_conn *conn, uint8_t err, struct bt_gatt_exchange_params *params) {
++        if (!err) {
++            uint16_t mtu = bt_gatt_get_mtu(conn);
++            LOG_INF("MTU exchange successful: %u", mtu);
++        } else {
++            LOG_WRN("MTU exchange failed: %d", err);
++        }
++    };
++    
++    int ret = bt_gatt_exchange_mtu(conn, &exchange_params);
++    if (ret) {
++        LOG_WRN("Failed to initiate MTU exchange: %d", ret);
++    } else {
++        LOG_DBG("MTU exchange initiated");
++    }
++
+     // Only send a connected event if the connection is already bonded
+     bool bonded = is_connection_bonded(conn);

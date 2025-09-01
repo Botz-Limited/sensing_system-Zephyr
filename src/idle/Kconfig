@@ -1,0 +1,62 @@
+# Idle Module Configuration
+
+config IDLE_MODULE
+    bool "Enable Idle module"
+    default y
+    help
+      Enable the idle module for power management activities
+
+if IDLE_MODULE
+
+module = IDLE_MODULE
+module-str = idle module
+source "subsys/logging/Kconfig.template.log_config"
+
+config IDLE_MODULE_STACK_SIZE
+    int "Stack size for idle thread"
+    default 2048
+    help
+      Stack size for the idle thread.
+
+config IDLE_MODULE_PRIORITY
+    int "Priority of the idle thread"
+    default 7
+    range 1 10
+    help
+      Thread priority for idle module.
+      Lower number means higher priority.
+
+config IDLE_INACTIVITY_TIMEOUT_MINUTES
+    int "Minutes of inactivity before sleep"
+    default 5
+    range 1 60
+    help
+      Number of minutes without motion sensor activity
+      before entering sleep mode.
+
+config IDLE_ENABLE_POWER_MANAGEMENT
+    bool "Enable power management in idle module"
+    default n
+    help
+      Enable system power management based on motion sensor activity.
+      When enabled, the system will enter sleep mode after the configured
+      inactivity timeout and wake on BHI360 interrupts.
+
+config IDLE_PERIODIC_CHECK_SECONDS
+    int "Periodic check interval in seconds"
+    default 10
+    range 1 60
+    help
+      How often to check for inactivity in seconds.
+
+config IDLE_MOTION_THRESHOLD_QUATERNION
+    int "Motion detection quaternion threshold (x1000)"
+    default 90
+    range 10 200
+    help
+      Threshold for detecting motion via quaternion changes.
+      Value is multiplied by 1000 (e.g., 50 = 0.05 actual threshold).
+      Larger values reduce sensitivity to sensor drift.
+      Recommended: 50-100 to avoid false triggers from drift.
+
+endif # IDLE_MODULE

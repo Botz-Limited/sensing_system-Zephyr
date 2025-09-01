@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+import "nanopb.proto";
+
+package sensor_data_messages;
+
+// --- Enums (BHI360 Specific) ---
+enum BHI360MessageType {
+  BHI360_UNKNOWN_MESSAGE_TYPE = 0; // Default value, should always be 0
+  BHI360_3D_DATA = 1;
+  BHI360_STEP_COUNTER_DATA = 2;
+}
+
+// --- Message for 3D Vector Data (fixed-point version) ---
+// Scale factor: 1000 for acceleration (mm/s²), 10000 for angular velocity (0.0001 rad/s)
+message Vector3i {
+  sint32 x = 1;  // Using sint32 for efficient encoding of negative values
+  sint32 y = 2;
+  sint32 z = 3;
+}
+
+// --- BHI360 3D Sensor Data Message (fixed-point) ---
+message BHI360_3D_Data {
+  Vector3i acceleration = 2;      // Scaled by 1000 (mm/s²)
+  Vector3i angular_velocity = 3;  // Scaled by 10000 (0.0001 rad/s)
+}
+
+// --- BHI360 Step Counter Data Message ---
+message BHI360_StepCounterData {
+  uint32 step_count = 2;
+  uint32 activity_duration_s = 3;
+}
+
+// --- BHI360 Combined Log Record (fixed-point version) ---
+// This version uses fixed-point integers to save space
+message BHI360LogRecord {
+  // Quaternion components scaled by 10000 (range: -10000 to 10000)
+  sint32 quat_x = 1 [(nanopb).int_size = IS_16];  // 2 bytes each
+  sint32 quat_y = 2 [(nanopb).int_size = IS_16];
+  sint32 quat_z = 3 [(nanopb).int_size = IS_16];
+  sint32 quat_w = 4 [(nanopb).int_size = IS_16];
+  
+  // Quaternion accuracy scaled by 100 (range: 0 to 300)
+  uint32 quat_accuracy = 5 [(nanopb).int_size = IS_8];  // 1 byte
+  
+  // Linear acceleration scaled by 1000 (mm/s²)
+  sint32 lacc_x = 6 [(nanopb).int_size = IS_16];  // 2 bytes each
+  sint32 lacc_y = 7 [(nanopb).int_size = IS_16];
+  sint32 lacc_z = 8 [(nanopb).int_size = IS_16];
+  
+  // Step count remains as is
+  uint32 step_count = 9;
+  
+  // Delta time in milliseconds (max 65535ms)
+  uint32 delta_ms = 10 [(nanopb).int_size = IS_16];
+  
+  // Gyroscope scaled by 10000 (0.0001 rad/s)
+  sint32 gyro_x = 11 [(nanopb).int_size = IS_16];  // 2 bytes each
+  sint32 gyro_y = 12 [(nanopb).int_size = IS_16];
+  sint32 gyro_z = 13 [(nanopb).int_size = IS_16];
+}
+
+// BHI360 specific message for logging session metadata
+message BHI360SensingData {
+  string firmware_version = 1;
+  uint32 sampling_frequency = 2;
+  BHI360MessageType message_type = 3; // Uses BHI360MessageType
+}
+
+// BHI360 specific message for marking the end of a logging session
+message BHI360SessionEnd {
+  uint64 uptime_ms = 1;
+}
+
+// --- Main Wrapper Message for BHI360 logs ---
+// Renamed to be unique for BHI360 logs
+message BHI360LogMessage {
+  oneof payload {
+    BHI360_3D_Data bhi360_3d = 2;
+    BHI360_StepCounterData bhi360_step_counter = 3;
+    BHI360SensingData sensing_data = 4;
+    BHI360SessionEnd session_end = 5;
+    BHI360LogRecord bhi360_log_record = 6; // Fixed-point log record
+  }
+}
+
+// Fixed-point data size comparison:
+// Original float version: ~52-58 bytes per record
+// Fixed-point version: ~29-35 bytes per record (40-45% reduction)
+//
+// Field sizes in fixed-point version:
+// - Quaternion (x,y,z,w): 4 × 2 bytes = 8 bytes
+// - Quaternion accuracy: 1 byte
+// - Linear acceleration: 3 × 2 bytes = 6 bytes
+// - Gyroscope: 3 × 2 bytes = 6 bytes
+// - Step count: 4 bytes
+// - Delta time: 2 bytes
+// Total raw data: 27 bytes + protobuf overhead

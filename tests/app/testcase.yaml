@@ -1,0 +1,4 @@
+tests:
+  app.unit:
+    platform_allow: native_posix
+    tags: app unit

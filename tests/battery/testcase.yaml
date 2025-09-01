@@ -1,0 +1,4 @@
+tests:
+  battery.test:
+    platform_allow: native_posix
+    tags: battery

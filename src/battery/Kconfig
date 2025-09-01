@@ -1,0 +1,22 @@
+config BATTERY_MODULE
+	bool "Battery Module"
+	select GPIO
+	help
+	  BATTERY MODULE
+
+if BATTERY_MODULE
+
+module = BATTERY_MODULE
+module-str = BATTERY module
+source "subsys/logging/Kconfig.template.log_config"
+
+
+config BATTERY_MODULE_STACK_SIZE
+	int "Battery module thread stack size"
+	default 3072
+
+config BATTERY_PRIORITY
+	int "Battery module thread priority"
+	default 8
+
+endif # BATTERY_MODULE

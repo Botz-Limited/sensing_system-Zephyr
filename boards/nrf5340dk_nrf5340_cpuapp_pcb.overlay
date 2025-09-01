@@ -1,0 +1,335 @@
+/*
+ * Copyright (c) 2019 Peter Bigot Consulting, LLC
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+
+/ {
+    chosen {
+        nordic,pm-ext-flash = &w25q128;
+        zephyr,settings-partition = &lfs1;
+        zephyr,console = &uart2;
+        zephyr,shell-uart = &uart2;
+        nordic,nrf-spim= &spi1;
+    };
+
+    aliases {
+        rtc0 = &rtc0;
+        wifi0 = &nrf7002;
+        spi1 = &spi1;
+    };
+
+};
+
+
+/delete-node/ &storage_partition;
+
+/ {
+    fstab {
+        compatible = "zephyr,fstab";
+        status = "okay";
+        lfs1: lfs1 {
+            compatible = "zephyr,fstab,littlefs";
+            mount-point = "/lfs1";
+            partition = <&lfs1_part>;
+            read-size = <16>;
+            prog-size = <16>;
+            cache-size = <64>;
+            lookahead-size = <32>;
+            block-cycles = <512>;
+        };
+    };
+};
+
+
+/* Add QSPI configuration with new flash */
+&qspi {
+    status = "okay";
+    pinctrl-0 = <&qspi_default>;
+    pinctrl-1 = <&qspi_sleep>;
+    pinctrl-names = "default", "sleep";
+    
+    /delete-node/ mx25r6435f@0;
+    
+    w25q128: w25q128jv@0 {
+        compatible = "nordic,qspi-nor";
+        reg = <0>;
+        sck-frequency = <8000000>;
+        jedec-id = [ef 40 18];
+        sfdp-bfp = [
+            e5 20 f1 ff  ff ff ff 03  44 eb 08 6b  08 3b 04 bb
+            ee ff ff ff  ff ff 00 ff  ff ff 00 ff  0c 20 0f 52
+            10 d8 00 ff  23 72 f5 00  82 ed 04 cc  44 83 68 44
+            30 b0 30 b0  f7 c4 d5 5c  00 be 29 ff  f0 d0 ff ff
+        ];
+        size = <134217728>; /* 128 Mbit = 16 MB */
+        has-dpd;
+        t-enter-dpd = <10000>;
+        t-exit-dpd = <35000>;
+        status = "okay";
+        
+        partitions {
+            compatible = "fixed-partitions";
+            #address-cells = <1>;
+            #size-cells = <1>;
+
+            lfs1_part: partition@0 {
+                label = "storage";
+                reg = <0x00000000 0x00006000>;
+            };
+        };
+    };
+};
+
+&adc {
+    status = "okay";
+    compatible = "nordic,nrf-saadc";
+    #address-cells = <1>;
+    #size-cells = <0>;
+    
+    channel@0 {
+        reg = <0>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+        zephyr,input-positive = <NRF_SAADC_AIN0>;
+        zephyr,resolution = <14>;
+    };
+    
+    channel@1 {
+        reg = <1>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+        zephyr,input-positive = <NRF_SAADC_AIN1>;
+        zephyr,resolution = <14>;
+    };
+    
+    channel@2 {
+        reg = <2>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+        zephyr,input-positive = <NRF_SAADC_AIN2>;
+        zephyr,resolution = <14>;
+    };
+    
+    channel@3 {
+        reg = <3>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+        zephyr,input-positive = <NRF_SAADC_AIN3>;
+        zephyr,resolution = <14>;
+    };
+    
+    channel@4 {
+        reg = <4>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+        zephyr,input-positive = <NRF_SAADC_AIN4>;
+        zephyr,resolution = <14>;
+    };
+    
+    channel@5 {
+        reg = <5>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+        zephyr,input-positive = <NRF_SAADC_AIN5>;
+        zephyr,resolution = <14>;
+    };
+    
+    channel@6 {
+        reg = <6>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+        zephyr,input-positive = <NRF_SAADC_AIN6>;
+        zephyr,resolution = <14>;
+    };
+    
+    channel@7 {
+        reg = <7>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)>;
+        zephyr,input-positive = <NRF_SAADC_AIN7>;
+        zephyr,resolution = <14>;
+    };
+};
+
+&gpio0 {
+    status = "okay";
+};
+
+&gpio1 {
+    status = "okay";
+};
+
+&pwm0 {
+    status = "disabled";
+};
+
+&timer0 {
+    status = "disabled";   
+};
+
+&timer2 {
+    status = "disabled";
+};
+
+
+&i2c1 {
+    status = "disabled";
+};
+
+&uart0 {
+    status = "disabled";
+};
+
+&rtc0 {
+    status = "okay";
+};
+
+/* Enable UART2 for console/logging */
+&uart2 {
+    compatible = "nordic,nrf-uarte";
+    status = "okay";
+    current-speed = <115200>;
+    parity= "none";
+    stop-bits = "1";
+    pinctrl-0 = <&uart2_default_pcb>;
+    pinctrl-1 = <&uart2_sleep_pcb>;
+    pinctrl-names = "default", "sleep";
+};
+
+
+&spi2 {
+    status = "disabled";
+};
+
+&spi4 {
+	compatible = "nordic,nrf-spim";
+	status = "disabled";
+	pinctrl-0 = <&spi4_default>;
+	pinctrl-1 = <&spi4_sleep>;
+	pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio1 16 GPIO_ACTIVE_LOW>;
+
+	nrf7002: nrf7002@0 {
+		compatible = "nordic,nrf7002-spi";
+		reg = <0>;
+		spi-max-frequency = <32000000>;
+		host-irq-gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
+		iovdd-ctrl-gpios = <&gpio1 8 GPIO_ACTIVE_HIGH>;
+		bucken-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
+        wifi-max-tx-pwr-2g-dsss = <20>;
+        wifi-max-tx-pwr-2g-mcs0 = <20>;
+        wifi-max-tx-pwr-2g-mcs7 = <20>;
+        wifi-max-tx-pwr-5g-low-mcs0 = <20>;
+        wifi-max-tx-pwr-5g-low-mcs7 = <20>;
+        wifi-max-tx-pwr-5g-mid-mcs0 = <20>;
+        wifi-max-tx-pwr-5g-mid-mcs7 = <20>;
+        wifi-max-tx-pwr-5g-high-mcs0 = <20>;
+        wifi-max-tx-pwr-5g-high-mcs7 = <20>;
+        label = "NRF7002";
+        status = "okay";
+	};
+};
+
+&spi1 {
+    compatible = "nordic,nrf-spim";
+    status = "okay";
+    pinctrl-0 = <&spi1_default_alt>;
+    pinctrl-1 = <&spi1_sleep_alt>;
+    pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>; // CS on P1.15
+    label = "spi1";
+
+    bhi360: bhi360@0 {
+        compatible = "bosch,bhi360";
+        status = "okay";
+        reg = <0>;
+        spi-max-frequency = <8000000>;
+        int-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;   // INT on P1.10
+        reset-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;  // Optional: RESET on P1.11
+        label = "BHI360";
+    };
+};
+
+&pinctrl {
+    spi1_default_alt: spi1_default_alt {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 14)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 13)>,
+                <NRF_PSEL(SPIM_MISO, 1, 12)>;
+        };
+    };
+
+    spi1_sleep_alt: spi1_sleep_alt {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 14)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 13)>,
+                <NRF_PSEL(SPIM_MISO, 1, 12)>;
+            low-power-enable;
+        };
+    };
+
+    spi2_default_alt: spi2_default_alt {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 9)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 8)>;
+        };
+        group2 {
+            psels = <NRF_PSEL(SPIM_MISO, 1, 7)>;
+            bias-pull-down;
+        };
+    };
+
+    spi2_sleep_alt: spi2_sleep_alt {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 1, 9)>,
+            <NRF_PSEL(SPIM_MOSI, 1, 8)>,
+            <NRF_PSEL(SPIM_MISO, 1, 7)>;
+            low-power-enable;
+        };
+    };
+
+	spi4_default: spi4_default {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
+					<NRF_PSEL(SPIM_MOSI, 1, 13)>,
+					<NRF_PSEL(SPIM_MISO, 1, 14)>;
+		};
+	};
+
+	spi4_sleep: spi4_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
+					<NRF_PSEL(SPIM_MOSI, 1, 13)>,
+					<NRF_PSEL(SPIM_MISO, 1, 14)>;
+			low-power-enable;
+		};
+	};
+
+	uart2_default_pcb: uart2_default_pcb {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 0, 20)>,  /* TX on P0.20 */
+                    <NRF_PSEL(UART_RX, 0, 22)>;  /* RX on P0.22 */
+        };
+    };
+
+    uart2_sleep_pcb: uart2_sleep_pcb {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 0, 20)>,
+                    <NRF_PSEL(UART_RX, 0, 22)>;
+            low-power-enable;
+        };
+    };
+};
+
+
+

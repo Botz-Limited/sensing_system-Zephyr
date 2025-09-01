@@ -1,0 +1,54 @@
+rsource "app/Kconfig"
+rsource "data/Kconfig"
+rsource "bluetooth/Kconfig"
+rsource "app_events/Kconfig"
+rsource "foot_sensor/Kconfig"
+rsource "motion_sensor/Kconfig"
+rsource "activity_metrics/Kconfig"
+rsource "sensor_data/Kconfig"
+rsource "realtime_metrics/Kconfig"
+rsource "analytics/Kconfig"
+rsource "battery/Kconfig"
+rsource "wifi/Kconfig"
+rsource "idle/Kconfig"
+rsource "Kconfig.fota"
+
+
+# Sensor Criticality Configuration
+choice PRIMARY_SENSING_FUNCTION
+    prompt "Primary sensing function"
+    default PRIMARY_FUNCTION_BOTH
+    help
+      Select which sensor is critical for system operation.
+      Non-critical sensors will report errors but not prevent system startup.
+
+    config PRIMARY_FUNCTION_FOOT
+        bool "Foot pressure sensing is primary"
+        help
+          Foot sensor failures will prevent system startup.
+          Motion sensor failures will be reported but system continues.
+        
+    config PRIMARY_FUNCTION_MOTION
+        bool "Motion/IMU sensing is primary"
+        help
+          Motion sensor failures will prevent system startup.
+          Foot sensor failures will be reported but system continues.
+        
+    config PRIMARY_FUNCTION_BOTH
+        bool "Both sensors are required"
+        help
+          Either sensor failure will prevent system startup.
+endchoice
+
+# Derived configs for easier use in code
+config FOOT_SENSOR_OPTIONAL
+    bool
+    default y if PRIMARY_FUNCTION_MOTION
+    default n
+
+config MOTION_SENSOR_OPTIONAL
+    bool
+    default y if PRIMARY_FUNCTION_FOOT
+    default n
+
+

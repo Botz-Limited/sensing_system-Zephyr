@@ -1,0 +1,34 @@
+# 3D Orientation Service Configuration
+
+config HIGH_RATE_3D_ORIENTATION
+    bool "Enable high-rate 3D orientation updates"
+    default n
+    help
+      Enable higher sampling and transmission rates for 3D orientation visualization.
+      When enabled:
+      - BHI360 quaternion sampling: 100Hz (instead of 50Hz)
+      - BLE transmission rate: 50Hz (instead of 20Hz)
+      - D2D transmission rate: 50Hz (instead of 20Hz)
+      
+      This provides smoother 3D visualization but increases power consumption
+      and BLE bandwidth usage.
+
+config 3D_ORIENTATION_BHI360_RATE
+    int "BHI360 quaternion sampling rate (Hz)"
+    default 100 if HIGH_RATE_3D_ORIENTATION
+    default 50
+    range 10 400
+    help
+      The rate at which the BHI360 outputs quaternion data.
+      Higher rates provide smoother motion but increase power consumption.
+      The BHI360 can support up to 400Hz for virtual sensors.
+
+config 3D_ORIENTATION_BLE_RATE
+    int "BLE transmission rate (Hz)"
+    default 50 if HIGH_RATE_3D_ORIENTATION
+    default 20
+    range 1 50
+    help
+      The rate at which quaternion data is sent over BLE.
+      Limited by BLE connection interval and bandwidth.
+      Higher rates provide smoother visualization but may cause packet loss.

@@ -1,0 +1,37 @@
+#
+# Copyright (c) 2025 Botz Innovation
+#
+
+menu "Analytics Module"
+
+config ANALYTICS_MODULE
+	bool "Enable analytics module"
+	default y
+	help
+	  Enable the analytics module for complex metric calculations.
+
+config ANALYTICS_MODULE_LOG_LEVEL
+	int "Analytics module log level"
+	default 3
+	range 0 4
+	help
+	  Log level for analytics module
+	  0 - OFF
+	  1 - ERROR
+	  2 - WARNING
+	  3 - INFO
+	  4 - DEBUG
+
+config ANALYTICS_MODULE_STACK_SIZE
+	int "Analytics thread stack size"
+	default 4096
+	help
+	  Stack size for the analytics processing thread
+
+config ANALYTICS_MODULE_PRIORITY
+	int "Analytics thread priority"
+	default 5
+	help
+	  Priority of the analytics processing thread
+
+endmenu
