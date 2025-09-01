@@ -36,7 +36,7 @@ config IDLE_INACTIVITY_TIMEOUT_MINUTES
 
 config IDLE_ENABLE_POWER_MANAGEMENT
     bool "Enable power management in idle module"
-    default y
+    default n
     help
       Enable system power management based on motion sensor activity.
       When enabled, the system will enter sleep mode after the configured
