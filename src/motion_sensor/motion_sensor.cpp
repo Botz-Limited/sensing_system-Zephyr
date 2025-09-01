@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <time.h>
+#include "math.h"
 
 #include <app.hpp>
 #include <app_event_manager.h>
@@ -29,6 +30,7 @@
 #include <events/app_state_event.h>
 #include <events/motion_sensor_event.h>
 #include <events/streaming_control_event.h>
+#include <events/idle_event.h>
 #if defined(CONFIG_WIFI_MODULE)
 #include <events/wifi_event.h>
 #endif
@@ -585,23 +587,30 @@ void motion_sensor_process(void *, void *, void *) {
 static void
 parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
                   void *callback_ref) {
-  ARG_UNUSED(callback_ref);
-  // Static variables to hold the latest values
-  static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0,
-               latest_quat_w = 0, latest_quat_accuracy = 0;
-  static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;
-  static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
-  static uint64_t latest_timestamp = 0;
+    ARG_UNUSED(callback_ref);
+    // Static variables to hold the latest values
+    static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0,
+                 latest_quat_w = 0, latest_quat_accuracy = 0;
+    static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;
+    static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
+    static uint64_t latest_timestamp = 0;
+    
+    // For motion activity detection (idle module)
+    static float last_reported_quat_w = 0;
+    static uint32_t last_reported_steps = 0;
+    static int64_t last_activity_report_time = 0;
+    const int64_t ACTIVITY_REPORT_INTERVAL_MS = 5000; // Report activity every 5 seconds max
 
-  // Synchronization tracking
-  static uint8_t motion_update_mask = 0;
-  static const uint8_t QUAT_UPDATED = 0x01;
-  static const uint8_t LACC_UPDATED = 0x02;
-  static const uint8_t GYRO_UPDATED = 0x04;
-  static const uint8_t ALL_MOTION_SENSORS =
-      (QUAT_UPDATED | LACC_UPDATED | GYRO_UPDATED);
+    // Synchronization tracking
+    static uint8_t motion_update_mask = 0;
+    static const uint8_t QUAT_UPDATED = 0x01;
+    static const uint8_t LACC_UPDATED = 0x02;
+    static const uint8_t GYRO_UPDATED = 0x04;
+    static const uint8_t ALL_MOTION_SENSORS =
+        (QUAT_UPDATED | LACC_UPDATED | GYRO_UPDATED);
 
-  bool send_data = false;
+    bool send_data = false;
+    bool motion_detected = false;
 
   switch (callback_info->sensor_id) {
   case QUAT_SENSOR_ID: {
@@ -620,6 +629,17 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
     latest_timestamp =
         *callback_info->time_stamp * 15625; // Convert to nanoseconds
     motion_update_mask |= QUAT_UPDATED;
+    
+    // Detect motion via quaternion changes for idle module
+    // Use configurable threshold to avoid false triggers from sensor drift
+    float motion_threshold = CONFIG_IDLE_MOTION_THRESHOLD_QUATERNION / 1000.0f;
+    float quat_delta = fabs(latest_quat_w - last_reported_quat_w);
+    if (quat_delta > motion_threshold) { // Default 0.05, configurable via Kconfig
+        motion_detected = true;
+        last_reported_quat_w = latest_quat_w;
+        LOG_DBG("Motion detected: quaternion delta %.3f > threshold %.3f",
+                (double)quat_delta, (double)motion_threshold);
+    }
 
     // Removed: No longer send orientation data before logging starts
 
@@ -694,6 +714,12 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
       }
     }
 
+    // Detect motion via step count changes for idle module
+    if (latest_step_count > last_reported_steps) {
+        motion_detected = true;
+        last_reported_steps = latest_step_count;
+    }
+    
     // Step counter updates independently, don't wait for it
     // It will be included with whatever value it has when motion sensors sync
     break;
@@ -850,6 +876,21 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
           latest_activity_step_count;
 #endif
      // k_msgq_put(&data_msgq, &activity_msg, K_NO_WAIT);
+    }
+    
+    // Send motion activity event to idle module if motion detected
+    if (motion_detected) {
+        int64_t current_time = k_uptime_get();
+        // Rate limit activity reports
+        if ((current_time - last_activity_report_time) > ACTIVITY_REPORT_INTERVAL_MS) {
+            struct motion_activity_event *evt = new_motion_activity_event();
+            if (evt) {
+                evt->timestamp_ms = (uint32_t)current_time;
+                APP_EVENT_SUBMIT(evt);
+                LOG_DBG("Sent motion activity event to idle module");
+            }
+            last_activity_report_time = current_time;
+        }
     }
   }
 }
