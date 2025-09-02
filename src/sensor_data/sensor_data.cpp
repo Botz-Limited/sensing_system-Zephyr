@@ -55,7 +55,7 @@ static struct k_thread sensor_data_thread_data;
 static k_tid_t sensor_data_tid;
 
 // Work queue configuration
-static constexpr int sensor_data_workq_stack_size = 2048;
+static constexpr int sensor_data_workq_stack_size = 4096;
 K_THREAD_STACK_DEFINE(sensor_data_workq_stack, sensor_data_workq_stack_size);
 static struct k_work_q sensor_data_work_q;
 

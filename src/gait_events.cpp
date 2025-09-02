@@ -126,20 +126,60 @@ static float calculate_adaptive_threshold(const foot_samples_t *buffer,
         }
     }
     
-    /* Calculate adaptive threshold as 50% between 5th and 75th percentiles */
-    int low_idx = sorted_count * 5 / 100;
-    int high_idx = sorted_count * 75 / 100;
-    float low_val = (float)total_pressures[low_idx];
-    float high_val = (float)total_pressures[high_idx];
+    /* ADAPTIVE THRESHOLD FOR CLEAR DETECTION */
+    /* With 8 sensors, each reading 0-16383 (14-bit ADC): */
+    /* - Theoretical max: 8 × 16383 = 131,064 */
+    /* - Swing phase (foot in air): Total ~0-1000 (noise only) */
+    /* - Light contact: Total ~5000-20000 */
+    /* - Normal stance phase: Total ~20000-80000 */
+    /* - Heavy pressure: Total ~80000-131064 */
     
-    float threshold = low_val + (high_val - low_val) * 0.5f;
+    /* Find the minimum and maximum values in the buffer */
+    int min_pressure = total_pressures[0];
+    int max_pressure = total_pressures[sorted_count - 1];
     
-    /* Sanity check for 14-bit ADC with 8 channels */
-    /* Maximum reasonable threshold would be 8 sensors * 11000 = 88000 */
-    /* But typical walking would have much lower values */
-    if (threshold > 20000) {
-        LOG_WRN("Adaptive threshold %.1f seems too high, clamping to 5000", threshold);
-        threshold = 5000.0f;  /* Reasonable threshold for walking */
+    /* Calculate the range */
+    int pressure_range = max_pressure - min_pressure;
+    
+    /* Set threshold adaptively based on the pressure range */
+    /* This ensures we detect transitions between swing and stance phases */
+    float threshold;
+    if (pressure_range > 10000) {
+        /* Clear difference between swing and stance - use 30% above minimum */
+        /* This works well for normal walking/running patterns */
+        threshold = (float)min_pressure + (float)pressure_range * 0.3f;
+    } else if (pressure_range > 5000) {
+        /* Moderate difference - use 25% above minimum */
+        /* This handles lighter steps or transitions */
+        threshold = (float)min_pressure + (float)pressure_range * 0.25f;
+    } else {
+        /* Small range - might be all swing or all stance */
+        /* Use 20% above minimum but ensure minimum threshold */
+        threshold = (float)min_pressure + (float)pressure_range * 0.2f;
+        if (threshold < 1000.0f && max_pressure > 2000) {
+            /* If max is significant, set threshold to detect transitions */
+            threshold = 1000.0f;
+        }
+    }
+    
+    /* Sanity checks for the threshold */
+    /* Must be high enough to avoid noise but low enough to detect contact */
+    if (threshold < 500.0f) {
+        /* Too low - would trigger on noise */
+        threshold = 500.0f;
+        LOG_DBG("Threshold too low, raised to %.1f", threshold);
+    } else if (threshold > 50000.0f) {
+        /* Extremely high - likely an error, cap at reasonable maximum */
+        /* Most real-world scenarios won't exceed 50k total pressure */
+        threshold = 20000.0f;
+        LOG_WRN("Threshold %.1f extremely high, capped at 20000", threshold);
+    }
+    
+    /* Log the pressure range for debugging */
+    static int range_log_counter = 0;
+    if (++range_log_counter % 20 == 0) {  // Log every 20th call
+        LOG_INF("Pressure range: min=%d, max=%d, threshold=%.1f", 
+                min_pressure, max_pressure, threshold);
     }
     
     /* Also ensure minimum threshold */
@@ -163,6 +203,11 @@ void gait_events_add_data(gait_event_detector_t *detector,
         return;  // Only foot_data is required, IMU is optional
     }
     
+    /* Validate detector state before accessing */
+    if (!detector->processing_active) {
+        return;  // Don't add data if not processing
+    }
+    
     int idx = detector->write_index;
     
     /* Bounds check before copying */
@@ -171,19 +216,35 @@ void gait_events_add_data(gait_event_detector_t *detector,
         return;
     }
     
+    /* Don't validate foot_data values - they might all be 0 during initialization */
+    /* The system should handle 0 values gracefully */
+    
     /* Copy data to buffer with bounds checking */
     memcpy(&detector->foot_buffer[idx], foot_data, sizeof(foot_samples_t));
     
-    /* Only copy IMU data if available */
+    /* Only copy IMU data if available and valid */
     if (imu_data) {
-        memcpy(&detector->imu_buffer[idx], imu_data, sizeof(imu_data_t));
+        /* Basic validation of IMU data */
+        bool valid_imu = (fabsf(imu_data->accel_x) < 100.0f &&
+                          fabsf(imu_data->accel_y) < 100.0f &&
+                          fabsf(imu_data->accel_z) < 100.0f &&
+                          fabsf(imu_data->gyro_x) < 10.0f &&
+                          fabsf(imu_data->gyro_y) < 10.0f &&
+                          fabsf(imu_data->gyro_z) < 10.0f);
         
-        /* Update velocity integration if we have previous data and IMU */
-        if (detector->buffer_count > 0) {
-            float dt = timestamp - detector->last_timestamp;
-            if (dt > 0 && dt < 0.1f) { /* Sanity check on dt */
-                update_velocity_integration(detector, imu_data, dt);
+        if (valid_imu) {
+            memcpy(&detector->imu_buffer[idx], imu_data, sizeof(imu_data_t));
+            
+            /* Update velocity integration if we have previous data and IMU */
+            if (detector->buffer_count > 0) {
+                float dt = timestamp - detector->last_timestamp;
+                if (dt > 0 && dt < 0.1f) { /* Sanity check on dt */
+                    update_velocity_integration(detector, imu_data, dt);
+                }
             }
+        } else {
+            /* Invalid IMU data - zero out */
+            memset(&detector->imu_buffer[idx], 0, sizeof(imu_data_t));
         }
     } else {
         /* No IMU data - zero out the buffer entry */
@@ -417,9 +478,12 @@ static void update_velocity_integration(gait_event_detector_t *detector,
         /* Update detailed FSM with current state */
         float velocity_mag = sqrtf(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
         int pressure_idx = detector->write_index > 0 ? detector->write_index - 1 : GAIT_BUFFER_SIZE_SAMPLES - 1;
-        float pressure = (float)calculate_total_pressure(&detector->foot_buffer[pressure_idx]);
-        gait_fsm_update(&detector->detailed_fsm, velocity_mag, pressure,
-                       (uint32_t)(detector->last_timestamp * 1000));
+        /* Validate pressure_idx before using it */
+        if (pressure_idx >= 0 && pressure_idx < GAIT_BUFFER_SIZE_SAMPLES) {
+            float pressure = (float)calculate_total_pressure(&detector->foot_buffer[pressure_idx]);
+            gait_fsm_update(&detector->detailed_fsm, velocity_mag, pressure,
+                           (uint32_t)(detector->last_timestamp * 1000));
+        }
     } else {
         /* BASIC: Simple linear integration */
         /* Remove gravity from acceleration (simplified - assumes Z is up) */

@@ -274,6 +274,16 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                     metrics_state.current_metrics.timestamp_ms = k_uptime_get_32();
                     metrics_state.metrics_count++;
                     
+                    // Log the received values for debugging
+                    LOG_INF("DIAG: Received metrics - Cadence=%u spm, Pace=%u s/km, GCT=%u ms",
+                            metrics_state.current_metrics.cadence_spm,
+                            metrics_state.current_metrics.pace_sec_km,
+                            metrics_state.current_metrics.ground_contact_ms);
+                    LOG_INF("DIAG: Form=%u%%, Balance=%d%%, Efficiency=%u%%",
+                            metrics_state.current_metrics.form_score,
+                            metrics_state.current_metrics.balance_lr_pct,
+                            metrics_state.current_metrics.efficiency_score);
+                    
                     // Send the metrics immediately since they're already calculated
                     send_ble_update();
                     break;

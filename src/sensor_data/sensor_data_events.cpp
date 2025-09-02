@@ -20,6 +20,9 @@ static gait_event_detector_t event_detector __aligned(8);
 static atomic_t events_initialized = ATOMIC_INIT(0);  // Use atomic instead of volatile bool
 static K_MUTEX_DEFINE(events_mutex);
 
+// Global variable for tracking bilateral success (used for fallback logic)
+uint32_t g_last_bilateral_success_time = 0;
+
 // Flow control state - safe implementation that won't break existing logic
 typedef enum {
     FLOW_MODE_NORMAL = 0,     // All features enabled (buffer < 50%)
@@ -82,9 +85,9 @@ void sensor_data_events_init(void)
         // Initialize with correct sampling rate
         gait_events_init(&event_detector, is_primary, sampling_rate);
         
-        // Enable advanced features with optimized processing
+        // Enable advanced features - they are critical for accurate gait analysis
         event_detector.use_advanced_features = true;
-        LOG_INF("Advanced gait features ENABLED with optimized processing");
+        LOG_INF("Advanced gait features ENABLED for comprehensive analysis");
         
         // Set subject height if available (default to 1.75m)
         gait_events_set_subject_height(&event_detector, 1.75f);
@@ -282,30 +285,30 @@ void sensor_data_1hz_timer_callback(void)
         last_buffer_count = event_detector.buffer_count;
     }
     
-    // Process buffer more aggressively to prevent overflow
-    // If buffer is more than 50% full, force processing
+    // Process buffer very aggressively to prevent overflow
+    // If buffer is more than 20% full, force processing
     int metrics_count = 0;
-    if (event_detector.buffer_count > GAIT_BUFFER_SIZE_SAMPLES / 2) {
-        LOG_DBG("Buffer >50%% full (%d/%d), forcing processing",
+    if (event_detector.buffer_count > GAIT_BUFFER_SIZE_SAMPLES / 5) {
+        LOG_DBG("Buffer >20%% full (%d/%d), forcing processing",
                 event_detector.buffer_count, GAIT_BUFFER_SIZE_SAMPLES);
         // Process immediately instead of waiting
         metrics_count = gait_events_process(&event_detector);
     }
     
-    // Only clear buffer if absolutely full AND no processing is happening
-    // Don't destroy data that hasn't been processed yet
-    if (event_detector.buffer_full) {
-        LOG_WRN("Buffer completely full (%d/%d), clearing oldest 10%% for emergency recovery",
+    // Process any pending data FIRST before considering clearing
+    if (metrics_count == 0) {
+        metrics_count = gait_events_process(&event_detector);
+    }
+    
+    // Only clear buffer if absolutely full AND processing didn't help
+    // This ensures we don't destroy unprocessed data
+    if (event_detector.buffer_full && metrics_count == 0) {
+        LOG_WRN("Buffer completely full (%d/%d) and no events detected, clearing oldest 10%% for emergency recovery",
                 event_detector.buffer_count, GAIT_BUFFER_SIZE_SAMPLES);
         int samples_to_clear = GAIT_BUFFER_SIZE_SAMPLES / 10;  // Only 10%, not 30%
         event_detector.read_index = (event_detector.read_index + samples_to_clear) % GAIT_BUFFER_SIZE_SAMPLES;
         event_detector.buffer_count = MAX(0, event_detector.buffer_count - samples_to_clear);
         event_detector.buffer_full = false;
-    }
-    
-    // Process any pending data (reuse metrics_count if already processed above)
-    if (metrics_count == 0) {
-        metrics_count = gait_events_process(&event_detector);
     }
     
     if (metrics_count > 0) {
@@ -328,7 +331,85 @@ void sensor_data_1hz_timer_callback(void)
             // On primary device, store metrics for bilateral comparison
             extern void sensor_data_store_primary_metrics(const gait_metrics_t *metrics, int count);
             sensor_data_store_primary_metrics(metrics, retrieved);
-            LOG_DBG("Stored %d primary metrics for bilateral analysis", retrieved);
+            LOG_INF("PRIMARY: Stored %d metrics, waiting for secondary data for bilateral analysis", retrieved);
+            
+            // Check if we should send unilateral metrics as fallback
+            // We'll wait up to 2 seconds for secondary data before sending unilateral
+            static uint32_t last_unilateral_send_time = 0;
+            uint32_t current_time = k_uptime_get_32();
+            
+            // Check if we've had recent bilateral success (use global variable)
+            bool recent_bilateral = (current_time - g_last_bilateral_success_time) < 5000; // Within 5 seconds
+            
+            // Only send unilateral as fallback if:
+            // 1. We haven't sent unilateral recently (avoid spam)
+            // 2. We haven't had bilateral success recently (no secondary connected)
+            if (!recent_bilateral && (current_time - last_unilateral_send_time) > 2000) {
+                LOG_WRN("PRIMARY: No secondary data for 2+ seconds, sending unilateral metrics as fallback");
+                
+                extern struct k_msgq sensor_data_queue;
+                generic_message_t metrics_msg;
+                metrics_msg.sender = SENDER_SENSOR_DATA;
+                metrics_msg.type = MSG_TYPE_REALTIME_METRICS;
+                
+                // Fill in basic metrics from primary only
+                realtime_metrics_t *rt_metrics = &metrics_msg.data.realtime_metrics;
+                memset(rt_metrics, 0, sizeof(realtime_metrics_t));
+                
+                rt_metrics->timestamp_ms = current_time;
+                
+                // Use the most recent metric
+                const gait_metrics_t *latest = &metrics[retrieved - 1];
+                
+                // Cadence and pace from primary foot only (halved for single foot)
+                rt_metrics->cadence_spm = (uint16_t)(latest->cadence / 2.0f); // Divide by 2 for single foot
+                if (latest->stride_length > 0 && latest->cadence > 0) {
+                    float speed_mps = (latest->cadence / 120.0f) * latest->stride_length; // Adjusted for single foot
+                    if (speed_mps > 0) {
+                        rt_metrics->pace_sec_km = (uint16_t)(1000.0f / speed_mps);
+                    }
+                }
+                
+                // Ground contact time
+                rt_metrics->ground_contact_ms = (uint16_t)(latest->gct * 1000.0f);
+                
+                // Flight time
+                if (latest->duration > 0) {
+                    float flight_time = (latest->duration - latest->gct) * 1000.0f;
+                    rt_metrics->flight_time_ms = (uint16_t)flight_time;
+                }
+                
+                // Stride metrics
+                rt_metrics->stride_length_cm = (uint16_t)(latest->stride_length * 100.0f);
+                rt_metrics->stride_duration_ms = (uint16_t)(latest->duration * 1000.0f);
+                
+                // Pronation
+                rt_metrics->avg_pronation_deg = latest->max_pronation;
+                
+                // Strike pattern (primary foot is right)
+                rt_metrics->right_strike_pattern = (latest->strike_pattern > 0) ? latest->strike_pattern - 1 : 0;
+                rt_metrics->left_strike_pattern = 1; // Default midfoot for missing foot
+                
+                // Vertical oscillation
+                rt_metrics->vertical_oscillation_cm = (uint8_t)(latest->vertical_oscillation * 100.0f);
+                
+                // Form score (basic calculation for unilateral)
+                rt_metrics->form_score = 75; // Lower score for unilateral
+                
+                // Balance (0 since we only have one foot)
+                rt_metrics->balance_lr_pct = 0; // Neutral
+                
+                // Mark as unilateral data
+                rt_metrics->alerts |= RT_ALERT_UNILATERAL_DATA; // Add flag to indicate unilateral
+                
+                // Send unilateral metrics
+                if (k_msgq_put(&sensor_data_queue, &metrics_msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send unilateral metrics to realtime_metrics");
+                } else {
+                    LOG_INF("PRIMARY: Sent unilateral metrics as temporary fallback");
+                    last_unilateral_send_time = current_time;
+                }
+            }
             #endif
             
             // Create D2D metrics packet - initialize all fields
@@ -426,24 +507,96 @@ void sensor_data_1hz_timer_callback(void)
             
             // Send d2d_packet via D2D interface
             #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-            // Only secondary devices send metrics to primary every 1 seconds (every other callback)
-            if (callback_count % 1 == 0) {
-                LOG_INF("SECONDARY: Sending D2D metrics every 2 seconds (callback #%u)", callback_count);
+            // SECONDARY: IMMEDIATE TRANSMISSION of ALL parameters
+            // Send all calculated parameters as soon as they're ready for freshest bilateral analysis
+            
+            static uint32_t last_d2d_send_time = 0;
+            static uint32_t consecutive_sends = 0;
+            static uint32_t total_packets_sent = 0;
+            uint32_t current_time = k_uptime_get_32();
+            
+            // Rate limiting with priority system
+            // Critical events (foot strikes): min 50ms between sends
+            // Normal metrics: min 100ms between sends  
+            // Low priority: min 500ms between sends
+            
+            uint32_t min_send_interval_ms = 100;  // Default for normal metrics
+            bool is_critical_event = false;
+            
+            // Determine priority based on what changed
+            if (latest->strike_pattern != 0 || latest->gct > 0) {
+                // Foot strike or stance phase change - CRITICAL
+                is_critical_event = true;
+                min_send_interval_ms = 50;  // Allow faster transmission
+                LOG_DBG("CRITICAL: Foot strike/stance detected - immediate send");
+            } else if (latest->cadence > 0 && latest->cadence != d2d_packet.metrics[IDX_CADENCE]) {
+                // Cadence changed - HIGH priority
+                min_send_interval_ms = 75;
+                LOG_DBG("HIGH: Cadence changed - priority send");
+            }
+            
+            // Check if we should send based on priority
+            bool should_send = (current_time - last_d2d_send_time) >= min_send_interval_ms;
+            
+            // Also force periodic send to ensure primary gets updates even during steady state
+            bool force_periodic = (current_time - last_d2d_send_time) >= 1000;
+            
+            if (should_send || force_periodic || is_critical_event) {
+                // Prepare comprehensive packet with ALL current parameters
+                // This ensures primary always has the complete picture
+                
+                LOG_INF("SECONDARY: Sending ALL parameters IMMEDIATELY (age=0ms, priority=%s)",
+                        is_critical_event ? "CRITICAL" : force_periodic ? "PERIODIC" : "NORMAL");
+                LOG_INF("  Packet #%u, interval=%u ms since last",
+                        total_packets_sent + 1, current_time - last_d2d_send_time);
                 LOG_INF("  GCT=%.1f ms, Cadence=%.1f spm, Stride=%.2f cm",
                         (double)d2d_packet.metrics[IDX_GCT],
                         (double)d2d_packet.metrics[IDX_CADENCE],
                         (double)d2d_packet.metrics[IDX_STRIDE_LENGTH]);
-                LOG_INF("  Valid metrics count: %d", valid_count);
+                LOG_INF("  Strike=%d, Pronation=%.1f deg, VO=%.1f cm",
+                        latest->strike_pattern,
+                        (double)d2d_packet.metrics[IDX_PRONATION],
+                        (double)d2d_packet.metrics[IDX_VERTICAL_OSC]);
+                LOG_INF("  Valid metrics: %d/18, timestamp: %u ms", valid_count, d2d_packet.timestamp);
                 
-                extern int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics);
-                int err = d2d_tx_notify_metrics(&d2d_packet);
-                if (err == 0) {
-                    LOG_INF("SECONDARY: D2D metrics packet sent successfully (seq=%u)", d2d_packet.sequence_num);
+                // Send the packet immediately - no caching, maximum freshness
+                if (valid_count > 0) {
+                    extern int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics);
+                    int err = d2d_tx_notify_metrics(&d2d_packet);
+                    
+                    if (err == 0) {
+                        LOG_INF("SECONDARY: SUCCESS - All parameters sent (seq=%u, latency=0ms)", 
+                                d2d_packet.sequence_num);
+                        last_d2d_send_time = current_time;
+                        total_packets_sent++;
+                        consecutive_sends++;
+                        
+                        // Log transmission statistics every 10 packets
+                        if (total_packets_sent % 10 == 0) {
+                            LOG_INF("D2D Stats: %u packets sent, current burst: %u consecutive",
+                                    total_packets_sent, consecutive_sends);
+                        }
+                    } else if (err == -ENOTCONN) {
+                        LOG_WRN("SECONDARY: No D2D connection - parameters not sent");
+                        consecutive_sends = 0;  // Reset burst counter
+                    } else if (err == -EAGAIN) {
+                        LOG_WRN("SECONDARY: D2D busy - will retry next cycle");
+                    } else {
+                        LOG_ERR("SECONDARY: Failed to send parameters: %d", err);
+                        consecutive_sends = 0;
+                    }
                 } else {
-                    LOG_ERR("SECONDARY: Failed to send D2D metrics packet: %d", err);
+                    LOG_WRN("SECONDARY: No valid metrics to send");
+                }
+                
+                // Adaptive rate limiting - back off if sending too frequently
+                if (consecutive_sends > 10 && !is_critical_event) {
+                    LOG_DBG("Rate limiting: %u consecutive sends, adding backoff", consecutive_sends);
+                    min_send_interval_ms = MIN(500, min_send_interval_ms * 2);
                 }
             } else {
-                LOG_DBG("SECONDARY: Skipping D2D transmission (callback #%u, sending every 2 seconds)", callback_count);
+                LOG_DBG("SECONDARY: Rate limited (waited %u/%u ms)", 
+                        current_time - last_d2d_send_time, min_send_interval_ms);
             }
             #else
             LOG_DBG("PRIMARY: Stored metrics locally - waiting for secondary D2D data (%d valid metrics)", valid_count);
@@ -453,6 +606,11 @@ void sensor_data_1hz_timer_callback(void)
         // Clear processed metrics
         gait_events_clear_metrics(&event_detector);
     }
+    
+    // Note: Removed cached metric sending as we now handle periodic sends
+    // through the force_periodic flag in the main D2D sending logic above.
+    // The secondary device will automatically send metrics at least every 1 second
+    // even without new events, ensuring the primary always has recent data.
     
     // Memory health check every 60 callbacks (1 minute at 1Hz)
     if (callback_count % 60 == 0) {
@@ -482,19 +640,42 @@ void sensor_data_1hz_timer_callback(void)
     k_mutex_unlock(&events_mutex);
 }
 
-// Bilateral metrics storage for correlation
+// Bilateral metrics storage with history for proper time correlation
+#define BILATERAL_HISTORY_SIZE 10  // Store last 10 seconds of primary metrics
+#define MAX_BILATERAL_TIME_DIFF_MS 3000  // Accept matches within 3 seconds (was 1.5 seconds)
+#define BILATERAL_WAIT_TIMEOUT_MS 3000   // Wait up to 3 seconds for secondary data
+
 typedef struct {
+    gait_metrics_t metrics[GAIT_MAX_EVENTS_PER_CHUNK];
+    uint32_t timestamp_ms;
+    uint8_t count;
+    bool valid;
+} primary_metrics_entry_t;
+
+typedef struct {
+    // Circular buffer of primary metrics history
+    primary_metrics_entry_t primary_history[BILATERAL_HISTORY_SIZE];
+    uint8_t history_write_idx;
+    uint8_t history_count;
+    
+    // Most recent secondary metrics
     d2d_metrics_packet_t secondary_metrics;
-    gait_metrics_t primary_metrics[GAIT_MAX_EVENTS_PER_CHUNK];
     uint32_t secondary_timestamp_ms;
-    uint32_t primary_timestamp_ms;
-    int32_t timestamp_offset_ms;  // Secondary - Primary offset
     bool secondary_valid;
-    bool primary_valid;
-    uint8_t primary_count;
+    
+    // Time synchronization
+    int32_t timestamp_offset_ms;  // Secondary - Primary offset
 } bilateral_metrics_t;
 
-static bilateral_metrics_t bilateral_data = {0};
+static bilateral_metrics_t bilateral_data = {
+    .primary_history = {{0}},
+    .history_write_idx = 0,
+    .history_count = 0,
+    .secondary_metrics = {0},
+    .secondary_timestamp_ms = 0,
+    .secondary_valid = false,
+    .timestamp_offset_ms = 0
+};
 static K_MUTEX_DEFINE(bilateral_mutex);
 
 // Timestamp synchronization
@@ -526,19 +707,139 @@ static void synchronize_timestamps(uint32_t secondary_timestamp_ms)
 }
 
 /**
+ * @brief Find best matching primary metrics for a given secondary timestamp
+ * Note: Secondary timestamps are always ~1 second old when received
+ */
+static primary_metrics_entry_t* find_matching_primary_metrics(uint32_t secondary_timestamp_ms)
+{
+    if (bilateral_data.history_count == 0) {
+        return NULL;
+    }
+    
+    // The secondary timestamp is when the secondary calculated its metrics
+    // We need to find primary metrics from around the same time
+    // Note: Secondary sends data 1 second after calculation, so its timestamp is ~1 second old
+    
+    primary_metrics_entry_t *best_match = NULL;
+    uint32_t best_time_diff = UINT32_MAX;
+    
+    // Search through history for best time match
+    for (int i = 0; i < bilateral_data.history_count; i++) {
+        primary_metrics_entry_t *entry = &bilateral_data.primary_history[i];
+        if (!entry->valid || entry->count == 0) {
+            continue;
+        }
+        
+        // Compare the actual calculation times
+        // Both timestamps should be from when metrics were calculated
+        uint32_t time_diff = abs((int32_t)entry->timestamp_ms - (int32_t)secondary_timestamp_ms);
+        
+        // Accept matches within MAX_BILATERAL_TIME_DIFF_MS window (3 seconds)
+        // This accounts for D2D delay which can be over 1 second
+        if (time_diff < MAX_BILATERAL_TIME_DIFF_MS && time_diff < best_time_diff) {
+            best_match = entry;
+            best_time_diff = time_diff;
+            LOG_DBG("Potential match: primary_time=%u, secondary_time=%u, diff=%u ms",
+                    entry->timestamp_ms, secondary_timestamp_ms, time_diff);
+        }
+    }
+    
+    if (best_match) {
+        LOG_INF("Found matching primary metrics with time diff %u ms (primary=%u, secondary=%u)",
+                best_time_diff, best_match->timestamp_ms, secondary_timestamp_ms);
+    } else {
+        LOG_WRN("No matching primary metrics found for secondary timestamp %u ms (searched %d entries)",
+                secondary_timestamp_ms, bilateral_data.history_count);
+    }
+    
+    return best_match;
+}
+
+/**
  * @brief Calculate bilateral gait asymmetry metrics
  */
 static void calculate_bilateral_metrics(void)
 {
-    if (!bilateral_data.secondary_valid || !bilateral_data.primary_valid || bilateral_data.primary_count == 0) {
+    if (!bilateral_data.secondary_valid) {
         return;
     }
     
-    // Get the most recent primary metrics
-    gait_metrics_t *primary = &bilateral_data.primary_metrics[bilateral_data.primary_count - 1];
+    // Find matching primary metrics from history
+    primary_metrics_entry_t *primary_entry = find_matching_primary_metrics(bilateral_data.secondary_timestamp_ms);
+    if (!primary_entry || primary_entry->count == 0) {
+        LOG_WRN("No matching primary metrics found for bilateral calculation");
+        // Clear secondary data as it's been processed (unsuccessfully)
+        bilateral_data.secondary_valid = false;
+        return;
+    }
+    
+    // Get the most recent primary metrics from the matched entry
+    gait_metrics_t *primary = &primary_entry->metrics[primary_entry->count - 1];
     d2d_metrics_packet_t *secondary = &bilateral_data.secondary_metrics;
     
-    // Calculate asymmetry indices
+    LOG_INF("Calculating bilateral metrics: Primary time=%u ms, Secondary time=%u ms",
+            primary_entry->timestamp_ms, bilateral_data.secondary_timestamp_ms);
+    
+    // Calculate TEMPORAL relationship between feet
+    // This is crucial for understanding gait coordination
+    int32_t time_offset_ms = (int32_t)primary_entry->timestamp_ms - (int32_t)bilateral_data.secondary_timestamp_ms;
+    
+    // Determine which foot struck first and calculate step time
+    // Step time = time between consecutive opposite foot strikes
+    uint16_t step_time_ms = 0;
+    bool left_foot_first = false;  // Assume secondary is left foot
+    
+    if (abs(time_offset_ms) < 2000) {  // Reasonable step time window
+        step_time_ms = (uint16_t)abs(time_offset_ms);
+        left_foot_first = (time_offset_ms > 0);  // Primary struck after secondary
+        
+        LOG_INF("TEMPORAL: Step time = %u ms (%s foot struck first)",
+                step_time_ms, left_foot_first ? "left" : "right");
+    } else {
+        LOG_WRN("TEMPORAL: Time offset %d ms too large - may be different stride cycles", time_offset_ms);
+    }
+    
+    // Calculate double support percentage
+    // During walking, both feet are on ground ~20% of gait cycle
+    // During running, there's no double support (flight phase instead)
+    float double_support_pct = 0.0f;
+    float avg_gct_ms = 0.0f;
+    float avg_stride_duration_ms = 0.0f;
+    
+    if (d2d_metric_is_valid(secondary, IDX_GCT) && primary->gct > 0) {
+        float sec_gct = secondary->metrics[IDX_GCT];
+        float pri_gct = primary->gct * 1000.0f;
+        avg_gct_ms = (sec_gct + pri_gct) / 2.0f;
+        
+        if (primary->duration > 0) {
+            avg_stride_duration_ms = primary->duration * 1000.0f;
+            
+            // Calculate overlap time when both feet are on ground
+            // This is approximate - exact calculation needs synchronized raw data
+            if (step_time_ms > 0 && step_time_ms < avg_gct_ms) {
+                // There's overlap - both feet on ground
+                float overlap_ms = avg_gct_ms - step_time_ms;
+                double_support_pct = (overlap_ms / avg_stride_duration_ms) * 100.0f;
+                LOG_INF("TEMPORAL: Double support = %.1f%% (overlap %.0f ms)",
+                        (double)double_support_pct, (double)overlap_ms);
+            } else {
+                // No overlap - flight phase (running)
+                LOG_INF("TEMPORAL: No double support - likely running gait");
+            }
+        }
+    }
+    
+    // Calculate step time asymmetry
+    // Compare current step time with expected (half of stride duration)
+    float step_time_asymmetry = 0.0f;
+    if (avg_stride_duration_ms > 0 && step_time_ms > 0) {
+        float expected_step_time = avg_stride_duration_ms / 2.0f;
+        step_time_asymmetry = fabsf(step_time_ms - expected_step_time) / expected_step_time * 100.0f;
+        LOG_INF("TEMPORAL: Step time asymmetry = %.1f%% (actual=%u ms, expected=%.0f ms)",
+                (double)step_time_asymmetry, step_time_ms, (double)expected_step_time);
+    }
+    
+    // Calculate asymmetry indices (existing code)
     float gct_asymmetry = 0.0f;
     float stride_asymmetry = 0.0f;
     float pronation_asymmetry = 0.0f;
@@ -625,6 +926,14 @@ static void calculate_bilateral_metrics(void)
     // Bilateral cadence (average of both feet)
     if (d2d_metric_is_valid(secondary, IDX_CADENCE) && primary->cadence > 0) {
         rt_metrics->cadence_spm = (uint16_t)((secondary->metrics[IDX_CADENCE] + primary->cadence) / 2.0f);
+    } else if (primary->cadence > 0) {
+        // Fallback: Use primary-only cadence if secondary not available
+        rt_metrics->cadence_spm = (uint16_t)(primary->cadence);
+        LOG_WRN("Using primary-only cadence: %u spm (secondary not available)", rt_metrics->cadence_spm);
+    } else if (d2d_metric_is_valid(secondary, IDX_CADENCE)) {
+        // Fallback: Use secondary-only cadence if primary not available
+        rt_metrics->cadence_spm = (uint16_t)(secondary->metrics[IDX_CADENCE]);
+        LOG_WRN("Using secondary-only cadence: %u spm (primary not available)", rt_metrics->cadence_spm);
     }
     
     // Calculate pace from cadence and stride length
@@ -742,6 +1051,11 @@ static void calculate_bilateral_metrics(void)
         LOG_WRN("Failed to send bilateral metrics to realtime_metrics module");
     } else {
         LOG_INF("Bilateral metrics sent to realtime_metrics module for distribution");
+        
+        // Update bilateral success time for fallback logic
+        extern uint32_t g_last_bilateral_success_time;
+        g_last_bilateral_success_time = k_uptime_get_32();
+        LOG_INF("PRIMARY: Bilateral analysis SUCCESS - updated success timestamp");
     }
 }
 
@@ -799,7 +1113,8 @@ extern "C" void sensor_data_process_received_metrics(const d2d_metrics_packet_t 
     
     #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // On primary device, calculate bilateral metrics if we have both sides
-    if (bilateral_data.primary_valid) {
+    // Check if we have primary data in history
+    if (bilateral_data.history_count > 0) {
         LOG_INF("PRIMARY: Have both primary and secondary data - calculating bilateral metrics");
         calculate_bilateral_metrics();
     } else {
@@ -823,23 +1138,31 @@ extern "C" void sensor_data_store_primary_metrics(const gait_metrics_t *metrics,
     
     k_mutex_lock(&bilateral_mutex, K_FOREVER);
     
+    // Store in circular history buffer
+    primary_metrics_entry_t *entry = &bilateral_data.primary_history[bilateral_data.history_write_idx];
+    
     // Copy metrics (up to max)
     int copy_count = MIN(count, GAIT_MAX_EVENTS_PER_CHUNK);
-    memcpy(bilateral_data.primary_metrics, metrics, copy_count * sizeof(gait_metrics_t));
-    bilateral_data.primary_count = copy_count;
-    bilateral_data.primary_timestamp_ms = k_uptime_get_32();
-    bilateral_data.primary_valid = true;
+    memcpy(entry->metrics, metrics, copy_count * sizeof(gait_metrics_t));
+    entry->count = copy_count;
+    entry->timestamp_ms = k_uptime_get_32();
+    entry->valid = true;
     
-    // If we have secondary metrics, calculate bilateral analysis
+    LOG_DBG("Stored primary metrics in history slot %d, timestamp=%u ms",
+            bilateral_data.history_write_idx, entry->timestamp_ms);
+    
+    // Update circular buffer indices
+    bilateral_data.history_write_idx = (bilateral_data.history_write_idx + 1) % BILATERAL_HISTORY_SIZE;
+    if (bilateral_data.history_count < BILATERAL_HISTORY_SIZE) {
+        bilateral_data.history_count++;
+    }
+    
+    // If we have pending secondary metrics, try to calculate bilateral analysis
     if (bilateral_data.secondary_valid) {
-        // Check if timestamps are reasonably close (within 2 seconds)
-        int32_t time_diff = abs((int32_t)bilateral_data.primary_timestamp_ms -
-                                (int32_t)(bilateral_data.secondary_timestamp_ms - d2d_time_offset_ms));
-        if (time_diff < 2000) {
-            calculate_bilateral_metrics();
-        } else {
-            LOG_WRN("Primary and secondary metrics timestamps too far apart: %d ms", time_diff);
-        }
+        LOG_INF("PRIMARY: Have pending secondary data, attempting bilateral calculation");
+        calculate_bilateral_metrics();
+        // Clear secondary data after processing (whether successful or not)
+        bilateral_data.secondary_valid = false;
     }
     
     k_mutex_unlock(&bilateral_mutex);
