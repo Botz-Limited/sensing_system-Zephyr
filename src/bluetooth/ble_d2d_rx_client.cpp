@@ -17,6 +17,8 @@
 #include <app.hpp>
 #include <ble_services.hpp>
 #include "sensor_data/sensor_data.h"
+#include <d2d_metrics.h>
+#include <d2d_metrics_fixed.h>
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 #include "ble_d2d_file_transfer.hpp"
@@ -1310,36 +1312,77 @@ static uint8_t d2d_metrics_notify_handler(struct bt_conn *conn, struct bt_gatt_s
         return BT_GATT_ITER_STOP;
     }
 
-    if (length != sizeof(d2d_metrics_packet_t))
+    // Check if we received fixed-point or float format based on size
+    if (length == sizeof(d2d_metrics_fixed_t))
     {
-        LOG_WRN("Invalid D2D metrics length: %u (expected %u)", length, sizeof(d2d_metrics_packet_t));
+        // Received fixed-point format - unpack to float
+        LOG_INF("Received fixed-point D2D metrics (%u bytes)", length);
+        
+        const d2d_metrics_fixed_t *fixed_metrics = (const d2d_metrics_fixed_t *)data;
+        
+        // Unpack fixed-point to float format
+        d2d_metrics_packet_t float_metrics;
+        d2d_metrics_unpack(&float_metrics, fixed_metrics);
+        
+        LOG_INF("=== RECEIVED D2D METRICS FROM SECONDARY (FIXED-POINT) ===");
+        LOG_INF("  Sequence: %u, Timestamp: %u ms", float_metrics.sequence_num, float_metrics.timestamp);
+        
+        // Log some key metrics if valid
+        if (d2d_metric_is_valid(&float_metrics, IDX_GCT)) {
+            LOG_INF("  GCT: %.1f ms", (double)float_metrics.metrics[IDX_GCT]);
+        }
+        if (d2d_metric_is_valid(&float_metrics, IDX_CADENCE)) {
+            LOG_INF("  Cadence: %.1f spm", (double)float_metrics.metrics[IDX_CADENCE]);
+        }
+        if (d2d_metric_is_valid(&float_metrics, IDX_PRONATION)) {
+            LOG_INF("  Pronation: %.1f deg", (double)float_metrics.metrics[IDX_PRONATION]);
+        }
+        if (d2d_metric_is_valid(&float_metrics, IDX_COP_X) && d2d_metric_is_valid(&float_metrics, IDX_COP_Y)) {
+            LOG_INF("  COP: (%.1f, %.1f) mm", (double)float_metrics.metrics[IDX_COP_X], (double)float_metrics.metrics[IDX_COP_Y]);
+        }
+        if (d2d_metric_is_valid(&float_metrics, IDX_LOADING_RATE)) {
+            LOG_INF("  Loading Rate: %.1f N/s", (double)float_metrics.metrics[IDX_LOADING_RATE]);
+        }
+        
+        // Process the unpacked metrics for bilateral analysis
+        sensor_data_process_received_metrics(&float_metrics);
+    }
+    else if (length == sizeof(d2d_metrics_packet_t))
+    {
+        // Received float format (legacy) - process directly
+        LOG_INF("Received float D2D metrics (%u bytes) - LEGACY FORMAT", length);
+        
+        const d2d_metrics_packet_t *metrics = (const d2d_metrics_packet_t *)data;
+        
+        LOG_INF("=== RECEIVED D2D METRICS FROM SECONDARY (FLOAT) ===");
+        LOG_INF("  Sequence: %u, Timestamp: %u ms", metrics->sequence_num, metrics->timestamp);
+        
+        // Log some key metrics if valid
+        if (d2d_metric_is_valid(metrics, IDX_GCT)) {
+            LOG_INF("  GCT: %.1f ms", (double)metrics->metrics[IDX_GCT]);
+        }
+        if (d2d_metric_is_valid(metrics, IDX_CADENCE)) {
+            LOG_INF("  Cadence: %.1f spm", (double)metrics->metrics[IDX_CADENCE]);
+        }
+        if (d2d_metric_is_valid(metrics, IDX_PRONATION)) {
+            LOG_INF("  Pronation: %.1f deg", (double)metrics->metrics[IDX_PRONATION]);
+        }
+        if (d2d_metric_is_valid(metrics, IDX_COP_X) && d2d_metric_is_valid(metrics, IDX_COP_Y)) {
+            LOG_INF("  COP: (%.1f, %.1f) mm", (double)metrics->metrics[IDX_COP_X], (double)metrics->metrics[IDX_COP_Y]);
+        }
+        if (d2d_metric_is_valid(metrics, IDX_LOADING_RATE)) {
+            LOG_INF("  Loading Rate: %.1f N/s", (double)metrics->metrics[IDX_LOADING_RATE]);
+        }
+        
+        // Process the received metrics for bilateral analysis
+        sensor_data_process_received_metrics(metrics);
+    }
+    else
+    {
+        LOG_WRN("Invalid D2D metrics length: %u (expected %u fixed or %u float)", 
+                length, sizeof(d2d_metrics_fixed_t), sizeof(d2d_metrics_packet_t));
         return BT_GATT_ITER_CONTINUE;
     }
-
-    const d2d_metrics_packet_t *metrics = (const d2d_metrics_packet_t *)data;
-    
-    LOG_INF("=== RECEIVED D2D METRICS FROM SECONDARY ===");
-    LOG_INF("  Sequence: %u, Timestamp: %u ms", metrics->sequence_num, metrics->timestamp);
-    
-    // Log some key metrics if valid
-    if (d2d_metric_is_valid(metrics, IDX_GCT)) {
-        LOG_INF("  GCT: %.1f ms", (double)metrics->metrics[IDX_GCT]);
-    }
-    if (d2d_metric_is_valid(metrics, IDX_CADENCE)) {
-        LOG_INF("  Cadence: %.1f spm", (double)metrics->metrics[IDX_CADENCE]);
-    }
-    if (d2d_metric_is_valid(metrics, IDX_PRONATION)) {
-        LOG_INF("  Pronation: %.1f deg", (double)metrics->metrics[IDX_PRONATION]);
-    }
-    if (d2d_metric_is_valid(metrics, IDX_COP_X) && d2d_metric_is_valid(metrics, IDX_COP_Y)) {
-        LOG_INF("  COP: (%.1f, %.1f) mm", (double)metrics->metrics[IDX_COP_X], (double)metrics->metrics[IDX_COP_Y]);
-    }
-    if (d2d_metric_is_valid(metrics, IDX_LOADING_RATE)) {
-        LOG_INF("  Loading Rate: %.1f N/s", (double)metrics->metrics[IDX_LOADING_RATE]);
-    }
-    
-    // Process the received metrics for bilateral analysis
-    sensor_data_process_received_metrics(metrics);
 
     return BT_GATT_ITER_CONTINUE;
 }

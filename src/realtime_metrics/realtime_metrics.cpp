@@ -390,11 +390,22 @@ static void ble_update_work_handler(struct k_work *work)
     ARG_UNUSED(work);
     
     if (atomic_get(&processing_active) == 1) {
+        // Always send BLE update every second for mobile app responsiveness
+        // The send_ble_update function will handle using fresh vs preserved data
+        uint32_t current_time = k_uptime_get_32();
+        uint32_t metrics_age = current_time - metrics_state.current_metrics.timestamp_ms;
+        
+        if (metrics_age < 2000) {
+            LOG_DBG("Sending BLE update with fresh data (age: %u ms)", metrics_age);
+        } else {
+            LOG_DBG("Sending BLE update with preserved data (fresh data age: %u ms)", metrics_age);
+        }
+        
         send_ble_update();
-        metrics_state.last_ble_update = k_uptime_get_32();
+        metrics_state.last_ble_update = current_time;
     }
     
-    // Reschedule for next update (1Hz)
+    // Always reschedule for next update (1Hz for mobile app)
     k_work_schedule_for_queue(&realtime_metrics_work_q, &ble_update_work, K_SECONDS(1));
 }
 
@@ -1049,11 +1060,42 @@ static void calculate_realtime_metrics(void)
 // Send BLE update
 static void send_ble_update(void)
 {
-  
-  //  LOG_INF("Sending BLE update: cadence=%d spm, pace=%d s/km, form=%d%%",
-    //        metrics_state.current_metrics.cadence_spm,
-      //      metrics_state.current_metrics.pace_sec_km,
-        //    metrics_state.current_metrics.form_score);
+    // Preserve last known good values to avoid sending zeros
+    static realtime_metrics_t last_good_metrics = {0};
+    static bool has_good_metrics = false;
+    
+    // Check if current metrics have valid data
+    bool current_metrics_valid = (metrics_state.current_metrics.cadence_spm > 0 || 
+                                 metrics_state.current_metrics.pace_sec_km > 0 ||
+                                 metrics_state.current_metrics.ground_contact_ms > 0);
+    
+    // Log for debugging
+    LOG_INF("BLE Update: current_valid=%s, cadence=%u, gct=%u, age=%u ms", 
+            current_metrics_valid ? "YES" : "NO",
+            metrics_state.current_metrics.cadence_spm,
+            metrics_state.current_metrics.ground_contact_ms,
+            k_uptime_get_32() - metrics_state.current_metrics.timestamp_ms);
+    
+    realtime_metrics_t metrics_to_send;
+    
+    if (current_metrics_valid) {
+        // Use current metrics and update last good values
+        memcpy(&metrics_to_send, &metrics_state.current_metrics, sizeof(realtime_metrics_t));
+        memcpy(&last_good_metrics, &metrics_state.current_metrics, sizeof(realtime_metrics_t));
+        has_good_metrics = true;
+        LOG_DBG("Sending fresh metrics: cadence=%u, pace=%u, gct=%u", 
+                metrics_to_send.cadence_spm, metrics_to_send.pace_sec_km, metrics_to_send.ground_contact_ms);
+    } else if (has_good_metrics) {
+        // Use last known good values but update timestamp
+        memcpy(&metrics_to_send, &last_good_metrics, sizeof(realtime_metrics_t));
+        metrics_to_send.timestamp_ms = k_uptime_get_32();
+        LOG_DBG("Sending preserved metrics: cadence=%u, pace=%u, gct=%u (age preserved)", 
+                metrics_to_send.cadence_spm, metrics_to_send.pace_sec_km, metrics_to_send.ground_contact_ms);
+    } else {
+        // No good metrics available, use current (may contain zeros)
+        memcpy(&metrics_to_send, &metrics_state.current_metrics, sizeof(realtime_metrics_t));
+        LOG_DBG("Sending current metrics (may contain zeros): cadence=%u", metrics_to_send.cadence_spm);
+    }
     
     // Create message for bluetooth module
     generic_message_t ble_msg = {};
@@ -1061,31 +1103,27 @@ static void send_ble_update(void)
     ble_msg.type = MSG_TYPE_ACTIVITY_METRICS_BLE;
     
     // Copy metrics data to message
-    // Note: We need to ensure the message can carry the metrics data
-    // For now, we'll use a pointer in the data union (to be defined)
-    // In production, we might want to copy the data or use a shared buffer
-    memcpy(&ble_msg.data, &metrics_state.current_metrics,
-           sizeof(metrics_state.current_metrics) > sizeof(ble_msg.data) ?
-           sizeof(ble_msg.data) : sizeof(metrics_state.current_metrics));
+    memcpy(&ble_msg.data, &metrics_to_send,
+           sizeof(metrics_to_send) > sizeof(ble_msg.data) ?
+           sizeof(ble_msg.data) : sizeof(metrics_to_send));
     
     if (ble_phone_is_connected()) {       
-    // Send to bluetooth module
-    int ret = k_msgq_put(&bluetooth_msgq, &ble_msg, K_NO_WAIT);
-    if (ret != 0) {
-        LOG_WRN("Failed to send metrics to bluetooth queue: %d", ret);  
-    }
+        // Send to bluetooth module
+        int ret = k_msgq_put(&bluetooth_msgq, &ble_msg, K_NO_WAIT);
+        if (ret != 0) {
+            LOG_WRN("Failed to send metrics to bluetooth queue: %d", ret);  
+        }
     }
 
     // Create message for data module
     generic_message_t data_msg = {};
     data_msg.sender = SENDER_REALTIME_METRICS;
-    data_msg.type = MSG_TYPE_REALTIME_METRICS_DATA;  // You may need to define this in your message types
+    data_msg.type = MSG_TYPE_REALTIME_METRICS_DATA;
     
     // Copy metrics data to message
-    memcpy(&data_msg.data, &metrics_state.current_metrics,
-           sizeof(metrics_state.current_metrics) > sizeof(data_msg.data) ?
-           sizeof(data_msg.data) : sizeof(metrics_state.current_metrics));
-    
+    memcpy(&data_msg.data, &metrics_to_send,
+           sizeof(metrics_to_send) > sizeof(data_msg.data) ?
+           sizeof(data_msg.data) : sizeof(metrics_to_send));
     
     // Send to data module
     int ret = k_msgq_put(&data_msgq, &data_msg, K_NO_WAIT);
@@ -1094,19 +1132,19 @@ static void send_ble_update(void)
     }
     
     // Log alerts if any
-    if (metrics_state.current_metrics.alerts != 0) {
-        LOG_WRN("Alerts active: 0x%02x", metrics_state.current_metrics.alerts);
-        if (metrics_state.current_metrics.alerts & RT_ALERT_HIGH_ASYMMETRY) {
+    if (metrics_to_send.alerts != 0) {
+        LOG_WRN("Alerts active: 0x%02x", metrics_to_send.alerts);
+        if (metrics_to_send.alerts & RT_ALERT_HIGH_ASYMMETRY) {
             LOG_WRN("High asymmetry detected: %d%%", 
-                    metrics_state.current_metrics.contact_time_asymmetry);
+                    metrics_to_send.contact_time_asymmetry);
         }
-        if (metrics_state.current_metrics.alerts & RT_ALERT_POOR_FORM) {
+        if (metrics_to_send.alerts & RT_ALERT_POOR_FORM) {
             LOG_WRN("Poor running form: score %d%%", 
-                    metrics_state.current_metrics.form_score);
+                    metrics_to_send.form_score);
         }
-        if (metrics_state.current_metrics.alerts & RT_ALERT_OVERPRONATION) {
+        if (metrics_to_send.alerts & RT_ALERT_OVERPRONATION) {
             LOG_WRN("Overpronation detected: %d degrees", 
-                    metrics_state.current_metrics.avg_pronation_deg);
+                    metrics_to_send.avg_pronation_deg);
         }
     }
 }

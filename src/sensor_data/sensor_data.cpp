@@ -591,11 +591,11 @@ static void process_foot_data_work_handler(struct k_work *work) {
       for (int i = 0; i < 8; i++) {
         sensor_state.left_pressure[i] = remapped_left[i];
       }
-      LOG_WRN("Updated left_pressure: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
-              sensor_state.left_pressure[0], sensor_state.left_pressure[1],
-              sensor_state.left_pressure[2], sensor_state.left_pressure[3],
-              sensor_state.left_pressure[4], sensor_state.left_pressure[5],
-              sensor_state.left_pressure[6], sensor_state.left_pressure[7]);
+   //   LOG_WRN("Updated left_pressure: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
+     //         sensor_state.left_pressure[0], sensor_state.left_pressure[1],
+       //       sensor_state.left_pressure[2], sensor_state.left_pressure[3],
+         //     sensor_state.left_pressure[4], sensor_state.left_pressure[5],
+           //   sensor_state.left_pressure[6], sensor_state.left_pressure[7]);
 
       // Detect ground contact
       bool was_in_contact = sensor_state.left_foot_contact;
