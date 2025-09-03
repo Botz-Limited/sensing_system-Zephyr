@@ -22,7 +22,7 @@
 #include "../bluetooth/ble_d2d_tx.hpp"
 #include "secondary_metrics.h"
 
-LOG_MODULE_REGISTER(secondary_metrics, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(secondary_metrics, LOG_LEVEL_WRN);
 
 // External Choros buffer instance (defined in analytics.cpp)
 extern choros_ring_buffer_t choros_buffer;

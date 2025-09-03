@@ -15,7 +15,7 @@
 #include <choros_buffer.hpp>
 #include <app.hpp>
 
-LOG_MODULE_REGISTER(choros_buffer, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(choros_buffer, LOG_LEVEL_WRN);
 
 /* Global Choros buffer instance - defined in analytics.cpp */
 extern choros_ring_buffer_t choros_buffer;

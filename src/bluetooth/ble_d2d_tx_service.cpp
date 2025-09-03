@@ -18,6 +18,7 @@
 #include <app.hpp>
 #include <app_fixed_point.hpp>
 #include <ble_services.hpp>
+#include <d2d_metrics_fixed.h>
 
 LOG_MODULE_REGISTER(d2d_tx_svc, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
@@ -132,7 +133,7 @@ static char activity_log_path[34] = {0};
 static bhi360_step_count_fixed_t activity_step_count_fixed = {0, 0};
 static uint16_t weight_kg_x10 = 0; // Weight in kg * 10 (for 0.1kg precision)
 static uint8_t battery_level = 0; // Battery level percentage (0-100)
-static d2d_metrics_packet_t metrics_data = {0}; // D2D metrics packet
+static d2d_metrics_fixed_t metrics_data_fixed = {0}; // D2D metrics packet (fixed-point)
 
 // CCC changed callbacks
 static void foot_sensor_ccc_changed(const struct bt_gatt_attr *attr, uint16_t value)
@@ -1117,31 +1118,68 @@ int d2d_tx_notify_metrics(const d2d_metrics_packet_t *metrics)
     LOG_INF("D2D TX: Metrics notify called - seq=%u, status=%u",
             metrics->sequence_num, metrics->calculation_status);
 
-    if (!primary_conn || !metrics_notify_enabled)
-    {
-        LOG_WRN("D2D TX: Cannot send metrics - no connection or notifications disabled");
+    if (!primary_conn) {
+        LOG_ERR("D2D TX: Cannot send metrics - NO PRIMARY CONNECTION");
+        return -ENOTCONN;
+    }
+    
+    if (!metrics_notify_enabled) {
+        LOG_ERR("D2D TX: Cannot send metrics - NOTIFICATIONS NOT ENABLED (primary didn't subscribe!)");
         return -ENOTCONN;
     }
 
-    // Copy the metrics data
-    memcpy(&metrics_data, metrics, sizeof(d2d_metrics_packet_t));
+    // Pack the floating-point metrics into fixed-point format
+    d2d_metrics_pack(&metrics_data_fixed, metrics);
+    
+    // Log packet size for debugging
+    LOG_INF("D2D TX: Fixed-point packet size = %zu bytes (was %zu float)", 
+            sizeof(metrics_data_fixed), sizeof(d2d_metrics_packet_t));
 
     // D2D Metrics characteristic is the last characteristic (skip back from CCC)
     const struct bt_gatt_attr *char_attr = &d2d_tx_svc.attrs[d2d_tx_svc.attr_count - 2];
-    int err = bt_gatt_notify(primary_conn, char_attr, &metrics_data, sizeof(metrics_data));
-    if (err)
-    {
-        LOG_ERR("Failed to send D2D metrics notification: %d", err);
+    
+    // Check MTU before sending
+    uint16_t mtu = bt_gatt_get_mtu(primary_conn);
+    LOG_INF("D2D TX: Current MTU is %u, fixed packet size is %zu", mtu, sizeof(metrics_data_fixed));
+    
+    // Try to send with retries if buffer exhausted
+    int err = -ENOMEM;
+    int retry_count = 0;
+    const int MAX_RETRIES = 3;
+    const int RETRY_DELAY_MS = 10;
+    
+    while (err == -ENOMEM && retry_count < MAX_RETRIES) {
+        err = bt_gatt_notify(primary_conn, char_attr, &metrics_data_fixed, sizeof(metrics_data_fixed));
+        
+        if (err == -ENOMEM) {
+            retry_count++;
+            LOG_WRN("D2D metrics send failed (ENOMEM), retry %d/%d", retry_count, MAX_RETRIES);
+            
+            // Give BLE stack time to free buffers
+            k_sleep(K_MSEC(RETRY_DELAY_MS));
+            
+            // On last retry, try to force buffer recovery
+            if (retry_count == MAX_RETRIES - 1) {
+                LOG_WRN("Attempting BLE buffer recovery...");
+                // Force process any pending TX completions
+                k_yield();
+            }
+        }
     }
-    else
-    {
+    
+    if (err == -ENOMEM) {
+        LOG_ERR("Failed to send D2D metrics after %d retries: BUFFER EXHAUSTED", MAX_RETRIES);
+        LOG_ERR("BLE stack may need CONFIG_BT_L2CAP_TX_BUF_COUNT increased");
+    } else if (err) {
+        LOG_ERR("Failed to send D2D metrics notification: %d", err);
+    } else {
         // Count valid bits in the valid_mask array
         int valid_count = 0;
         for (int i = 0; i < sizeof(metrics->valid_mask); i++) {
             valid_count += __builtin_popcount(metrics->valid_mask[i]);
         }
-        LOG_INF("D2D metrics sent: seq=%u, status=%u, valid_count=%d",
-                metrics->sequence_num, metrics->calculation_status, valid_count);
+        LOG_INF("D2D metrics sent (fixed-point): seq=%u, status=%u, valid_count=%d, size=%zu bytes",
+                metrics->sequence_num, metrics->calculation_status, valid_count, sizeof(metrics_data_fixed));
     }
 
     return err;

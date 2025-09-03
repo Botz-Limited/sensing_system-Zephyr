@@ -6,7 +6,7 @@
 #include "ble_connection_manager.hpp"
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(ble_conn_mgr, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(ble_conn_mgr, LOG_LEVEL_WRN);
 
 BleConnectionManager::BleConnectionManager() 
     : phone_conn(nullptr), d2d_conn(nullptr), secondary_conn(nullptr) {

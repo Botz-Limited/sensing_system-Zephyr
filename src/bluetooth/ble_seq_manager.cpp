@@ -2,7 +2,7 @@
 #include <string.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(ble_seq_manager, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(ble_seq_manager, LOG_LEVEL_WRN);
 
 // Singleton constructor
 BleSequenceManager::BleSequenceManager() 

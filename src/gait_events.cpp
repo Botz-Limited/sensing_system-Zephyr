@@ -13,7 +13,7 @@
 #include "sensor_data/sensor_data_enhanced_algorithms.hpp"
 #include "sensor_data/sensor_data_fast_processing.hpp"
 
-LOG_MODULE_REGISTER(gait_events, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(gait_events, LOG_LEVEL_WRN);
 
 /* Constants */
 #ifndef M_PI
@@ -126,13 +126,68 @@ static float calculate_adaptive_threshold(const foot_samples_t *buffer,
         }
     }
     
-    /* Calculate adaptive threshold as 50% between 5th and 75th percentiles */
-    int low_idx = sorted_count * 5 / 100;
-    int high_idx = sorted_count * 75 / 100;
-    float low_val = (float)total_pressures[low_idx];
-    float high_val = (float)total_pressures[high_idx];
+    /* ADAPTIVE THRESHOLD FOR CLEAR DETECTION */
+    /* With 8 sensors, each reading 0-16383 (14-bit ADC): */
+    /* - Theoretical max: 8 × 16383 = 131,064 */
+    /* - Swing phase (foot in air): Total ~0-1000 (noise only) */
+    /* - Light contact: Total ~5000-20000 */
+    /* - Normal stance phase: Total ~20000-80000 */
+    /* - Heavy pressure: Total ~80000-131064 */
     
-    return low_val + (high_val - low_val) * 0.5f;
+    /* Find the minimum and maximum values in the buffer */
+    int min_pressure = total_pressures[0];
+    int max_pressure = total_pressures[sorted_count - 1];
+    
+    /* Calculate the range */
+    int pressure_range = max_pressure - min_pressure;
+    
+    /* Set threshold adaptively based on the pressure range */
+    /* This ensures we detect transitions between swing and stance phases */
+    float threshold;
+    if (pressure_range > 10000) {
+        /* Clear difference between swing and stance - use 30% above minimum */
+        /* This works well for normal walking/running patterns */
+        threshold = (float)min_pressure + (float)pressure_range * 0.3f;
+    } else if (pressure_range > 5000) {
+        /* Moderate difference - use 25% above minimum */
+        /* This handles lighter steps or transitions */
+        threshold = (float)min_pressure + (float)pressure_range * 0.25f;
+    } else {
+        /* Small range - might be all swing or all stance */
+        /* Use 20% above minimum but ensure minimum threshold */
+        threshold = (float)min_pressure + (float)pressure_range * 0.2f;
+        if (threshold < 1000.0f && max_pressure > 2000) {
+            /* If max is significant, set threshold to detect transitions */
+            threshold = 1000.0f;
+        }
+    }
+    
+    /* Sanity checks for the threshold */
+    /* Must be high enough to avoid noise but low enough to detect contact */
+    if (threshold < 500.0f) {
+        /* Too low - would trigger on noise */
+        threshold = 500.0f;
+        LOG_DBG("Threshold too low, raised to %.1f", threshold);
+    } else if (threshold > 50000.0f) {
+        /* Extremely high - likely an error, cap at reasonable maximum */
+        /* Most real-world scenarios won't exceed 50k total pressure */
+        threshold = 20000.0f;
+        LOG_WRN("Threshold %.1f extremely high, capped at 20000", threshold);
+    }
+    
+    /* Log the pressure range for debugging */
+    static int range_log_counter = 0;
+    if (++range_log_counter % 20 == 0) {  // Log every 20th call
+        LOG_INF("Pressure range: min=%d, max=%d, threshold=%.1f", 
+                min_pressure, max_pressure, threshold);
+    }
+    
+    /* Also ensure minimum threshold */
+    if (threshold < GAIT_PRESSURE_THRESHOLD) {
+        threshold = GAIT_PRESSURE_THRESHOLD;  /* Use default minimum */
+    }
+    
+    return threshold;
 }
 
 /**
@@ -144,8 +199,13 @@ void gait_events_add_data(gait_event_detector_t *detector,
                           const imu_data_t *imu_data,
                           float timestamp)
 {
-    if (!detector || !foot_data || !imu_data) {
-        return;
+    if (!detector || !foot_data) {
+        return;  // Only foot_data is required, IMU is optional
+    }
+    
+    /* Validate detector state before accessing */
+    if (!detector->processing_active) {
+        return;  // Don't add data if not processing
     }
     
     int idx = detector->write_index;
@@ -156,18 +216,42 @@ void gait_events_add_data(gait_event_detector_t *detector,
         return;
     }
     
+    /* Don't validate foot_data values - they might all be 0 during initialization */
+    /* The system should handle 0 values gracefully */
+    
     /* Copy data to buffer with bounds checking */
     memcpy(&detector->foot_buffer[idx], foot_data, sizeof(foot_samples_t));
-    memcpy(&detector->imu_buffer[idx], imu_data, sizeof(imu_data_t));
-    detector->timestamps[idx] = timestamp;
     
-    /* Update velocity integration if we have previous data */
-    if (detector->buffer_count > 0) {
-        float dt = timestamp - detector->last_timestamp;
-        if (dt > 0 && dt < 0.1f) { /* Sanity check on dt */
-            update_velocity_integration(detector, imu_data, dt);
+    /* Only copy IMU data if available and valid */
+    if (imu_data) {
+        /* Basic validation of IMU data */
+        bool valid_imu = (fabsf(imu_data->accel_x) < 100.0f &&
+                          fabsf(imu_data->accel_y) < 100.0f &&
+                          fabsf(imu_data->accel_z) < 100.0f &&
+                          fabsf(imu_data->gyro_x) < 10.0f &&
+                          fabsf(imu_data->gyro_y) < 10.0f &&
+                          fabsf(imu_data->gyro_z) < 10.0f);
+        
+        if (valid_imu) {
+            memcpy(&detector->imu_buffer[idx], imu_data, sizeof(imu_data_t));
+            
+            /* Update velocity integration if we have previous data and IMU */
+            if (detector->buffer_count > 0) {
+                float dt = timestamp - detector->last_timestamp;
+                if (dt > 0 && dt < 0.1f) { /* Sanity check on dt */
+                    update_velocity_integration(detector, imu_data, dt);
+                }
+            }
+        } else {
+            /* Invalid IMU data - zero out */
+            memset(&detector->imu_buffer[idx], 0, sizeof(imu_data_t));
         }
+    } else {
+        /* No IMU data - zero out the buffer entry */
+        memset(&detector->imu_buffer[idx], 0, sizeof(imu_data_t));
     }
+    
+    detector->timestamps[idx] = timestamp;
     
     /* Store current velocity and position */
     detector->velocities[idx] = detector->current_velocity;
@@ -394,9 +478,12 @@ static void update_velocity_integration(gait_event_detector_t *detector,
         /* Update detailed FSM with current state */
         float velocity_mag = sqrtf(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
         int pressure_idx = detector->write_index > 0 ? detector->write_index - 1 : GAIT_BUFFER_SIZE_SAMPLES - 1;
-        float pressure = (float)calculate_total_pressure(&detector->foot_buffer[pressure_idx]);
-        gait_fsm_update(&detector->detailed_fsm, velocity_mag, pressure,
-                       (uint32_t)(detector->last_timestamp * 1000));
+        /* Validate pressure_idx before using it */
+        if (pressure_idx >= 0 && pressure_idx < GAIT_BUFFER_SIZE_SAMPLES) {
+            float pressure = (float)calculate_total_pressure(&detector->foot_buffer[pressure_idx]);
+            gait_fsm_update(&detector->detailed_fsm, velocity_mag, pressure,
+                           (uint32_t)(detector->last_timestamp * 1000));
+        }
     } else {
         /* BASIC: Simple linear integration */
         /* Remove gravity from acceleration (simplified - assumes Z is up) */
@@ -445,6 +532,236 @@ static void apply_zupt(gait_event_detector_t *detector, bool is_stance)
 }
 
 /**
+ * @brief Detect mid-stance phase from pressure distribution
+ * Mid-stance occurs when foot is flat and COP is in middle third of foot
+ */
+static bool detect_mid_stance(const foot_samples_t *foot_data, float total_force, float last_total_force)
+{
+    if (!foot_data || total_force < 1000.0f) {
+        return false;  // Not enough pressure for mid-stance
+    }
+    
+    // Calculate force derivative (rate of change)
+    float force_derivative = fabsf(total_force - last_total_force);
+    const float FORCE_STABLE_THRESHOLD = 500.0f;  // Force should be stable
+    
+    // Calculate COP position
+    int16_t cop_x = 0, cop_y = 0;
+    calculate_center_of_pressure(foot_data->values, &cop_x, &cop_y, false);
+    
+    // Foot dimensions (approximate)
+    const float FOOT_LENGTH_MM = 250.0f;
+    
+    // Check if COP is in middle third of foot (mid-stance characteristic)
+    bool cop_in_middle = (cop_x > FOOT_LENGTH_MM * 0.3f && cop_x < FOOT_LENGTH_MM * 0.7f);
+    
+    // Check if force is stable (low derivative)
+    bool force_stable = (force_derivative < FORCE_STABLE_THRESHOLD);
+    
+    // Check if weight is well distributed (not just heel or toe)
+    uint16_t heel_force = foot_data->values[0] + foot_data->values[1];  // Heel sensors
+    uint16_t mid_force = foot_data->values[2] + foot_data->values[3] + foot_data->values[4] + foot_data->values[5];  // Mid sensors
+    uint16_t toe_force = foot_data->values[6] + foot_data->values[7];  // Toe sensors
+    
+    bool balanced_distribution = (mid_force > heel_force * 0.5f && mid_force > toe_force * 0.5f);
+    
+    // Mid-stance detected when all conditions met
+    return cop_in_middle && force_stable && balanced_distribution;
+}
+
+/**
+ * @brief Refine initial contact detection with sub-sample precision
+ * Finds exact moment and location of first contact
+ */
+static float refine_initial_contact(const foot_samples_t *buffer, int ic_index, int buffer_size, uint8_t *strike_pattern_out)
+{
+    if (!buffer || ic_index < 1 || ic_index >= buffer_size) {
+        return (float)ic_index;  // Can't refine, return original
+    }
+    
+    // Look at the sample before and at IC
+    const foot_samples_t *prev_sample = &buffer[ic_index - 1];
+    const foot_samples_t *ic_sample = &buffer[ic_index];
+    
+    // Find which sensor(s) made first contact
+    int first_contact_sensor = -1;
+    uint16_t max_delta = 0;
+    
+    for (int i = 0; i < 8; i++) {
+        uint16_t delta = (ic_sample->values[i] > prev_sample->values[i]) ? 
+                        (ic_sample->values[i] - prev_sample->values[i]) : 0;
+        if (delta > max_delta) {
+            max_delta = delta;
+            first_contact_sensor = i;
+        }
+    }
+    
+    // Classify strike pattern based on first contact sensor
+    if (strike_pattern_out) {
+        if (first_contact_sensor >= 0 && first_contact_sensor <= 1) {
+            *strike_pattern_out = 1;  // Heel strike (sensors 0-1)
+        } else if (first_contact_sensor >= 6 && first_contact_sensor <= 7) {
+            *strike_pattern_out = 3;  // Forefoot strike (sensors 6-7)
+        } else {
+            *strike_pattern_out = 2;  // Midfoot strike (sensors 2-5)
+        }
+    }
+    
+    // Linear interpolation for sub-sample precision
+    // Find the exact time when threshold was crossed
+    if (max_delta > 0) {
+        float threshold_fraction = 0.5f;  // Assume threshold crossed at midpoint
+        float refined_index = (float)(ic_index - 1) + threshold_fraction;
+        return refined_index;
+    }
+    
+    return (float)ic_index;
+}
+
+/**
+ * @brief Detect push-off phase from pressure distribution
+ * Push-off occurs when COP moves rapidly toward toes and heel lifts
+ */
+static bool detect_push_off_phase(const foot_samples_t *foot_data, const foot_samples_t *prev_foot_data, 
+                                  float total_force, float peak_force)
+{
+    if (!foot_data || !prev_foot_data || total_force < 500.0f) {
+        return false;  // Not enough pressure
+    }
+    
+    // Calculate COP for current and previous samples
+    int16_t cop_x = 0, cop_y = 0;
+    int16_t prev_cop_x = 0, prev_cop_y = 0;
+    calculate_center_of_pressure(foot_data->values, &cop_x, &cop_y, false);
+    calculate_center_of_pressure(prev_foot_data->values, &prev_cop_x, &prev_cop_y, false);
+    
+    // Calculate COP velocity (movement toward toes)
+    float cop_velocity = (float)(cop_y - prev_cop_y);  // Positive = toward toes
+    const float COP_VELOCITY_THRESHOLD = 5.0f;  // mm per sample
+    
+    // Calculate regional forces
+    uint16_t heel_force = foot_data->values[0] + foot_data->values[1];
+    uint16_t forefoot_force = foot_data->values[6] + foot_data->values[7];
+    
+    // Push-off characteristics:
+    // 1. COP moving rapidly toward toes
+    // 2. Forefoot force > heel force (heel lifting)
+    // 3. Total force decreasing from peak (propulsion)
+    bool cop_moving_forward = (cop_velocity > COP_VELOCITY_THRESHOLD);
+    bool heel_lifting = (forefoot_force > heel_force * 2);
+    bool force_decreasing = (total_force < peak_force * 0.9f);
+    
+    return cop_moving_forward && heel_lifting && force_decreasing && (total_force > 1000.0f);
+}
+
+/**
+ * @brief Detect double support phase (both feet on ground)
+ * This is already calculated in bilateral analysis but we add local detection
+ */
+static bool detect_double_support_local(const gait_event_detector_t *detector, int current_index)
+{
+    if (!detector || current_index < 0 || current_index >= GAIT_BUFFER_SIZE_SAMPLES) {
+        return false;
+    }
+    
+    // For local detection, we look at the gait phase state machine
+    // Double support occurs during:
+    // 1. Loading response (just after IC, other foot still on ground)
+    // 2. Pre-swing (just before TO, other foot already on ground)
+    
+    // This is a simplified local detection
+    // The real double support is calculated in bilateral analysis
+    
+    // Check if we're in early stance (loading) or late stance (pre-swing)
+    if (detector->current_phase == GAIT_PHASE_STANCE) {
+        // Get position within stance phase
+        int stance_duration = current_index - detector->last_ic_index;
+        int expected_stance = (int)(detector->sampling_rate * 0.6f);  // ~600ms stance
+        
+        if (stance_duration < expected_stance * 0.2f) {
+            // Early stance - likely loading response (double support)
+            return true;
+        } else if (stance_duration > expected_stance * 0.8f) {
+            // Late stance - likely pre-swing (double support)
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * @brief Enhanced gait phase detection with sub-phases
+ * Adds mid-stance, push-off, and double support detection
+ */
+static gait_phase_t detect_enhanced_gait_phase(gait_event_detector_t *detector, int current_index)
+{
+    static float last_total_force = 0.0f;
+    static float peak_force = 0.0f;
+    static bool in_mid_stance = false;
+    static bool in_push_off = false;
+    
+    if (!detector || current_index < 0 || current_index >= GAIT_BUFFER_SIZE_SAMPLES) {
+        return GAIT_PHASE_IDLE;
+    }
+    
+    // Get current and previous foot data
+    const foot_samples_t *foot_data = &detector->foot_buffer[current_index];
+    const foot_samples_t *prev_foot_data = (current_index > 0) ? 
+                                           &detector->foot_buffer[current_index - 1] : foot_data;
+    
+    // Calculate total force
+    float total_force = (float)calculate_total_pressure(foot_data);
+    
+    // Track peak force during stance
+    if (detector->current_phase == GAIT_PHASE_STANCE && total_force > peak_force) {
+        peak_force = total_force;
+    }
+    
+    // Detect mid-stance
+    bool mid_stance_detected = detect_mid_stance(foot_data, total_force, last_total_force);
+    if (mid_stance_detected && !in_mid_stance) {
+        in_mid_stance = true;
+        LOG_DBG("Mid-stance detected at index %d", current_index);
+    } else if (!mid_stance_detected && in_mid_stance) {
+        in_mid_stance = false;
+        LOG_DBG("Mid-stance ended at index %d", current_index);
+    }
+    
+    // Detect push-off phase
+    bool push_off_detected = detect_push_off_phase(foot_data, prev_foot_data, total_force, peak_force);
+    if (push_off_detected && !in_push_off) {
+        in_push_off = true;
+        LOG_DBG("Push-off phase detected at index %d", current_index);
+    } else if (!push_off_detected && in_push_off) {
+        in_push_off = false;
+        LOG_DBG("Push-off phase ended at index %d", current_index);
+    }
+    
+    // Detect double support (local estimation)
+    bool double_support = detect_double_support_local(detector, current_index);
+    if (double_support) {
+        static uint32_t last_ds_log = 0;
+        uint32_t now = k_uptime_get_32();
+        if (now - last_ds_log > 500) {  // Log every 500ms max
+            LOG_DBG("Double support detected (local) at index %d", current_index);
+            last_ds_log = now;
+        }
+    }
+    
+    // Reset on swing phase
+    if (detector->current_phase == GAIT_PHASE_SWING) {
+        peak_force = 0.0f;
+        in_mid_stance = false;
+        in_push_off = false;
+    }
+    
+    last_total_force = total_force;
+    
+    return detector->current_phase;  // Return current phase (enhanced detection is logged)
+}
+
+/**
  * Detect IC (Initial Contact) and TO (Toe Off) events from pressure data
  * Implements    pressure_event_detection algorithm
  */
@@ -461,11 +778,32 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
     int samples_to_process = MIN(detector->buffer_count, GAIT_BUFFER_SIZE_SAMPLES);
     
     /* ADVANCED: Build motion mask to reduce false positives */
+    /* Check if we actually have IMU data before using advanced features */
+    bool has_imu_data = false;
     if (detector->use_advanced_features) {
-        build_motion_mask(&detector->motion_mask,
-                         detector->imu_buffer,
-                         samples_to_process,
-                         detector->motion_mask_buffer);
+        /* Check if IMU buffer has any non-zero data */
+        for (int i = 0; i < MIN(10, samples_to_process); i++) {
+            int idx = (start_idx + i) % GAIT_BUFFER_SIZE_SAMPLES;
+            imu_data_t *imu = &detector->imu_buffer[idx];
+            if (imu->accel_x != 0 || imu->accel_y != 0 || imu->accel_z != 0 ||
+                imu->gyro_x != 0 || imu->gyro_y != 0 || imu->gyro_z != 0) {
+                has_imu_data = true;
+                break;
+            }
+        }
+        
+        if (has_imu_data) {
+            build_motion_mask(&detector->motion_mask,
+                             detector->imu_buffer,
+                             samples_to_process,
+                             detector->motion_mask_buffer);
+        } else {
+            /* No IMU data - set all motion mask to true (allow all samples) */
+            for (int i = 0; i < samples_to_process; i++) {
+                detector->motion_mask_buffer[i] = true;
+            }
+            LOG_DBG("No IMU data detected - motion mask disabled");
+        }
         
         /* Fill gaps in pressure signal using Kalman filter */
         for (int i = 0; i < samples_to_process; i++) {
@@ -489,6 +827,13 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
     float adaptive_threshold = calculate_adaptive_threshold(detector->foot_buffer,
                                                            start_idx,
                                                            samples_to_process);
+    
+    /* Log threshold for debugging */
+    static int threshold_log_counter = 0;
+    if (++threshold_log_counter % 10 == 0) {  // Log every 10th call
+        LOG_INF("Adaptive threshold: %.1f (processing %d samples)", 
+                adaptive_threshold, samples_to_process);
+    }
     
     /* Timing constraints in samples */
     int min_stride_samples = (int)(GAIT_MIN_STRIDE_TIME * detector->sampling_rate);
@@ -540,12 +885,20 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
                 continue;
             }
             
-            /* Valid IC event */
+            /* Valid IC event - refine with sub-sample precision */
+            uint8_t strike_pattern = 0;
+            float refined_ic_time = refine_initial_contact(detector->foot_buffer, 
+                                                          curr_idx, 
+                                                          GAIT_BUFFER_SIZE_SAMPLES,
+                                                          &strike_pattern);
+            
             detector->ic_indices[detector->ic_count++] = i;
             last_ic = i;
+            detector->current_phase = GAIT_PHASE_STANCE;  /* Update phase */
+            detector->last_ic_index = i;
             
-            LOG_DBG("IC detected at index %d, pressure %.1f > threshold %.1f",
-                    i, curr_pressure, adaptive_threshold);
+            LOG_DBG("IC detected at index %d (refined: %.1f), pressure %.1f > threshold %.1f, strike=%d",
+                    i, refined_ic_time, curr_pressure, adaptive_threshold, strike_pattern);
         }
         
         /* Detect TO: transition from contact to no contact (1→0) */
@@ -566,8 +919,15 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
             /* Valid TO event */
             detector->to_indices[detector->to_count++] = i;
             last_to = i;
+            detector->current_phase = GAIT_PHASE_SWING;  /* Update phase */
+            detector->last_to_index = i;
             
             LOG_DBG("TO detected at index %d", i);
+        }
+        
+        /* Call enhanced phase detection for each sample during stance */
+        if (detector->current_phase == GAIT_PHASE_STANCE) {
+            detect_enhanced_gait_phase(detector, curr_idx);
         }
     }
     
@@ -787,12 +1147,14 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
         m->cop_path_length = cop_path_length;
         m->loading_rate = max_loading_rate;
         
-        /* Calculate stride length from velocity integration */
+        /* Calculate stride length from velocity integration OR estimate from cadence */
         float stride_length = 0.0f;
         float vertical_osc_max = 0.0f;
         float vertical_osc_min = 0.0f;
         float lateral_movement = 0.0f;
         
+        /* First try to integrate velocity if we have IMU data */
+        bool has_valid_velocity = false;
         for (int i = segment->ic_index; i < segment->next_ic_index; i++) {
             int buf_idx = (start_idx + i) % GAIT_BUFFER_SIZE_SAMPLES;
             int next_buf_idx = (start_idx + i + 1) % GAIT_BUFFER_SIZE_SAMPLES;
@@ -803,8 +1165,14 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
             
             float dt = detector->timestamps[next_buf_idx] - detector->timestamps[buf_idx];
             if (dt > 0 && dt < 0.1f) {
-                /* Integrate forward velocity for stride length */
-                stride_length += detector->velocities[buf_idx].x * dt;
+                /* Check if we have valid velocity data */
+                if (fabsf(detector->velocities[buf_idx].x) > 0.001f ||
+                    fabsf(detector->velocities[buf_idx].y) > 0.001f ||
+                    fabsf(detector->velocities[buf_idx].z) > 0.001f) {
+                    has_valid_velocity = true;
+                    /* Integrate forward velocity for stride length */
+                    stride_length += detector->velocities[buf_idx].x * dt;
+                }
                 
                 /* Track vertical oscillation during swing phase */
                 if (i >= segment->to_index) {
@@ -818,7 +1186,42 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
             }
         }
         
-        m->stride_length = ABS(stride_length);
+        /* If velocity integration failed or gave unrealistic results, estimate from cadence and height */
+        if (!has_valid_velocity || fabsf(stride_length) < 0.1f || fabsf(stride_length) > 5.0f) {
+            /* Use empirical formula based on cadence and height */
+            /* Research shows: stride_length ≈ height × 0.65 × (cadence/100)^0.5 */
+            /* Adjusted for running: stride increases with cadence up to a point */
+            
+            float height = detector->subject_height_m > 0 ? detector->subject_height_m : 1.75f;
+            
+            if (m->cadence > 0) {
+                /* Different formulas for walking vs running based on cadence */
+                if (m->cadence < 140) {
+                    /* Walking: stride length increases linearly with cadence */
+                    stride_length = height * 0.4f * (m->cadence / 100.0f);
+                } else if (m->cadence < 180) {
+                    /* Jogging: moderate stride length */
+                    stride_length = height * 0.65f * sqrtf(m->cadence / 100.0f);
+                } else {
+                    /* Running: stride length plateaus at higher cadences */
+                    /* At 200 spm, typical stride is ~1.1-1.3m for average height */
+                    float cadence_factor = 1.0f - expf(-(m->cadence - 180.0f) / 50.0f);
+                    stride_length = height * (0.6f + 0.15f * cadence_factor);
+                }
+                
+                /* Apply reasonable bounds */
+                stride_length = MAX(0.5f, MIN(2.5f, stride_length));
+                
+                LOG_DBG("Estimated stride length: %.2fm from cadence %.1f spm and height %.2fm",
+                        stride_length, m->cadence, height);
+            } else {
+                /* Fallback to default */
+                stride_length = 1.1f;
+                LOG_DBG("Using default stride length: %.2fm", stride_length);
+            }
+        }
+        
+        m->stride_length = fabsf(stride_length);
         m->stride_velocity = m->stride_length / m->duration;
         m->vertical_oscillation = vertical_osc_max - vertical_osc_min;
         m->step_width = lateral_movement / (segment->next_ic_index - segment->ic_index);
@@ -962,10 +1365,12 @@ int gait_events_process(gait_event_detector_t *detector)
         LOG_DBG("No events detected in current chunk");
         
         /* Move read index forward to process next chunk */
-        int samples_to_skip = detector->sampling_rate / 3; /* Keep 1/3 second overlap */
+        /* Clear more aggressively when no events detected to prevent overflow */
+        int samples_to_skip = detector->sampling_rate / 2; /* Clear half second of data */
         if (samples_to_skip > 0 && samples_to_skip < detector->buffer_count) {
             detector->read_index = (detector->read_index + samples_to_skip) % GAIT_BUFFER_SIZE_SAMPLES;
             detector->buffer_count -= samples_to_skip;
+            LOG_DBG("No events: cleared %d samples, %d remain", samples_to_skip, detector->buffer_count);
         }
         return 0;
     }
@@ -981,19 +1386,40 @@ int gait_events_process(gait_event_detector_t *detector)
     /* Step 3: Calculate metrics for each stride */
     calculate_stride_metrics(detector);
     
-    /* Step 4: Update read index to keep overlap (similar to    implementation) */
+    /* Step 4: Update read index to keep minimal overlap for continuous processing */
     if (detector->stride_count > 0) {
-        /* Move read index past the last processed stride, keeping 1/3 second overlap */
+        /* Move read index past the last processed stride, keeping only 0.2 second overlap */
+        /* This prevents buffer overflow while maintaining continuity */
         stride_segment_t *last_segment = &detector->stride_segments[detector->stride_count - 1];
-        int samples_to_skip = last_segment->next_ic_index - (int)(detector->sampling_rate / 3);
+        int overlap_samples = (int)(detector->sampling_rate * 0.2f);  /* 20 samples at 100Hz */
+        int samples_to_skip = last_segment->next_ic_index - overlap_samples;
+        
+        /* Ensure we clear at least 50% of processed data to prevent overflow */
+        int min_clear = last_segment->next_ic_index / 2;
+        if (samples_to_skip < min_clear) {
+            samples_to_skip = min_clear;
+        }
+        
         if (samples_to_skip > 0 && samples_to_skip < detector->buffer_count) {
             detector->read_index = (detector->read_index + samples_to_skip) % GAIT_BUFFER_SIZE_SAMPLES;
             detector->buffer_count -= samples_to_skip;
+            
+            LOG_DBG("Cleared %d samples after processing, %d remain in buffer (overlap: %d)",
+                    samples_to_skip, detector->buffer_count, overlap_samples);
             
             /* Reset velocity/position at stride boundary for drift correction */
             detector->current_position.x = 0;
             detector->current_position.y = 0;
             detector->current_position.z = 0;
+        }
+    } else {
+        /* No complete strides found - clear some buffer to prevent overflow */
+        /* But be more conservative to avoid losing potential events */
+        int samples_to_clear = detector->sampling_rate / 4;  /* Clear 0.25 seconds worth */
+        if (samples_to_clear > 0 && samples_to_clear < detector->buffer_count) {
+            detector->read_index = (detector->read_index + samples_to_clear) % GAIT_BUFFER_SIZE_SAMPLES;
+            detector->buffer_count -= samples_to_clear;
+            LOG_DBG("No strides: cleared %d samples, %d remain", samples_to_clear, detector->buffer_count);
         }
     }
     

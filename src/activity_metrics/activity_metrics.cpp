@@ -858,11 +858,9 @@ static void periodic_update_work_handler(struct k_work *work)
             last_periodic_update = now;
         }
         
-        // Send BLE update
-        if (now - last_ble_update >= BLE_UPDATE_INTERVAL_MS) {
-            send_ble_update();
-            last_ble_update = now;
-        }
+        // BLE updates are published exclusively by realtime_metrics module at 1Hz
+        // Removed local BLE send to avoid duplicate publishers and stale zeros
+        // (was calling send_ble_update here)
         
         // Reschedule for next update
         k_work_schedule_for_queue(&activity_metrics_work_q, &periodic_update_work, K_MSEC(100));
@@ -1081,8 +1079,8 @@ static void calculate_realtime_metrics(void)
 static void send_periodic_record(void)
 {
     // For now, just log the metrics
-    LOG_WRN("Periodic update: cadence=%.1f, contact=%.1fms, flight=%.1fms",
-            (double)sensor_data.current_cadence, (double)sensor_data.avg_contact_time, (double)sensor_data.avg_flight_time);
+  //  LOG_WRN("Periodic update: cadence=%.1f, contact=%.1fms, flight=%.1fms",
+    //        (double)sensor_data.current_cadence, (double)sensor_data.avg_contact_time, (double)sensor_data.avg_flight_time);
     
     // TODO: Create proper message structure for activity records
     // This would send to data module for logging
@@ -1169,8 +1167,8 @@ static void send_ble_update(void)
         LOG_WRN("Failed to send biomechanics data to Bluetooth queue");
     }
     
-    LOG_WRN("BLE update sent: pace=%d s/km, cadence=%d, form=%d",
-            packet.pace_sec_per_km, packet.cadence_x2/2, packet.form_score);
+   // LOG_WRN("BLE update sent: pace=%d s/km, cadence=%d, form=%d",
+     //       packet.pace_sec_per_km, packet.cadence_x2/2, packet.form_score);
 }
 #else
 static void send_ble_update(void)

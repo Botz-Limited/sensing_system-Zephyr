@@ -22,13 +22,16 @@ extern "C" {
 #endif
 
 /* Configuration constants for 100Hz foot sensor sampling rate */
+/* GAIT_BUFFER_SIZE_SAMPLES is already defined in gait_advanced_features.h (300 samples) */
+#ifndef GAIT_BUFFER_SIZE_SAMPLES
 #define GAIT_BUFFER_SIZE_SAMPLES   300    /* 3 seconds @ 100Hz */
+#endif
 #define GAIT_SAMPLING_RATE         100.0f /* Hz (foot sensor rate) */
 #define GAIT_MIN_STRIDE_TIME       0.33f  /* 330ms minimum between strides */
 #define GAIT_MAX_STRIDE_TIME       6.0f   /* 6 seconds max (after pause) */
 #define GAIT_MIN_CONTACT_TIME      0.120f /* 120ms minimum contact time */
 #define GAIT_REFRACTORY_TIME       0.120f /* 120ms refractory after TO */
-#define GAIT_PRESSURE_THRESHOLD    150    /* Adaptive pressure threshold */
+#define GAIT_PRESSURE_THRESHOLD    1000   /* Minimum adaptive pressure threshold */
 #define GAIT_MAX_EVENTS_PER_CHUNK  10     /* Max strides per 3-second chunk */
 #define GAIT_VELOCITY_THRESHOLD    0.1f   /* m/s for ZUPT */
 

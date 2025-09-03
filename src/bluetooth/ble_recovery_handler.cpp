@@ -4,7 +4,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
-LOG_MODULE_REGISTER(ble_recovery, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(ble_recovery, LOG_LEVEL_WRN);
 
 // External BLE notification functions (only available on primary device)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)

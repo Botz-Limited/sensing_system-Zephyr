@@ -18,6 +18,13 @@ config FOOT_SENSOR_OPTIONAL
 	  initialization fails. If disabled, foot sensor failure will prevent
 	  system startup.
 
+config FOOT_SIMULATION
+	bool "Foot pressure reading simulation for testing"
+	default y
+	help
+	  Enable foot sample simulation, bypassing the original values
+
+
 config FOOT_SENSOR_USE_SIMPLE
 	bool "Use simplified thread-based ADC implementation"
 	default y

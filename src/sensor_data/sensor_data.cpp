@@ -55,7 +55,7 @@ static struct k_thread sensor_data_thread_data;
 static k_tid_t sensor_data_tid;
 
 // Work queue configuration
-static constexpr int sensor_data_workq_stack_size = 2048;
+static constexpr int sensor_data_workq_stack_size = 4096;
 K_THREAD_STACK_DEFINE(sensor_data_workq_stack, sensor_data_workq_stack_size);
 static struct k_work_q sensor_data_work_q;
 
@@ -196,10 +196,12 @@ static struct {
 } sensor_state;
 
 // Adaptive D2D timing constants - Optimized for nRF5340 network core
-#define D2D_MIN_FRESHNESS_WINDOW_MS 50    // Reduced from 100ms - network core enables lower latency
-#define D2D_MAX_FRESHNESS_WINDOW_MS 300   // Reduced from 500ms - tighter bounds with better performance
-#define D2D_LATENCY_HISTORY_SIZE 20       // Increased for more accurate averaging with lower latency
-#define D2D_NETCORE_LATENCY_OFFSET 20     // Network core typical IPC + processing overhead
+// IMPORTANT: Secondary sends D2D data at 1Hz (every 1000ms), not 100Hz
+// So freshness window must be > 1000ms to avoid invalidating left foot data
+#define D2D_MIN_FRESHNESS_WINDOW_MS 1500    // Increased to handle 1Hz D2D rate
+#define D2D_MAX_FRESHNESS_WINDOW_MS 3000    // Allow up to 3 seconds for D2D data
+#define D2D_LATENCY_HISTORY_SIZE 20         // Increased for more accurate averaging with lower latency
+#define D2D_NETCORE_LATENCY_OFFSET 20       // Network core typical IPC + processing overhead
 
 // Forward declarations
 static void sensor_data_init(void);
@@ -589,11 +591,11 @@ static void process_foot_data_work_handler(struct k_work *work) {
       for (int i = 0; i < 8; i++) {
         sensor_state.left_pressure[i] = remapped_left[i];
       }
-      LOG_WRN("Updated left_pressure: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
-              sensor_state.left_pressure[0], sensor_state.left_pressure[1],
-              sensor_state.left_pressure[2], sensor_state.left_pressure[3],
-              sensor_state.left_pressure[4], sensor_state.left_pressure[5],
-              sensor_state.left_pressure[6], sensor_state.left_pressure[7]);
+   //   LOG_WRN("Updated left_pressure: [0]=%u, [1]=%u, [2]=%u, [3]=%u, [4]=%u, [5]=%u, [6]=%u, [7]=%u",
+     //         sensor_state.left_pressure[0], sensor_state.left_pressure[1],
+       //       sensor_state.left_pressure[2], sensor_state.left_pressure[3],
+         //     sensor_state.left_pressure[4], sensor_state.left_pressure[5],
+           //   sensor_state.left_pressure[6], sensor_state.left_pressure[7]);
 
       // Detect ground contact
       bool was_in_contact = sensor_state.left_foot_contact;
@@ -907,11 +909,14 @@ static void periodic_sample_work_handler(struct k_work *work) {
     }
   }
   
-  // Trigger optimized timer callback for event-based metrics transmission
-  // Process every 2 seconds instead of 1Hz to reduce CPU load and prevent D2D blocking
+  // Trigger timer callback for event-based metrics transmission
+  // Process every 1 second for both primary and secondary devices
   static uint32_t last_metrics_callback = 0;
   uint32_t current = k_uptime_get_32();
-  if (current - last_metrics_callback >= 2000) {  // 0.5Hz instead of 1Hz
+  
+  // Both primary and secondary process at 1Hz
+  // Secondary needs to process to calculate and send D2D metrics
+  if (current - last_metrics_callback >= 1000) {  // 1Hz for all devices
     // Only call timer callback when processing is active
     if (atomic_get(&processing_active) == 1) {
       sensor_data_1hz_timer_callback();
@@ -1002,8 +1007,19 @@ static void process_sensor_sample(void) {
   // Check D2D data freshness for left foot with adaptive window
   uint32_t left_data_age =
       current_time - sensor_state.left_foot_last_update_time;
+  
+#if IS_ENABLED(CONFIG_FOOT_SIMULATION)
+  // For simulation: Always consider D2D data valid if we have received any
+  // This bypasses freshness checks since simulation D2D is sent at 1Hz
+  bool left_data_valid = (sensor_state.left_foot_last_update_time > 0);
+  if (sensor_state.sample_count % 100 == 0 && left_data_valid) {
+    LOG_WRN("SIMULATION: Bypassing D2D freshness check, data age: %u ms", left_data_age);
+  }
+#else
+  // Normal operation: Check freshness with adaptive window
   bool left_data_valid =
       (left_data_age < adaptive_freshness_window);
+#endif
   
   // Update D2D connection quality metrics
   if (left_data_valid && sensor_state.d2d_last_good_time > 0) {

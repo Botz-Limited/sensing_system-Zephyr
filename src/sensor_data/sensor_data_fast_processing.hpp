@@ -44,12 +44,15 @@ typedef enum {
     PHASE_NO_CONTACT
 } contact_phase_t;
 
-// Pressure region indices
-// Correct mapping: [0-3] = forefoot, [4-5] = midfoot, [6-7] = heel
+// Pressure region indices based on actual sensor layout:
+// Sensor 1 [0] = Big Toe (Medial)
+// Sensors 2-4 [1-3] = Forefoot (Lateral, Center, Medial)
+// Sensors 5-6 [4-5] = Midfoot/Arch (Lateral, Medial)
+// Sensors 7-8 [6-7] = Heel (Lateral, Medial)
 typedef enum {
-    REGION_FOREFOOT = 0,   // Sensors 0-3
-    REGION_MIDFOOT,        // Sensors 4-5
-    REGION_HEEL            // Sensors 6-7
+    REGION_FOREFOOT = 0,   // Sensors [0-3]: toe + forefoot
+    REGION_MIDFOOT,        // Sensors [4-5]: arch
+    REGION_HEEL            // Sensors [6-7]: heel
 } pressure_region_t;
 
 /**
@@ -100,11 +103,11 @@ ALWAYS_INLINE uint16_t detect_peak_force(const uint16_t pressure[8])
  */
 ALWAYS_INLINE contact_phase_t detect_contact_phase(const uint16_t pressure[8], bool was_in_contact)
 {
-    // Calculate regional pressures using correct mapping
-    // [0-3] = forefoot, [4-5] = midfoot, [6-7] = heel
-    uint32_t forefoot = pressure[0] + pressure[1] + pressure[2] + pressure[3];
-    uint32_t midfoot = pressure[4] + pressure[5];
-    uint32_t heel = pressure[6] + pressure[7];
+    // Calculate regional pressures using actual sensor mapping:
+    // [0-3] = toe + forefoot, [4-5] = midfoot/arch, [6-7] = heel
+    uint32_t forefoot = pressure[0] + pressure[1] + pressure[2] + pressure[3];  // toe + forefoot
+    uint32_t midfoot = pressure[4] + pressure[5];  // arch
+    uint32_t heel = pressure[6] + pressure[7];  // heel
     uint32_t total = heel + midfoot + forefoot;
     
     // No contact

@@ -104,6 +104,7 @@ typedef struct {
 #define RT_ALERT_HIGH_IMPACT       (1 << 2)
 #define RT_ALERT_FATIGUE_DETECTED  (1 << 3)
 #define RT_ALERT_OVERPRONATION     (1 << 4)
+#define RT_ALERT_UNILATERAL_DATA   (1 << 5)  // Data from single foot only (no bilateral)
 
 // Function prototypes for metrics calculation
 void cadence_tracker_init(cadence_tracker_t *tracker);

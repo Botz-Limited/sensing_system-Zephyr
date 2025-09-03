@@ -7,7 +7,7 @@
 #include <gait_events.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(gait_safety, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(gait_safety, LOG_LEVEL_WRN);
 
 // Wrap functions in extern "C" for linkage from C++ code
 extern "C" {
