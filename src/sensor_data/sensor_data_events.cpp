@@ -768,15 +768,15 @@ static primary_metrics_entry_t* find_matching_primary_metrics(uint32_t secondary
         if (time_diff < MAX_BILATERAL_TIME_DIFF_MS && time_diff < best_time_diff) {
             best_match = entry;
             best_time_diff = time_diff;
-            LOG_DBG("Potential match: primary=%u, secondary=%u (adjusted=%d), diff=%u ms",
-                    entry->timestamp_ms, secondary_timestamp_ms, adjusted_secondary_time, time_diff);
+           // LOG_DBG("Potential match: primary=%u, secondary=%u (adjusted=%d), diff=%u ms",
+             //       entry->timestamp_ms, secondary_timestamp_ms, adjusted_secondary_time, time_diff);
         }
     }
     
     if (best_match) {
-        LOG_INF("Found matching primary metrics: time_diff=%u ms (primary=%u, secondary=%u, offset=%d)",
-                best_time_diff, best_match->timestamp_ms, secondary_timestamp_ms, 
-                bilateral_data.timestamp_offset_ms);
+    //    LOG_INF("Found matching primary metrics: time_diff=%u ms (primary=%u, secondary=%u, offset=%d)",
+      //          best_time_diff, best_match->timestamp_ms, secondary_timestamp_ms, 
+        //        bilateral_data.timestamp_offset_ms);
     } else {
         // If no match found but we have recent data, use it anyway
         if (bilateral_data.history_count > 0) {

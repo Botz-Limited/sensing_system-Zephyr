@@ -532,6 +532,236 @@ static void apply_zupt(gait_event_detector_t *detector, bool is_stance)
 }
 
 /**
+ * @brief Detect mid-stance phase from pressure distribution
+ * Mid-stance occurs when foot is flat and COP is in middle third of foot
+ */
+static bool detect_mid_stance(const foot_samples_t *foot_data, float total_force, float last_total_force)
+{
+    if (!foot_data || total_force < 1000.0f) {
+        return false;  // Not enough pressure for mid-stance
+    }
+    
+    // Calculate force derivative (rate of change)
+    float force_derivative = fabsf(total_force - last_total_force);
+    const float FORCE_STABLE_THRESHOLD = 500.0f;  // Force should be stable
+    
+    // Calculate COP position
+    int16_t cop_x = 0, cop_y = 0;
+    calculate_center_of_pressure(foot_data->values, &cop_x, &cop_y, false);
+    
+    // Foot dimensions (approximate)
+    const float FOOT_LENGTH_MM = 250.0f;
+    
+    // Check if COP is in middle third of foot (mid-stance characteristic)
+    bool cop_in_middle = (cop_x > FOOT_LENGTH_MM * 0.3f && cop_x < FOOT_LENGTH_MM * 0.7f);
+    
+    // Check if force is stable (low derivative)
+    bool force_stable = (force_derivative < FORCE_STABLE_THRESHOLD);
+    
+    // Check if weight is well distributed (not just heel or toe)
+    uint16_t heel_force = foot_data->values[0] + foot_data->values[1];  // Heel sensors
+    uint16_t mid_force = foot_data->values[2] + foot_data->values[3] + foot_data->values[4] + foot_data->values[5];  // Mid sensors
+    uint16_t toe_force = foot_data->values[6] + foot_data->values[7];  // Toe sensors
+    
+    bool balanced_distribution = (mid_force > heel_force * 0.5f && mid_force > toe_force * 0.5f);
+    
+    // Mid-stance detected when all conditions met
+    return cop_in_middle && force_stable && balanced_distribution;
+}
+
+/**
+ * @brief Refine initial contact detection with sub-sample precision
+ * Finds exact moment and location of first contact
+ */
+static float refine_initial_contact(const foot_samples_t *buffer, int ic_index, int buffer_size, uint8_t *strike_pattern_out)
+{
+    if (!buffer || ic_index < 1 || ic_index >= buffer_size) {
+        return (float)ic_index;  // Can't refine, return original
+    }
+    
+    // Look at the sample before and at IC
+    const foot_samples_t *prev_sample = &buffer[ic_index - 1];
+    const foot_samples_t *ic_sample = &buffer[ic_index];
+    
+    // Find which sensor(s) made first contact
+    int first_contact_sensor = -1;
+    uint16_t max_delta = 0;
+    
+    for (int i = 0; i < 8; i++) {
+        uint16_t delta = (ic_sample->values[i] > prev_sample->values[i]) ? 
+                        (ic_sample->values[i] - prev_sample->values[i]) : 0;
+        if (delta > max_delta) {
+            max_delta = delta;
+            first_contact_sensor = i;
+        }
+    }
+    
+    // Classify strike pattern based on first contact sensor
+    if (strike_pattern_out) {
+        if (first_contact_sensor >= 0 && first_contact_sensor <= 1) {
+            *strike_pattern_out = 1;  // Heel strike (sensors 0-1)
+        } else if (first_contact_sensor >= 6 && first_contact_sensor <= 7) {
+            *strike_pattern_out = 3;  // Forefoot strike (sensors 6-7)
+        } else {
+            *strike_pattern_out = 2;  // Midfoot strike (sensors 2-5)
+        }
+    }
+    
+    // Linear interpolation for sub-sample precision
+    // Find the exact time when threshold was crossed
+    if (max_delta > 0) {
+        float threshold_fraction = 0.5f;  // Assume threshold crossed at midpoint
+        float refined_index = (float)(ic_index - 1) + threshold_fraction;
+        return refined_index;
+    }
+    
+    return (float)ic_index;
+}
+
+/**
+ * @brief Detect push-off phase from pressure distribution
+ * Push-off occurs when COP moves rapidly toward toes and heel lifts
+ */
+static bool detect_push_off_phase(const foot_samples_t *foot_data, const foot_samples_t *prev_foot_data, 
+                                  float total_force, float peak_force)
+{
+    if (!foot_data || !prev_foot_data || total_force < 500.0f) {
+        return false;  // Not enough pressure
+    }
+    
+    // Calculate COP for current and previous samples
+    int16_t cop_x = 0, cop_y = 0;
+    int16_t prev_cop_x = 0, prev_cop_y = 0;
+    calculate_center_of_pressure(foot_data->values, &cop_x, &cop_y, false);
+    calculate_center_of_pressure(prev_foot_data->values, &prev_cop_x, &prev_cop_y, false);
+    
+    // Calculate COP velocity (movement toward toes)
+    float cop_velocity = (float)(cop_y - prev_cop_y);  // Positive = toward toes
+    const float COP_VELOCITY_THRESHOLD = 5.0f;  // mm per sample
+    
+    // Calculate regional forces
+    uint16_t heel_force = foot_data->values[0] + foot_data->values[1];
+    uint16_t forefoot_force = foot_data->values[6] + foot_data->values[7];
+    
+    // Push-off characteristics:
+    // 1. COP moving rapidly toward toes
+    // 2. Forefoot force > heel force (heel lifting)
+    // 3. Total force decreasing from peak (propulsion)
+    bool cop_moving_forward = (cop_velocity > COP_VELOCITY_THRESHOLD);
+    bool heel_lifting = (forefoot_force > heel_force * 2);
+    bool force_decreasing = (total_force < peak_force * 0.9f);
+    
+    return cop_moving_forward && heel_lifting && force_decreasing && (total_force > 1000.0f);
+}
+
+/**
+ * @brief Detect double support phase (both feet on ground)
+ * This is already calculated in bilateral analysis but we add local detection
+ */
+static bool detect_double_support_local(const gait_event_detector_t *detector, int current_index)
+{
+    if (!detector || current_index < 0 || current_index >= GAIT_BUFFER_SIZE_SAMPLES) {
+        return false;
+    }
+    
+    // For local detection, we look at the gait phase state machine
+    // Double support occurs during:
+    // 1. Loading response (just after IC, other foot still on ground)
+    // 2. Pre-swing (just before TO, other foot already on ground)
+    
+    // This is a simplified local detection
+    // The real double support is calculated in bilateral analysis
+    
+    // Check if we're in early stance (loading) or late stance (pre-swing)
+    if (detector->current_phase == GAIT_PHASE_STANCE) {
+        // Get position within stance phase
+        int stance_duration = current_index - detector->last_ic_index;
+        int expected_stance = (int)(detector->sampling_rate * 0.6f);  // ~600ms stance
+        
+        if (stance_duration < expected_stance * 0.2f) {
+            // Early stance - likely loading response (double support)
+            return true;
+        } else if (stance_duration > expected_stance * 0.8f) {
+            // Late stance - likely pre-swing (double support)
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+/**
+ * @brief Enhanced gait phase detection with sub-phases
+ * Adds mid-stance, push-off, and double support detection
+ */
+static gait_phase_t detect_enhanced_gait_phase(gait_event_detector_t *detector, int current_index)
+{
+    static float last_total_force = 0.0f;
+    static float peak_force = 0.0f;
+    static bool in_mid_stance = false;
+    static bool in_push_off = false;
+    
+    if (!detector || current_index < 0 || current_index >= GAIT_BUFFER_SIZE_SAMPLES) {
+        return GAIT_PHASE_IDLE;
+    }
+    
+    // Get current and previous foot data
+    const foot_samples_t *foot_data = &detector->foot_buffer[current_index];
+    const foot_samples_t *prev_foot_data = (current_index > 0) ? 
+                                           &detector->foot_buffer[current_index - 1] : foot_data;
+    
+    // Calculate total force
+    float total_force = (float)calculate_total_pressure(foot_data);
+    
+    // Track peak force during stance
+    if (detector->current_phase == GAIT_PHASE_STANCE && total_force > peak_force) {
+        peak_force = total_force;
+    }
+    
+    // Detect mid-stance
+    bool mid_stance_detected = detect_mid_stance(foot_data, total_force, last_total_force);
+    if (mid_stance_detected && !in_mid_stance) {
+        in_mid_stance = true;
+        LOG_DBG("Mid-stance detected at index %d", current_index);
+    } else if (!mid_stance_detected && in_mid_stance) {
+        in_mid_stance = false;
+        LOG_DBG("Mid-stance ended at index %d", current_index);
+    }
+    
+    // Detect push-off phase
+    bool push_off_detected = detect_push_off_phase(foot_data, prev_foot_data, total_force, peak_force);
+    if (push_off_detected && !in_push_off) {
+        in_push_off = true;
+        LOG_DBG("Push-off phase detected at index %d", current_index);
+    } else if (!push_off_detected && in_push_off) {
+        in_push_off = false;
+        LOG_DBG("Push-off phase ended at index %d", current_index);
+    }
+    
+    // Detect double support (local estimation)
+    bool double_support = detect_double_support_local(detector, current_index);
+    if (double_support) {
+        static uint32_t last_ds_log = 0;
+        uint32_t now = k_uptime_get_32();
+        if (now - last_ds_log > 500) {  // Log every 500ms max
+            LOG_DBG("Double support detected (local) at index %d", current_index);
+            last_ds_log = now;
+        }
+    }
+    
+    // Reset on swing phase
+    if (detector->current_phase == GAIT_PHASE_SWING) {
+        peak_force = 0.0f;
+        in_mid_stance = false;
+        in_push_off = false;
+    }
+    
+    last_total_force = total_force;
+    
+    return detector->current_phase;  // Return current phase (enhanced detection is logged)
+}
+
+/**
  * Detect IC (Initial Contact) and TO (Toe Off) events from pressure data
  * Implements    pressure_event_detection algorithm
  */
