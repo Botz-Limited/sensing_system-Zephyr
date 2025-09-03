@@ -885,12 +885,20 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
                 continue;
             }
             
-            /* Valid IC event */
+            /* Valid IC event - refine with sub-sample precision */
+            uint8_t strike_pattern = 0;
+            float refined_ic_time = refine_initial_contact(detector->foot_buffer, 
+                                                          curr_idx, 
+                                                          GAIT_BUFFER_SIZE_SAMPLES,
+                                                          &strike_pattern);
+            
             detector->ic_indices[detector->ic_count++] = i;
             last_ic = i;
+            detector->current_phase = GAIT_PHASE_STANCE;  /* Update phase */
+            detector->last_ic_index = i;
             
-            LOG_DBG("IC detected at index %d, pressure %.1f > threshold %.1f",
-                    i, curr_pressure, adaptive_threshold);
+            LOG_DBG("IC detected at index %d (refined: %.1f), pressure %.1f > threshold %.1f, strike=%d",
+                    i, refined_ic_time, curr_pressure, adaptive_threshold, strike_pattern);
         }
         
         /* Detect TO: transition from contact to no contact (1→0) */
@@ -911,8 +919,15 @@ static void detect_ic_to_events(gait_event_detector_t *detector)
             /* Valid TO event */
             detector->to_indices[detector->to_count++] = i;
             last_to = i;
+            detector->current_phase = GAIT_PHASE_SWING;  /* Update phase */
+            detector->last_to_index = i;
             
             LOG_DBG("TO detected at index %d", i);
+        }
+        
+        /* Call enhanced phase detection for each sample during stance */
+        if (detector->current_phase == GAIT_PHASE_STANCE) {
+            detect_enhanced_gait_phase(detector, curr_idx);
         }
     }
     
@@ -1132,12 +1147,14 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
         m->cop_path_length = cop_path_length;
         m->loading_rate = max_loading_rate;
         
-        /* Calculate stride length from velocity integration */
+        /* Calculate stride length from velocity integration OR estimate from cadence */
         float stride_length = 0.0f;
         float vertical_osc_max = 0.0f;
         float vertical_osc_min = 0.0f;
         float lateral_movement = 0.0f;
         
+        /* First try to integrate velocity if we have IMU data */
+        bool has_valid_velocity = false;
         for (int i = segment->ic_index; i < segment->next_ic_index; i++) {
             int buf_idx = (start_idx + i) % GAIT_BUFFER_SIZE_SAMPLES;
             int next_buf_idx = (start_idx + i + 1) % GAIT_BUFFER_SIZE_SAMPLES;
@@ -1148,8 +1165,14 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
             
             float dt = detector->timestamps[next_buf_idx] - detector->timestamps[buf_idx];
             if (dt > 0 && dt < 0.1f) {
-                /* Integrate forward velocity for stride length */
-                stride_length += detector->velocities[buf_idx].x * dt;
+                /* Check if we have valid velocity data */
+                if (fabsf(detector->velocities[buf_idx].x) > 0.001f ||
+                    fabsf(detector->velocities[buf_idx].y) > 0.001f ||
+                    fabsf(detector->velocities[buf_idx].z) > 0.001f) {
+                    has_valid_velocity = true;
+                    /* Integrate forward velocity for stride length */
+                    stride_length += detector->velocities[buf_idx].x * dt;
+                }
                 
                 /* Track vertical oscillation during swing phase */
                 if (i >= segment->to_index) {
@@ -1163,7 +1186,42 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
             }
         }
         
-        m->stride_length = ABS(stride_length);
+        /* If velocity integration failed or gave unrealistic results, estimate from cadence and height */
+        if (!has_valid_velocity || fabsf(stride_length) < 0.1f || fabsf(stride_length) > 5.0f) {
+            /* Use empirical formula based on cadence and height */
+            /* Research shows: stride_length ≈ height × 0.65 × (cadence/100)^0.5 */
+            /* Adjusted for running: stride increases with cadence up to a point */
+            
+            float height = detector->subject_height_m > 0 ? detector->subject_height_m : 1.75f;
+            
+            if (m->cadence > 0) {
+                /* Different formulas for walking vs running based on cadence */
+                if (m->cadence < 140) {
+                    /* Walking: stride length increases linearly with cadence */
+                    stride_length = height * 0.4f * (m->cadence / 100.0f);
+                } else if (m->cadence < 180) {
+                    /* Jogging: moderate stride length */
+                    stride_length = height * 0.65f * sqrtf(m->cadence / 100.0f);
+                } else {
+                    /* Running: stride length plateaus at higher cadences */
+                    /* At 200 spm, typical stride is ~1.1-1.3m for average height */
+                    float cadence_factor = 1.0f - expf(-(m->cadence - 180.0f) / 50.0f);
+                    stride_length = height * (0.6f + 0.15f * cadence_factor);
+                }
+                
+                /* Apply reasonable bounds */
+                stride_length = MAX(0.5f, MIN(2.5f, stride_length));
+                
+                LOG_DBG("Estimated stride length: %.2fm from cadence %.1f spm and height %.2fm",
+                        stride_length, m->cadence, height);
+            } else {
+                /* Fallback to default */
+                stride_length = 1.1f;
+                LOG_DBG("Using default stride length: %.2fm", stride_length);
+            }
+        }
+        
+        m->stride_length = fabsf(stride_length);
         m->stride_velocity = m->stride_length / m->duration;
         m->vertical_oscillation = vertical_osc_max - vertical_osc_min;
         m->step_width = lateral_movement / (segment->next_ic_index - segment->ic_index);
