@@ -179,7 +179,32 @@ static void process_adc_samples(int16_t *raw_data)
             // Gait cycle: ~600ms total (300ms stance, 300ms swing) for ~100 spm cadence
             // Using high pressure values to ensure clear event detection
             int64_t current_time = k_uptime_get();
-            int cycle_time = current_time % 600;  // 600ms gait cycle for ~100 spm
+            
+            // Add phase delay for secondary device to create realistic bilateral pattern
+            // Secondary (left foot) should be ~180 degrees out of phase with primary (right foot)
+            // This creates a natural alternating gait pattern
+            int phase_offset = 0;
+            #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                // Secondary device: add 300ms phase offset (half cycle)
+                // This simulates left foot being out of phase with right foot
+                phase_offset = 300;  // Half of 600ms cycle
+                // Also add small random variation (±20ms) to make it more realistic
+                phase_offset += ((current_time / 1000) % 41) - 20;  // -20 to +20 ms variation
+                
+                // Log phase offset periodically for debugging
+                static uint32_t phase_log_counter = 0;
+                if (++phase_log_counter % 1000 == 0) {  // Every 10 seconds at 100Hz
+                    LOG_INF("SECONDARY: Gait simulation with %dms phase offset (left foot)", phase_offset);
+                }
+            #else
+                // Primary device - log periodically
+                static uint32_t phase_log_counter = 0;
+                if (++phase_log_counter % 1000 == 0) {  // Every 10 seconds at 100Hz
+                    LOG_INF("PRIMARY: Gait simulation with 0ms phase offset (right foot)");
+                }
+            #endif
+            
+            int cycle_time = (current_time + phase_offset) % 600;  // 600ms gait cycle with phase offset
             
             // Create realistic pressure pattern with 14-bit ADC range
             // Total pressure during midstance: ~70,000-80,000 (clear detection)

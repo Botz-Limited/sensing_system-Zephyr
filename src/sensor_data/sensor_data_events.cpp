@@ -642,7 +642,7 @@ void sensor_data_1hz_timer_callback(void)
 
 // Bilateral metrics storage with history for proper time correlation
 #define BILATERAL_HISTORY_SIZE 10  // Store last 10 seconds of primary metrics
-#define MAX_BILATERAL_TIME_DIFF_MS 3000  // Accept matches within 3 seconds (was 1.5 seconds)
+#define MAX_BILATERAL_TIME_DIFF_MS 5000  // Accept matches within 5 seconds to handle D2D delays
 #define BILATERAL_WAIT_TIMEOUT_MS 3000   // Wait up to 3 seconds for secondary data
 
 typedef struct {
