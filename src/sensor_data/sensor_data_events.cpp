@@ -451,11 +451,20 @@ void sensor_data_1hz_timer_callback(void)
             d2d_metric_set_valid(&d2d_packet, IDX_PEAK_PRESSURE);
             
             // Center of pressure at toe-off (use most recent COP)
-            d2d_packet.metrics[IDX_COP_X] = (float)latest->cop_x_at_to;
-            d2d_metric_set_valid(&d2d_packet, IDX_COP_X);
-            
-            d2d_packet.metrics[IDX_COP_Y] = (float)latest->cop_y_at_to;
-            d2d_metric_set_valid(&d2d_packet, IDX_COP_Y);
+            // Validate COP values are reasonable (within foot dimensions ~300mm)
+            if (abs(latest->cop_x_at_to) < 300 && abs(latest->cop_y_at_to) < 300) {
+                d2d_packet.metrics[IDX_COP_X] = (float)latest->cop_x_at_to;
+                d2d_metric_set_valid(&d2d_packet, IDX_COP_X);
+                
+                d2d_packet.metrics[IDX_COP_Y] = (float)latest->cop_y_at_to;
+                d2d_metric_set_valid(&d2d_packet, IDX_COP_Y);
+            } else {
+                // Use default COP values if invalid
+                d2d_packet.metrics[IDX_COP_X] = 0.0f;
+                d2d_packet.metrics[IDX_COP_Y] = 50.0f;  // Middle of foot
+                LOG_DBG("Invalid COP values (%d, %d), using defaults", 
+                        latest->cop_x_at_to, latest->cop_y_at_to);
+            }
             
             // Foot strike angle (derived from strike pattern)
             float strike_angle = 0.0f;
@@ -820,21 +829,47 @@ static void calculate_bilateral_metrics(void)
     
     // Calculate TEMPORAL relationship between feet
     // This is crucial for understanding gait coordination
-    int32_t time_offset_ms = (int32_t)primary_entry->timestamp_ms - (int32_t)bilateral_data.secondary_timestamp_ms;
+    
+    // IMPORTANT: We must adjust the secondary timestamp to primary's time reference
+    // The bilateral_data.timestamp_offset_ms = secondary_time - primary_time (from synchronize_timestamps)
+    // So to get secondary time in primary reference: adjusted_secondary = secondary - offset
+    int32_t adjusted_secondary_time_ms = (int32_t)bilateral_data.secondary_timestamp_ms - bilateral_data.timestamp_offset_ms;
+    
+    // Now calculate the ACTUAL temporal difference between foot strikes in the same time reference
+    int32_t time_offset_ms = (int32_t)primary_entry->timestamp_ms - adjusted_secondary_time_ms;
+    
+    LOG_DBG("TEMPORAL calculation: primary=%u ms, secondary_raw=%u ms, offset=%d ms, secondary_adjusted=%d ms, temporal_diff=%d ms",
+            primary_entry->timestamp_ms, bilateral_data.secondary_timestamp_ms, 
+            bilateral_data.timestamp_offset_ms, adjusted_secondary_time_ms, time_offset_ms);
     
     // Determine which foot struck first and calculate step time
     // Step time = time between consecutive opposite foot strikes
     uint16_t step_time_ms = 0;
     bool left_foot_first = false;  // Assume secondary is left foot
     
-    if (abs(time_offset_ms) < 2000) {  // Reasonable step time window
+    // Now time_offset_ms should be the ACTUAL time difference between foot strikes
+    // This should be in the range of 0-600ms for normal gait (half a stride cycle)
+    
+    // For safety, handle cases where the offset calculation might be off
+    // A typical step time is 200-600ms (half of a 400-1200ms gait cycle)
+    if (abs(time_offset_ms) > 2000) {
+        // Still too large, use modulo to find position within gait cycle
+        LOG_WRN("TEMPORAL: Adjusted time offset still large (%d ms), using modulo", time_offset_ms);
+        int32_t step_offset_within_cycle = abs(time_offset_ms) % 1200;
+        if (step_offset_within_cycle < 600) {
+            step_time_ms = (uint16_t)step_offset_within_cycle;
+            left_foot_first = (time_offset_ms > 0);
+        } else {
+            step_time_ms = (uint16_t)(1200 - step_offset_within_cycle);
+            left_foot_first = (time_offset_ms < 0);
+        }
+    } else {
+        // Normal case - time offset is reasonable
         step_time_ms = (uint16_t)abs(time_offset_ms);
         left_foot_first = (time_offset_ms > 0);  // Primary struck after secondary
         
         LOG_INF("TEMPORAL: Step time = %u ms (%s foot struck first)",
                 step_time_ms, left_foot_first ? "left" : "right");
-    } else {
-        LOG_WRN("TEMPORAL: Time offset %d ms too large - may be different stride cycles", time_offset_ms);
     }
     
     // Calculate double support percentage
@@ -975,12 +1010,63 @@ static void calculate_bilateral_metrics(void)
     }
     
     // Calculate pace from cadence and stride length
-    if (rt_metrics->cadence_spm > 0 && d2d_metric_is_valid(secondary, IDX_STRIDE_LENGTH) && primary->stride_length > 0) {
-        float avg_stride_m = (secondary->metrics[IDX_STRIDE_LENGTH] / 100.0f + primary->stride_length) / 2.0f;
-        float speed_mps = (rt_metrics->cadence_spm / 60.0f) * avg_stride_m;
-        if (speed_mps > 0) {
-            rt_metrics->pace_sec_km = (uint16_t)(1000.0f / speed_mps);
+    // Pace (s/km) = 1000 / (speed in m/s)
+    // Speed (m/s) = (cadence in steps/min / 60) * stride_length in meters
+    LOG_INF("PACE CALC: Starting - cadence=%u spm", rt_metrics->cadence_spm);
+    
+    if (rt_metrics->cadence_spm > 0) {
+        float avg_stride_m = 0;
+        float primary_stride = primary->stride_length;
+        float secondary_stride = 0;
+        bool secondary_valid = d2d_metric_is_valid(secondary, IDX_STRIDE_LENGTH);
+        
+        if (secondary_valid) {
+            secondary_stride = secondary->metrics[IDX_STRIDE_LENGTH] / 100.0f;
         }
+        
+        LOG_INF("PACE CALC: Primary stride=%.3f m, Secondary stride=%.3f m (valid=%d)",
+                (double)primary_stride, (double)secondary_stride, secondary_valid);
+        
+        // Try to get stride length from both feet
+        if (secondary_valid && secondary_stride > 0 && primary_stride > 0) {
+            avg_stride_m = (secondary_stride + primary_stride) / 2.0f;
+            LOG_INF("PACE CALC: Using average of both feet: %.3f m", (double)avg_stride_m);
+        } else if (primary_stride > 0) {
+            avg_stride_m = primary_stride;
+            LOG_INF("PACE CALC: Using primary only: %.3f m", (double)avg_stride_m);
+        } else if (secondary_valid && secondary_stride > 0) {
+            avg_stride_m = secondary_stride;
+            LOG_INF("PACE CALC: Using secondary only: %.3f m", (double)avg_stride_m);
+        } else {
+            // Fallback: Estimate stride length from cadence
+            // Empirical formula based on typical running patterns
+            // Higher cadence typically means shorter strides
+            if (rt_metrics->cadence_spm > 180) {
+                avg_stride_m = 1.1f;  // Short stride for high cadence
+            } else if (rt_metrics->cadence_spm > 160) {
+                avg_stride_m = 1.3f;  // Medium stride
+            } else {
+                avg_stride_m = 1.5f;  // Longer stride for lower cadence
+            }
+            LOG_INF("PACE CALC: No stride data! Estimated %.2f m from cadence %u spm", 
+                    (double)avg_stride_m, rt_metrics->cadence_spm);
+        }
+        
+        // Calculate speed and pace
+        if (avg_stride_m > 0) {
+            float speed_mps = (rt_metrics->cadence_spm / 60.0f) * avg_stride_m;
+            if (speed_mps > 0) {
+                rt_metrics->pace_sec_km = (uint16_t)(1000.0f / speed_mps);
+                LOG_INF("PACE CALC SUCCESS: %u s/km (speed: %.2f m/s, stride: %.2f m, cadence: %u)",
+                        rt_metrics->pace_sec_km, (double)speed_mps, (double)avg_stride_m, rt_metrics->cadence_spm);
+            } else {
+                LOG_ERR("PACE CALC: Speed calculation failed! speed_mps=%.3f", (double)speed_mps);
+            }
+        } else {
+            LOG_ERR("PACE CALC: No valid stride length! avg_stride_m=%.3f", (double)avg_stride_m);
+        }
+    } else {
+        LOG_WRN("PACE CALC: Cadence is 0, cannot calculate pace");
     }
     
     // Ground contact time (average) and flight time
