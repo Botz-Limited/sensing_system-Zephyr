@@ -36,7 +36,7 @@
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_MODULE_LOG_LEVEL); // NOLINT
 
-#define BATTERY_UPDATE_INTERVAL_MS 10000 // 10 seconds
+#define BATTERY_UPDATE_INTERVAL_MS 60000 // 60 seconds
 
 // --- PERIODIC BATTERY UPDATE ---
 static struct k_work_delayable battery_update_work;

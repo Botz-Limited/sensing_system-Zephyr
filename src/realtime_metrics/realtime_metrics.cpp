@@ -1063,38 +1063,103 @@ static void send_ble_update(void)
     // Preserve last known good values to avoid sending zeros
     static realtime_metrics_t last_good_metrics = {0};
     static bool has_good_metrics = false;
+    static uint32_t last_good_update_time = 0;
     
     // Check if current metrics have valid data
+    // A metric is valid if it has key values (cadence OR ground contact time)
     bool current_metrics_valid = (metrics_state.current_metrics.cadence_spm > 0 || 
-                                 metrics_state.current_metrics.pace_sec_km > 0 ||
                                  metrics_state.current_metrics.ground_contact_ms > 0);
+    
+    // Calculate age of current metrics
+    uint32_t current_time = k_uptime_get_32();
+    uint32_t metrics_age = current_time - metrics_state.current_metrics.timestamp_ms;
     
     // Log for debugging
     LOG_INF("BLE Update: current_valid=%s, cadence=%u, gct=%u, age=%u ms", 
             current_metrics_valid ? "YES" : "NO",
             metrics_state.current_metrics.cadence_spm,
             metrics_state.current_metrics.ground_contact_ms,
-            k_uptime_get_32() - metrics_state.current_metrics.timestamp_ms);
+            metrics_age);
     
     realtime_metrics_t metrics_to_send;
     
     if (current_metrics_valid) {
         // Use current metrics and update last good values
         memcpy(&metrics_to_send, &metrics_state.current_metrics, sizeof(realtime_metrics_t));
-        memcpy(&last_good_metrics, &metrics_state.current_metrics, sizeof(realtime_metrics_t));
+        
+        // Preserve individual fields that might be temporarily zero
+        // This handles the case where cadence updates but pace hasn't been calculated yet
+        if (metrics_to_send.cadence_spm > 0) {
+            last_good_metrics.cadence_spm = metrics_to_send.cadence_spm;
+        }
+        if (metrics_to_send.pace_sec_km > 0) {
+            last_good_metrics.pace_sec_km = metrics_to_send.pace_sec_km;
+        }
+        if (metrics_to_send.ground_contact_ms > 0) {
+            last_good_metrics.ground_contact_ms = metrics_to_send.ground_contact_ms;
+        }
+        if (metrics_to_send.flight_time_ms > 0) {
+            last_good_metrics.flight_time_ms = metrics_to_send.flight_time_ms;
+        }
+        if (metrics_to_send.stride_length_cm > 0) {
+            last_good_metrics.stride_length_cm = metrics_to_send.stride_length_cm;
+        }
+        if (metrics_to_send.form_score > 0) {
+            last_good_metrics.form_score = metrics_to_send.form_score;
+        }
+        if (metrics_to_send.efficiency_score > 0) {
+            last_good_metrics.efficiency_score = metrics_to_send.efficiency_score;
+        }
+        
+        // Copy other fields that should be preserved
+        last_good_metrics.balance_lr_pct = metrics_to_send.balance_lr_pct;
+        last_good_metrics.contact_time_asymmetry = metrics_to_send.contact_time_asymmetry;
+        last_good_metrics.force_asymmetry = metrics_to_send.force_asymmetry;
+        last_good_metrics.pronation_asymmetry = metrics_to_send.pronation_asymmetry;
+        last_good_metrics.left_strike_pattern = metrics_to_send.left_strike_pattern;
+        last_good_metrics.right_strike_pattern = metrics_to_send.right_strike_pattern;
+        last_good_metrics.avg_pronation_deg = metrics_to_send.avg_pronation_deg;
+        last_good_metrics.vertical_oscillation_cm = metrics_to_send.vertical_oscillation_cm;
+        last_good_metrics.vertical_ratio = metrics_to_send.vertical_ratio;
+        
         has_good_metrics = true;
+        last_good_update_time = current_time;
+        
+        // Fill in any missing fields from last good values
+        if (metrics_to_send.pace_sec_km == 0 && last_good_metrics.pace_sec_km > 0) {
+            metrics_to_send.pace_sec_km = last_good_metrics.pace_sec_km;
+            LOG_DBG("Using preserved pace value: %u s/km", metrics_to_send.pace_sec_km);
+        }
+        
         LOG_DBG("Sending fresh metrics: cadence=%u, pace=%u, gct=%u", 
                 metrics_to_send.cadence_spm, metrics_to_send.pace_sec_km, metrics_to_send.ground_contact_ms);
     } else if (has_good_metrics) {
-        // Use last known good values but update timestamp
-        memcpy(&metrics_to_send, &last_good_metrics, sizeof(realtime_metrics_t));
-        metrics_to_send.timestamp_ms = k_uptime_get_32();
-        LOG_DBG("Sending preserved metrics: cadence=%u, pace=%u, gct=%u (age preserved)", 
-                metrics_to_send.cadence_spm, metrics_to_send.pace_sec_km, metrics_to_send.ground_contact_ms);
+        // Use last known good values but check if they're not too old
+        uint32_t good_metrics_age = current_time - last_good_update_time;
+        
+        if (good_metrics_age < 10000) {  // Use preserved values for up to 10 seconds
+            memcpy(&metrics_to_send, &last_good_metrics, sizeof(realtime_metrics_t));
+            metrics_to_send.timestamp_ms = current_time;  // Update timestamp
+            LOG_DBG("Sending preserved metrics (age %u ms): cadence=%u, pace=%u, gct=%u", 
+                    good_metrics_age, metrics_to_send.cadence_spm, 
+                    metrics_to_send.pace_sec_km, metrics_to_send.ground_contact_ms);
+        } else {
+            // Metrics are too old, send default values but keep non-zero form/balance
+            memset(&metrics_to_send, 0, sizeof(realtime_metrics_t));
+            metrics_to_send.timestamp_ms = current_time;
+            metrics_to_send.form_score = 85;  // Default form score
+            metrics_to_send.balance_lr_pct = 50;  // Default neutral balance
+            metrics_to_send.efficiency_score = 85;  // Default efficiency
+            LOG_WRN("Preserved metrics too old (%u ms), sending defaults", good_metrics_age);
+        }
     } else {
-        // No good metrics available, use current (may contain zeros)
-        memcpy(&metrics_to_send, &metrics_state.current_metrics, sizeof(realtime_metrics_t));
-        LOG_DBG("Sending current metrics (may contain zeros): cadence=%u", metrics_to_send.cadence_spm);
+        // No good metrics available yet, send defaults
+        memset(&metrics_to_send, 0, sizeof(realtime_metrics_t));
+        metrics_to_send.timestamp_ms = current_time;
+        metrics_to_send.form_score = 85;  // Default form score
+        metrics_to_send.balance_lr_pct = 50;  // Default neutral balance  
+        metrics_to_send.efficiency_score = 85;  // Default efficiency
+        LOG_DBG("No good metrics yet, sending defaults");
     }
     
     // Create message for bluetooth module

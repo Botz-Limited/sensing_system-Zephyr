@@ -708,7 +708,7 @@ static void synchronize_timestamps(uint32_t secondary_timestamp_ms)
 
 /**
  * @brief Find best matching primary metrics for a given secondary timestamp
- * Note: Secondary timestamps are always ~1 second old when received
+ * Note: Devices have different boot times, so we use the offset to align timestamps
  */
 static primary_metrics_entry_t* find_matching_primary_metrics(uint32_t secondary_timestamp_ms)
 {
@@ -716,9 +716,30 @@ static primary_metrics_entry_t* find_matching_primary_metrics(uint32_t secondary
         return NULL;
     }
     
-    // The secondary timestamp is when the secondary calculated its metrics
-    // We need to find primary metrics from around the same time
-    // Note: Secondary sends data 1 second after calculation, so its timestamp is ~1 second old
+    // IMPORTANT: The devices have different boot times (different k_uptime_get_32() values)
+    // The timestamp_offset_ms tells us the difference: offset = secondary_time - primary_time
+    // To convert secondary timestamp to primary time reference: primary_equiv = secondary - offset
+    
+    // Adjust secondary timestamp to primary's time reference
+    int32_t adjusted_secondary_time = (int32_t)secondary_timestamp_ms - bilateral_data.timestamp_offset_ms;
+    
+    LOG_DBG("Timestamp adjustment: secondary=%u ms, offset=%d ms, adjusted=%d ms",
+            secondary_timestamp_ms, bilateral_data.timestamp_offset_ms, adjusted_secondary_time);
+    
+    // If adjusted time is way off, just use most recent data
+    if (adjusted_secondary_time < 0) {
+        LOG_WRN("Adjusted time negative (%d), using most recent primary data", adjusted_secondary_time);
+        // Find the most recent valid entry
+        for (int i = bilateral_data.history_count - 1; i >= 0; i--) {
+            primary_metrics_entry_t *entry = &bilateral_data.primary_history[i];
+            if (entry->valid && entry->count > 0) {
+                LOG_INF("Using most recent primary metrics (time=%u) for secondary time=%u",
+                        entry->timestamp_ms, secondary_timestamp_ms);
+                return entry;
+            }
+        }
+        return NULL;
+    }
     
     primary_metrics_entry_t *best_match = NULL;
     uint32_t best_time_diff = UINT32_MAX;
@@ -730,26 +751,43 @@ static primary_metrics_entry_t* find_matching_primary_metrics(uint32_t secondary
             continue;
         }
         
-        // Compare the actual calculation times
-        // Both timestamps should be from when metrics were calculated
-        uint32_t time_diff = abs((int32_t)entry->timestamp_ms - (int32_t)secondary_timestamp_ms);
+        // Calculate time difference using adjusted timestamp
+        uint32_t time_diff = abs((int32_t)entry->timestamp_ms - adjusted_secondary_time);
         
-        // Accept matches within MAX_BILATERAL_TIME_DIFF_MS window (3 seconds)
-        // This accounts for D2D delay which can be over 1 second
+        // Accept matches within MAX_BILATERAL_TIME_DIFF_MS window (5 seconds)
+        // This accounts for D2D delay and phase offset between feet
         if (time_diff < MAX_BILATERAL_TIME_DIFF_MS && time_diff < best_time_diff) {
             best_match = entry;
             best_time_diff = time_diff;
-            LOG_DBG("Potential match: primary_time=%u, secondary_time=%u, diff=%u ms",
-                    entry->timestamp_ms, secondary_timestamp_ms, time_diff);
+            LOG_DBG("Potential match: primary=%u, secondary=%u (adjusted=%d), diff=%u ms",
+                    entry->timestamp_ms, secondary_timestamp_ms, adjusted_secondary_time, time_diff);
         }
     }
     
     if (best_match) {
-        LOG_INF("Found matching primary metrics with time diff %u ms (primary=%u, secondary=%u)",
-                best_time_diff, best_match->timestamp_ms, secondary_timestamp_ms);
+        LOG_INF("Found matching primary metrics: time_diff=%u ms (primary=%u, secondary=%u, offset=%d)",
+                best_time_diff, best_match->timestamp_ms, secondary_timestamp_ms, 
+                bilateral_data.timestamp_offset_ms);
     } else {
-        LOG_WRN("No matching primary metrics found for secondary timestamp %u ms (searched %d entries)",
-                secondary_timestamp_ms, bilateral_data.history_count);
+        // If no match found but we have recent data, use it anyway
+        if (bilateral_data.history_count > 0) {
+            // Get the most recent valid entry
+            for (int i = bilateral_data.history_count - 1; i >= 0; i--) {
+                primary_metrics_entry_t *entry = &bilateral_data.primary_history[i];
+                if (entry->valid && entry->count > 0) {
+                    uint32_t current_time = k_uptime_get_32();
+                    uint32_t age = current_time - entry->timestamp_ms;
+                    if (age < 2000) {  // If less than 2 seconds old
+                        LOG_WRN("No exact match, using recent primary metrics (age=%u ms) for secondary time=%u",
+                                age, secondary_timestamp_ms);
+                        return entry;
+                    }
+                }
+            }
+        }
+        
+        LOG_WRN("No matching primary metrics for secondary time=%u (adjusted=%d, searched %d entries)",
+                secondary_timestamp_ms, adjusted_secondary_time, bilateral_data.history_count);
     }
     
     return best_match;
