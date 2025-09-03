@@ -1130,6 +1130,28 @@ static void send_ble_update(void)
             metrics_to_send.pace_sec_km = last_good_metrics.pace_sec_km;
             LOG_DBG("Using preserved pace value: %u s/km", metrics_to_send.pace_sec_km);
         }
+        if (metrics_to_send.cadence_spm == 0 && last_good_metrics.cadence_spm > 0) {
+            metrics_to_send.cadence_spm = last_good_metrics.cadence_spm;
+            LOG_DBG("Using preserved cadence value: %u spm", metrics_to_send.cadence_spm);
+        }
+        if (metrics_to_send.ground_contact_ms == 0 && last_good_metrics.ground_contact_ms > 0) {
+            metrics_to_send.ground_contact_ms = last_good_metrics.ground_contact_ms;
+            LOG_DBG("Using preserved GCT value: %u ms", metrics_to_send.ground_contact_ms);
+        }
+        if (metrics_to_send.flight_time_ms == 0 && last_good_metrics.flight_time_ms > 0) {
+            metrics_to_send.flight_time_ms = last_good_metrics.flight_time_ms;
+            LOG_DBG("Using preserved flight time value: %u ms", metrics_to_send.flight_time_ms);
+        }
+        if (metrics_to_send.stride_length_cm == 0 && last_good_metrics.stride_length_cm > 0) {
+            metrics_to_send.stride_length_cm = last_good_metrics.stride_length_cm;
+            LOG_DBG("Using preserved stride length: %u cm", metrics_to_send.stride_length_cm);
+        }
+        if (metrics_to_send.form_score == 0 && last_good_metrics.form_score > 0) {
+            metrics_to_send.form_score = last_good_metrics.form_score;
+        }
+        if (metrics_to_send.efficiency_score == 0 && last_good_metrics.efficiency_score > 0) {
+            metrics_to_send.efficiency_score = last_good_metrics.efficiency_score;
+        }
         
         LOG_DBG("Sending fresh metrics: cadence=%u, pace=%u, gct=%u", 
                 metrics_to_send.cadence_spm, metrics_to_send.pace_sec_km, metrics_to_send.ground_contact_ms);

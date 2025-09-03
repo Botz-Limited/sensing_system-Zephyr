@@ -11,7 +11,7 @@
 #include <dfu/dfu_target.h>
 #include <zephyr/sys/byteorder.h>
 
-LOG_MODULE_REGISTER(fota_proxy, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(fota_proxy, LOG_LEVEL_WRN);
 
 // Buffer sizes
 #define FOTA_PROXY_BUF_SIZE 512

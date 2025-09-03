@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include "ccc_callback_fix.hpp"
 
-LOG_MODULE_REGISTER(d2d_file_transfer, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(d2d_file_transfer, LOG_LEVEL_WRN);
 
 // File transfer state
 static struct {

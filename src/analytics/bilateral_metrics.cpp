@@ -17,7 +17,7 @@
 #include <choros_buffer.hpp>
 #include "../realtime_metrics/realtime_metrics.h"
 
-LOG_MODULE_REGISTER(bilateral_metrics, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(bilateral_metrics, LOG_LEVEL_WRN);
 
 // External Choros buffer instance
 extern choros_ring_buffer_t choros_buffer;

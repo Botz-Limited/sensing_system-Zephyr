@@ -858,11 +858,9 @@ static void periodic_update_work_handler(struct k_work *work)
             last_periodic_update = now;
         }
         
-        // Send BLE update
-        if (now - last_ble_update >= BLE_UPDATE_INTERVAL_MS) {
-            send_ble_update();
-            last_ble_update = now;
-        }
+        // BLE updates are published exclusively by realtime_metrics module at 1Hz
+        // Removed local BLE send to avoid duplicate publishers and stale zeros
+        // (was calling send_ble_update here)
         
         // Reschedule for next update
         k_work_schedule_for_queue(&activity_metrics_work_q, &periodic_update_work, K_MSEC(100));

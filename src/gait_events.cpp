@@ -13,7 +13,7 @@
 #include "sensor_data/sensor_data_enhanced_algorithms.hpp"
 #include "sensor_data/sensor_data_fast_processing.hpp"
 
-LOG_MODULE_REGISTER(gait_events, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(gait_events, LOG_LEVEL_WRN);
 
 /* Constants */
 #ifndef M_PI

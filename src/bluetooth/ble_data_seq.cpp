@@ -10,7 +10,7 @@
 #include "ble_data_seq.hpp"
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(ble_data_seq, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(ble_data_seq, LOG_LEVEL_WRN);
 
 void ble_seq_init(ble_seq_manager_t *manager)
 {

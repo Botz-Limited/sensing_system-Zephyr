@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <app.hpp>  // For generic_message_t and message types
 
-LOG_MODULE_REGISTER(file_proxy, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(file_proxy, LOG_LEVEL_WRN);
 
 // Buffer sizes
 #define FILE_PROXY_BUF_SIZE 512

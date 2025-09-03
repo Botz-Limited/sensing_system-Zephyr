@@ -14,7 +14,7 @@
 #include <zephyr/sys/math_extras.h>
 #endif
 
-LOG_MODULE_REGISTER(gait_advanced, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(gait_advanced, LOG_LEVEL_WRN);
 
 /* Constants */
 #define GRAVITY_MS2 9.81f

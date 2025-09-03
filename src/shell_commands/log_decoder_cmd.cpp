@@ -16,7 +16,7 @@
 #include <cstring>
 #include <cstdio>
 
-LOG_MODULE_REGISTER(log_decoder_cmd, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(log_decoder_cmd, LOG_LEVEL_WRN);
 
 // Simple log file analysis without protobuf decoding
 static int analyze_log_file(const struct shell *sh, const char *path)
