@@ -149,13 +149,20 @@ ALWAYS_INLINE bool calculate_center_of_pressure(const uint16_t pressure[8],
     }
     
     if (total_pressure == 0) {
-        *cop_x = 0;
-        *cop_y = 0;
-        return false;
+        // No pressure - set to midfoot center position
+        *cop_x = 0;    // Center (between medial and lateral)
+        *cop_y = 0;    // Midfoot position
+        return false;  // Indicate no valid pressure, but values are set
     }
     
-    *cop_x = (int16_t)(weighted_x / total_pressure);
-    *cop_y = (int16_t)(weighted_y / total_pressure);
+    // Ensure division doesn't cause overflow
+    if (total_pressure > 0) {
+        *cop_x = (int16_t)(weighted_x / (int32_t)total_pressure);
+        *cop_y = (int16_t)(weighted_y / (int32_t)total_pressure);
+    } else {
+        *cop_x = 0;
+        *cop_y = 0;
+    }
     
     return true;
 }

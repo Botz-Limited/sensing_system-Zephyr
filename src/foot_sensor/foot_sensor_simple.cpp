@@ -184,69 +184,134 @@ static void process_adc_samples(int16_t *raw_data)
             // Secondary (left foot) should be ~180 degrees out of phase with primary (right foot)
             // This creates a natural alternating gait pattern
             int phase_offset = 0;
+            
+            // Create realistic differences between left and right feet
+            float pressure_multiplier = 1.0f;  // For simulating force differences
+            float gct_multiplier = 1.0f;       // For simulating GCT differences
+            bool is_left_foot = false;
+            
             #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-                // Secondary device: add 300ms phase offset (half cycle)
-                // This simulates left foot being out of phase with right foot
-                phase_offset = 300;  // Half of 600ms cycle
-                // Also add small random variation (±20ms) to make it more realistic
-                phase_offset += ((current_time / 1000) % 41) - 20;  // -20 to +20 ms variation
+                // SECONDARY (LEFT FOOT) characteristics:
+                is_left_foot = true;
+                phase_offset = 300;  // Half of 600ms cycle for opposite phase
+                // Add small realistic variation (±10ms) for natural gait
+                phase_offset += ((current_time / 1000) % 21) - 10;  // -10 to +10 ms variation
                 
-                // Log phase offset periodically for debugging
+                // Common asymmetries in runners:
+                pressure_multiplier = 0.97f;  // 3% less force on left foot (common)
+                gct_multiplier = 1.02f;        // 2% longer GCT on left (slight asymmetry)
+                
+                // Log periodically for debugging
                 static uint32_t phase_log_counter = 0;
                 if (++phase_log_counter % 1000 == 0) {  // Every 10 seconds at 100Hz
-                    LOG_INF("SECONDARY: Gait simulation with %dms phase offset (left foot)", phase_offset);
+                    LOG_INF("SECONDARY (Left foot): phase=%dms, force=%.0f%%, GCT=+%.0f%%", 
+                            phase_offset, pressure_multiplier * 100, (gct_multiplier - 1.0f) * 100);
                 }
             #else
-                // Primary device - log periodically
+                // PRIMARY (RIGHT FOOT) characteristics:
+                is_left_foot = false;
+                pressure_multiplier = 1.03f;  // 3% more force on right foot
+                gct_multiplier = 0.98f;        // 2% shorter GCT on right
+                
+                // Log periodically
                 static uint32_t phase_log_counter = 0;
                 if (++phase_log_counter % 1000 == 0) {  // Every 10 seconds at 100Hz
-                    LOG_INF("PRIMARY: Gait simulation with 0ms phase offset (right foot)");
+                    LOG_INF("PRIMARY (Right foot): phase=0ms, force=%.0f%%, GCT=-%.0f%%", 
+                            pressure_multiplier * 100, (1.0f - gct_multiplier) * 100);
                 }
             #endif
             
+            // Adjust cycle time for GCT differences
             int cycle_time = (current_time + phase_offset) % 600;  // 600ms gait cycle with phase offset
+            
+            // Adjust stance phase duration based on GCT multiplier
+            int stance_duration = (int)(300 * gct_multiplier);  // Normally 300ms
             
             // Create realistic pressure pattern with 14-bit ADC range
             // Total pressure during midstance: ~70,000-80,000 (clear detection)
             int16_t pressure_value = 0;
             
-            if (cycle_time < 300) {
-                // Stance phase (0-300ms) - foot is on ground
+            if (cycle_time < stance_duration) {
+                // Stance phase - foot is on ground (adjusted duration for GCT differences)
                 if (cycle_time < 50) {
                     // Initial contact/loading (0-50ms) - heel strike
                     // Sharp ramp up pressure from 0 to 10000
                     pressure_value = (cycle_time * 200);  // 0 to 10000 in 50ms
-                    // Heel sensors get most pressure during heel strike
-                    msg.data.foot_samples.values[0] = pressure_value;        // Heel lateral
-                    msg.data.foot_samples.values[1] = pressure_value;        // Heel medial
-                    msg.data.foot_samples.values[2] = pressure_value / 4;    // Midfoot lateral
-                    msg.data.foot_samples.values[3] = pressure_value / 4;    // Midfoot medial
-                    msg.data.foot_samples.values[4] = 0;                     // Forefoot lateral
-                    msg.data.foot_samples.values[5] = 0;                     // Forefoot medial
-                    msg.data.foot_samples.values[6] = 0;                     // Toe lateral
-                    msg.data.foot_samples.values[7] = 0;                     // Toe medial
+                    pressure_value = (int16_t)(pressure_value * pressure_multiplier);
+                    
+                    // For LEFT foot, sensors are flipped (lateral/medial swapped)
+                    // RIGHT foot: [1]=Lateral, [3]=Medial, [4]=Arch Lat, [5]=Arch Med, [6]=Heel Lat, [7]=Heel Med
+                    // LEFT foot:  [1]=Medial, [3]=Lateral, [4]=Arch Med, [5]=Arch Lat, [6]=Heel Med, [7]=Heel Lat
+                    
+                    if (is_left_foot) {
+                        // Left foot - flipped mapping with slight medial bias
+                        msg.data.foot_samples.values[0] = 0;                          // Big Toe
+                        msg.data.foot_samples.values[1] = 0;                          // Forefoot medial (flipped)
+                        msg.data.foot_samples.values[2] = 0;                          // Forefoot center
+                        msg.data.foot_samples.values[3] = 0;                          // Forefoot lateral (flipped)
+                        msg.data.foot_samples.values[4] = (pressure_value / 4) * 1.1; // Arch medial (flipped) - more pressure
+                        msg.data.foot_samples.values[5] = (pressure_value / 4) * 0.9; // Arch lateral (flipped) - less pressure
+                        msg.data.foot_samples.values[6] = pressure_value * 1.05;      // Heel medial (flipped) - more pressure
+                        msg.data.foot_samples.values[7] = pressure_value * 0.95;      // Heel lateral (flipped) - less pressure
+                    } else {
+                        // Right foot - normal mapping with slight lateral bias
+                        msg.data.foot_samples.values[0] = 0;                          // Big Toe
+                        msg.data.foot_samples.values[1] = 0;                          // Forefoot lateral
+                        msg.data.foot_samples.values[2] = 0;                          // Forefoot center
+                        msg.data.foot_samples.values[3] = 0;                          // Forefoot medial
+                        msg.data.foot_samples.values[4] = (pressure_value / 4) * 1.1; // Arch lateral - more pressure
+                        msg.data.foot_samples.values[5] = (pressure_value / 4) * 0.9; // Arch medial - less pressure
+                        msg.data.foot_samples.values[6] = pressure_value * 1.05;      // Heel lateral - more pressure
+                        msg.data.foot_samples.values[7] = pressure_value * 0.95;      // Heel medial - less pressure
+                    }
                 } else if (cycle_time < 150) {
                     // Midstance (50-150ms) - full foot contact, weight bearing
-                    // All sensors have significant pressure - total ~76000
-                    msg.data.foot_samples.values[0] = 8000;   // Heel lateral
-                    msg.data.foot_samples.values[1] = 8000;   // Heel medial
-                    msg.data.foot_samples.values[2] = 11000;  // Midfoot lateral (max pressure)
-                    msg.data.foot_samples.values[3] = 11000;  // Midfoot medial
-                    msg.data.foot_samples.values[4] = 10000;  // Forefoot lateral
-                    msg.data.foot_samples.values[5] = 10000;  // Forefoot medial
-                    msg.data.foot_samples.values[6] = 9000;   // Toe lateral
-                    msg.data.foot_samples.values[7] = 9000;   // Toe medial
-                } else if (cycle_time < 250) {
-                    // Push-off (150-250ms) - weight shifts to forefoot/toes
-                    // Heel lifts off, pressure on forefoot and toes - total ~60000
-                    msg.data.foot_samples.values[0] = 0;      // Heel lateral (off ground)
-                    msg.data.foot_samples.values[1] = 0;      // Heel medial
-                    msg.data.foot_samples.values[2] = 4000;   // Midfoot lateral
-                    msg.data.foot_samples.values[3] = 4000;   // Midfoot medial
-                    msg.data.foot_samples.values[4] = 13000;  // Forefoot lateral (max pressure)
-                    msg.data.foot_samples.values[5] = 13000;  // Forefoot medial
-                    msg.data.foot_samples.values[6] = 13000;  // Toe lateral
-                    msg.data.foot_samples.values[7] = 13000;  // Toe medial
+                    // All sensors have significant pressure - apply multiplier
+                    if (is_left_foot) {
+                        // Left foot - flipped mapping with medial bias
+                        msg.data.foot_samples.values[0] = (int16_t)(9000 * pressure_multiplier * 1.05);   // Big Toe - more pressure
+                        msg.data.foot_samples.values[1] = (int16_t)(10000 * pressure_multiplier * 1.02);  // Forefoot medial (flipped)
+                        msg.data.foot_samples.values[2] = (int16_t)(10000 * pressure_multiplier);         // Forefoot center
+                        msg.data.foot_samples.values[3] = (int16_t)(10000 * pressure_multiplier * 0.98);  // Forefoot lateral (flipped)
+                        msg.data.foot_samples.values[4] = (int16_t)(11000 * pressure_multiplier * 1.03);  // Arch medial (flipped) - max
+                        msg.data.foot_samples.values[5] = (int16_t)(11000 * pressure_multiplier * 0.97);  // Arch lateral (flipped)
+                        msg.data.foot_samples.values[6] = (int16_t)(8000 * pressure_multiplier * 1.02);   // Heel medial (flipped)
+                        msg.data.foot_samples.values[7] = (int16_t)(8000 * pressure_multiplier * 0.98);   // Heel lateral (flipped)
+                    } else {
+                        // Right foot - normal mapping with lateral bias
+                        msg.data.foot_samples.values[0] = (int16_t)(9000 * pressure_multiplier * 0.95);   // Big Toe - less pressure
+                        msg.data.foot_samples.values[1] = (int16_t)(10000 * pressure_multiplier * 1.02);  // Forefoot lateral
+                        msg.data.foot_samples.values[2] = (int16_t)(10000 * pressure_multiplier);         // Forefoot center
+                        msg.data.foot_samples.values[3] = (int16_t)(10000 * pressure_multiplier * 0.98);  // Forefoot medial
+                        msg.data.foot_samples.values[4] = (int16_t)(11000 * pressure_multiplier * 1.03);  // Arch lateral - max
+                        msg.data.foot_samples.values[5] = (int16_t)(11000 * pressure_multiplier * 0.97);  // Arch medial
+                        msg.data.foot_samples.values[6] = (int16_t)(8000 * pressure_multiplier * 1.02);   // Heel lateral
+                        msg.data.foot_samples.values[7] = (int16_t)(8000 * pressure_multiplier * 0.98);   // Heel medial
+                    }
+                } else if (cycle_time < (stance_duration - 50)) {
+                    // Push-off phase - weight shifts to forefoot/toes
+                    // Adjust timing based on stance_duration
+                    if (is_left_foot) {
+                        // Left foot - stronger medial push-off (common overpronation)
+                        msg.data.foot_samples.values[0] = (int16_t)(13000 * pressure_multiplier * 1.08);  // Big Toe - max push
+                        msg.data.foot_samples.values[1] = (int16_t)(13000 * pressure_multiplier * 1.05);  // Forefoot medial (flipped)
+                        msg.data.foot_samples.values[2] = (int16_t)(13000 * pressure_multiplier);          // Forefoot center
+                        msg.data.foot_samples.values[3] = (int16_t)(13000 * pressure_multiplier * 0.95);  // Forefoot lateral (flipped)
+                        msg.data.foot_samples.values[4] = (int16_t)(4000 * pressure_multiplier * 1.1);    // Arch medial (flipped)
+                        msg.data.foot_samples.values[5] = (int16_t)(4000 * pressure_multiplier * 0.9);    // Arch lateral (flipped)
+                        msg.data.foot_samples.values[6] = 0;  // Heel medial - off ground
+                        msg.data.foot_samples.values[7] = 0;  // Heel lateral - off ground
+                    } else {
+                        // Right foot - stronger lateral push-off
+                        msg.data.foot_samples.values[0] = (int16_t)(13000 * pressure_multiplier * 0.92);  // Big Toe - less push
+                        msg.data.foot_samples.values[1] = (int16_t)(13000 * pressure_multiplier * 1.05);  // Forefoot lateral
+                        msg.data.foot_samples.values[2] = (int16_t)(13000 * pressure_multiplier);          // Forefoot center
+                        msg.data.foot_samples.values[3] = (int16_t)(13000 * pressure_multiplier * 0.95);  // Forefoot medial
+                        msg.data.foot_samples.values[4] = (int16_t)(4000 * pressure_multiplier * 1.1);    // Arch lateral
+                        msg.data.foot_samples.values[5] = (int16_t)(4000 * pressure_multiplier * 0.9);    // Arch medial
+                        msg.data.foot_samples.values[6] = 0;  // Heel lateral - off ground
+                        msg.data.foot_samples.values[7] = 0;  // Heel medial - off ground
+                    }
                 } else {
                     // Toe-off transition (250-300ms) - leaving ground
                     // Pressure rapidly decreasing as foot leaves ground
@@ -255,14 +320,15 @@ static void process_adc_samples(int16_t *raw_data)
                     int16_t fade_factor = 13000 - (time_in_phase * 260);  // 13000 to 0 over 50ms
                     if (fade_factor < 0) fade_factor = 0;
                     
-                    msg.data.foot_samples.values[0] = 0;                    // Heel lateral
-                    msg.data.foot_samples.values[1] = 0;                    // Heel medial
-                    msg.data.foot_samples.values[2] = 0;                    // Midfoot lateral
-                    msg.data.foot_samples.values[3] = 0;                    // Midfoot medial
-                    msg.data.foot_samples.values[4] = fade_factor / 3;      // Forefoot lateral
-                    msg.data.foot_samples.values[5] = fade_factor / 3;      // Forefoot medial
-                    msg.data.foot_samples.values[6] = fade_factor;          // Toe lateral (last to leave)
-                    msg.data.foot_samples.values[7] = fade_factor;          // Toe medial
+                    // Using correct mapping: [0]=Big Toe, [1-3]=Forefoot, [4-5]=Arch, [6-7]=Heel
+                    msg.data.foot_samples.values[0] = fade_factor;          // Big Toe - last to leave
+                    msg.data.foot_samples.values[1] = fade_factor / 3;      // Forefoot lateral
+                    msg.data.foot_samples.values[2] = fade_factor / 3;      // Forefoot center
+                    msg.data.foot_samples.values[3] = fade_factor / 3;      // Forefoot medial
+                    msg.data.foot_samples.values[4] = 0;                    // Arch lateral - off
+                    msg.data.foot_samples.values[5] = 0;                    // Arch medial - off
+                    msg.data.foot_samples.values[6] = 0;                    // Heel lateral - off
+                    msg.data.foot_samples.values[7] = 0;                    // Heel medial - off
                 }
             } else {
                 // Swing phase (300-600ms) - foot is in air, no ground contact

@@ -27,7 +27,7 @@ extern "C" {
 #define FP_SCALE_PRESSURE     100    // Pressure in 0.01 kPa units
 #define FP_SCALE_VELOCITY     100    // Velocity in 0.01 m/s units
 #define FP_SCALE_PERCENT      10     // Percentages in 0.1% units
-#define FP_SCALE_FORCE        100    // Force/impact in 0.01 g units
+#define FP_SCALE_FORCE        1      // Force/impact in 1 unit (no scaling for large values)
 #define FP_SCALE_FREQUENCY    100    // Frequency in 0.01 Hz units
 #define FP_SCALE_POWER        10     // Power in 0.1 W units
 #define FP_SCALE_ENERGY       10     // Energy in 0.1 J units
@@ -144,9 +144,17 @@ static inline void d2d_metrics_pack(d2d_metrics_fixed_t *fixed, const d2d_metric
     fixed->work = (int16_t)(floating->metrics[IDX_WORK] * FP_SCALE_ENERGY);
     fixed->efficiency = (int16_t)(floating->metrics[IDX_EFFICIENCY] * FP_SCALE_PERCENT);
     
-    // Impact metrics
-    fixed->peak_impact = (int16_t)(floating->metrics[IDX_PEAK_IMPACT] * FP_SCALE_FORCE);
-    fixed->loading_rate = (int16_t)(floating->metrics[IDX_LOADING_RATE] * FP_SCALE_FORCE);
+    // Impact metrics - clamp peak_impact to prevent overflow
+    float peak_impact_scaled = floating->metrics[IDX_PEAK_IMPACT] * FP_SCALE_FORCE;
+    if (peak_impact_scaled > 32767.0f) peak_impact_scaled = 32767.0f;
+    else if (peak_impact_scaled < -32768.0f) peak_impact_scaled = -32768.0f;
+    fixed->peak_impact = (int16_t)peak_impact_scaled;
+    
+    float loading_rate_scaled = floating->metrics[IDX_LOADING_RATE] * FP_SCALE_FORCE;
+    if (loading_rate_scaled > 32767.0f) loading_rate_scaled = 32767.0f;
+    else if (loading_rate_scaled < -32768.0f) loading_rate_scaled = -32768.0f;
+    fixed->loading_rate = (int16_t)loading_rate_scaled;
+    
     fixed->impact_duration = (int16_t)(floating->metrics[IDX_IMPACT_DURATION]);
     
     // Balance metrics
