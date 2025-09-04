@@ -13,7 +13,7 @@
 #include <gait_events.h>
 #include <d2d_metrics.h>
 
-LOG_MODULE_REGISTER(sensor_data_events, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(sensor_data_events, CONFIG_SENSOR_DATA_MODULE_LOG_LEVEL);
 
 // Static gait event detector for this module - make sure it's properly aligned
 static gait_event_detector_t event_detector __aligned(8);

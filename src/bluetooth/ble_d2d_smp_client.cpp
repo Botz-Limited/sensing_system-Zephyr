@@ -8,7 +8,7 @@
 #include <zephyr/kernel.h>
 #include <string.h>
 
-LOG_MODULE_REGISTER(d2d_smp_client, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(d2d_smp_client, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // Standard MCUmgr SMP Service UUID
 static struct bt_uuid_128 smp_service_uuid = 

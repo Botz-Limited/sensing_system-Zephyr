@@ -12,6 +12,13 @@ module = MOTION_SENSOR_MODULE
 module-str = MOTION_SENSOR module
 source "subsys/logging/Kconfig.template.log_config"
 
+config MOTION_SENSOR_MODULE_LOG_LEVEL
+	int "Motion Sensor module log level"
+	depends on MOTION_SENSOR_MODULE && LOG
+	default 2
+	help
+	  Sets log level for Motion Sensor module
+
 
 config MOTION_SENSOR_MODULE_STACK_SIZE
 	int "Motion Sensor module thread stack size"

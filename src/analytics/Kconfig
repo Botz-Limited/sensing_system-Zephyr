@@ -12,7 +12,8 @@ config ANALYTICS_MODULE
 
 config ANALYTICS_MODULE_LOG_LEVEL
 	int "Analytics module log level"
-	default 3
+	depends on ANALYTICS_MODULE && LOG
+	default 2
 	range 0 4
 	help
 	  Log level for analytics module

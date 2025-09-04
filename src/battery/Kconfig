@@ -10,6 +10,13 @@ module = BATTERY_MODULE
 module-str = BATTERY module
 source "subsys/logging/Kconfig.template.log_config"
 
+config BATTERY_MODULE_LOG_LEVEL
+	int "Battery module log level"
+	depends on BATTERY_MODULE && LOG
+	default 2
+	help
+	  Sets log level for Battery module
+
 
 config BATTERY_MODULE_STACK_SIZE
 	int "Battery module thread stack size"

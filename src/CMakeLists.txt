@@ -13,6 +13,6 @@ add_subdirectory(idle)
 
 # Add gait analysis source files to the build
 target_sources(app PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/gait_events.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/gait_advanced_features.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gait/gait_events.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/gait/gait_advanced_features.cpp
 )

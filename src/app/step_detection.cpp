@@ -13,7 +13,7 @@
 #include <string.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(step_detection, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(step_detection, CONFIG_APP_MODULE_LOG_LEVEL);
 
 // Constants for step detection
 #define CONTACT_THRESHOLD_N     50.0f   // 50 Newtons minimum for ground contact
