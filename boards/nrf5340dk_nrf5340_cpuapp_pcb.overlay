@@ -12,6 +12,7 @@
         zephyr,console = &uart2;
         zephyr,shell-uart = &uart2;
         nordic,nrf-spim= &spi1;
+        zephyr,mmc = &sdhc;
     };
 
     aliases {
@@ -39,8 +40,22 @@
             lookahead-size = <32>;
             block-cycles = <512>;
         };
+
+        sdhc_mount: sdhc_mount {
+            compatible = "zephyr,fstab,littlefs";
+            label = "SDCard";
+            mount-point = "/sd";
+            partition = <&sdmmc_part>;
+            read-size = <16>;
+            prog-size = <16>;
+            cache-size = <64>;
+            lookahead-size = <32>;
+            block-cycles = <512>;
+
+        };
+        };    
+        
     };
-};
 
 
 /* Add QSPI configuration with new flash */
@@ -207,8 +222,41 @@
 };
 
 
+/* Enable SPI2 for SD card */
 &spi2 {
-    status = "disabled";
+    compatible = "nordic,nrf-spim";
+    status = "okay";
+    cs-gpios = <&gpio0 26 GPIO_ACTIVE_LOW>;
+    pinctrl-0 = <&spi2_default_alt>;
+    pinctrl-1 = <&spi2_sleep_alt>;
+    pinctrl-names = "default", "sleep";
+    
+    // SD Card device node
+    sdhc: sdhc@0 {
+        compatible = "zephyr,sdhc-spi-slot";
+        status = "okay";
+        reg = <0>;
+        label = "SDHC";
+        
+        sdmmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+
+            partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        sdmmc_part: partition@0 {
+            label = "storage_sd";
+            reg = <0x00000000 0x00006000>;
+        };
+    };
+		}; 
+        spi-max-frequency = <8000000>;
+    
+    };
 };
 
 &spi4 {

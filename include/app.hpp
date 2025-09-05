@@ -287,6 +287,7 @@ static constexpr uint8_t MSG_QUEUE_DEPTH = 40;
 // --- MESSAGE QUEUE DECLARATION (unchanged) ---
 extern struct k_msgq bluetooth_msgq;
 extern struct k_msgq data_msgq;
+extern struct k_msgq data_sd_msgq;
 extern struct k_msgq motion_sensor_msgq;
 extern struct k_msgq activity_metrics_msgq;
 extern struct k_msgq sensor_data_msgq;  // New multi-thread architecture queue

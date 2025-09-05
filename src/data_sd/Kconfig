@@ -1,0 +1,88 @@
+
+config DATA_SD_MODULE
+	bool "Data Storage System"
+	select SPI
+	select FLASH
+	select FILE_SYSTEM
+	select FILE_SYSTEM_LITTLEFS
+
+	help
+	  DATA_MODULE_SD
+
+if DATA_SD_MODULE
+
+config DATA_SD_MODULE_LOG_LEVEL
+	int "Data module SD log level"
+	depends on DATA_SD_MODULE && LOG
+	default 4
+	help
+	  Sets log level for Data SD module
+
+
+config FILE_SYSTEM_MOUNT
+	string
+	default "/sd"
+
+config FPU
+	default y
+
+config FPU_SHARING
+	default y
+
+config FS_LITTLEFS_BLK_DEV
+	default y
+
+config FS_LITTLEFS_FMP_DEV
+	default n	
+
+config FS_LITTLEFS_FMP_DEV
+	default n	
+
+
+# Enable SDHC interface
+config DISK_DRIVERS
+	default y
+
+config DISK_DRIVER_SDMMC
+	default y
+
+# Enable SPI interface
+config SPI
+	default y
+
+config LAB_VERSION
+	bool "Lab version"
+	default n
+
+config DATA_SD_MODULE_STACK_SIZE
+	int "Data module thread stack size"
+	default 4096
+
+config DATA_SD_MODULE_PRIORITY
+	int "Data module thread priority"
+	default 7
+
+config BT_LONG_WQ_STACK_SIZE
+	int
+	default 4096	
+
+config DATA_SD_LOG_SPACE_LEFT_THRESHOLD_KB
+	int  "Flash memory minimum free space in Kbytes to trigger file deletion"
+	default 200
+
+config DATA_SD_DELETE_DAYS
+	int "Number of logg days to delete if not enough space on the external flash"	
+	default 7
+
+config APP_WIPE_STORAGE
+	bool "Option to clear the flash area before mounting"
+	default n
+	help
+	  Use this to force an existing file system to be created.
+
+
+module = DATA_SD_MODULE
+module-str = data sd module
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # DATA_SD_MODULE

@@ -38,6 +38,19 @@
             lookahead-size = <32>;
             block-cycles = <512>;
         };
+
+        sdhc_mount: sdhc_mount {
+            compatible = "zephyr,fstab,littlefs";
+            label = "SDCard";
+            mount-point = "/sd";
+            partition = <&sdmmc_part>;
+            read-size = <16>;
+            prog-size = <16>;
+            cache-size = <64>;
+            lookahead-size = <32>;
+            block-cycles = <512>;
+
+        };
     };
 };
 
@@ -204,11 +217,50 @@
 	};
 };
 
+/* Enable SPI2 for SD card */
 &spi2 {
     compatible = "nordic,nrf-spim";
     status = "okay";
+    cs-gpios = <&gpio0 26 GPIO_ACTIVE_LOW>;
     pinctrl-0 = <&spi2_default_alt>;
     pinctrl-1 = <&spi2_sleep_alt>;
+    pinctrl-names = "default", "sleep";
+    
+    // SD Card device node
+    sdhc: sdhc@0 {
+        compatible = "zephyr,sdhc-spi-slot";
+        status = "okay";
+        reg = <0>;
+        label = "SDHC";
+        
+        sdmmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+
+            partitions {
+        compatible = "fixed-partitions";
+        #address-cells = <1>;
+        #size-cells = <1>;
+
+        sdmmc_part: partition@0 {
+            label = "storage_sd";
+            reg = <0x00000000 0x00006000>;
+        };
+    };
+		}; 
+        spi-max-frequency = <8000000>;
+
+        
+    
+    };
+};
+
+&spi1 {
+    compatible = "nordic,nrf-spim";
+    status = "okay";
+    pinctrl-0 = <&spi1_default_alt>;
+    pinctrl-1 = <&spi1_sleep_alt>;
     pinctrl-names = "default", "sleep";
     cs-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>; // CS on P1.6
 

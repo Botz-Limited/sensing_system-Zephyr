@@ -1,4 +1,4 @@
-name: idle
+name: data_sd
 build:
   # Path to the module's CMakeLists.txt relative to the 'zephyr' subdirectory.
   cmake: ../.
