@@ -780,6 +780,13 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
       k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
 #endif
 
+#if defined(CONFIG_LAB_VERSION)
+      // For lab version, send all raw IMU data at full rate (100Hz) to SD card module
+      if (k_msgq_put(&data_sd_msgq, &msg, K_NO_WAIT) != 0) {
+        LOG_WRN("Failed to send BHI360 data to data_sd module");
+      }
+#endif
+
 
       // Rate limiting for Bluetooth: Send at 5Hz instead of 100Hz
       // Motion sensor runs at 100Hz, so send every 20th sample to achieve 5Hz

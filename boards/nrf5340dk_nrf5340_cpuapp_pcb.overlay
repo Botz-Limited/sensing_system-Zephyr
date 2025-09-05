@@ -212,7 +212,7 @@
 /* Enable UART2 for console/logging */
 &uart2 {
     compatible = "nordic,nrf-uarte";
-    status = "okay";
+    status = "disabled";
     current-speed = <115200>;
     parity= "none";
     stop-bits = "1";

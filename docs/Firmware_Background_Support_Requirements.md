@@ -315,7 +315,7 @@ CONFIG_BT_GAP_PERIPHERAL_PREF_PARAMS=y
 
 # Increase buffers for aggregated data
 CONFIG_BT_L2CAP_TX_BUF_COUNT=16
-CONFIG_BT_CONN_TX_MAX=32
+CONFIG_BT_CONN_TX_MAX=40
 ```
 
 ## Testing Requirements

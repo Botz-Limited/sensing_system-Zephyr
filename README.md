@@ -102,7 +102,7 @@ Then run the build command again.
 
 Enable debug output by adding the following to your build command:
 ```bash
--- -DCONFIG_LOG_LEVEL_DBG=y
+-- -DCONFIG_LOG_LEVEL_WRN=y
 ```
 
 ## FOTA (Firmware Over-The-Air) Updates
