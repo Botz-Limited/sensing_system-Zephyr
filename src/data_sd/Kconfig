@@ -4,7 +4,14 @@ config DATA_SD_MODULE
 	select SPI
 	select FLASH
 	select FILE_SYSTEM
-	select FILE_SYSTEM_LITTLEFS
+	select FS_FATFS
+	select FS_FATFS_LFN
+	select FS_FATFS_EXFAT
+	select FS_LITTLEFS_BLK_DEV
+	select DISK_ACCESS
+	select DISK_DRIVERS
+	select DISK_DRIVER_SDMMC
+
 
 	help
 	  DATA_MODULE_SD
@@ -17,6 +24,19 @@ config DATA_SD_MODULE_LOG_LEVEL
 	default 4
 	help
 	  Sets log level for Data SD module
+
+# Config the file system
+config FILE_SYSTEM
+	default y
+
+config FAT_FILESYSTEM_ELM
+	default y
+
+
+# Allocate buffer on RAM for transferring chunck of data
+# from Flash to SPI
+config SPI_NRFX_RAM_BUFFER_SIZE
+	default 8
 
 
 config FILE_SYSTEM_MOUNT
@@ -35,16 +55,9 @@ config FS_LITTLEFS_BLK_DEV
 config FS_LITTLEFS_FMP_DEV
 	default n	
 
-config FS_LITTLEFS_FMP_DEV
-	default n	
-
-
-# Enable SDHC interface
-config DISK_DRIVERS
-	default y
-
-config DISK_DRIVER_SDMMC
-	default y
+config CONFIG_FS_FATFS_MAX_LFN
+	int
+	default 255
 
 # Enable SPI interface
 config SPI
@@ -79,7 +92,6 @@ config APP_WIPE_STORAGE
 	default n
 	help
 	  Use this to force an existing file system to be created.
-
 
 module = DATA_SD_MODULE
 module-str = data sd module

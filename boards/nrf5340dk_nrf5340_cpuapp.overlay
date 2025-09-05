@@ -40,16 +40,10 @@
         };
 
         sdhc_mount: sdhc_mount {
-            compatible = "zephyr,fstab,littlefs";
+            compatible = "zephyr,fstab,fat";
             label = "SDCard";
             mount-point = "/sd";
             partition = <&sdmmc_part>;
-            read-size = <16>;
-            prog-size = <16>;
-            cache-size = <64>;
-            lookahead-size = <32>;
-            block-cycles = <512>;
-
         };
     };
 };

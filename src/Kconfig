@@ -15,6 +15,7 @@ rsource "data_sd/Kconfig"
 rsource "Kconfig.fota"
 
 
+
 # Sensor Criticality Configuration
 choice PRIMARY_SENSING_FUNCTION
     prompt "Primary sensing function"

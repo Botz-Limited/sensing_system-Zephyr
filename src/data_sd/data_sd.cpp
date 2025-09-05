@@ -16,7 +16,6 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/flash.h>
 #include <zephyr/fs/fs.h>
-#include <zephyr/fs/littlefs.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/storage/flash_map.h>
@@ -30,6 +29,7 @@
 #include <events/bluetooth_state_event.h>
 #include <events/data_event.h>
 #include <util.hpp>
+#include <ff.h>
 
 #include <app.hpp>
 #include <data_sd.hpp>
@@ -39,6 +39,10 @@
 #include "../../include/events/motion_sensor_event.h"
 
 #if IS_ENABLED(CONFIG_LAB_VERSION)
+
+#if defined(CONFIG_FAT_FILESYSTEM_ELM)
+#include <ff.h>
+#endif
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_DATA_SD_MODULE_LOG_LEVEL);
 
@@ -123,10 +127,14 @@ struct __attribute__((packed)) RawFileFooter {
 };
 
 // Module state
-static struct fs_mount_t lfs_sd_storage_mnt = {};
+static struct fs_mount_t fat_sd_storage_mnt = {};
 static struct fs_file_t raw_log_file;
 static bool sd_card_available = false;
 static atomic_t logging_active = ATOMIC_INIT(0);
+
+#if defined(CONFIG_FAT_FILESYSTEM_ELM)
+static FATFS fat_fs;
+#endif
 
 // Buffering
 static uint8_t write_buffer[SD_WRITE_BUFFER_SIZE];
@@ -202,22 +210,24 @@ static void data_sd_init(void)
 {
     LOG_INF("Initializing SD card data module");
 
-    // Initialize the fs_mount_t structure
-    lfs_sd_storage_mnt.type = FS_LITTLEFS;
-    lfs_sd_storage_mnt.fs_data = &lfs_sd_storage_mnt;
-    lfs_sd_storage_mnt.mnt_point = sd_mount_point;
-    lfs_sd_storage_mnt.flags = FS_MOUNT_FLAG_USE_DISK_ACCESS;
-    lfs_sd_storage_mnt.storage_dev = (void *)DEVICE_DT_GET(DT_NODELABEL(sdhc));
+    // Initialize the fs_mount_t structure for FAT filesystem
+    fat_sd_storage_mnt.type = FS_FATFS;
+#if defined(CONFIG_FAT_FILESYSTEM_ELM)
+    fat_sd_storage_mnt.fs_data = &fat_fs;
+#endif
+    fat_sd_storage_mnt.mnt_point = sd_mount_point;
+    fat_sd_storage_mnt.flags = FS_MOUNT_FLAG_USE_DISK_ACCESS;
+    fat_sd_storage_mnt.storage_dev = (void *)"SD";  // Use disk name instead of device
 
     // Mount the file system
-    err_t err = mount_sdcard_file_system(&lfs_sd_storage_mnt);
+    err_t err = mount_sdcard_file_system(&fat_sd_storage_mnt);
     if (err != err_t::NO_ERROR) {
         LOG_ERR("Error mounting SD card: %d", (int)err);
         sd_card_available = false;
         LOG_WRN("SD card not available - system will operate without raw data logging");
     } else {
         sd_card_available = true;
-        LOG_INF("SD card mounted at %s", lfs_sd_storage_mnt.mnt_point);
+        LOG_INF("SD card mounted at %s", fat_sd_storage_mnt.mnt_point);
     }
 
     // Initialize work queue
@@ -249,45 +259,39 @@ static void data_sd_init(void)
 
 static err_t mount_sdcard_file_system(struct fs_mount_t *mount)
 {
-    const struct device *sd_card_device = NULL;
-
-#if DT_NODE_EXISTS(DT_NODELABEL(sdhc))
-    sd_card_device = DEVICE_DT_GET(DT_NODELABEL(sdhc));
-    if (device_is_ready(sd_card_device)) {
-        LOG_INF("Using SD card (on SPI)");
-    } else {
-        LOG_ERR("SD card device isn't ready");
+    // Initialize disk access for SD card
+    const char *disk_pdrv = "SD";
+    int ret = disk_access_init(disk_pdrv);
+    if (ret != 0) {
+        LOG_ERR("Failed to initialize disk access for SD card: %d", ret);
         return err_t::DATA_ERROR;
     }
-#else
-    LOG_ERR("SD card device node not found");
-    return err_t::DATA_ERROR;
-#endif
 
-    int ret = fs_mount(mount);
+    // Mount the FAT filesystem
+    ret = fs_mount(mount);
     if (ret != 0) {
-        LOG_ERR("SD card FS mount failed: %d", ret);
+        LOG_ERR("SD card FAT FS mount failed: %d", ret);
 
         // Attempt to format the card if mount fails
-        if (ret == -ENOENT) {
-            LOG_INF("File system not found, formatting...");
-            ret = fs_mkfs(mount->type, (uintptr_t)mount->storage_dev, NULL, 0);
+        if (ret == -ENOENT || ret == -ENODEV || ret == -EIO) {
+            LOG_INF("File system not found, formatting as FAT...");
+            ret = fs_mkfs(FS_FATFS, (uintptr_t)disk_pdrv, NULL, 0);
             if (ret == 0) {
-                LOG_INF("SD card formatted successfully. Attempting to mount again...");
+                LOG_INF("SD card formatted as FAT successfully. Attempting to mount again...");
                 ret = fs_mount(mount);
                 if (ret == 0) {
                     LOG_INF("SD card mounted successfully after formatting");
                     return err_t::NO_ERROR;
                 }
             } else {
-                LOG_ERR("Failed to format SD card: %d", ret);
+                LOG_ERR("Failed to format SD card as FAT: %d", ret);
                 return err_t::DATA_ERROR;
             }
         }
         return err_t::DATA_ERROR;
     }
 
-    LOG_INF("SD card mounted at %s", mount->mnt_point);
+    LOG_INF("SD card mounted at %s with FAT filesystem", mount->mnt_point);
     return err_t::NO_ERROR;
 }
 
