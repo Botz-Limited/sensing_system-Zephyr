@@ -32,6 +32,9 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL);
 // External message queues
 extern struct k_msgq sensor_data_msgq;
 extern struct k_msgq bluetooth_msgq;
+#if defined(CONFIG_LAB_VERSION)
+extern struct k_msgq data_sd_msgq;      // For sending to data_sd module (lab version)
+#endif
 
 // Constants
 static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
@@ -353,29 +356,39 @@ static void process_adc_samples(int16_t *raw_data)
             }
 #endif
 
-            if (atomic_get(&logging_active) == 1)
-                // Always send to sensor_data module at 100Hz only if activity started
+            // Send to sensor_data module at 100Hz only if activity started
+            if (atomic_get(&logging_active) == 1) {
                 if (k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT) != 0)
                 {
                     LOG_WRN("Failed to send foot sensor data to sensor_data module");
                 }
+            }
 
-            // Send to Bluetooth at 5Hz (every 20th sample)
-            if (++ble_sample_counter >= BLUETOOTH_RATE_DIVIDER)
-            {
-                ble_sample_counter = 0;
-                // Check streaming flag before sending to bluetooth
-                if (foot_sensor_streaming_enabled == true)
+#if defined(CONFIG_LAB_VERSION)
+            // For lab version, send all raw foot data at full rate (100Hz) to SD card module
+            // during activity OR streaming (commands 3/5)
+            if ((atomic_get(&logging_active) == 1) || (foot_sensor_streaming_enabled == true)) {
+                if (k_msgq_put(&data_sd_msgq, &msg, K_NO_WAIT) != 0) {
+                    LOG_WRN("Failed to send foot sensor data to data_sd module");
+                }
+            }
+#endif
+
+            // Send to Bluetooth at 5Hz ONLY when streaming is enabled AND no activity is running
+            if (foot_sensor_streaming_enabled == true && atomic_get(&logging_active) == 0) {
+                if (++ble_sample_counter >= BLUETOOTH_RATE_DIVIDER)
                 {
+                    ble_sample_counter = 0;
                     if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
                     {
                         LOG_WRN("Failed to send foot sensor data to bluetooth module");
                     }
                 }
-                else
-                {
-                    LOG_DBG("Foot sensor BLE streaming disabled, skipping bluetooth_msgq");
-                }
+            }
+            else
+            {
+                // Reset counter when not streaming to ensure immediate response when enabled
+                ble_sample_counter = 0;
             }
         }
     }

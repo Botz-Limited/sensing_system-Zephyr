@@ -428,6 +428,17 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
     }
 }
 
+// Target service UUID: 5cb36a14-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
+// This is used by both primary (for advertising) and secondary (for scanning)
+static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x3f, 0x00, 0xa8, 0x89,
+                                                0x97, 0x4d, 0x69, 0xca, 0x14, 0x6a, 0xb3, 0x5c};
+
+// Getter function to access the target service UUID from other modules
+extern "C" const uint8_t* get_target_service_uuid(void)
+{
+    return target_service_uuid;
+}
+
 // For secondary (central) role: scanning and connecting
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 
@@ -449,10 +460,6 @@ static const struct bt_le_conn_param conn_param = {
     .latency = 0,
     .timeout = 400,
 };
-
-// Target service UUID: 5cb36a14-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
-static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x3f, 0x00, 0xa8, 0x89,
-                                                0x97, 0x4d, 0x69, 0xca, 0x14, 0x6a, 0xb3, 0x5c};
 
 // Helper function to check if advertisement contains our target UUID
 static bool adv_data_has_uuid(struct net_buf_simple *ad)

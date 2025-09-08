@@ -427,7 +427,7 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
     strncpy(start_logging_msg.data.command_str, "START_LOGGING_ACTIVITY",
             sizeof(start_logging_msg.data.command_str) - 1);
     start_logging_msg.data.command_str[sizeof(start_logging_msg.data.command_str) - 1] = '\0';
-
+    
     // Start logging Activity file
     if (k_msgq_put(&data_msgq, &start_logging_msg, K_NO_WAIT) != 0) {
       LOG_WRN("Failed to send START_LOGGING_ACTIVITY command to DATA module");

@@ -68,8 +68,10 @@ enum RawPacketType : uint8_t {
 
 // Raw data file header structure
 struct __attribute__((packed)) RawFileHeader {
-    char magic[4];           // "BRAW" - Botz RAW
+    char magic[4];           // "BOTZ" - Botz RAW
     uint8_t version;         // File format version
+    // Compiler would add 3 bytes of padding here to align the next uint32_t to 4 bytes.
+    uint8_t explicit_padding_1[3]; // 3 bytes - Offsets 5, 6, 7
     uint32_t start_time_ms;  // System uptime at start
     uint8_t foot_channels;   // Number of foot sensor channels
     uint8_t reserved[7];     // Reserved for future use
@@ -368,8 +370,11 @@ static err_t start_raw_logging(void)
 
     // Write header
     RawFileHeader header = {};
-    memcpy(header.magic, "BRAW", 4);
+    memcpy(header.magic, "BOTZ", 4);
     header.version = 1;
+    header.explicit_padding_1[0]=0U;
+    header.explicit_padding_1[1]=0U;
+    header.explicit_padding_1[2]=0U;
     header.start_time_ms = session_start_time;
     header.foot_channels = NUM_FOOT_SENSOR_CHANNELS;
 

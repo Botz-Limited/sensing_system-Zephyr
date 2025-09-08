@@ -238,6 +238,9 @@ typedef struct {
     uint32_t duration_sec;
 } session_summary_msg_t;
 
+// Default sampling frequency for activity logging (in Hz)
+#define DEFAULT_ACTIVITY_SAMPLING_FREQUENCY_HZ 100
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -248,6 +251,7 @@ typedef struct
     // Metadata for command messages (ignored for sensor data)
     char fw_version[32];
     uint32_t sampling_frequency;
+    uint8_t service_uuid[16];  // BLE service UUID for activity logging
     union {
         foot_samples_t foot_samples;
         bhi360_3d_mapping_t bhi360_3d_mapping;

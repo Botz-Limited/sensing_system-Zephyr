@@ -50,6 +50,9 @@
 #include "../../include/events/foot_sensor_event.h"
 #include "../../include/events/motion_sensor_event.h"
 
+// External function to get the BLE service UUID from bluetooth module
+extern "C" const uint8_t* get_target_service_uuid(void);
+
 LOG_MODULE_REGISTER(MODULE, CONFIG_DATA_MODULE_LOG_LEVEL);
 
 static uint32_t current_packet_number = 0;
@@ -454,7 +457,7 @@ static void process_sensor_data_work_handler(struct k_work *work)
             uint32_t timestamp_ms;
             uint16_t cadence_spm;
             uint16_t pace_sec_km;
-            uint8_t form_score;
+            uint16_t speed_kmh_x10;  // Speed in km/h * 10 (fixed point, 1 decimal)
             int8_t balance_lr_pct;
             uint16_t ground_contact_ms;
             uint16_t flight_time_ms;
@@ -465,8 +468,6 @@ static void process_sensor_data_work_handler(struct k_work *work)
             uint8_t right_strike_pattern;
             int8_t avg_pronation_deg;
             uint8_t vertical_ratio;
-            uint8_t efficiency_score;
-            uint8_t alerts;
         } __attribute__((packed)) activity_metrics_binary_t;
 
         // Reset counter if approaching maximum to prevent overflow
@@ -480,7 +481,7 @@ static void process_sensor_data_work_handler(struct k_work *work)
                                                     .timestamp_ms = metrics->timestamp_ms,
                                                     .cadence_spm = metrics->cadence_spm,
                                                     .pace_sec_km = metrics->pace_sec_km,
-                                                    .form_score = metrics->form_score,
+                                                    .speed_kmh_x10 = (metrics->pace_sec_km > 0) ? (36000 / metrics->pace_sec_km) : 0,
                                                     .balance_lr_pct = metrics->balance_lr_pct,
                                                     .ground_contact_ms = metrics->ground_contact_ms,
                                                     .flight_time_ms = metrics->flight_time_ms,
@@ -490,15 +491,13 @@ static void process_sensor_data_work_handler(struct k_work *work)
                                                     .left_strike_pattern = metrics->left_strike_pattern,
                                                     .right_strike_pattern = metrics->right_strike_pattern,
                                                     .avg_pronation_deg = metrics->avg_pronation_deg,
-                                                    .vertical_ratio = metrics->vertical_ratio,
-                                                    .efficiency_score = metrics->efficiency_score,
-                                                    .alerts = metrics->alerts};
+                                                    .vertical_ratio = metrics->vertical_ratio};
 
         LOG_WRN("activity_packet_counter = %u\n"
                 "timestamp = %u\n"
                 "cadence = %u\n"
                 "pace = %u\n"
-                "form_score = %u\n"
+                "speed = %u\n"
                 "balance = %d\n"
                 "ground_contact = %u\n"
                 "flight_time = %u\n"
@@ -508,15 +507,12 @@ static void process_sensor_data_work_handler(struct k_work *work)
                 "left_strike_pattern = %u\n"
                 "right_strike_pattern = %u\n"
                 "avg_pronation_deg = %d\n"
-                "vertical_ratio = %u\n"
-                "efficiency_score = %u\n"
-                "alerts = 0x%02X",
+                "vertical_ratio = %u\n",
                 binary_metrics.packet_number, binary_metrics.timestamp_ms, binary_metrics.cadence_spm,
-                binary_metrics.pace_sec_km, binary_metrics.form_score, binary_metrics.balance_lr_pct,
+                binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
                 binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms, binary_metrics.contact_time_asymmetry,
                 binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry, binary_metrics.left_strike_pattern,
-                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio,
-                binary_metrics.efficiency_score, binary_metrics.alerts);
+                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio);
 
         // Add to batch buffer if there's space
         if (activity_batch_bytes + sizeof(binary_metrics) <= sizeof(activity_batch_buffer))
@@ -1002,12 +998,12 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
         // Get current battery state
         //  battery_info_t battery_start = get_battery_info();  to be implmented
 
-        // Version 2 header with battery support
+        // Version 3 header with battery and UUID support
         typedef struct __attribute__((packed))
         {
             char magic[4];          // "BOTZ"
-            uint8_t version;        // File format version (2)
-            uint32_t start_time;    // Milliseconds since boot
+            uint8_t version;        // File format version (3)
+            uint32_t start_time;    // Milliseconds the activity starts from up time
             uint32_t sample_rate;   // Sampling frequency (Hz)
             char fw_version[16];    // Null-terminated string
             uint8_t user_height_cm; // User profile data
@@ -1015,21 +1011,31 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
             uint8_t user_age_years;
             uint8_t user_sex;
             battery_info_t battery; // Battery state at start
-            uint8_t reserved[4];    // Future use
-        } ActivityFileHeaderV2;
+            uint8_t service_uuid[16]; // BLE service UUID
+        } ActivityFileHeaderV3;
 
-        ActivityFileHeaderV2 header = {.magic = {'B', 'O', 'T', 'Z'},
-                                       .version = 2,
+        ActivityFileHeaderV3 header = {.magic = {'B', 'O', 'T', 'Z'},
+                                       .version = 3,
                                        .start_time = activity_last_timestamp_ms,
                                        .sample_rate = sampling_frequency,
                                        .user_height_cm = user_config.user_height_cm,
                                        .user_weight_kg = user_config.user_weight_kg,
                                        .user_age_years = user_config.user_age_years,
                                        .user_sex = user_config.user_sex,
-                                       .battery = battery_start,
-                                       .reserved = {0}};
+                                       .battery = battery_start};
+        
         strncpy(header.fw_version, fw_version, sizeof(header.fw_version) - 1);
         header.fw_version[sizeof(header.fw_version) - 1] = '\0';
+        
+        // Get the BLE service UUID from bluetooth module
+        const uint8_t* uuid = get_target_service_uuid();
+        if (uuid != nullptr) {
+            memcpy(header.service_uuid, uuid, 16);
+            LOG_INF("Activity header includes BLE service UUID");
+        } else {
+            memset(header.service_uuid, 0, 16);
+            LOG_WRN("Could not get BLE service UUID, using zeros");
+        }
 
         // Write header through buffer system
         if (activity_write_buffer_pos + sizeof(header) > sizeof(activity_write_buffer))
@@ -1093,7 +1099,7 @@ err_t end_activity_logging()
             battery_info_t battery; // Battery at session end
         } ActivityFileFooterV2;
 
-        ActivityFileFooterV2 footer = {.end_time = k_uptime_get() - activity_last_timestamp_ms,
+        ActivityFileFooterV2 footer = {.end_time = k_uptime_get(),
                                        .record_count = activity_batch_count,
                                        .packet_count = activity_packet_counter,
                                        .file_crc = 0, // Would be calculated in full implementation

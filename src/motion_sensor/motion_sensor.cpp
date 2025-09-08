@@ -584,16 +584,17 @@ void motion_sensor_process(void *, void *, void *) {
   }
 }
 
+// Static variables to hold the latest sensor values (moved to file scope for LOG_INF access)
+static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0,
+             latest_quat_w = 0, latest_quat_accuracy = 0;
+static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;
+static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
+static uint64_t latest_timestamp = 0;
+
 static void
 parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
                   void *callback_ref) {
     ARG_UNUSED(callback_ref);
-    // Static variables to hold the latest values
-    static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0,
-                 latest_quat_w = 0, latest_quat_accuracy = 0;
-    static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;
-    static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
-    static uint64_t latest_timestamp = 0;
     
     // For motion activity detection (idle module)
     static float last_reported_quat_w = 0;
@@ -733,6 +734,17 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
   if ((motion_update_mask & ALL_MOTION_SENSORS) == ALL_MOTION_SENSORS) {
     send_data = true;
     motion_update_mask = 0; // Reset for next cycle
+    LOG_DBG("All motion sensors updated, send_data=true");
+  } else {
+    // Debug: Log which sensors are still missing
+    static uint32_t debug_counter = 0;
+    if (++debug_counter % 100 == 0) { // Every 100 calls
+      LOG_INF("Motion sensor update status - QUAT:%s, LACC:%s, GYRO:%s (mask:0x%02x)",
+              (motion_update_mask & QUAT_UPDATED) ? "YES" : "NO",
+              (motion_update_mask & LACC_UPDATED) ? "YES" : "NO", 
+              (motion_update_mask & GYRO_UPDATED) ? "YES" : "NO",
+              motion_update_mask);
+    }
   }
 
   // Send data when we have a complete set or step counter update
@@ -769,31 +781,64 @@ parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_info,
     record.gyro_z = latest_gyro_z;
     record.step_count = latest_step_count;
     record.timestamp = latest_timestamp;
+    
+    // Prepare message for logging
+    generic_message_t msg{};
+    msg.sender = SENDER_BHI360_THREAD;
+    msg.type = MSG_TYPE_BHI360_LOG_RECORD;
+    msg.data.bhi360_log_record = record;
+    
+    // Send data for logging if activity is active
     if (atomic_get(&logging_active) == 1) {
-      generic_message_t msg{};
-      msg.sender = SENDER_BHI360_THREAD;
-      msg.type = MSG_TYPE_BHI360_LOG_RECORD;
-      msg.data.bhi360_log_record = record;
-
 // Send to sensor data module (new multi-thread architecture)
 #if IS_ENABLED(CONFIG_SENSOR_DATA_MODULE)
       k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT);
 #endif
+    }
 
 #if defined(CONFIG_LAB_VERSION)
-      // For lab version, send all raw IMU data at full rate (100Hz) to SD card module
+    // For lab version, send all raw IMU data at full rate (100Hz) to SD card module
+    // during activity OR streaming (commands 4/5)
+    if ((atomic_get(&logging_active) == 1) || (quaternion_streaming_enabled == true)) {
       if (k_msgq_put(&data_sd_msgq, &msg, K_NO_WAIT) != 0) {
         LOG_WRN("Failed to send BHI360 data to data_sd module");
       }
+    }
 #endif
-
-
+    
+    // Process data for debug logging when either activity or streaming is active
+    if ((atomic_get(&logging_active) == 1) || (quaternion_streaming_enabled == true)) {
+      // Rate limiting counters for logging
+      static uint16_t motion_bt_sample_counter_log = 0;  // Changed to uint16_t to handle values up to 100
+      const uint16_t MOTION_SAMPLES_TO_SKIP_LOG = 100; // 100Hz / 100 = 1Hz (every second)
+      
+      // Always increment counter at 100Hz rate (every time we have new data)
+      motion_bt_sample_counter_log++;
+      
+      // Log every second (100 samples at 100Hz)
+      if (motion_bt_sample_counter_log >= MOTION_SAMPLES_TO_SKIP_LOG) {
+        motion_bt_sample_counter_log = 0;
+        
+        // Log the current sensor values
+        LOG_INF("BHI360 3D Mapping: quat_x=%.6f, quat_y=%.6f, quat_z=%.6f, quat_w=%.6f, gyro_x=%.6f, gyro_y=%.6f, gyro_z=%.6f",
+                (double)latest_quat_x,
+                (double)latest_quat_y,
+                (double)latest_quat_z,
+                (double)latest_quat_w,
+                (double)latest_gyro_x,
+                (double)latest_gyro_y,
+                (double)latest_gyro_z);
+      }
+    }
+    
+    // Process data for Bluetooth streaming ONLY when streaming is enabled AND no activity is running
+    if (quaternion_streaming_enabled == true && atomic_get(&logging_active) == 0) {
       // Rate limiting for Bluetooth: Send at 5Hz instead of 100Hz
       // Motion sensor runs at 100Hz, so send every 20th sample to achieve 5Hz
       static uint8_t motion_bt_sample_counter = 0;
       const uint8_t MOTION_SAMPLES_TO_SKIP = 20; // 100Hz / 20 = 5Hz
       
-      // Always increment counter when we have new data
+      // Always increment counter at 100Hz rate
       motion_bt_sample_counter++;
       
       // Only send to Bluetooth at 5Hz rate (reduced from 100Hz for BLE bandwidth)
@@ -1219,7 +1264,7 @@ static bool app_event_handler(const struct app_event_header *aeh) {
     if (atomic_get(&logging_active) == 0) {
       // Mark activity as started and capture current step count
       activity_logging_active = true;
-      quaternion_streaming_enabled=false;
+      // Don't change streaming state - keep it independent of activity
       atomic_set(&logging_active, 1);
 
       // Also start activity logging
