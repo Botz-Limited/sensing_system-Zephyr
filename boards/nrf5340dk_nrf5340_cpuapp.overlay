@@ -184,7 +184,7 @@
 
 &spi4 {
 	compatible = "nordic,nrf-spim";
-	status = "okay";
+	status = "disabled";
 	pinctrl-0 = <&spi4_default>;
 	pinctrl-1 = <&spi4_sleep>;
 	pinctrl-names = "default", "sleep";
@@ -215,7 +215,7 @@
 &spi2 {
     compatible = "nordic,nrf-spim";
     status = "okay";
-    cs-gpios = <&gpio0 26 GPIO_ACTIVE_LOW>;
+    cs-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>;
     pinctrl-0 = <&spi2_default_alt>;
     pinctrl-1 = <&spi2_sleep_alt>;
     pinctrl-names = "default", "sleep";
@@ -256,15 +256,15 @@
     pinctrl-0 = <&spi1_default_alt>;
     pinctrl-1 = <&spi1_sleep_alt>;
     pinctrl-names = "default", "sleep";
-    cs-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>; // CS on P1.6
+    cs-gpios = <&gpio1 15 GPIO_ACTIVE_LOW>; // CS on P0.26
 
     bhi360: bhi360@0 {
         compatible = "bosch,bhi360";
         status = "okay";
         reg = <0>;
         spi-max-frequency = <8000000>;
-        int-gpios = <&gpio1 2 GPIO_ACTIVE_HIGH>;   // INT on P1.2
-        reset-gpios = <&gpio1 3 GPIO_ACTIVE_LOW>;  // Optional: RESET on P1.3
+        int-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;   // INT on P1.2
+        reset-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;  // Optional: RESET on P1.3
         label = "BHI360";
     };
 };
@@ -272,20 +272,17 @@
 &pinctrl {
     spi1_default_alt: spi1_default_alt {
         group1 {
-            psels = <NRF_PSEL(SPIM_SCK, 0, 25)>,
-                <NRF_PSEL(SPIM_MOSI, 0, 6)>;
-        };
-        group2 {
-            psels = <NRF_PSEL(SPIM_MISO, 0, 7)>;
-            bias-pull-down;
+            psels = <NRF_PSEL(SPIM_SCK, 1, 14)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 13)>,
+                <NRF_PSEL(SPIM_MISO, 1, 12)>;
         };
     };
 
     spi1_sleep_alt: spi1_sleep_alt {
         group1 {
-            psels = <NRF_PSEL(SPIM_SCK, 0, 25)>,
-                <NRF_PSEL(SPIM_MOSI, 0, 6)>,
-                <NRF_PSEL(SPIM_MISO, 0, 7)>;
+            psels = <NRF_PSEL(SPIM_SCK, 1, 14)>,
+                <NRF_PSEL(SPIM_MOSI, 1, 13)>,
+                <NRF_PSEL(SPIM_MISO, 1, 12)>;
             low-power-enable;
         };
     };
@@ -312,9 +309,9 @@
 
 	spi4_default: spi4_default {
 		group1 {
-			psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
-					<NRF_PSEL(SPIM_MOSI, 1, 13)>,
-					<NRF_PSEL(SPIM_MISO, 1, 14)>;
+			psels = <NRF_PSEL(SPIM_SCK, 1, 9)>,
+					<NRF_PSEL(SPIM_MOSI, 1, 8)>,
+					<NRF_PSEL(SPIM_MISO, 1, 7)>;
 		};
 	};
 
