@@ -11,13 +11,11 @@
         zephyr,settings-partition = &lfs1;
         zephyr,console = &uart2;
         zephyr,shell-uart = &uart2;
-        nordic,nrf-spim= &spi1;
         zephyr,mmc = &sdhc;
     };
 
     aliases {
         rtc0 = &rtc0;
-        wifi0 = &nrf7002;
         spi1 = &spi1;
     };
 
@@ -41,17 +39,11 @@
             block-cycles = <512>;
         };
 
-        sdhc_mount: sdhc_mount {
-            compatible = "zephyr,fstab,littlefs";
+         sdhc_mount: sdhc_mount {
+            compatible = "zephyr,fstab,fat";
             label = "SDCard";
             mount-point = "/sd";
             partition = <&sdmmc_part>;
-            read-size = <16>;
-            prog-size = <16>;
-            cache-size = <64>;
-            lookahead-size = <32>;
-            block-cycles = <512>;
-
         };
         };    
         
@@ -209,10 +201,14 @@
     status = "okay";
 };
 
+&spi2 {
+    status = "disabled";
+};
+
 /* Enable UART2 for console/logging */
 &uart2 {
     compatible = "nordic,nrf-uarte";
-    status = "disabled";
+    status = "okay";
     current-speed = <115200>;
     parity= "none";
     stop-bits = "1";
@@ -222,26 +218,26 @@
 };
 
 
-/* Enable SPI2 for SD card */
-&spi2 {
+/* Enable SPI4 for SD card */
+&spi4 {
     compatible = "nordic,nrf-spim";
-    status = "okay";
-    cs-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>;
-    pinctrl-0 = <&spi2_default_alt>;
-    pinctrl-1 = <&spi2_sleep_alt>;
+    status = "disabled";
+    cs-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>;
+    pinctrl-0 = <&spi4_default>;
+    pinctrl-1 = <&spi4_sleep>;
     pinctrl-names = "default", "sleep";
     
     // SD Card device node
     sdhc: sdhc@0 {
         compatible = "zephyr,sdhc-spi-slot";
-        status = "okay";
+        status = "disabled";
         reg = <0>;
         label = "SDHC";
         
         sdmmc {
 			compatible = "zephyr,sdmmc-disk";
 			disk-name = "SD";
-			status = "okay";
+			status = "disabled";
 
             partitions {
         compatible = "fixed-partitions";
@@ -259,34 +255,7 @@
     };
 };
 
-&spi4 {
-	compatible = "nordic,nrf-spim";
-	status = "disabled";
-	pinctrl-0 = <&spi4_default>;
-	pinctrl-1 = <&spi4_sleep>;
-	pinctrl-names = "default", "sleep";
-    cs-gpios = <&gpio1 16 GPIO_ACTIVE_LOW>;
 
-	nrf7002: nrf7002@0 {
-		compatible = "nordic,nrf7002-spi";
-		reg = <0>;
-		spi-max-frequency = <32000000>;
-		host-irq-gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>;
-		iovdd-ctrl-gpios = <&gpio1 8 GPIO_ACTIVE_HIGH>;
-		bucken-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;
-        wifi-max-tx-pwr-2g-dsss = <20>;
-        wifi-max-tx-pwr-2g-mcs0 = <20>;
-        wifi-max-tx-pwr-2g-mcs7 = <20>;
-        wifi-max-tx-pwr-5g-low-mcs0 = <20>;
-        wifi-max-tx-pwr-5g-low-mcs7 = <20>;
-        wifi-max-tx-pwr-5g-mid-mcs0 = <20>;
-        wifi-max-tx-pwr-5g-mid-mcs7 = <20>;
-        wifi-max-tx-pwr-5g-high-mcs0 = <20>;
-        wifi-max-tx-pwr-5g-high-mcs7 = <20>;
-        label = "NRF7002";
-        status = "okay";
-	};
-};
 
 &spi1 {
     compatible = "nordic,nrf-spim";
@@ -348,17 +317,17 @@
 
 	spi4_default: spi4_default {
 		group1 {
-			psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
-					<NRF_PSEL(SPIM_MOSI, 1, 13)>,
-					<NRF_PSEL(SPIM_MISO, 1, 14)>;
+			psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+					<NRF_PSEL(SPIM_MOSI, 0, 9)>,
+					<NRF_PSEL(SPIM_MISO, 0, 10)>;
 		};
 	};
 
 	spi4_sleep: spi4_sleep {
 		group1 {
-			psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
-					<NRF_PSEL(SPIM_MOSI, 1, 13)>,
-					<NRF_PSEL(SPIM_MISO, 1, 14)>;
+			psels = <NRF_PSEL(SPIM_SCK, 0, 8)>,
+					<NRF_PSEL(SPIM_MOSI, 0, 9)>,
+					<NRF_PSEL(SPIM_MISO, 0, 10)>;
 			low-power-enable;
 		};
 	};

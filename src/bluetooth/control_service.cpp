@@ -1095,7 +1095,6 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
     // Send streaming control event (keep quaternion as-is, default enabled)
     struct streaming_control_event *evt = new_streaming_control_event();
     evt->foot_sensor_streaming_enabled = false;
-    evt->quaternion_streaming_enabled = true; // Keep current state (default enabled)
     APP_EVENT_SUBMIT(evt);
     
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -1110,7 +1109,6 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
     // STOP QUATERNION STREAMING
     // Send streaming control event (keep foot sensor as-is, default enabled)
     struct streaming_control_event *evt = new_streaming_control_event();
-    evt->foot_sensor_streaming_enabled = true; // Keep current state (default enabled)
     evt->quaternion_streaming_enabled = false;
     APP_EVENT_SUBMIT(evt);
     

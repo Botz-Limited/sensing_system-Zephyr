@@ -87,6 +87,7 @@ typedef enum
     MSG_TYPE_EXTERNAL_FLASH_ERASE_COMPLETE, // Notification that flash erase is complete
     MSG_TYPE_BIOMECHANICS_EXTENDED, // Biomechanics extended data for BLE
     MSG_TYPE_SESSION_SUMMARY, // Session summary data for BLE
+    MSG_TYPE_COPY_FILE_TO_SD, // Command to copy a file to SD card (LAB_VERSION only)
 } msg_type_t;
 
 // Define sender types

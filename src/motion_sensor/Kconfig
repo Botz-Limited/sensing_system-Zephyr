@@ -22,7 +22,7 @@ config MOTION_SENSOR_MODULE_LOG_LEVEL
 
 config MOTION_SENSOR_MODULE_STACK_SIZE
 	int "Motion Sensor module thread stack size"
-	default 3072
+	default 4096
 
 config MOTION_SENSOR_MODULE_PRIORITY
 	int "Motion Sensor module thread priority"

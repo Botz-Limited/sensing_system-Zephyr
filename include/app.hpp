@@ -238,6 +238,12 @@ typedef struct {
     uint32_t duration_sec;
 } session_summary_msg_t;
 
+// File copy to SD card message (LAB_VERSION only)
+typedef struct {
+    char source_path[64];      // Path to file in internal flash
+    char dest_filename[64];    // Destination filename on SD card
+} copy_file_to_sd_msg_t;
+
 // Default sampling frequency for activity logging (in Hz)
 #define DEFAULT_ACTIVITY_SAMPLING_FREQUENCY_HZ 100
 
@@ -280,6 +286,7 @@ typedef struct
         d2d_metrics_packet_t d2d_metrics;  // D2D calculated metrics packet
         biomechanics_extended_msg_t biomechanics_extended;  // Biomechanics extended data
         session_summary_msg_t session_summary;  // Session summary data
+        copy_file_to_sd_msg_t copy_to_sd;  // File copy request (LAB_VERSION only)
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 

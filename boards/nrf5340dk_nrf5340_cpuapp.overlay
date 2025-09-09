@@ -42,7 +42,7 @@
         sdhc_mount: sdhc_mount {
             compatible = "zephyr,fstab,fat";
             label = "SDCard";
-            mount-point = "/sd";
+            mount-point = "/SD:";
             partition = <&sdmmc_part>;
         };
     };
@@ -239,7 +239,7 @@
 
         sdmmc_part: partition@0 {
             label = "storage_sd";
-            reg = <0x00000000 0x00006000>;
+            reg = <0x00000000 0x00906000>;
         };
     };
 		}; 

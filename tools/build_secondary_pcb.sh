@@ -19,11 +19,6 @@ WEST_CMD+=" -Dmcuboot_DTC_OVERLAY_FILE=/home/ee/sensing_fw/sysbuild/mcuboot/boar
 # Build EXTRA_CONF_FILE list for PCB and optional Wi-Fi
 EXTRA_CONF="/home/ee/sensing_fw/prj_pcb.conf"
 
-# Check for --with-wifi flag
-if [[ "$*" == *"--with-wifi"* ]]; then
-    echo "Including Wi-Fi configuration..."
-    EXTRA_CONF+=";/home/ee/sensing_fw/prj_wifi.conf"
-fi
 
 # Add to WEST_CMD if EXTRA_CONF is set
 if [ -n "$EXTRA_CONF" ]; then

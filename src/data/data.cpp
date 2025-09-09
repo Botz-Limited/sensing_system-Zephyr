@@ -1160,6 +1160,30 @@ err_t end_activity_logging()
 
     LOG_WRN("Closing file CLOSED!!!!!!!!");
 
+#if IS_ENABLED(CONFIG_LAB_VERSION)
+    // Send message to copy the file to SD card
+    generic_message_t copy_msg = {};
+    copy_msg.sender = SENDER_DATA;
+    copy_msg.type = MSG_TYPE_COPY_FILE_TO_SD;
+    
+    // Copy the current activity file path
+    strncpy(copy_msg.data.copy_to_sd.source_path, activity_file_path, 
+            sizeof(copy_msg.data.copy_to_sd.source_path) - 1);
+    copy_msg.data.copy_to_sd.source_path[sizeof(copy_msg.data.copy_to_sd.source_path) - 1] = '\0';
+    
+    // Generate destination filename (keep same name but with different extension for clarity)
+    snprintf(copy_msg.data.copy_to_sd.dest_filename, 
+             sizeof(copy_msg.data.copy_to_sd.dest_filename),
+             "activity_%03u_copy.dat", next_activity_file_sequence);
+    
+    if (k_msgq_put(&data_sd_msgq, &copy_msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send copy file message to SD module");
+    } else {
+        LOG_INF("Requested copy of activity file %s to SD card as %s", 
+                activity_file_path, copy_msg.data.copy_to_sd.dest_filename);
+    }
+#endif
+
     // TODO: test only - list directory contents
     LOG_WRN("About to list directory contents for: %s", hardware_dir_path);
     int lsdir_result = lsdir(hardware_dir_path);

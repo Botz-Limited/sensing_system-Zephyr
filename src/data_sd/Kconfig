@@ -21,7 +21,7 @@ if DATA_SD_MODULE
 config DATA_SD_MODULE_LOG_LEVEL
 	int "Data module SD log level"
 	depends on DATA_SD_MODULE && LOG
-	default 4
+	default 6
 	help
 	  Sets log level for Data SD module
 
@@ -35,19 +35,19 @@ config FAT_FILESYSTEM_ELM
 
 # Allocate buffer on RAM for transferring chunck of data
 # from Flash to SPI
-config SPI_NRFX_RAM_BUFFER_SIZE
-	default 8
+#config SPI_NRFX_RAM_BUFFER_SIZE
+#	default 8
 
 
 config FILE_SYSTEM_MOUNT
 	string
 	default "/sd"
 
-config FPU
-	default y
+#config FPU
+#	default y
 
-config FPU_SHARING
-	default y
+#config FPU_SHARING
+#	default n
 
 config FS_LITTLEFS_BLK_DEV
 	default y
