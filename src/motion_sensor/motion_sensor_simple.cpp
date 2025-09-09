@@ -573,14 +573,31 @@ static void process_sensor_data(void)
     // Debug logging at 1Hz when activity or streaming is active
     if ((atomic_get(&logging_active) == 1) || (quaternion_streaming_enabled == true))
     {
-        if (++log_sample_counter >= LOG_RATE_DIVIDER)
-        {
-            log_sample_counter = 0;
-            LOG_INF("BHI360 3D Mapping: quat_x=%.6f, quat_y=%.6f, quat_z=%.6f, quat_w=%.6f, "
-                    "gyro_x=%.6f, gyro_y=%.6f, gyro_z=%.6f",
-                    (double)latest_quat_x, (double)latest_quat_y, (double)latest_quat_z, (double)latest_quat_w,
-                    (double)latest_gyro_x, (double)latest_gyro_y, (double)latest_gyro_z);
-        }
+    if (++log_sample_counter >= LOG_RATE_DIVIDER)
+    {
+    log_sample_counter = 0;
+    
+    // Log Quaternion and Gyroscope data
+    LOG_INF("BHI360 Quat: x=%.4f, y=%.4f, z=%.4f, w=%.4f, accuracy=%.1f",
+    (double)latest_quat_x, (double)latest_quat_y, (double)latest_quat_z, (double)latest_quat_w,
+    (double)latest_quat_accuracy);
+    
+    // Log Gyroscope data (rad/s)
+    LOG_INF("BHI360 Gyro: x=%.4f, y=%.4f, z=%.4f rad/s",
+    (double)latest_gyro_x, (double)latest_gyro_y, (double)latest_gyro_z);
+    
+    // Log Linear Acceleration data (m/s²)
+    LOG_INF("BHI360 LinAcc: x=%.4f, y=%.4f, z=%.4f m/s²",
+    (double)latest_lacc_x, (double)latest_lacc_y, (double)latest_lacc_z);
+    
+    // Log Step Count data
+    LOG_INF("BHI360 Steps: total=%u, activity=%u",
+    latest_step_count, latest_activity_step_count);
+    
+    // Log timestamp (convert from nanoseconds to milliseconds for readability)
+    uint32_t timestamp_ms = (uint32_t)(latest_timestamp / 1000000);
+    LOG_INF("BHI360 Timestamp: %u ms", timestamp_ms);
+    }
     }
 
     // Send to Bluetooth at 5Hz when streaming is enabled AND no activity is running

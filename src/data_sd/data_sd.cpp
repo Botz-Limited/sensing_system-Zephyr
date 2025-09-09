@@ -634,12 +634,25 @@ static void try_combine_packets(void)
 
 static void process_foot_data_work_handler(struct k_work *work)
 {
+    // Check if SD card is available and file is open before processing
+    if (!sd_card_available || raw_log_file.filep == NULL)
+    {
+        // Silently drop the data if SD card is not available or file not open
+        return;
+    }
 
     k_mutex_lock(&foot_msg_mutex, K_FOREVER);
     generic_message_t local_msg = pending_foot_msg;
     k_mutex_unlock(&foot_msg_mutex);
 
     k_mutex_lock(&file_mutex, K_FOREVER);
+
+    // Double-check file is still open after acquiring mutex
+    if (raw_log_file.filep == NULL)
+    {
+        k_mutex_unlock(&file_mutex);
+        return;
+    }
 
     // Prepare foot packet
     RawFootPacket foot_packet = {};
@@ -665,12 +678,25 @@ static void process_foot_data_work_handler(struct k_work *work)
 
 static void process_motion_data_work_handler(struct k_work *work)
 {
+    // Check if SD card is available and file is open before processing
+    if (!sd_card_available || raw_log_file.filep == NULL)
+    {
+        // Silently drop the data if SD card is not available or file not open
+        return;
+    }
 
     k_mutex_lock(&motion_msg_mutex, K_FOREVER);
     generic_message_t local_msg = pending_motion_msg;
     k_mutex_unlock(&motion_msg_mutex);
 
     k_mutex_lock(&file_mutex, K_FOREVER);
+
+    // Double-check file is still open after acquiring mutex
+    if (raw_log_file.filep == NULL)
+    {
+        k_mutex_unlock(&file_mutex);
+        return;
+    }
 
     // Prepare motion packet
     RawMotionPacket motion_packet = {};
@@ -709,10 +735,20 @@ static void process_motion_data_work_handler(struct k_work *work)
 
 static void periodic_flush_work_handler(struct k_work *work)
 {
-    if (foot_sensor_streaming_enabled == true)
-    {
+    // Always reschedule the periodic flush work
+    k_work_schedule_for_queue(&data_sd_work_q, &periodic_flush_work, K_MSEC(PERIODIC_FLUSH_MS));
 
+    // Only process if streaming is enabled, SD card is available, and file is open
+    if (foot_sensor_streaming_enabled == true && sd_card_available && raw_log_file.filep != NULL)
+    {
         k_mutex_lock(&file_mutex, K_FOREVER);
+
+        // Double-check file is still open after acquiring mutex
+        if (raw_log_file.filep == NULL)
+        {
+            k_mutex_unlock(&file_mutex);
+            return;
+        }
 
         // Check for stale pending data
         uint32_t current_time = k_uptime_get_32();
@@ -737,9 +773,6 @@ static void periodic_flush_work_handler(struct k_work *work)
         flush_write_buffer();
 
         k_mutex_unlock(&file_mutex);
-
-        // Reschedule
-        k_work_schedule_for_queue(&data_sd_work_q, &periodic_flush_work, K_MSEC(PERIODIC_FLUSH_MS));
     }
 }
 
