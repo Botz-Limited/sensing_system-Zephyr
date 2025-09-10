@@ -74,6 +74,9 @@ extern struct k_msgq bluetooth_msgq;    // For sending to bluetooth module
 #if defined(CONFIG_WIFI_MODULE)
 extern struct k_msgq wifi_msgq;         // For sending to wifi module
 #endif
+#if defined(CONFIG_LAB_VERSION)
+extern struct k_msgq data_sd_msgq;      // For sending to data_sd module (lab version)
+#endif
 
 static constexpr uint32_t US_PER_SECOND = 1000000UL;
 static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
@@ -350,6 +353,13 @@ static void saadc_event_handler(nrfx_saadc_evt_t const *p_event) {
         if (k_msgq_put(&sensor_data_msgq, &msg, K_NO_WAIT) != 0) {
           LOG_WRN("Failed to send foot sensor data to sensor_data module");
         }
+        
+#if defined(CONFIG_LAB_VERSION)
+        // For lab version, send all raw data at full rate (100Hz) to SD card module
+        if (k_msgq_put(&data_sd_msgq, &msg, K_NO_WAIT) != 0) {
+          LOG_WRN("Failed to send foot sensor data to data_sd module");
+        }
+#endif
         
         // Also send to Bluetooth at 20Hz (every 5th sample) for JIS characteristics
         if (++sample_counter % SAMPLES_TO_SKIP == 0) {

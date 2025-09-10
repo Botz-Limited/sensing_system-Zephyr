@@ -11,7 +11,7 @@
 
 #include "bluetooth_debug.hpp"
 
-LOG_MODULE_REGISTER(bt_debug, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(bt_debug, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // Debug function to check connection security status
 void bt_debug_check_security(struct bt_conn *conn)

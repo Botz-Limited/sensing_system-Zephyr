@@ -46,9 +46,14 @@
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
-static uint32_t device_status_bitfield = 0;
+
+uint32_t device_status_bitfield = 0;
 static uint32_t previous_device_status_bitfield = 0; // Store the previous value
 static bool init_status_bt_update = false;           // A flag to force the first update
+
+
+static activity_state_t current_activity_state = ACTIVITY_STATE_IDLE;
+static activity_state_t pre_pause_activity_state = ACTIVITY_STATE_IDLE; // State before pause
 
 // Packed device status for efficient BLE transmission
 static device_status_packed_t device_status_packed = {0};
@@ -1635,5 +1640,83 @@ extern "C" void jis_device_status_packed_notify(void)
     {
         safe_gatt_notify(&device_status_packed_uuid.uuid, static_cast<const void *>(&device_status_packed),
                          sizeof(device_status_packed));
+    }
+}
+
+// --- Activity State Management Functions ---
+
+/**
+ * @brief Update the activity state in the status bitfield
+ * 
+ * @param new_state The new activity state to set
+ */
+void jis_update_activity_state(activity_state_t new_state)
+{
+    // Save previous state if transitioning to pause
+    if (new_state == ACTIVITY_STATE_PAUSED && current_activity_state != ACTIVITY_STATE_PAUSED) {
+        pre_pause_activity_state = current_activity_state;
+        LOG_DBG("Saving pre-pause state: %d", pre_pause_activity_state);
+    }
+    
+    current_activity_state = new_state;
+    
+    // Clear all activity bits first
+    uint32_t status = device_status_bitfield & ~STATUS_ACTIVITY_MASK;
+    
+    // Set new activity state bits
+    switch(new_state) {
+        case ACTIVITY_STATE_1_RUNNING:
+            status |= STATUS_ACTIVITY_1_RUNNING;
+            LOG_INF("Activity state: RUNNING (1)");
+            break;
+        case ACTIVITY_STATE_3_FOOT_STREAM:
+            status |= STATUS_ACTIVITY_3_FOOT_STREAM;
+            LOG_INF("Activity state: FOOT STREAMING (3)");
+            break;
+        case ACTIVITY_STATE_4_QUAT_STREAM:
+            status |= STATUS_ACTIVITY_4_QUAT_STREAM;
+            LOG_INF("Activity state: QUATERNION STREAMING (4)");
+            break;
+        case ACTIVITY_STATE_5_BOTH_STREAM:
+            status |= STATUS_ACTIVITY_5_BOTH_STREAM;
+            LOG_INF("Activity state: BOTH STREAMING (5)");
+            break;
+        case ACTIVITY_STATE_PAUSED:
+            status |= STATUS_ACTIVITY_PAUSED;
+            LOG_INF("Activity state: PAUSED");
+            break;
+        case ACTIVITY_STATE_IDLE:
+        default:
+            // No bits set for idle
+            LOG_INF("Activity state: IDLE");
+            break;
+    }
+    
+    set_device_status(status);
+}
+
+/**
+ * @brief Get the current activity state
+ * 
+ * @return The current activity state
+ */
+extern "C" activity_state_t jis_get_activity_state(void)
+{
+    return current_activity_state;
+}
+
+/**
+ * @brief Restore the activity state from before pause
+ */
+extern "C" void jis_restore_activity_state_from_pause(void)
+{
+    if (pre_pause_activity_state != ACTIVITY_STATE_IDLE && 
+        pre_pause_activity_state != ACTIVITY_STATE_PAUSED) {
+        LOG_INF("Restoring activity state from pause: %d", pre_pause_activity_state);
+        jis_update_activity_state(pre_pause_activity_state);
+    } else {
+        // Default to activity 1 if no valid previous state
+        LOG_INF("No valid pre-pause state, defaulting to RUNNING");
+        jis_update_activity_state(ACTIVITY_STATE_1_RUNNING);
     }
 }

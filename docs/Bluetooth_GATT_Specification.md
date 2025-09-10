@@ -396,18 +396,91 @@ The weight measurement feature calculates total weight using all 16 pressure sen
 
 ### Status Bitfield
 
+The Status characteristic provides a 32-bit bitfield with device state and error information:
+
+#### General Status Bits (0-7)
 ```c
-#define STATUS_IDLE                    0x00000001
-#define STATUS_LOGGING_ACTIVE          0x00000002
-#define STATUS_ERROR                   0x00000004
-#define STATUS_LOW_BATTERY             0x00000008
-#define STATUS_CHARGING                0x00000010
-#define STATUS_BLUETOOTH_CONNECTED     0x00000020
-#define STATUS_D2D_CONNECTED           0x00000040
-#define STATUS_FILE_SYSTEM_ERROR       0x00000080
-#define STATUS_SENSOR_ERROR            0x00000100
-#define STATUS_CALIBRATING             0x00000200
+#define STATUS_IDLE                    (1 << 0)   // 0x00000001 - Device is idle
+#define STATUS_LOGGING_ACTIVE          (1 << 1)   // 0x00000002 - Activity logging active
+#define STATUS_ERROR                   (1 << 2)   // 0x00000004 - General error flag
+#define STATUS_LOW_BATTERY             (1 << 3)   // 0x00000008 - Battery below threshold
+#define STATUS_CHARGING                (1 << 4)   // 0x00000010 - Device is charging
+#define STATUS_BLUETOOTH_CONNECTED     (1 << 5)   // 0x00000020 - Phone connected via BLE
+#define STATUS_READY                   (1 << 6)   // 0x00000040 - Device ready for operation
+#define STATUS_RESERVED_7              (1 << 7)   // 0x00000080 - Reserved for future use
 ```
+
+#### Error Status Bits (8-22)
+```c
+#define STATUS_BATTERY_FAULT           (1 << 8)   // 0x00000100 - Battery fault detected
+#define STATUS_BLUETOOTH_ERROR         (1 << 9)   // 0x00000200 - Bluetooth communication error
+#define STATUS_HARDWARE_ERROR          (1 << 10)  // 0x00000400 - General hardware error
+#define STATUS_DATA_ERROR              (1 << 11)  // 0x00000800 - Data module error
+#define STATUS_DFU_ERROR               (1 << 12)  // 0x00001000 - DFU/firmware update error
+#define STATUS_ADC_ERROR               (1 << 13)  // 0x00002000 - ADC/foot sensor error
+#define STATUS_I2C_ERROR               (1 << 14)  // 0x00004000 - I2C communication error
+#define STATUS_BATTERY_DISCONNECTED    (1 << 15)  // 0x00008000 - Battery disconnected
+#define STATUS_MOTION_ERROR            (1 << 16)  // 0x00010000 - Motion sensor error
+#define STATUS_RTC_ERROR               (1 << 17)  // 0x00020000 - Real-time clock error
+#define STATUS_FILE_SYSTEM_ERROR       (1 << 18)  // 0x00040000 - File system error
+#define STATUS_PROTO_ENCODE_ERROR      (1 << 19)  // 0x00080000 - Protocol buffer encoding error
+#define STATUS_FILE_SYSTEM_NO_FILES    (1 << 20)  // 0x00100000 - No files in file system
+#define STATUS_FILE_SYSTEM_FULL        (1 << 21)  // 0x00200000 - File system storage full
+#define STATUS_FLASH_FAILURE           (1 << 22)  // 0x00400000 - Flash memory failure
+```
+
+#### Weight Calibration Status Bits (23-24)
+```c
+#define STATUS_WEIGHT_CALIBRATING      (1 << 23)  // 0x00800000 - Weight calibration in progress
+#define STATUS_WEIGHT_CALIBRATED       (1 << 24)  // 0x01000000 - Weight calibration complete
+```
+
+#### Activity State Bits (25-29)
+```c
+#define STATUS_ACTIVITY_1_RUNNING      (1 << 25)  // 0x02000000 - Normal activity running
+#define STATUS_ACTIVITY_3_FOOT_STREAM  (1 << 26)  // 0x04000000 - Foot sensor streaming active
+#define STATUS_ACTIVITY_4_QUAT_STREAM  (1 << 27)  // 0x08000000 - Quaternion streaming active
+#define STATUS_ACTIVITY_5_BOTH_STREAM  (1 << 28)  // 0x10000000 - Both streams active
+#define STATUS_ACTIVITY_PAUSED         (1 << 29)  // 0x20000000 - Activity paused
+```
+
+#### Device Connection Status Bits (30-31)
+```c
+#define STATUS_D2D_CONNECTED           (1 << 30)  // 0x40000000 - Secondary device connected
+#define STATUS_RESERVED_31             (1 << 31)  // 0x80000000 - Reserved for future use
+```
+
+#### Activity State Interpretation
+
+The activity state bits (25-29) are mutually exclusive and indicate the current device activity:
+
+| Bits 25-29 | State | Description |
+|------------|-------|-------------|
+| 00000 | IDLE | No activity, device idle |
+| 00001 | RUNNING | Activity 1 - Normal activity recording |
+| 00010 | FOOT_STREAM | Activity 3 - Foot sensor streaming only |
+| 00100 | QUAT_STREAM | Activity 4 - Quaternion streaming only |
+| 01000 | BOTH_STREAM | Activity 5 - Both foot and quaternion streaming |
+| 10000 | PAUSED | Activity paused, files open, state preserved |
+
+#### Status Masks for Convenience
+```c
+#define STATUS_ALL_ERRORS_MASK         0x007FFF00  // Bits 8-22: All error bits
+#define STATUS_ACTIVITY_MASK           0x3E000000  // Bits 25-29: Activity state bits
+#define STATUS_CALIBRATION_MASK        0x01800000  // Bits 23-24: Weight calibration bits
+```
+
+#### Example Status Values
+
+| Status Value | Interpretation |
+|--------------|----------------|
+| 0x00000002 | Logging active, no errors |
+| 0x02000002 | Activity 1 running with logging |
+| 0x40000002 | Secondary device connected, logging active |
+| 0x42000002 | Activity 1 running with secondary connected |
+| 0x20000002 | Activity paused, files still open |
+| 0x04000000 | Foot streaming only (no activity logging) |
+| 0x50000002 | Both streams active with secondary connected |
 
 ---
 

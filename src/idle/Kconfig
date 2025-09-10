@@ -12,6 +12,13 @@ module = IDLE_MODULE
 module-str = idle module
 source "subsys/logging/Kconfig.template.log_config"
 
+config IDLE_MODULE_LOG_LEVEL
+	int "Idle module log level"
+	depends on IDLE_MODULE && LOG
+	default 2
+	help
+	  Sets log level for idle module
+
 config IDLE_MODULE_STACK_SIZE
     int "Stack size for idle thread"
     default 2048

@@ -22,6 +22,13 @@ config DATA_MODULE
 
 if DATA_MODULE
 
+config DATA_MODULE_LOG_LEVEL
+	int "Data module log level"
+	depends on DATA_MODULE && LOG
+	default 2
+	help
+	  Sets log level for Data module
+
 config NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE
 	int
 	default 4096

@@ -13,6 +13,13 @@ module = ACTIVITY_METRICS_MODULE
 module-str = activity metrics module
 source "subsys/logging/Kconfig.template.log_config"
 
+config ACTIVITY_METRICS_MODULE_LOG_LEVEL
+	int "Activity metrics module log level"
+	depends on ACTIVITY_METRICS_MODULE && LOG
+	default 2
+	help
+	  Sets log level for activity metrics module
+
 config ACTIVITY_METRICS_MODULE_STACK_SIZE
     int "Stack size for activity metrics thread"
     default 4096

@@ -102,6 +102,13 @@ module = BLUETOOTH_MODULE
 module-str = bluetooth module
 source "subsys/logging/Kconfig.template.log_config"
 
+config BLUETOOTH_MODULE_LOG_LEVEL
+	int "Bluetooth module log level"
+	depends on BLUETOOTH_MODULE && LOG
+	default 2
+	help
+	  Sets log level for Bluetooth module
+
 config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
 	int "Duration the system with advertise for"
 	default 60

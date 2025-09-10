@@ -1,0 +1,17 @@
+#!/bin/sh
+# This git hook is designed to extract a given JIRA KEY from the branch name and
+# prepend it to any git commit message. it expects a JIRA key in the format JF-123
+# where JF is the given JIRA key which was set in the JIRA project and -123 is the ticket
+# number that the branch was created for.
+# IF No JIRA key is found then do nothing.
+jira_key="JF"
+
+id="$(git rev-parse --abbrev-ref HEAD | grep "$jira_key-[0-9]*" --only-matching)"
+if [ -n "$id" ]
+then 
+    id="[$id]"    
+    # $1 is the name of the file containing the commit message
+    # Prepend the found pattern to the start of that file, 
+    # which is the start that message
+    sed -i.bak -E "1s/^/${id} /" $1
+fi

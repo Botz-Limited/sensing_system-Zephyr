@@ -10,6 +10,13 @@ module = FOOT_SENSOR_MODULE
 module-str = FOOT_SENSOR module
 source "subsys/logging/Kconfig.template.log_config"
 
+config FOOT_SENSOR_MODULE_LOG_LEVEL
+	int "Foot Sensor module log level"
+	depends on FOOT_SENSOR_MODULE && LOG
+	default 2
+	help
+	  Sets log level for Foot Sensor module
+
 config FOOT_SENSOR_OPTIONAL
 	bool "Make foot sensor optional (non-critical for boot)"
 	default n

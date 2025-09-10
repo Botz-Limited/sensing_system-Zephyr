@@ -11,7 +11,9 @@ rsource "analytics/Kconfig"
 rsource "battery/Kconfig"
 rsource "wifi/Kconfig"
 rsource "idle/Kconfig"
+rsource "data_sd/Kconfig"
 rsource "Kconfig.fota"
+
 
 
 # Sensor Criticality Configuration

@@ -19,13 +19,6 @@ All the necessary tools are installed by the docker file the first time the proj
 
 To build the firmware, use the following West command:
 
-```bash
-west build --build-dir /home/ee/sensing_fw/build /home/ee/sensing_fw/ --board nrf5340dk/nrf5340/cpuapp --sysbuild -- -DCONFIG_PRIMARY_DEVICE=y
 ```
-
-### Build Configuration Options
-
-- **`-DCONFIG_PRIMARY_DEVICE=y`**: Configures the device as a primary device in the sensing network
-- **`-DCONFIG_PRIMARY_DEVICE=n`**: Configures the device as a non-primary (secondary) device
 
 

@@ -1,6 +1,7 @@
 #include "ble_d2d_rx.hpp"
 #include <app.hpp>
 #include <app_event_manager.h>
+#include <app_version.h>
 #include <ble_services.hpp>
 #include <cstring>
 #include <events/foot_sensor_event.h>

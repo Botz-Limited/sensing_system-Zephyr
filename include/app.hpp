@@ -238,6 +238,15 @@ typedef struct {
     uint32_t duration_sec;
 } session_summary_msg_t;
 
+// File copy to SD card message (LAB_VERSION only)
+typedef struct {
+    char source_path[64];      // Path to file in internal flash
+    char dest_filename[64];    // Destination filename on SD card
+} copy_file_to_sd_msg_t;
+
+// Default sampling frequency for activity logging (in Hz)
+#define DEFAULT_ACTIVITY_SAMPLING_FREQUENCY_HZ 100
+
 // Generic message wrapper with Union ---
 // This struct will now directly hold the data payload using a union.
 // The size of this struct will be the size of its largest member in the union.
@@ -248,6 +257,7 @@ typedef struct
     // Metadata for command messages (ignored for sensor data)
     char fw_version[32];
     uint32_t sampling_frequency;
+    uint8_t service_uuid[16];  // BLE service UUID for activity logging
     union {
         foot_samples_t foot_samples;
         bhi360_3d_mapping_t bhi360_3d_mapping;
@@ -276,6 +286,7 @@ typedef struct
         d2d_metrics_packet_t d2d_metrics;  // D2D calculated metrics packet
         biomechanics_extended_msg_t biomechanics_extended;  // Biomechanics extended data
         session_summary_msg_t session_summary;  // Session summary data
+        copy_file_to_sd_msg_t copy_to_sd;  // File copy request (LAB_VERSION only)
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 
@@ -287,6 +298,7 @@ static constexpr uint8_t MSG_QUEUE_DEPTH = 40;
 // --- MESSAGE QUEUE DECLARATION (unchanged) ---
 extern struct k_msgq bluetooth_msgq;
 extern struct k_msgq data_msgq;
+extern struct k_msgq data_sd_msgq;
 extern struct k_msgq motion_sensor_msgq;
 extern struct k_msgq activity_metrics_msgq;
 extern struct k_msgq sensor_data_msgq;  // New multi-thread architecture queue

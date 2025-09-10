@@ -14,7 +14,7 @@
 #include <stdio.h>
 #include "ccc_callback_fix.hpp"
 
-LOG_MODULE_REGISTER(d2d_file_transfer, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(d2d_file_transfer, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // File transfer state
 static struct {

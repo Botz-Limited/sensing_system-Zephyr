@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <app.hpp>  // For generic_message_t and message types
 
-LOG_MODULE_REGISTER(file_proxy, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(file_proxy, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // Buffer sizes
 #define FILE_PROXY_BUF_SIZE 512

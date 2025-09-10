@@ -2,7 +2,7 @@
 #include <string.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(ble_seq_manager, LOG_LEVEL_WRN);
+LOG_MODULE_REGISTER(ble_seq_manager, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
 // Singleton constructor
 BleSequenceManager::BleSequenceManager() 

@@ -11,6 +11,13 @@ module = APP_MODULE
 module-str = app module
 source "subsys/logging/Kconfig.template.log_config"
 
+config APP_MODULE_LOG_LEVEL
+	int "App module log level"
+	depends on APP_MODULE && LOG
+	default 2
+	help
+	  Sets log level for App module
+
 config APP_PAUSED_TIMEOUT_MINS
 	int "Duration the system will stay paused before power off"
 	default 5

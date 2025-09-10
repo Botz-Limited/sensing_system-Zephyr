@@ -37,6 +37,20 @@
 #define STATUS_WEIGHT_NOT_CALIBRATED  (1 << 23)  // Weight sensor not calibrated
 #define STATUS_WEIGHT_CALIBRATING     (1 << 24)  // Weight calibration in progress
 
+// Activity state bits (25-29) - represent different activity states
+#define STATUS_ACTIVITY_1_RUNNING      (1 << 25)  // Activity 1 running (normal activity)
+#define STATUS_ACTIVITY_3_FOOT_STREAM  (1 << 26)  // Activity 3 (foot streaming only)
+#define STATUS_ACTIVITY_4_QUAT_STREAM  (1 << 27)  // Activity 4 (quaternion streaming only)
+#define STATUS_ACTIVITY_5_BOTH_STREAM  (1 << 28)  // Activity 5 (both streaming)
+#define STATUS_ACTIVITY_PAUSED         (1 << 29)  // Activity is paused
+// Note: STATUS_ACTIVITY_IDLE is when none of the above bits are set
+
+// Connection status bits
+#define STATUS_D2D_CONNECTED           (1 << 30)  // Secondary device (D2D) connected
+
+// Mask for activity state bits
+#define STATUS_ACTIVITY_MASK           (0x3E000000)  // Bits 25-29
+
 // Mask for all error bits
 #define STATUS_ALL_ERRORS_MASK        (0x7FFF00)  // Bits 8-22
 

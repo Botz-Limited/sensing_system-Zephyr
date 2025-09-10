@@ -27,6 +27,7 @@
 #include "zephyr/settings/settings.h"
 
 #include "ble_services.hpp"
+#include <ble_services.hpp>
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
@@ -44,6 +45,7 @@
 #include <app.hpp>
 #include <app_event_manager.h>
 #include <app_version.h>
+#include <app_fixed_point.hpp>
 #include <ble_connection_state.h>
 #include <caf/events/module_state_event.h>
 #include <errors.hpp>
@@ -78,6 +80,10 @@
 // Step count functions moved to Activity Metrics Service
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL); // NOLINT
+
+void jis_update_d2d_connection_status(bool connected);
+
+extern uint32_t device_status_bitfield;
 
 extern void cs_external_flash_erase_complete_notify(void);
 // FWD declarations
@@ -256,7 +262,8 @@ void bluetooth_d2d_confirmed(struct bt_conn *conn)
     ble_d2d_tx_set_connection(conn);
     LOG_INF("D2D TX connection set for command forwarding");
 
-    // Notify legacy BLE service that D2D is connected
+    // Notify Information Service that D2D is connected
+    jis_update_d2d_connection_status(true);
 
 #endif
 }
@@ -320,6 +327,7 @@ static void d2d_connected(struct bt_conn *conn, uint8_t err)
         // now, we'll set d2d_conn when we discover D2D services
         LOG_INF("Connection established, will determine if D2D after service "
                 "discovery");
+        jis_update_d2d_connection_status(true);        
 #else
         // For secondary device, any connection is to the primary (D2D)
         d2d_conn = conn;
@@ -387,7 +395,8 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         LOG_INF("Secondary device disconnected! (reason 0x%02x)\n", reason);
 
-        // Notify legacy BLE service that D2D is disconnected
+        // Notify Information Service that D2D is disconnected
+        jis_update_d2d_connection_status(false);
 
         // Clear the secondary connection for FOTA proxy
         fota_proxy_set_secondary_conn(NULL);
@@ -428,6 +437,17 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
     }
 }
 
+// Target service UUID: 5cb36a12-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
+// This is used by both primary (for advertising) and secondary (for scanning)
+static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x3f, 0x00, 0xa8, 0x89,
+                                                0x97, 0x4d, 0x69, 0xca, 0x14, 0x6a, 0xb3, 0x5c};
+
+// Getter function to access the target service UUID from other modules
+extern "C" const uint8_t* get_target_service_uuid(void)
+{
+    return target_service_uuid;
+}
+
 // For secondary (central) role: scanning and connecting
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 
@@ -449,10 +469,6 @@ static const struct bt_le_conn_param conn_param = {
     .latency = 0,
     .timeout = 400,
 };
-
-// Target service UUID: 5cb36a14-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
-static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x3f, 0x00, 0xa8, 0x89,
-                                                0x97, 0x4d, 0x69, 0xca, 0x14, 0x6a, 0xb3, 0x5c};
 
 // Helper function to check if advertisement contains our target UUID
 static bool adv_data_has_uuid(struct net_buf_simple *ad)
@@ -2858,6 +2874,30 @@ static void battery_level_secondary_work_handler(struct k_work *work)
     d2d_tx_notify_battery_level(battery_level.level);
 #endif // !CONFIG_PRIMARY_DEVICE
 }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
+/**
+ * @brief Update D2D connection status
+ * 
+ * @param connected true if secondary device is connected, false otherwise
+ */
+void jis_update_d2d_connection_status(bool connected)
+{
+    uint32_t status = device_status_bitfield;
+    
+    if (connected) {
+        status |= STATUS_D2D_CONNECTED;
+        LOG_INF("D2D connection status: CONNECTED");
+    } else {
+        status &= ~STATUS_D2D_CONNECTED;
+        LOG_INF("D2D connection status: DISCONNECTED");
+    }
+    
+    set_device_status(status);
+}
+
+#endif
 
 /**
  * @brief Resets Bluetooth bonding information.

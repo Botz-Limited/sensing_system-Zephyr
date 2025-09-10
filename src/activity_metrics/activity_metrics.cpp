@@ -230,19 +230,7 @@ static void calculate_realtime_metrics(void);
  * @note This function is a placeholder with TODO for proper message structure. Currently logs metrics only.
  *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
  */
-static void send_periodic_record(void);
-/**
- * @brief Sends activity metrics updates to Bluetooth for real-time feedback.
- * @note This function is partially complete with TODO for defining proper message type. It calculates and sends BLE updates.
- *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
- */
-static void send_ble_update(void);
-/**
- * @brief Work handler for processing foot sensor data from the queue.
- * @param work Pointer to the work item.
- * @note This function is complete and processes foot data safely using double buffering.
- *       Data Requirements: Foot sensor data (specific to one foot per call).
- */
+
 static void process_foot_data_work_handler(struct k_work *work);
 /**
  * @brief Work handler for processing BHI360 IMU data from the queue.
@@ -852,15 +840,6 @@ static void periodic_update_work_handler(struct k_work *work)
         session_state.total_distance_cm = calculate_total_distance();
         update_splits();
         
-        // Send periodic record to data module
-        if (now - last_periodic_update >= PERIODIC_UPDATE_INTERVAL_MS) {
-            send_periodic_record();
-            last_periodic_update = now;
-        }
-        
-        // BLE updates are published exclusively by realtime_metrics module at 1Hz
-        // Removed local BLE send to avoid duplicate publishers and stale zeros
-        // (was calling send_ble_update here)
         
         // Reschedule for next update
         k_work_schedule_for_queue(&activity_metrics_work_q, &periodic_update_work, K_MSEC(100));
@@ -1075,107 +1054,6 @@ static void calculate_realtime_metrics(void)
 }
 #endif
 
-// Send periodic record to data module
-static void send_periodic_record(void)
-{
-    // For now, just log the metrics
-  //  LOG_WRN("Periodic update: cadence=%.1f, contact=%.1fms, flight=%.1fms",
-    //        (double)sensor_data.current_cadence, (double)sensor_data.avg_contact_time, (double)sensor_data.avg_flight_time);
-    
-    // TODO: Create proper message structure for activity records
-    // This would send to data module for logging
-}
-
-// Send BLE update
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-static void send_ble_update(void)
-{
-    RealtimeMetricsPacket packet;
-    memset(&packet, 0, sizeof(packet));
-    
-    // Calculate delta time
-    uint32_t now = k_uptime_get_32();
-    packet.delta_time_ms = now - session_state.last_ble_update_time;
-    session_state.last_ble_update_time = now;
-    
-    // Populate metrics
-    packet.cadence_x2 = (uint16_t)(sensor_data.current_cadence * 2);
-    packet.contact_time_ms = (uint16_t)sensor_data.avg_contact_time;
-    packet.distance_m = (uint16_t)(session_state.total_distance_cm / 100);
-    packet.step_count = sensor_data.step_count;
-    
-    // Calculate pace
-    float pace_sec_km = calculate_pace_from_cadence(sensor_data.current_cadence);
-    packet.pace_sec_per_km = (uint16_t)pace_sec_km;
-    
-    // Get strike pattern from step detection
-    StepDetectionState left_state, right_state;
-    step_detection_get_metrics(0, &left_state);
-    step_detection_get_metrics(1, &right_state);
-    
-    // Use most common strike pattern
-    packet.foot_strike = (left_state.initial_contact_region + right_state.initial_contact_region) / 2;
-    
-    // Composite scores
-    packet.form_score = calculate_form_score();
-    packet.balance_lr = calculate_balance_score();
-    packet.efficiency = calculate_efficiency_score(
-        sensor_data.avg_contact_time,
-        sensor_data.avg_flight_time
-    );
-    packet.fatigue_level = calculate_fatigue_level();
-    
-    // Send to Bluetooth module
-    // Send real-time metrics to Bluetooth
-    generic_message_t ble_msg;
-    ble_msg.sender = SENDER_ACTIVITY_METRICS;
-    ble_msg.type = MSG_TYPE_ACTIVITY_METRICS_BLE;
-    
-    // Create local metrics structure with current data
-    realtime_metrics_t local_metrics;
-    memset(&local_metrics, 0, sizeof(local_metrics));
-    local_metrics.cadence_spm = (uint16_t)sensor_data.current_cadence;
-    local_metrics.pace_sec_km = packet.pace_sec_per_km;
-    local_metrics.distance_m = session_state.total_distance_cm / 100;
-    local_metrics.form_score = packet.form_score;
-    local_metrics.balance_lr_pct = packet.balance_lr;
-    local_metrics.ground_contact_ms = (uint16_t)sensor_data.avg_contact_time;
-    local_metrics.flight_time_ms = (uint16_t)sensor_data.avg_flight_time;
-    local_metrics.efficiency_score = packet.efficiency;
-    local_metrics.alerts = 0; // No alerts for now
-    
-    memcpy(&ble_msg.data.realtime_metrics, &local_metrics, sizeof(realtime_metrics_t));
-    
-    if (k_msgq_put(&bluetooth_msgq, &ble_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to send realtime metrics to Bluetooth queue");
-    }
-    
-    // Also send biomechanics extended data
-    generic_message_t bio_msg;
-    bio_msg.sender = SENDER_ACTIVITY_METRICS;
-    bio_msg.type = MSG_TYPE_BIOMECHANICS_EXTENDED;
-    
-    // Fill biomechanics data from local metrics (these are placeholders - update with actual calculated values)
-    bio_msg.data.biomechanics_extended.pronation_left = 0;  // TODO: Get from actual calculations
-    bio_msg.data.biomechanics_extended.pronation_right = 0; // TODO: Get from actual calculations
-    bio_msg.data.biomechanics_extended.loading_rate_left = 0; // TODO: Get from actual calculations
-    bio_msg.data.biomechanics_extended.loading_rate_right = 0; // TODO: Get from actual calculations
-    bio_msg.data.biomechanics_extended.arch_collapse_left = 0; // TODO: Get from actual calculations
-    bio_msg.data.biomechanics_extended.arch_collapse_right = 0; // TODO: Get from actual calculations
-    
-    if (k_msgq_put(&bluetooth_msgq, &bio_msg, K_NO_WAIT) != 0) {
-        LOG_WRN("Failed to send biomechanics data to Bluetooth queue");
-    }
-    
-   // LOG_WRN("BLE update sent: pace=%d s/km, cadence=%d, form=%d",
-     //       packet.pace_sec_per_km, packet.cadence_x2/2, packet.form_score);
-}
-#else
-static void send_ble_update(void)
-{
-    // Secondary device: no BLE updates for bilateral metrics
-}
-#endif
 
 // Helper functions
 static float calculate_pace_from_cadence(float cadence)
