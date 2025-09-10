@@ -92,7 +92,7 @@ static err_t init_adc_channels(void)
     // Configure all 8 channels
     for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
     {
-        channel_configs[i].gain = ADC_GAIN_1;
+        channel_configs[i].gain = ADC_GAIN_1_6;
         channel_configs[i].reference = ADC_REF_INTERNAL;
         channel_configs[i].acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10);
         channel_configs[i].channel_id = i;                                         // Channel 0-7 maps to AIN0-AIN7
@@ -173,7 +173,8 @@ static void process_adc_samples(int16_t *raw_data)
             // Apply calibration offset and populate message
             for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
             {
-                int16_t calibrated_value = raw_data[i] - saadc_offset[i];
+             //   int16_t calibrated_value = raw_data[i] - saadc_offset[i];
+                int16_t calibrated_value = raw_data[i]; //discard calibrated valuues at the moment.
                 msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
             }
 
