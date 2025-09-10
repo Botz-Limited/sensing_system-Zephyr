@@ -32,6 +32,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL);
 // External message queues
 extern struct k_msgq sensor_data_msgq;
 extern struct k_msgq bluetooth_msgq;
+extern struct k_msgq data_msgq; // For sending calibration data to data module
 #if IS_ENABLED(CONFIG_LAB_VERSION)
 extern struct k_msgq data_sd_msgq; // For sending to data_sd module (lab version)
 #endif
@@ -54,6 +55,13 @@ static atomic_t logging_active = ATOMIC_INIT(0);
 // Local streaming state
 static bool foot_sensor_streaming_enabled = false;
 
+// Weight map calibration state
+static bool weight_map_calibration_active = false;
+static uint32_t weight_map_sample_count = 0;
+static constexpr uint32_t WEIGHT_MAP_SAMPLES = 500; // 5 seconds at 100Hz
+static uint32_t weight_map_sum[SAADC_CHANNEL_COUNT] = {0};  // Changed to uint32_t to avoid overflow
+static foot_weight_map_data_t weight_map_data;
+
 // ADC device and configuration
 static const struct device *adc_dev;
 static struct adc_channel_cfg channel_configs[SAADC_CHANNEL_COUNT];
@@ -75,6 +83,9 @@ static void foot_sensor_thread(void *p1, void *p2, void *p3);
 static err_t init_adc_channels(void);
 static void calibrate_channels(void);
 static void process_adc_samples(int16_t *raw_data);
+static void start_weight_map_calibration(void);
+static void process_weight_map_sample(int16_t *raw_data);
+static void complete_weight_map_calibration(void);
 
 /**
  * @brief Initialize ADC channels
@@ -131,11 +142,126 @@ static void calibrate_channels(void)
 }
 
 /**
+ * @brief Start weight map calibration
+ */
+static void start_weight_map_calibration(void)
+{
+    LOG_INF("Starting foot weight map calibration - stand still for 5 seconds");
+    
+    // Reset calibration state
+    weight_map_calibration_active = true;
+    weight_map_sample_count = 0;
+    memset(weight_map_sum, 0, sizeof(weight_map_sum));
+    memset(&weight_map_data, 0, sizeof(weight_map_data));
+}
+
+/**
+ * @brief Process weight map calibration sample
+ */
+static void process_weight_map_sample(int16_t *raw_data)
+{
+    if (weight_map_sample_count < WEIGHT_MAP_SAMPLES)
+    {
+        // Accumulate sensor values
+        for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+        {
+            // Use raw values without offset calibration for weight map
+            // ADC is 14-bit (0-16383), ensure we handle as unsigned
+            uint16_t value = (raw_data[i] < 0) ? 0 : (uint16_t)raw_data[i];
+            
+            // Accumulate safely - max possible: 16383 * 500 = 8,191,500 (fits in uint32_t)
+            weight_map_sum[i] += value;
+        }
+        
+        weight_map_sample_count++;
+        
+        // Log progress every second (100 samples)
+        if (weight_map_sample_count % 100 == 0)
+        {
+            LOG_INF("Weight map calibration progress: %d/%d samples", 
+                    weight_map_sample_count, WEIGHT_MAP_SAMPLES);
+        }
+        
+        // Check if calibration is complete
+        if (weight_map_sample_count >= WEIGHT_MAP_SAMPLES)
+        {
+            complete_weight_map_calibration();
+        }
+    }
+}
+
+/**
+ * @brief Complete weight map calibration and send data
+ */
+static void complete_weight_map_calibration(void)
+{
+    LOG_INF("Weight map calibration complete - processing data");
+    
+    // Calculate averages and total weight
+    uint32_t total = 0;
+    for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+    {
+        weight_map_data.sensor_map[i] = (uint16_t)(weight_map_sum[i] / WEIGHT_MAP_SAMPLES);
+        total += weight_map_data.sensor_map[i];
+    }
+    
+    weight_map_data.total_weight = total;
+    weight_map_data.sample_count = WEIGHT_MAP_SAMPLES;
+    weight_map_data.timestamp_ms = k_uptime_get_32();
+    weight_map_data.is_valid = true;
+    
+    // Calculate weight distribution percentages
+    if (total > 0)
+    {
+        for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+        {
+            weight_map_data.weight_distribution[i] = 
+                (float)weight_map_data.sensor_map[i] * 100.0f / (float)total;
+        }
+    }
+    
+    // Log the calibration results
+    LOG_INF("Weight map calibration results:");
+    LOG_INF("  Total weight: %u", weight_map_data.total_weight);
+    for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+    {
+        LOG_INF("  Sensor[%d]: %u (%.1f%%)", i, 
+                weight_map_data.sensor_map[i], 
+                weight_map_data.weight_distribution[i]);
+    }
+    
+    // Send calibration data to data module for storage
+    generic_message_t msg;
+    msg.sender = SENDER_FOOT_SENSOR_THREAD;
+    msg.type = MSG_TYPE_FOOT_WEIGHT_MAP_DATA;
+    memcpy(&msg.data.foot_weight_map, &weight_map_data, sizeof(foot_weight_map_data_t));
+    
+    if (k_msgq_put(&data_msgq, &msg, K_NO_WAIT) != 0)
+    {
+        LOG_ERR("Failed to send weight map calibration data to data module");
+    }
+    else
+    {
+        LOG_INF("Weight map calibration data sent to data module");
+    }
+    
+    // Reset calibration state
+    weight_map_calibration_active = false;
+}
+
+/**
  * @brief Process ADC samples and send to message queues
  */
 static void process_adc_samples(int16_t *raw_data)
 {
     static uint8_t ble_sample_counter = 0;
+
+    // Handle weight map calibration if active
+    if (weight_map_calibration_active)
+    {
+        process_weight_map_sample(raw_data);
+        return; // Don't process normal samples during calibration
+    }
 
     if (!calibration_done)
     {
@@ -473,6 +599,17 @@ static void foot_sensor_thread(void *p1, void *p2, void *p3)
     // Main sampling loop
     while (true)
     {
+        // Check for weight map calibration command via message queue
+        generic_message_t cmd_msg;
+        if (k_msgq_get(&bluetooth_msgq, &cmd_msg, K_NO_WAIT) == 0)
+        {
+            if (cmd_msg.type == MSG_TYPE_START_FOOT_WEIGHT_MAP)
+            {
+                LOG_INF("Received weight map calibration command");
+                start_weight_map_calibration();
+            }
+        }
+
         // Read all 8 channels
         int ret = adc_read(adc_dev, &sequence);
         if (ret < 0)

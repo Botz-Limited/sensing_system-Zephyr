@@ -426,6 +426,71 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     break;
                 }
 
+                case MSG_TYPE_FOOT_WEIGHT_MAP_DATA: {
+                    // Process foot weight map calibration data
+                    LOG_INF("Received foot weight map calibration data");
+                    
+                    // Save the calibration data to external flash
+                    if (filesystem_available)
+                    {
+                        // Create calibration directory if it doesn't exist
+                        int ret = fs_mkdir(calibration_dir_path);
+                        if (ret != 0 && ret != -EEXIST)
+                        {
+                            LOG_ERR("Failed to create calibration directory: %d", ret);
+                        }
+                        else
+                        {
+                            // Create filename for foot weight map calibration
+                            char filename[util::max_path_length];
+                            snprintk(filename, sizeof(filename), "%s/foot_weight_map.bin", calibration_dir_path);
+                            
+                            // Open file for writing
+                            struct fs_file_t file;
+                            fs_file_t_init(&file);
+                            
+                            ret = fs_open(&file, filename, FS_O_CREATE | FS_O_WRITE);
+                            if (ret != 0)
+                            {
+                                LOG_ERR("Failed to open foot weight map file %s: %d", filename, ret);
+                            }
+                            else
+                            {
+                                // Write calibration data
+                                ret = fs_write(&file, &msg.data.foot_weight_map, sizeof(foot_weight_map_data_t));
+                                if (ret < 0)
+                                {
+                                    LOG_ERR("Failed to write foot weight map data: %d", ret);
+                                }
+                                else
+                                {
+                                    LOG_INF("Foot weight map calibration saved to %s", filename);
+                                    LOG_INF("  Total weight: %u", msg.data.foot_weight_map.total_weight);
+                                    LOG_INF("  Timestamp: %u ms", msg.data.foot_weight_map.timestamp_ms);
+                                    LOG_INF("  Sample count: %u", msg.data.foot_weight_map.sample_count);
+                                    
+                                    // Log sensor distribution
+                                    for (uint8_t i = 0; i < NUM_FOOT_SENSOR_CHANNELS; i++)
+                                    {
+                                        LOG_INF("  Sensor[%d]: %u (%.1f%%)", i,
+                                                msg.data.foot_weight_map.sensor_map[i],
+                                                msg.data.foot_weight_map.weight_distribution[i]);
+                                    }
+                                }
+                                
+                                // Sync and close file
+                                fs_sync(&file);
+                                fs_close(&file);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        LOG_WRN("Cannot save foot weight map - filesystem not available");
+                    }
+                    break;
+                }
+
                 default:
                     LOG_WRN("Received unsupported message type %d  from sender %d", msg.type, msg.sender);
                     break;

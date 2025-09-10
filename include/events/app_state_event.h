@@ -88,6 +88,8 @@ typedef enum
     MSG_TYPE_BIOMECHANICS_EXTENDED, // Biomechanics extended data for BLE
     MSG_TYPE_SESSION_SUMMARY, // Session summary data for BLE
     MSG_TYPE_COPY_FILE_TO_SD, // Command to copy a file to SD card (LAB_VERSION only)
+    MSG_TYPE_START_FOOT_WEIGHT_MAP, // Start foot weight map calibration
+    MSG_TYPE_FOOT_WEIGHT_MAP_DATA, // Foot weight map calibration data
 } msg_type_t;
 
 // Define sender types

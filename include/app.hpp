@@ -137,6 +137,16 @@ typedef struct {
     bool is_calibrated;     // Flag to indicate if calibration is valid
 } weight_calibration_data_t;
 
+// Foot weight map calibration data structure
+typedef struct {
+    uint16_t sensor_map[NUM_FOOT_SENSOR_CHANNELS];  // Average sensor values during standing
+    uint32_t total_weight;                          // Total weight across all sensors
+    float weight_distribution[NUM_FOOT_SENSOR_CHANNELS]; // Percentage distribution per sensor
+    uint32_t timestamp_ms;                          // When calibration was performed
+    uint16_t sample_count;                          // Number of samples averaged
+    bool is_valid;                                  // Flag to indicate if calibration is valid
+} foot_weight_map_data_t;
+
 // Weight calibration step data (for calibration procedure)
 typedef struct {
     float known_weight_kg;  // User's actual weight for calibration
@@ -287,6 +297,7 @@ typedef struct
         biomechanics_extended_msg_t biomechanics_extended;  // Biomechanics extended data
         session_summary_msg_t session_summary;  // Session summary data
         copy_file_to_sd_msg_t copy_to_sd;  // File copy request (LAB_VERSION only)
+        foot_weight_map_data_t foot_weight_map;  // Foot weight map calibration data
     } data;                         // All actual data payloads will be stored here
 } generic_message_t;
 
