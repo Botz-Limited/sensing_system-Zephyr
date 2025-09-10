@@ -243,7 +243,7 @@
         };
     };
 		}; 
-        spi-max-frequency = <8000000>;
+        spi-max-frequency = <20000000>; // 20 MHz
 
         
     

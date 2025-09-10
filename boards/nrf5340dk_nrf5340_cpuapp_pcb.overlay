@@ -221,7 +221,7 @@
 /* Enable SPI4 for SD card */
 &spi4 {
     compatible = "nordic,nrf-spim";
-    status = "disabled";
+    status = "okay";
     cs-gpios = <&gpio0 11 GPIO_ACTIVE_LOW>;
     pinctrl-0 = <&spi4_default>;
     pinctrl-1 = <&spi4_sleep>;
@@ -230,14 +230,14 @@
     // SD Card device node
     sdhc: sdhc@0 {
         compatible = "zephyr,sdhc-spi-slot";
-        status = "disabled";
+        status = "okay";
         reg = <0>;
         label = "SDHC";
         
         sdmmc {
 			compatible = "zephyr,sdmmc-disk";
 			disk-name = "SD";
-			status = "disabled";
+			status = "okay";
 
             partitions {
         compatible = "fixed-partitions";
@@ -246,11 +246,11 @@
 
         sdmmc_part: partition@0 {
             label = "storage_sd";
-            reg = <0x00000000 0x00006000>;
+            reg = <0x00000000 0x00906000>;
         };
     };
 		}; 
-        spi-max-frequency = <8000000>;
+        spi-max-frequency = <20000000>; // 20 MHz
     
     };
 };
