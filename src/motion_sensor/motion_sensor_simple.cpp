@@ -35,7 +35,8 @@
 // BHI360 includes
 #include "BHY2-Sensor-API/bhy2.h"
 #include "BHY2-Sensor-API/bhy2_parse.h"
-#include "BHY2-Sensor-API/firmware/bhi360/BHI360_Aux_BMM150.fw.h"
+// Try basic firmware which should have all standard sensors including step counter
+#include "BHY2-Sensor-API/firmware/bhi360/BHI360.fw.h"  // Basic firmware with standard sensors
 #include <bhi360.h>
 
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -84,17 +85,40 @@ static bool activity_logging_active = false;
 
 #include <zephyr/drivers/sensor.h> // For standard sensor value types
 
-// Sensor IDs for BHI360 virtual sensors
+// Sensor IDs for BHI360 virtual sensors - Core sensors
 static constexpr uint8_t QUAT_SENSOR_ID = BHY2_SENSOR_ID_GAMERV;      // 28: Game Rotation Vector (no mag)
-static constexpr uint8_t LACC_SENSOR_ID = BHY2_SENSOR_ID_ACC;         // Linear Acceleration (direct ID if not defined)
-static constexpr uint8_t GYRO_SENSOR_ID = BHY2_SENSOR_ID_GYRO;        // 3: Raw Gyroscope
-static constexpr uint8_t ACCEL_SENSOR_ID = BHY2_SENSOR_ID_ACC;        // 1: Raw Accelerometer (dependency)
-static constexpr uint8_t STEP_COUNTER_SENSOR_ID = BHY2_SENSOR_ID_STC; // 43: Step Counter (corrected back)
+static constexpr uint8_t ACCEL_SENSOR_ID = BHY2_SENSOR_ID_ACC;        // 4: Calibrated Accelerometer (with gravity)
+static constexpr uint8_t GYRO_SENSOR_ID = BHY2_SENSOR_ID_GYRO;        // 13: Calibrated Gyroscope
+
+// Step counter variants - try multiple versions to find which one is available
+static constexpr uint8_t STEP_COUNTER_SENSOR_ID = BHY2_SENSOR_ID_STC; // 52: Step Counter (standard)
+static constexpr uint8_t STEP_DETECTOR_SENSOR_ID = BHY2_SENSOR_ID_STD; // 50: Step Detector (individual steps)
+static constexpr uint8_t STEP_COUNTER_WU_ID = BHY2_SENSOR_ID_STC_WU;   // 53: Step Counter Wake Up
+static constexpr uint8_t STEP_DETECTOR_WU_ID = BHY2_SENSOR_ID_STD_WU;  // 94: Step Detector Wake Up
+static constexpr uint8_t STEP_COUNTER_LP_ID = BHY2_SENSOR_ID_STC_LP;   // 136: Step Counter Low Power
+static constexpr uint8_t STEP_DETECTOR_LP_ID = BHY2_SENSOR_ID_STD_LP;  // 137: Step Detector Low Power
+
+// Track which step counter variant is actually available
+static uint8_t active_step_counter_id = 0;
+static uint8_t active_step_detector_id = 0;
+
+// Additional sensors available with HWActivity firmware
+static constexpr uint8_t LACC_SENSOR_ID = BHY2_SENSOR_ID_LACC;        // 31: Linear Acceleration (gravity removed)
+static constexpr uint8_t GRAVITY_SENSOR_ID = BHY2_SENSOR_ID_GRA;      // 28: Gravity vector
+static constexpr uint8_t ACTIVITY_SENSOR_ID = BHY2_SENSOR_ID_AR;      // 63: Activity Recognition
+
+// Track which sensors are actually available
+static bool lacc_available = false;
+static bool gravity_available = false;
+static bool activity_available = false;
 
 // Static variables to hold the latest sensor values (file scope for access across functions)
 static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0, latest_quat_w = 0, latest_quat_accuracy = 0;
-static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;
+static float latest_acc_x = 0, latest_acc_y = 0, latest_acc_z = 0;  // Accelerometer with gravity
+static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;  // Linear acceleration (gravity removed)
 static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
+static float latest_gravity_x = 0, latest_gravity_y = 0, latest_gravity_z = 0;  // Gravity vector
+static uint8_t latest_activity_type = 0;  // Activity recognition result
 static uint64_t latest_timestamp = 0;
 
 // Forward declarations
@@ -116,6 +140,7 @@ static void check_and_save_calibration_updates(const struct device *bhi360_dev);
  */
 static err_t init_bhi360(void)
 {
+    uint32_t actual_len;
     // Check if driver is ready
     if (!device_is_ready(bhi360_dev))
     {
@@ -204,47 +229,259 @@ static err_t init_bhi360(void)
         return err_t::MOTION_ERROR;
     }
 
+    // Check sensor availability before configuration
+    LOG_INF("BHI360: Checking sensor availability with firmware");
+    
+    // First check if physical step counter/detector are present
+    LOG_INF("  Checking physical sensors:");
+    uint8_t phys_present[32] = {0};
+    rslt = bhy2_get_parameter(BHY2_PARAM_SYS_PHYS_SENSOR_PRESENT, phys_present, sizeof(phys_present), &actual_len, bhy2_ptr);
+    if (rslt == BHY2_OK) {
+        // Check for physical step counter (ID 32) and detector (ID 33)
+        if (phys_present[32/8] & (1 << (32 % 8))) {
+            LOG_INF("    Physical Step Counter (32) - Present");
+        } else {
+            LOG_WRN("    Physical Step Counter (32) - Not Present");
+        }
+        if (phys_present[33/8] & (1 << (33 % 8))) {
+            LOG_INF("    Physical Step Detector (33) - Present");
+        } else {
+            LOG_WRN("    Physical Step Detector (33) - Not Present");
+        }
+    }
+    
+    // Check core sensors (these should always be available)
+    if (bhy2_is_sensor_available(QUAT_SENSOR_ID, bhy2_ptr))
+    {
+        LOG_INF("  Quaternion (Game Rotation Vector) - Available");
+    }
+    else
+    {
+        LOG_ERR("  Quaternion sensor not available!");
+        return err_t::MOTION_ERROR;
+    }
+    
+    if (bhy2_is_sensor_available(ACCEL_SENSOR_ID, bhy2_ptr))
+    {
+        LOG_INF("  Accelerometer (with gravity) - Available");
+    }
+    else
+    {
+        LOG_WRN("  Accelerometer sensor not available");
+    }
+    
+    if (bhy2_is_sensor_available(GYRO_SENSOR_ID, bhy2_ptr))
+    {
+        LOG_INF("  Gyroscope - Available");
+    }
+    else
+    {
+        LOG_ERR("  Gyroscope sensor not available!");
+        return err_t::MOTION_ERROR;
+    }
+    
+    // Check all step counter variants to find which one is available
+    LOG_INF("  Checking step counter variants:");
+    
+    if (bhy2_is_sensor_available(STEP_COUNTER_SENSOR_ID, bhy2_ptr))
+    {
+        LOG_INF("    Step Counter (52) - Available");
+        active_step_counter_id = STEP_COUNTER_SENSOR_ID;
+    }
+    else if (bhy2_is_sensor_available(STEP_COUNTER_WU_ID, bhy2_ptr))
+    {
+        LOG_INF("    Step Counter Wake Up (53) - Available");
+        active_step_counter_id = STEP_COUNTER_WU_ID;
+    }
+    else if (bhy2_is_sensor_available(STEP_COUNTER_LP_ID, bhy2_ptr))
+    {
+        LOG_INF("    Step Counter Low Power (136) - Available");
+        active_step_counter_id = STEP_COUNTER_LP_ID;
+    }
+    else
+    {
+        LOG_WRN("    No step counter variant available");
+    }
+    
+    if (bhy2_is_sensor_available(STEP_DETECTOR_SENSOR_ID, bhy2_ptr))
+    {
+        LOG_INF("    Step Detector (50) - Available");
+        active_step_detector_id = STEP_DETECTOR_SENSOR_ID;
+    }
+    else if (bhy2_is_sensor_available(STEP_DETECTOR_WU_ID, bhy2_ptr))
+    {
+        LOG_INF("    Step Detector Wake Up (94) - Available");
+        active_step_detector_id = STEP_DETECTOR_WU_ID;
+    }
+    else if (bhy2_is_sensor_available(STEP_DETECTOR_LP_ID, bhy2_ptr))
+    {
+        LOG_INF("    Step Detector Low Power (137) - Available");
+        active_step_detector_id = STEP_DETECTOR_LP_ID;
+    }
+    else
+    {
+        LOG_WRN("    No step detector variant available");
+    }
+    
+    // Check additional sensors from HWActivity firmware
+    lacc_available = bhy2_is_sensor_available(LACC_SENSOR_ID, bhy2_ptr);
+    if (lacc_available)
+    {
+        LOG_INF("  Linear Acceleration (gravity removed) - Available");
+    }
+    else
+    {
+        LOG_WRN("  Linear Acceleration not available, will use regular accelerometer");
+    }
+    
+    gravity_available = bhy2_is_sensor_available(GRAVITY_SENSOR_ID, bhy2_ptr);
+    if (gravity_available)
+    {
+        LOG_INF("  Gravity Vector - Available");
+    }
+    else
+    {
+        LOG_DBG("  Gravity Vector not available");
+    }
+    
+    activity_available = bhy2_is_sensor_available(ACTIVITY_SENSOR_ID, bhy2_ptr);
+    if (activity_available)
+    {
+        LOG_INF("  Activity Recognition - Available");
+    }
+    else
+    {
+        LOG_DBG("  Activity Recognition not available");
+    }
+
     // Configure sensors at 100Hz
     float motion_sensor_rate = 100.0f;
     float step_counter_rate = 20.0f;
+    float activity_rate = 5.0f;  // Activity recognition at 5Hz
     uint32_t report_latency_ms = 0;
 
     LOG_INF("BHI360: Configuring sensors");
-
+    k_msleep(SAMPLE_PERIOD_MS);
+    // Configure core sensors (required)
     rslt = bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
     if (rslt != BHY2_OK)
     {
         LOG_ERR("Failed to configure quaternion sensor: %d", rslt);
         return err_t::MOTION_ERROR;
     }
-
-    rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
+    k_msleep(SAMPLE_PERIOD_MS);
+    // Configure accelerometer (we'll use this for now, even if LACC is available)
+    rslt = bhy2_set_virt_sensor_cfg(ACCEL_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
     if (rslt != BHY2_OK)
     {
-        LOG_ERR("Failed to configure linear acceleration sensor: %d", rslt);
+        LOG_ERR("Failed to configure accelerometer sensor: %d", rslt);
         return err_t::MOTION_ERROR;
     }
-
+    k_msleep(SAMPLE_PERIOD_MS);
     rslt = bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
     if (rslt != BHY2_OK)
     {
         LOG_ERR("Failed to configure gyroscope sensor: %d", rslt);
         return err_t::MOTION_ERROR;
     }
-
-    rslt = bhy2_set_virt_sensor_cfg(STEP_COUNTER_SENSOR_ID, step_counter_rate, report_latency_ms, bhy2_ptr);
-    if (rslt != BHY2_OK)
+k_msleep(SAMPLE_PERIOD_MS);
+    
+    // Configure whichever step counter variant is available
+    if (active_step_counter_id != 0)
     {
-        LOG_ERR("Failed to configure step counter sensor: %d", rslt);
-        return err_t::MOTION_ERROR;
+        rslt = bhy2_set_virt_sensor_cfg(active_step_counter_id, step_counter_rate, report_latency_ms, bhy2_ptr);
+        if (rslt != BHY2_OK)
+        {
+            LOG_ERR("Failed to configure step counter sensor (ID %u): %d", active_step_counter_id, rslt);
+            active_step_counter_id = 0; // Mark as unavailable
+        }
+        else
+        {
+            LOG_INF("Step counter configured successfully (ID %u)", active_step_counter_id);
+        }
     }
-
+    
+    k_msleep(SAMPLE_PERIOD_MS);
+    
+    // Configure whichever step detector variant is available
+    if (active_step_detector_id != 0)
+    {
+        rslt = bhy2_set_virt_sensor_cfg(active_step_detector_id, step_counter_rate, report_latency_ms, bhy2_ptr);
+        if (rslt != BHY2_OK)
+        {
+            LOG_WRN("Failed to configure step detector sensor (ID %u): %d", active_step_detector_id, rslt);
+            active_step_detector_id = 0; // Mark as unavailable
+        }
+        else
+        {
+            LOG_INF("Step detector configured successfully (ID %u)", active_step_detector_id);
+        }
+    }
+k_msleep(SAMPLE_PERIOD_MS);
+    // Configure optional sensors if available
+    if (lacc_available)
+    {
+        rslt = bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
+        if (rslt != BHY2_OK)
+        {
+            LOG_WRN("Failed to configure linear acceleration sensor: %d", rslt);
+            lacc_available = false;
+        }
+    }
+    k_msleep(SAMPLE_PERIOD_MS);
+    if (gravity_available)
+    {
+        rslt = bhy2_set_virt_sensor_cfg(GRAVITY_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
+        if (rslt != BHY2_OK)
+        {
+            LOG_WRN("Failed to configure gravity sensor: %d", rslt);
+            gravity_available = false;
+        }
+    }
+    k_msleep(SAMPLE_PERIOD_MS);
+    if (activity_available)
+    {
+        rslt = bhy2_set_virt_sensor_cfg(ACTIVITY_SENSOR_ID, activity_rate, report_latency_ms, bhy2_ptr);
+        if (rslt != BHY2_OK)
+        {
+            LOG_WRN("Failed to configure activity recognition: %d", rslt);
+            activity_available = false;
+        }
+    }
+k_msleep(SAMPLE_PERIOD_MS);
     // Register callbacks - ESSENTIAL for data parsing
     LOG_INF("BHI360: Registering callbacks");
-    rslt |= bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
-    rslt |= bhy2_register_fifo_parse_callback(LACC_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+    
+    // Register core sensor callbacks (always register these)
+    rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+    rslt |= bhy2_register_fifo_parse_callback(ACCEL_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
     rslt |= bhy2_register_fifo_parse_callback(GYRO_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
-    rslt |= bhy2_register_fifo_parse_callback(STEP_COUNTER_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+    
+    // Register callbacks for whichever step counter/detector variants are available
+    if (active_step_counter_id != 0)
+    {
+        rslt |= bhy2_register_fifo_parse_callback(active_step_counter_id, parse_all_sensors, NULL, bhy2_ptr);
+    }
+    if (active_step_detector_id != 0)
+    {
+        rslt |= bhy2_register_fifo_parse_callback(active_step_detector_id, parse_all_sensors, NULL, bhy2_ptr);
+    }
+    
+    // Register optional sensor callbacks if available
+    if (lacc_available)
+    {
+        rslt |= bhy2_register_fifo_parse_callback(LACC_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+    }
+    if (gravity_available)
+    {
+        rslt |= bhy2_register_fifo_parse_callback(GRAVITY_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+    }
+    if (activity_available)
+    {
+        rslt |= bhy2_register_fifo_parse_callback(ACTIVITY_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+    }
+    
+    // Always register meta event callback
     rslt |= bhy2_register_fifo_parse_callback(BHY2_SYS_ID_META_EVENT, parse_meta_event, NULL, bhy2_ptr);
 
     if (rslt != BHY2_OK)
@@ -353,15 +590,65 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             break;
         }
 
-        case LACC_SENSOR_ID: {
+        case ACCEL_SENSOR_ID: {
             struct bhy2_data_xyz data;
             bhy2_parse_xyz(callback_info->data_ptr, &data);
 
-            // Linear acceleration is in m/s^2, scaled by 100
-            latest_lacc_x = (float)data.x / 100.0f;
-            latest_lacc_y = (float)data.y / 100.0f;
-            latest_lacc_z = (float)data.z / 100.0f;
-            motion_update_mask |= LACC_UPDATED;
+            // Accelerometer data (with gravity) is in m/s^2
+            // BHI360 HWActivity firmware uses LSB = 1/1000 m/s^2
+            latest_acc_x = (float)data.x / 1000.0f;
+            latest_acc_y = (float)data.y / 1000.0f;
+            latest_acc_z = (float)data.z / 1000.0f;
+            
+            // For backward compatibility, also update lacc variables if true LACC not available
+            if (!lacc_available) {
+                latest_lacc_x = latest_acc_x;
+                latest_lacc_y = latest_acc_y;
+                latest_lacc_z = latest_acc_z;
+                motion_update_mask |= LACC_UPDATED;
+            }
+            break;
+        }
+
+        case LACC_SENSOR_ID: {
+            if (lacc_available) {
+                struct bhy2_data_xyz data;
+                bhy2_parse_xyz(callback_info->data_ptr, &data);
+
+                // Linear acceleration (gravity removed) is in m/s^2
+                // BHI360 HWActivity firmware uses LSB = 1/1000 m/s^2
+                latest_lacc_x = (float)data.x / 1000.0f;
+                latest_lacc_y = (float)data.y / 1000.0f;
+                latest_lacc_z = (float)data.z / 1000.0f;
+                motion_update_mask |= LACC_UPDATED;
+            }
+            break;
+        }
+
+        case GRAVITY_SENSOR_ID: {
+            if (gravity_available) {
+                struct bhy2_data_xyz data;
+                bhy2_parse_xyz(callback_info->data_ptr, &data);
+
+                // Gravity vector is in m/s^2
+                // BHI360 HWActivity firmware uses LSB = 1/1000 m/s^2
+                latest_gravity_x = (float)data.x / 1000.0f;
+                latest_gravity_y = (float)data.y / 1000.0f;
+                latest_gravity_z = (float)data.z / 1000.0f;
+            }
+            break;
+        }
+
+        case ACTIVITY_SENSOR_ID: {
+            if (activity_available) {
+                // Activity recognition data format varies by firmware
+                // Typically first byte is activity type
+                if (callback_info->data_size >= 1) {
+                    latest_activity_type = callback_info->data_ptr[0];
+                    // Activity types (firmware dependent):
+                    // 0: Unknown, 1: Still, 2: Walking, 3: Running, 4: On Bicycle, 5: In Vehicle, 6: Tilting
+                }
+            }
             break;
         }
 
@@ -369,35 +656,66 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             struct bhy2_data_xyz data;
             bhy2_parse_xyz(callback_info->data_ptr, &data);
 
-            // Gyroscope data is in rad/s, scaled by 2^14
-            latest_gyro_x = (float)data.x / 16384.0f;
-            latest_gyro_y = (float)data.y / 16384.0f;
-            latest_gyro_z = (float)data.z / 16384.0f;
+            // Gyroscope data: BHI360 HWActivity firmware uses LSB = 1/2900 dps
+            // Convert from degrees/s to rad/s: multiply by PI/180
+            const float DEG_TO_RAD = 3.14159265359f / 180.0f;
+            latest_gyro_x = ((float)data.x / 2900.0f) * DEG_TO_RAD;
+            latest_gyro_y = ((float)data.y / 2900.0f) * DEG_TO_RAD;
+            latest_gyro_z = ((float)data.z / 2900.0f) * DEG_TO_RAD;
             motion_update_mask |= GYRO_UPDATED;
             break;
         }
 
-        case STEP_COUNTER_SENSOR_ID: {
+        case BHY2_SENSOR_ID_STD:      // 50: Step Detector
+        case BHY2_SENSOR_ID_STD_WU:   // 94: Step Detector Wake Up
+        case BHY2_SENSOR_ID_STD_LP:   // 137: Step Detector Low Power
+        {
+            // Step detector fires for each individual step detected
+            // This helps ensure the step counter is working
+            static uint32_t detector_count = 0;
+            detector_count++;
+            LOG_INF("Step detected (ID %u)! Total detector events: %u", callback_info->sensor_id, detector_count);
+            break;
+        }
+
+        case BHY2_SENSOR_ID_STC:      // 52: Step Counter
+        case BHY2_SENSOR_ID_STC_WU:   // 53: Step Counter Wake Up
+        case BHY2_SENSOR_ID_STC_LP:   // 136: Step Counter Low Power
+        {
             if (callback_info->data_size < 4)
             {
                 LOG_ERR("Step counter: invalid data size: %d", callback_info->data_size);
                 return;
             }
 
+            // Parse the step count value
+            uint32_t new_step_count = (callback_info->data_ptr[0]) | 
+                                     (callback_info->data_ptr[1] << 8) |
+                                     (callback_info->data_ptr[2] << 16) | 
+                                     (callback_info->data_ptr[3] << 24);
+
+            // Log raw step counter data for debugging
+            static uint32_t last_logged_count = 0;
+            if (new_step_count != last_logged_count) {
+                LOG_INF("Step counter raw value changed: %u -> %u", last_logged_count, new_step_count);
+                last_logged_count = new_step_count;
+            }
+
             // Handle potential wrap-around
             static uint32_t previous_step_count = 0;
             static uint32_t step_accumulator = 0;
 
-            uint32_t new_step_count = (callback_info->data_ptr[0]) | (callback_info->data_ptr[1] << 8) |
-                                      (callback_info->data_ptr[2] << 16) | (callback_info->data_ptr[3] << 24);
-
-            if (new_step_count < previous_step_count)
+            if (new_step_count < previous_step_count && previous_step_count > 0)
             {
-                LOG_WRN("Step count wrap detected");
-                step_accumulator += UINT32_MAX + 1;
+                LOG_WRN("Step count wrap detected: %u -> %u", previous_step_count, new_step_count);
+                step_accumulator += (UINT32_MAX - previous_step_count) + new_step_count + 1;
+            }
+            else if (new_step_count > previous_step_count)
+            {
+                step_accumulator += (new_step_count - previous_step_count);
             }
 
-            latest_step_count = step_accumulator + new_step_count;
+            latest_step_count = step_accumulator;
             previous_step_count = new_step_count;
 
             // Calculate activity step count if activity is active
@@ -573,31 +891,57 @@ static void process_sensor_data(void)
     // Debug logging at 1Hz when activity or streaming is active
     if ((atomic_get(&logging_active) == 1) || (quaternion_streaming_enabled == true))
     {
-    if (++log_sample_counter >= LOG_RATE_DIVIDER)
-    {
-    log_sample_counter = 0;
-    
-    // Log Quaternion and Gyroscope data
-    LOG_INF("BHI360 Quat: x=%.4f, y=%.4f, z=%.4f, w=%.4f, accuracy=%.1f",
-    (double)latest_quat_x, (double)latest_quat_y, (double)latest_quat_z, (double)latest_quat_w,
-    (double)latest_quat_accuracy);
-    
-    // Log Gyroscope data (rad/s)
-    LOG_INF("BHI360 Gyro: x=%.4f, y=%.4f, z=%.4f rad/s",
-    (double)latest_gyro_x, (double)latest_gyro_y, (double)latest_gyro_z);
-    
-    // Log Linear Acceleration data (m/s²)
-    LOG_INF("BHI360 LinAcc: x=%.4f, y=%.4f, z=%.4f m/s²",
-    (double)latest_lacc_x, (double)latest_lacc_y, (double)latest_lacc_z);
-    
-    // Log Step Count data
-    LOG_INF("BHI360 Steps: total=%u, activity=%u",
-    latest_step_count, latest_activity_step_count);
-    
-    // Log timestamp (convert from nanoseconds to milliseconds for readability)
-    uint32_t timestamp_ms = (uint32_t)(latest_timestamp / 1000000);
-    LOG_INF("BHI360 Timestamp: %u ms", timestamp_ms);
-    }
+        if (++log_sample_counter >= LOG_RATE_DIVIDER)
+        {
+            log_sample_counter = 0;
+            
+            // Log Quaternion data
+            LOG_INF("BHI360 Quat: x=%.4f, y=%.4f, z=%.4f, w=%.4f, accuracy=%.1f",
+                    (double)latest_quat_x, (double)latest_quat_y, (double)latest_quat_z, (double)latest_quat_w,
+                    (double)latest_quat_accuracy);
+            
+            // Log Gyroscope data (rad/s)
+            LOG_INF("BHI360 Gyro: x=%.4f, y=%.4f, z=%.4f rad/s",
+                    (double)latest_gyro_x, (double)latest_gyro_y, (double)latest_gyro_z);
+            
+            // Log Accelerometer data (with gravity) - always available
+            LOG_INF("BHI360 Accel: x=%.4f, y=%.4f, z=%.4f m/s² (with gravity)",
+                    (double)latest_acc_x, (double)latest_acc_y, (double)latest_acc_z);
+            
+            // Log Linear Acceleration data (gravity removed) - if different from accel
+            if (lacc_available) {
+                LOG_INF("BHI360 LinAcc: x=%.4f, y=%.4f, z=%.4f m/s² (gravity removed)",
+                        (double)latest_lacc_x, (double)latest_lacc_y, (double)latest_lacc_z);
+            }
+            
+            // Log Gravity Vector - if available
+            if (gravity_available) {
+                LOG_INF("BHI360 Gravity: x=%.4f, y=%.4f, z=%.4f m/s²",
+                        (double)latest_gravity_x, (double)latest_gravity_y, (double)latest_gravity_z);
+            }
+            
+            // Log Activity Recognition - if available
+            if (activity_available && latest_activity_type != 0) {
+                const char *activity_name = "Unknown";
+                switch (latest_activity_type) {
+                    case 1: activity_name = "Still"; break;
+                    case 2: activity_name = "Walking"; break;
+                    case 3: activity_name = "Running"; break;
+                    case 4: activity_name = "On Bicycle"; break;
+                    case 5: activity_name = "In Vehicle"; break;
+                    case 6: activity_name = "Tilting"; break;
+                }
+                LOG_INF("BHI360 Activity: %s (type=%u)", activity_name, latest_activity_type);
+            }
+            
+            // Log Step Count data
+            LOG_INF("BHI360 Steps: total=%u, activity=%u",
+                    latest_step_count, latest_activity_step_count);
+            
+            // Log timestamp (convert from nanoseconds to milliseconds for readability)
+            uint32_t timestamp_ms = (uint32_t)(latest_timestamp / 1000000);
+            LOG_INF("BHI360 Timestamp: %u ms", timestamp_ms);
+        }
     }
 
     // Send to Bluetooth at 5Hz when streaming is enabled AND no activity is running
