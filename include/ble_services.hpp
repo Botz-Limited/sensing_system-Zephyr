@@ -22,6 +22,22 @@
 extern "C" {
 #endif
 
+// Activity state enum (matches information_service.cpp)
+typedef enum {
+    ACTIVITY_STATE_IDLE = 0,
+    ACTIVITY_STATE_1_RUNNING,
+    ACTIVITY_STATE_3_FOOT_STREAM,
+    ACTIVITY_STATE_4_QUAT_STREAM,
+    ACTIVITY_STATE_5_BOTH_STREAM,
+    ACTIVITY_STATE_PAUSED
+} activity_state_t;
+
+// Activity state management functions
+void jis_update_activity_state(activity_state_t new_state);
+activity_state_t jis_get_activity_state(void);
+void jis_restore_activity_state_from_pause(void);
+
+// Status notification functions
 void jis_set_err_status_notify(err_t new_device_status);
 void jis_clear_err_status_notify(err_t new_device_status);
 void jis_charge_status_notify(uint8_t new_charge_status);
@@ -58,6 +74,11 @@ extern "C" void jis_weight_measurement_notify(float weight_kg);
 void jis_foot_sensor_notify_ble(const foot_samples_ble_t *data);
 void jis_bhi360_data1_notify_ble(const bhi360_3d_mapping_ble_t *data);
 void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t *data);
+
+// Secondary data update functions (primary only)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+
+#endif
 
 // Secondary device info functions (primary only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)

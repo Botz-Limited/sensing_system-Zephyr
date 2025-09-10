@@ -30,9 +30,10 @@
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/logging/log.h>
+#include <ble_services.hpp>
+#include "ble_services.hpp"
 
 #include "ble_conn_params.hpp"
-#include "ble_services.hpp"
 #include "ccc_callback_fix.hpp"
 #include <app.hpp>
 #include <app_version.h>
@@ -78,9 +79,6 @@ extern struct k_msgq analytics_queue;
 
 // External function declarations
 extern "C" void set_current_time_from_epoch(uint32_t new_epoch_time_s);
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE) 
-extern err_t ble_reset_bonds(void);
-#endif
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 static constexpr uint8_t is_little_endian = 1;
@@ -404,6 +402,9 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
 
   if (value == 1) {
     // START ACTIVITY (New session)
+    // Update activity state
+    jis_update_activity_state(ACTIVITY_STATE_1_RUNNING);
+    
     struct foot_sensor_start_activity_event *foot_evt =
         new_foot_sensor_start_activity_event();
     APP_EVENT_SUBMIT(foot_evt);
@@ -439,6 +440,9 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
             "(input=1).");
   } else if (value == 2) {
     // UNPAUSE ACTIVITY (Resume existing session)
+    // Restore activity state from before pause
+    jis_restore_activity_state_from_pause();
+    
     struct foot_sensor_start_activity_event *foot_evt =
         new_foot_sensor_start_activity_event();
     APP_EVENT_SUBMIT(foot_evt);
@@ -475,6 +479,9 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
     LOG_INF("Activity UNPAUSED - sensors resumed, data files continue (input=2).");
   } else if (value == 3) {
     // START FOOT SENSOR STREAMING
+    // Update activity state
+    jis_update_activity_state(ACTIVITY_STATE_3_FOOT_STREAM);
+    
     // Send streaming control event
     struct streaming_control_event *evt = new_streaming_control_event();
     evt->foot_sensor_streaming_enabled = true;
@@ -491,6 +498,9 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
     LOG_INF("Foot sensor streaming ENABLED (input=3).");
   } else if (value == 4) {
     // START QUATERNION STREAMING
+    // Update activity state
+    jis_update_activity_state(ACTIVITY_STATE_4_QUAT_STREAM);
+    
     // Send streaming control event
     struct streaming_control_event *evt = new_streaming_control_event();
     evt->foot_sensor_streaming_enabled = false;
@@ -507,6 +517,9 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
     LOG_INF("Quaternion streaming ENABLED (input=4).");
   } else if (value == 5) {
     // START BOTH FOOT SENSOR AND QUATERNION STREAMING
+    // Update activity state
+    jis_update_activity_state(ACTIVITY_STATE_5_BOTH_STREAM);
+    
     // Send streaming control event
     struct streaming_control_event *evt = new_streaming_control_event();
     evt->foot_sensor_streaming_enabled = true;
@@ -1010,6 +1023,9 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
 
   if (value == 1) {
     // STOP ACTIVITY (End session completely)
+    // Update activity state to idle
+    jis_update_activity_state(ACTIVITY_STATE_IDLE);
+    
     struct foot_sensor_stop_activity_event *foot_evt =
         new_foot_sensor_stop_activity_event();
     APP_EVENT_SUBMIT(foot_evt);
@@ -1047,6 +1063,9 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
             "(input=1).");
   } else if (value == 2) {
     // PAUSE ACTIVITY (Suspend processing but keep files open)
+    // Update activity state to paused
+    jis_update_activity_state(ACTIVITY_STATE_PAUSED);
+    
     struct foot_sensor_stop_activity_event *foot_evt =
         new_foot_sensor_stop_activity_event();
     APP_EVENT_SUBMIT(foot_evt);
@@ -1092,6 +1111,16 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
     LOG_INF("Activity PAUSED - sensors stopped, data files remain open (input=2).");
   } else if (value == 3) {
     // STOP FOOT SENSOR STREAMING
+    // Check current state and update accordingly
+    activity_state_t current = jis_get_activity_state();
+    if (current == ACTIVITY_STATE_5_BOTH_STREAM) {
+        // Was streaming both, now only quaternion
+        jis_update_activity_state(ACTIVITY_STATE_4_QUAT_STREAM);
+    } else if (current == ACTIVITY_STATE_3_FOOT_STREAM) {
+        // Was only streaming foot, now idle
+        jis_update_activity_state(ACTIVITY_STATE_IDLE);
+    }
+    
     // Send streaming control event (keep quaternion as-is, default enabled)
     struct streaming_control_event *evt = new_streaming_control_event();
     evt->foot_sensor_streaming_enabled = false;
@@ -1107,6 +1136,16 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
     LOG_INF("Foot sensor streaming DISABLED (input=3).");
   } else if (value == 4) {
     // STOP QUATERNION STREAMING
+    // Check current state and update accordingly
+    activity_state_t current = jis_get_activity_state();
+    if (current == ACTIVITY_STATE_5_BOTH_STREAM) {
+        // Was streaming both, now only foot
+        jis_update_activity_state(ACTIVITY_STATE_3_FOOT_STREAM);
+    } else if (current == ACTIVITY_STATE_4_QUAT_STREAM) {
+        // Was only streaming quaternion, now idle
+        jis_update_activity_state(ACTIVITY_STATE_IDLE);
+    }
+    
     // Send streaming control event (keep foot sensor as-is, default enabled)
     struct streaming_control_event *evt = new_streaming_control_event();
     evt->quaternion_streaming_enabled = false;
@@ -1122,6 +1161,9 @@ static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
     LOG_INF("Quaternion streaming DISABLED (input=4).");
   } else if (value == 5) {
     // STOP BOTH FOOT SENSOR AND QUATERNION STREAMING
+    // Update activity state to idle (no streaming)
+    jis_update_activity_state(ACTIVITY_STATE_IDLE);
+    
     // Send streaming control event
     struct streaming_control_event *evt = new_streaming_control_event();
     evt->foot_sensor_streaming_enabled = false;
