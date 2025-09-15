@@ -1582,211 +1582,21 @@ static ssize_t ams_activity_step_count_read(struct bt_conn *conn,
  * @param metrics Pointer to metrics data
  */
 void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
-  
-  /*  if (!metrics) {
-      return;
-    } */ //To implement it properly
 
-#if IS_ENABLED(CONFIG_TEST_RANDOM_GENERATOR) // This is for testing only!!!!!!
-  cadence_spm_value = (uint16_t)(sys_rand32_get() % 5000) / 100.0f +
-                      20.0f; // Random 20.0 to 70.0
-  contact_time_asym_value = (uint8_t)((sys_rand32_get() % 101));    // 0 to 100
-  stride_duration_asym_value = (uint8_t)((sys_rand32_get() % 101)); // 0 to 100
-  stride_length_asym_value = (uint8_t)((sys_rand32_get() % 101));   // 0 to 100
-  ground_contact_ms_value = (uint16_t)(sys_rand32_get() % 1001);    // 0 to 1000
-  flight_time_ms_value = (uint16_t)(sys_rand32_get() % 501);        // 0 to 500
-  stride_duration_ms_value =
-      (uint16_t)(sys_rand32_get() % 501); // 0 to 500  stride average
-  pace_sec_km_value =
-      (uint32_t)(180 + (sys_rand32_get() % 1321)); // 180 to 1500 (inclusive)
-  distance_m_value =
-      (uint32_t)(2000 + (sys_rand32_get() % 3001));             // 2000–5000m) - Already uint32_t
-  form_score_value = (uint8_t)((sys_rand32_get() % 101));       // 0 to 100
-  balance_lr_pct_value = (uint8_t)((sys_rand32_get() % 101));   // 0 to 100
-  efficiency_score_value = (uint8_t)((sys_rand32_get() % 101)); // 0 to 100
-  alerts_value = (uint8_t)((sys_rand32_get() % 101));           // 0 to 100
-  
-  // New metrics for testing
-  stride_length_avg_mm_value = (uint16_t)(1200 + (sys_rand32_get() % 801)); // 1200-2000mm (1.2-2.0m)
-  // Calculate run speed based on cadence and stride length
-  // Formula: speed = cadence(spm) * stride_length(m) / 120
-  // Convert to cm/s: multiply by 100
-  uint32_t speed_calc = (cadence_spm_value * stride_length_avg_mm_value) / 1200; // Result in cm/s
-  run_speed_cms_value = (uint16_t)(speed_calc > 65535 ? 65535 : speed_calc); // Cap at uint16_t max
-
-  if (current_conn) {
-    if (cadence_spm_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &cadence_spm_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &cadence_spm_value,
-                               sizeof(cadence_spm_value));
-      if (err)
-        LOG_WRN("Failed to send Cadence SPM notification: %d", err);
-    }
-
-    if (contact_time_asym_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &contact_time_asym_uuid.uuid);
-      int err =
-          bt_gatt_notify(current_conn, status_gatt, &contact_time_asym_value,
-                         sizeof(contact_time_asym_value));
-      if (err)
-        LOG_WRN("Failed to send Contact Time Asymmetry notification: %d", err);
-    }
-
-    if (stride_duration_asym_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &stride_duration_asym_uuid.uuid);
-      int err =
-          bt_gatt_notify(current_conn, status_gatt, &stride_duration_asym_value,
-                         sizeof(stride_duration_asym_value));
-      if (err)
-        LOG_WRN("Failed to send Stride Duration Asymmetry notification: %d",
-                err);
-    }
-
-    if (stride_length_asym_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &stride_length_asym_uuid.uuid);
-      int err =
-          bt_gatt_notify(current_conn, status_gatt, &stride_length_asym_value,
-                         sizeof(stride_length_asym_value));
-      if (err)
-        LOG_WRN("Failed to send Stride Length Asymmetry notification: %d", err);
-    }
-
-    if (ground_contact_ms_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &ground_contact_ms_uuid.uuid);
-      int err =
-          bt_gatt_notify(current_conn, status_gatt, &ground_contact_ms_value,
-                         sizeof(ground_contact_ms_value));
-      if (err)
-        LOG_WRN("Failed to send Ground Contact MS notification: %d", err);
-    }
-
-    if (flight_time_ms_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &flight_time_ms_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &flight_time_ms_value,
-                               sizeof(flight_time_ms_value));
-      if (err)
-        LOG_WRN("Failed to send Flight Time MS notification: %d", err);
-    }
-
-    if (stride_duration_ms_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &stride_duration_ms_uuid.uuid);
-      int err =
-          bt_gatt_notify(current_conn, status_gatt, &stride_duration_ms_value,
-                         sizeof(stride_duration_ms_value));
-      if (err)
-        LOG_WRN("Failed to send Stride Duration MS notification: %d", err);
-    }
-
-    if (pace_sec_km_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &avg_pace_sec_km_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &pace_sec_km_value,
-                               sizeof(pace_sec_km_value));
-      if (err)
-        LOG_WRN("Failed to send Pace Sec/Km notification: %d", err);
-    }
-
-    if (distance_m_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &total_distance_m_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &distance_m_value,
-                               sizeof(distance_m_value));
-      if (err)
-        LOG_WRN("Failed to send Distance M notification: %d", err);
-    }
-
-    if (form_score_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &form_score_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &form_score_value,
-                               sizeof(form_score_value));
-      if (err)
-        LOG_WRN("Failed to send Form Score notification: %d", err);
-    }
-
-    if (balance_lr_pct_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &balance_lr_pct_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &balance_lr_pct_value,
-                               sizeof(balance_lr_pct_value));
-      if (err)
-        LOG_WRN("Failed to send Balance L/R Pct notification: %d", err);
-    }
-
-    if (efficiency_score_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &efficiency_score_uuid.uuid);
-      int err =
-          bt_gatt_notify(current_conn, status_gatt, &efficiency_score_value,
-                         sizeof(efficiency_score_value));
-      if (err)
-        LOG_WRN("Failed to send Efficiency Score notification: %d", err);
-    }
-
-    if (alerts_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &alerts_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &alerts_value,
-                               sizeof(alerts_value));
-      if (err)
-        LOG_WRN("Failed to send Alerts notification: %d", err);
-    }
-
-    if (stride_length_avg_mm_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &stride_length_avg_mm_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &stride_length_avg_mm_value,
-                               sizeof(stride_length_avg_mm_value));
-      if (err)
-        LOG_WRN("Failed to send Stride Length Average MM notification: %d", err);
-    }
-
-    if (run_speed_cms_notify_enabled) {
-      auto *status_gatt = bt_gatt_find_by_uuid(
-          activity_metrics_service.attrs, activity_metrics_service.attr_count,
-          &run_speed_cms_uuid.uuid);
-      int err = bt_gatt_notify(current_conn, status_gatt, &run_speed_cms_value,
-                               sizeof(run_speed_cms_value));
-      if (err)
-        LOG_WRN("Failed to send Run Speed CMS notification: %d", err);
-    }
+  if (!metrics) {
+    LOG_ERR("ams_update_realtime_metrics: metrics is NULL");
+    return;
   }
-
-  return;
-
-#else
-
   // Update individual real-time metrics values
   cadence_spm_value = metrics->cadence_spm;
   pace_sec_km_value = metrics->pace_sec_km;
   distance_m_value = metrics->distance_m;
-  form_score_value = metrics->form_score;
+  //form_score_value = metrics->form_score;
   balance_lr_pct_value = metrics->balance_lr_pct;
   ground_contact_ms_value = metrics->ground_contact_ms;
   flight_time_ms_value = metrics->flight_time_ms;
-  efficiency_score_value = metrics->efficiency_score;
-  alerts_value = metrics->alerts;
+ // efficiency_score_value = metrics->efficiency_score;
+  //alerts_value = metrics->alerts;
 
   // Send notifications for individual real-time metrics if enabled and
   // connected
@@ -1809,7 +1619,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
       if (err)
         LOG_WRN("Failed to send Pace Sec/Km notification: %d", err);
     }
-    if (distance_m_notify_enabled) {
+ /*   if (distance_m_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
           &total_distance_m_uuid.uuid);
@@ -1817,8 +1627,8 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                                sizeof(distance_m_value));
       if (err)
         LOG_WRN("Failed to send Distance M notification: %d", err);
-    }
-    if (form_score_notify_enabled) {
+    } */
+  /*  if (form_score_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
           &form_score_uuid.uuid);
@@ -1826,7 +1636,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                                sizeof(form_score_value));
       if (err)
         LOG_WRN("Failed to send Form Score notification: %d", err);
-    }
+    } */
     if (balance_lr_pct_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
@@ -1855,7 +1665,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
       if (err)
         LOG_WRN("Failed to send Flight Time MS notification: %d", err);
     }
-    if (efficiency_score_notify_enabled) {
+  /*  if (efficiency_score_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
           &efficiency_score_uuid.uuid);
@@ -1864,9 +1674,9 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                          sizeof(efficiency_score_value));
       if (err)
         LOG_WRN("Failed to send Efficiency Score notification: %d", err);
-    }
+    } */
 
-    if (alerts_notify_enabled) {
+  /*  if (alerts_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
           &alerts_uuid.uuid);
@@ -1874,7 +1684,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                                sizeof(alerts_value));
       if (err)
         LOG_WRN("Failed to send Alerts notification: %d", err);
-    }
+    } */
   }
 
   // Update individual asymmetry metrics values
@@ -1898,7 +1708,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
       if (err)
         LOG_WRN("Failed to send Contact Time Asymmetry notification: %d", err);
     }
-    if (flight_time_asym_notify_enabled) {
+  /*  if (flight_time_asym_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
           &flight_time_asym_uuid.uuid);
@@ -1907,7 +1717,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                          sizeof(flight_time_asym_value));
       if (err)
         LOG_WRN("Failed to send Flight Time Asymmetry notification: %d", err);
-    }
+    } */
     if (force_asym_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
@@ -1928,7 +1738,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
         LOG_WRN("Failed to send Pronation Asymmetry notification: %d", err);
     }
 
-    if (strike_left_notify_enabled) {
+   /* if (strike_left_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
           &strike_left_uuid.uuid);
@@ -1945,7 +1755,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                                sizeof(strike_right_value));
       if (err)
         LOG_WRN("Failed to send Strike Right notification: %d", err);
-    }
+    }*/
   }
 
   // Update stride metrics values
@@ -1965,7 +1775,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
 
   // Send notifications for stride metrics if enabled and connected
   if (current_conn) {
-    if (stride_duration_ms_notify_enabled) {
+   /* if (stride_duration_ms_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
           &stride_duration_ms_uuid.uuid);
@@ -2018,7 +1828,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
                                sizeof(stride_length_avg_mm_value));
       if (err)
         LOG_WRN("Failed to send Stride Length Average MM notification: %d", err);
-    }
+    } */
 
     if (run_speed_cms_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
@@ -2030,7 +1840,6 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
         LOG_WRN("Failed to send Run Speed CMS notification: %d", err);
     }
   }
-#endif
 }
 
 /**

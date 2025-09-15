@@ -32,6 +32,7 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/types.h>
+#include <zephyr/drivers/hwinfo.h>
 
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_MODULE_LOG_LEVEL); // NOLINT
@@ -40,6 +41,10 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_BATTERY_MODULE_LOG_LEVEL); // NOLINT
 
 // --- PERIODIC BATTERY UPDATE ---
 static struct k_work_delayable battery_update_work;
+
+uint32_t reset_cause;
+char reset_cause_str[128];
+int ret=0;
 
 // Currently unused - kept for future battery monitoring implementation
 static void battery_update_work_handler(struct k_work *work)
@@ -61,6 +66,65 @@ static void battery_update_work_handler(struct k_work *work)
     k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT); // Send to Bluetooth module via message queue on secondary
     #endif
     LOG_DBG("Battery level updated: %d%%", level);
+    if (ret != 0) {
+        LOG_WRN("Failed to get reset cause (err %d)\n", ret);
+    } else {
+        // Print the raw value first - it's always available
+        LOG_WRN("Reset cause register: 0x%08X\n", reset_cause);
+
+        // Now, manually check the most important bits and print a message.
+        // This is the reliable way to do it.
+        LOG_WRN("Reset reasons: ");
+        
+        if (reset_cause & RESET_POR) {
+            LOG_WRN("Power-On-Reset ");
+        }
+        if (reset_cause & RESET_PIN) {
+            LOG_WRN("Reset-Pin ");
+        }
+        if (reset_cause & RESET_BROWNOUT) {
+            LOG_WRN("Brownout ");
+        }
+        if (reset_cause & RESET_SOFTWARE) {
+            LOG_WRN("Software ");
+        }
+        if (reset_cause & RESET_WATCHDOG) {
+            LOG_WRN("Watchdog ");
+        }
+        if (reset_cause & RESET_DEBUG) {
+            LOG_WRN("Debugger ");
+        }
+        if (reset_cause & RESET_CPU_LOCKUP) {
+            LOG_WRN("CPU-Lockup ");
+        }
+        if (reset_cause & RESET_LOW_POWER_WAKE) {
+            LOG_WRN("Low-Power ");
+        }
+        if (reset_cause & RESET_USER) {
+            LOG_WRN("Low-Power ");
+        }
+         if (reset_cause & RESET_HARDWARE) {
+            LOG_WRN("Low-Power ");
+        }
+        if (reset_cause & RESET_SECURITY) {
+            LOG_WRN("Low-Power ");
+        }
+        if (reset_cause & RESET_PLL) {
+            LOG_WRN("Low-Power ");
+        }
+        if (reset_cause & RESET_CLOCK) {
+            LOG_WRN("Low-Power ");
+        }
+         if (reset_cause & RESET_TEMPERATURE) {
+            LOG_WRN("Low-Power ");
+        }
+        // Check if no flags were set (e.g., a previous reset cleared the register)
+        if (reset_cause == 0) {
+            LOG_WRN("Unknown (register cleared)");
+        }
+        
+        LOG_WRN("\n");
+    }
     k_work_reschedule(&battery_update_work, K_MSEC(BATTERY_UPDATE_INTERVAL_MS));
 }
 
@@ -69,6 +133,7 @@ void battery_monitor_init(void)
     LOG_INF("Battery level Init");
     k_work_init_delayable(&battery_update_work, battery_update_work_handler);
     k_work_schedule(&battery_update_work, K_NO_WAIT);
+    ret = hwinfo_get_reset_cause(&reset_cause);
     module_set_state(MODULE_STATE_READY);
 }
 

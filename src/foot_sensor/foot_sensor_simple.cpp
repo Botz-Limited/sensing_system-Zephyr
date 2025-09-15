@@ -45,7 +45,7 @@ static constexpr uint32_t SAMPLE_PERIOD_MS = 1000 / SAMPLE_RATE_HZ; // 10ms
 static constexpr uint8_t BLUETOOTH_RATE_DIVIDER = 20;               // Send to BLE at 5Hz (100Hz / 20)
 
 // Thread stack and priority
-K_THREAD_STACK_DEFINE(foot_sensor_stack, 3096);
+K_THREAD_STACK_DEFINE(foot_sensor_stack, 4096);
 static struct k_thread foot_sensor_thread_data;
 static k_tid_t foot_sensor_tid = NULL;
 
@@ -58,8 +58,8 @@ static bool foot_sensor_streaming_enabled = false;
 // Weight map calibration state
 static bool weight_map_calibration_active = false;
 static uint32_t weight_map_sample_count = 0;
-static constexpr uint32_t WEIGHT_MAP_SAMPLES = 500; // 5 seconds at 100Hz
-static uint32_t weight_map_sum[SAADC_CHANNEL_COUNT] = {0};  // Changed to uint32_t to avoid overflow
+static constexpr uint32_t WEIGHT_MAP_SAMPLES = 500;        // 5 seconds at 100Hz
+static uint32_t weight_map_sum[SAADC_CHANNEL_COUNT] = {0}; // Changed to uint32_t to avoid overflow
 static foot_weight_map_data_t weight_map_data;
 
 // ADC device and configuration
@@ -147,7 +147,7 @@ static void calibrate_channels(void)
 static void start_weight_map_calibration(void)
 {
     LOG_INF("Starting foot weight map calibration - stand still for 5 seconds");
-    
+
     // Reset calibration state
     weight_map_calibration_active = true;
     weight_map_sample_count = 0;
@@ -168,20 +168,19 @@ static void process_weight_map_sample(int16_t *raw_data)
             // Use raw values without offset calibration for weight map
             // ADC is 14-bit (0-16383), ensure we handle as unsigned
             uint16_t value = (raw_data[i] < 0) ? 0 : (uint16_t)raw_data[i];
-            
+
             // Accumulate safely - max possible: 16383 * 500 = 8,191,500 (fits in uint32_t)
             weight_map_sum[i] += value;
         }
-        
+
         weight_map_sample_count++;
-        
+
         // Log progress every second (100 samples)
         if (weight_map_sample_count % 100 == 0)
         {
-            LOG_INF("Weight map calibration progress: %d/%d samples", 
-                    weight_map_sample_count, WEIGHT_MAP_SAMPLES);
+            LOG_INF("Weight map calibration progress: %d/%d samples", weight_map_sample_count, WEIGHT_MAP_SAMPLES);
         }
-        
+
         // Check if calibration is complete
         if (weight_map_sample_count >= WEIGHT_MAP_SAMPLES)
         {
@@ -196,7 +195,7 @@ static void process_weight_map_sample(int16_t *raw_data)
 static void complete_weight_map_calibration(void)
 {
     LOG_INF("Weight map calibration complete - processing data");
-    
+
     // Calculate averages and total weight
     uint32_t total = 0;
     for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
@@ -204,38 +203,35 @@ static void complete_weight_map_calibration(void)
         weight_map_data.sensor_map[i] = (uint16_t)(weight_map_sum[i] / WEIGHT_MAP_SAMPLES);
         total += weight_map_data.sensor_map[i];
     }
-    
+
     weight_map_data.total_weight = total;
     weight_map_data.sample_count = WEIGHT_MAP_SAMPLES;
     weight_map_data.timestamp_ms = k_uptime_get_32();
     weight_map_data.is_valid = true;
-    
+
     // Calculate weight distribution percentages
     if (total > 0)
     {
         for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
         {
-            weight_map_data.weight_distribution[i] = 
-                (float)weight_map_data.sensor_map[i] * 100.0f / (float)total;
+            weight_map_data.weight_distribution[i] = (float)weight_map_data.sensor_map[i] * 100.0f / (float)total;
         }
     }
-    
+
     // Log the calibration results
     LOG_INF("Weight map calibration results:");
     LOG_INF("  Total weight: %u", weight_map_data.total_weight);
     for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
     {
-        LOG_INF("  Sensor[%d]: %u (%.1f%%)", i, 
-                weight_map_data.sensor_map[i], 
-                weight_map_data.weight_distribution[i]);
+        LOG_INF("  Sensor[%d]: %u (%.1f%%)", i, weight_map_data.sensor_map[i], weight_map_data.weight_distribution[i]);
     }
-    
+
     // Send calibration data to data module for storage
     generic_message_t msg;
     msg.sender = SENDER_FOOT_SENSOR_THREAD;
     msg.type = MSG_TYPE_FOOT_WEIGHT_MAP_DATA;
     memcpy(&msg.data.foot_weight_map, &weight_map_data, sizeof(foot_weight_map_data_t));
-    
+
     if (k_msgq_put(&data_msgq, &msg, K_NO_WAIT) != 0)
     {
         LOG_ERR("Failed to send weight map calibration data to data module");
@@ -244,7 +240,7 @@ static void complete_weight_map_calibration(void)
     {
         LOG_INF("Weight map calibration data sent to data module");
     }
-    
+
     // Reset calibration state
     weight_map_calibration_active = false;
 }
@@ -299,8 +295,8 @@ static void process_adc_samples(int16_t *raw_data)
             // Apply calibration offset and populate message
             for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
             {
-             //   int16_t calibrated_value = raw_data[i] - saadc_offset[i];
-                int16_t calibrated_value = raw_data[i]; //discard calibrated valuues at the moment.
+                //   int16_t calibrated_value = raw_data[i] - saadc_offset[i];
+                int16_t calibrated_value = raw_data[i]; // discard calibrated valuues at the moment.
                 msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
             }
 
@@ -649,6 +645,7 @@ static void foot_sensor_init(void)
                                       K_PRIO_PREEMPT(5), // Priority 5
                                       0, K_NO_WAIT);
 
+    k_thread_suspend(foot_sensor_tid);
     k_thread_name_set(foot_sensor_tid, "foot_sensor");
 
     LOG_INF("Foot sensor module initialized successfully");
@@ -675,6 +672,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     if (is_foot_sensor_start_activity_event(aeh))
     {
         LOG_INF("Received start activity event - enabling foot sensor sampling");
+        k_thread_resume(foot_sensor_tid);
         atomic_set(&logging_active, 1);
         foot_sensor_streaming_enabled = false;
         return false;
@@ -684,6 +682,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         LOG_INF("Received stop activity event - disabling foot sensor sampling");
         atomic_set(&logging_active, 0);
+        k_thread_suspend(foot_sensor_tid);
         return false;
     }
 
@@ -691,6 +690,15 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         auto *event = cast_streaming_control_event(aeh);
         foot_sensor_streaming_enabled = event->foot_sensor_streaming_enabled;
+        if (foot_sensor_streaming_enabled)
+        {
+            k_thread_resume(foot_sensor_tid);
+        }
+        else
+        {
+
+            k_thread_suspend(foot_sensor_tid);
+        }
         LOG_INF("foot_samples_work %s", foot_sensor_streaming_enabled ? "enabled" : "disabled");
 
 // If in lab version, we have to stop the raw file logging in the sd card

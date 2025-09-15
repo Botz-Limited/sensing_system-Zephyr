@@ -25,13 +25,14 @@
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/types.h>
 
+#include "ble_services.hpp"
+#include <ble_services.hpp>
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/buf.h>
 #include <zephyr/bluetooth/conn.h>
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/uuid.h>
 #include <zephyr/logging/log.h>
-#include <ble_services.hpp>
-#include "ble_services.hpp"
 
 #include "ble_conn_params.hpp"
 #include "ccc_callback_fix.hpp"
@@ -49,6 +50,8 @@
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
+extern struct k_msgq sensor_data_queue; // Output to realtime_metrics module (legacy name)
+
 // External message queue for analytics (defined in app.cpp)
 extern struct k_msgq analytics_queue;
 
@@ -60,21 +63,52 @@ extern struct k_msgq analytics_queue;
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 // Helper macro to forward D2D commands with automatic queuing if not ready
-#define FORWARD_D2D_COMMAND(func, cmd_type, value, desc)                       \
-  do {                                                                         \
-    int err = func(value);                                                     \
-    if (err == -EINVAL && !ble_d2d_tx_is_ready()) {                            \
-      LOG_INF("D2D TX not ready, queuing " desc);                              \
-      err = ble_d2d_tx_queue_command(cmd_type, &value);                        \
-      if (err) {                                                               \
-        LOG_ERR("Failed to queue " desc ": %d", err);                          \
-      }                                                                        \
-    } else if (err) {                                                          \
-      LOG_ERR("Failed to forward " desc " to secondary: %d", err);             \
-    } else {                                                                   \
-      LOG_INF("Successfully forwarded " desc " to secondary");                 \
-    }                                                                          \
-  } while (0)
+#define FORWARD_D2D_COMMAND(func, cmd_type, value, desc)                                                               \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        int err = 0;                                                                                                   \
+        int retry_count = 0;                                                                                           \
+                                                                                                                       \
+        /* Retry loop for buffer issues */                                                                             \
+        do                                                                                                             \
+        {                                                                                                              \
+            err = func(value);                                                                                         \
+                                                                                                                       \
+            if (err == -EINVAL && !ble_d2d_tx_is_ready())                                                              \
+            {                                                                                                          \
+                LOG_INF("D2D TX not ready, queuing " desc);                                                            \
+                err = ble_d2d_tx_queue_command(cmd_type, &value);                                                      \
+                if (err)                                                                                               \
+                {                                                                                                      \
+                    LOG_ERR("Failed to queue " desc ": %d", err);                                                      \
+                }                                                                                                      \
+                break; /* Exit loop */                                                                                 \
+            }                                                                                                          \
+            else if (err == -ENOMEM)                                                                                   \
+            {                                                                                                          \
+                /* Buffer full - retry */                                                                              \
+                LOG_WRN("No buffers for " desc ", retry %d", retry_count);                                             \
+                k_msleep(100);                                                                                         \
+                retry_count++;                                                                                         \
+            }                                                                                                          \
+            else if (err)                                                                                              \
+            {                                                                                                          \
+                LOG_ERR("Failed to forward " desc " to secondary: %d", err);                                           \
+                break;                                                                                                 \
+            }                                                                                                          \
+            else                                                                                                       \
+            {                                                                                                          \
+                LOG_INF("Successfully forwarded " desc " to secondary");                                               \
+                break;                                                                                                 \
+            }                                                                                                          \
+                                                                                                                       \
+        } while (retry_count < 15); /* Max 3 retries */                                                                \
+                                                                                                                       \
+        if (err == -ENOMEM && retry_count >= 3)                                                                        \
+        {                                                                                                              \
+            LOG_ERR("Failed to send " desc " after %d retries: %d", retry_count, err);                                 \
+        }                                                                                                              \
+    } while (0)
 #endif
 
 // External function declarations
@@ -92,159 +126,132 @@ static uint8_t external_flash_erase_status = 0; // 0=idle, 1=erasing, 2=complete
 
 static uint32_t swap_to_little_endian(uint32_t value);
 
-static ssize_t write_set_time_control_vnd(struct bt_conn *conn,
-                                          const struct bt_gatt_attr *attr,
-                                          const void *buf, uint16_t len,
-                                          uint16_t offset, uint8_t flags);
+static ssize_t write_set_time_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                          uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_param_control_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+static void cs_gps_update_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+static void cs_user_info_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 
 /**
  * @brief UUID for the control service. This UUID identifies the control service
  * used for handling various commands over Bluetooth communication.
  */
-static struct bt_uuid_128 control_service_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b67f, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 control_service_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b67f, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for the start activity characteristic. ---
-static struct bt_uuid_128 start_activity_command_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b684, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 start_activity_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b684, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for the stop activity characteristic. ---
-static struct bt_uuid_128 stop_activity_command_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b685, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 stop_activity_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b685, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for the trigger BHI360 calibration characteristic. ---
-static struct bt_uuid_128 trigger_bhi360_calibration_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b686, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 trigger_bhi360_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b686, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for the delete activity log command characteristic. ---
-static struct bt_uuid_128 delete_activity_log_command_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b687, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 delete_activity_log_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b687, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 static struct bt_uuid_128 delete_secondary_activity_log_command_uuid =
-    BT_UUID_INIT_128(
-        BT_UUID_128_ENCODE(0x4fd5b68a, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68a, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for connection parameter control characteristic ---
-static struct bt_uuid_128 conn_param_control_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b68b, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 conn_param_control_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68b, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for weight calibration characteristic ---
-static struct bt_uuid_128 weight_calibration_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b68d, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 weight_calibration_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68d, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for GPS update characteristic ---
-static struct bt_uuid_128 gps_update_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b68e, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 gps_update_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68e, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for reset bonds characteristic ---
-static struct bt_uuid_128 reset_bonds_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b68f, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 reset_bonds_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b68f, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for user info characteristic ---
-static struct bt_uuid_128 user_info_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b690, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 user_info_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b690, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // --- New: UUID for erase external flash characteristic ---
-static struct bt_uuid_128 erase_external_flash_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b691, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 erase_external_flash_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b691, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 // Forward declarations for start/stop activity handlers
-static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
-                                                const struct bt_gatt_attr *attr,
-                                                const void *buf, uint16_t len,
-                                                uint16_t offset, uint8_t flags);
-static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                              uint16_t value);
-static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
-                                               const struct bt_gatt_attr *attr,
-                                               const void *buf, uint16_t len,
-                                               uint16_t offset, uint8_t flags);
-static void cs_stop_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                             uint16_t value);
-static ssize_t write_trigger_bhi360_calibration_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags);
-static void
-cs_trigger_bhi360_calibration_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                              uint16_t value);
-static ssize_t write_delete_activity_log_command_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags);
-static void
-cs_delete_activity_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                       uint16_t value);
+static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                                uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                               uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_stop_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+static ssize_t write_trigger_bhi360_calibration_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                    const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_trigger_bhi360_calibration_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+static ssize_t write_delete_activity_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                     const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_delete_activity_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
+
+static void cs_set_time_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 
 // Secondary device delete command handlers
 
-static ssize_t write_delete_secondary_activity_log_command_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags);
-static void cs_delete_secondary_activity_log_ccc_cfg_changed(
-    const struct bt_gatt_attr *attr, uint16_t value);
+static ssize_t write_delete_secondary_activity_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                               const void *buf, uint16_t len, uint16_t offset,
+                                                               uint8_t flags);
+static void cs_delete_secondary_activity_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 
 // Connection parameter control handlers
-static ssize_t write_conn_param_control_vnd(struct bt_conn *conn,
-                                            const struct bt_gatt_attr *attr,
-                                            const void *buf, uint16_t len,
-                                            uint16_t offset, uint8_t flags);
-static ssize_t read_conn_param_control_vnd(struct bt_conn *conn,
-                                           const struct bt_gatt_attr *attr,
-                                           void *buf, uint16_t len,
-                                           uint16_t offset);
+static ssize_t write_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                            uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t read_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                           uint16_t len, uint16_t offset);
 
 // Weight calibration handlers
-static ssize_t write_weight_calibration_trigger_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags);
-static void
-cs_weight_calibration_trigger_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                              uint16_t value);
+static ssize_t write_weight_calibration_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                    const void *buf, uint16_t len, uint16_t offset, uint8_t flags);
+static void cs_weight_calibration_trigger_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);
 
 // GPS update handlers
-static ssize_t write_gps_update_vnd(struct bt_conn *conn,
-                                    const struct bt_gatt_attr *attr,
-                                    const void *buf, uint16_t len,
-                                    uint16_t offset, uint8_t flags);
+static ssize_t write_gps_update_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                    uint16_t len, uint16_t offset, uint8_t flags);
 
 // Reset bonds handlers
-static ssize_t write_reset_bonds_vnd(struct bt_conn *conn,
-                                     const struct bt_gatt_attr *attr,
-                                     const void *buf, uint16_t len,
-                                     uint16_t offset, uint8_t flags);
+static ssize_t write_reset_bonds_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                     uint16_t len, uint16_t offset, uint8_t flags);
 
 // User info handlers
-static ssize_t write_user_info_vnd(struct bt_conn *conn,
-                                   const struct bt_gatt_attr *attr,
-                                   const void *buf, uint16_t len,
+static ssize_t write_user_info_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len,
                                    uint16_t offset, uint8_t flags);
 
 // Erase external flash handlers
-static ssize_t write_erase_external_flash_vnd(struct bt_conn *conn,
-                                              const struct bt_gatt_attr *attr,
-                                              const void *buf, uint16_t len,
-                                              uint16_t offset, uint8_t flags);
-static ssize_t read_erase_external_flash_vnd(struct bt_conn *conn,
-                                             const struct bt_gatt_attr *attr,
-                                             void *buf, uint16_t len,
-                                             uint16_t offset);
+static ssize_t write_erase_external_flash_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                              uint16_t len, uint16_t offset, uint8_t flags);
+static ssize_t read_erase_external_flash_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                             uint16_t len, uint16_t offset);
 
 /**
  * @brief Structure for user information data
  * Age in years (1 byte), Gender (1 byte), Height in mm (2 bytes), Weight in decigrams (2 bytes)
  */
-struct __attribute__((packed)) UserInfoData {
-    uint8_t age_years;       // Age in years
-    uint8_t gender;          // Gender identifier
-    uint16_t height_mm;      // Height in millimeters
-    uint16_t weight_dg;      // Weight in decigrams (1 dg = 0.1 g = 0.0001 kg)
+struct __attribute__((packed)) UserInfoData
+{
+    uint8_t age_years;  // Age in years
+    uint8_t gender;     // Gender identifier
+    uint16_t height_mm; // Height in millimeters
+    uint16_t weight_dg; // Weight in decigrams (1 dg = 0.1 g = 0.0001 kg)
 };
 
 /**
  * @brief UUID for the set time command characteristic.
  * This UUID identifies the characteristic for setting the device's time.
  */
-static struct bt_uuid_128 set_time_command_uuid = BT_UUID_INIT_128(
-    BT_UUID_128_ENCODE(0x4fd5b681, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
+static struct bt_uuid_128 set_time_command_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x4fd5b681, 0x9d89, 0x4061, 0x92aa, 0x319ca786baae));
 
 /**
  * @brief Control Service GATT Declaration
@@ -266,92 +273,63 @@ BT_GATT_SERVICE_DEFINE(
     // Command Point Characteristic
 
     // time characteristics
-    BT_GATT_CHARACTERISTIC(&set_time_command_uuid.uuid,
-                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE, nullptr,
-                           write_set_time_control_vnd,
+    BT_GATT_CHARACTERISTIC(&set_time_command_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_set_time_control_vnd,
                            static_cast<void *>(&set_time_control)),
 
-
     // New: Start Activity Characteristic
-    BT_GATT_CHARACTERISTIC(&start_activity_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, nullptr,
-                           write_start_activity_command_vnd, nullptr),
-    BT_GATT_CCC(cs_start_activity_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CHARACTERISTIC(&start_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_start_activity_command_vnd, nullptr),
 
     // New: Stop Activity Characteristic
-    BT_GATT_CHARACTERISTIC(&stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE, nullptr,
-                           write_stop_activity_command_vnd, nullptr),
-    BT_GATT_CCC(cs_stop_activity_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CHARACTERISTIC(&stop_activity_command_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_stop_activity_command_vnd, nullptr),
 
     // New: Trigger BHI360 Calibration Characteristic
-    BT_GATT_CHARACTERISTIC(&trigger_bhi360_calibration_uuid.uuid,
-                           BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
-                           BT_GATT_PERM_WRITE, nullptr,
-                           write_trigger_bhi360_calibration_vnd, nullptr),
-    BT_GATT_CCC(cs_trigger_bhi360_calibration_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CHARACTERISTIC(&trigger_bhi360_calibration_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_trigger_bhi360_calibration_vnd, nullptr),
 
     // New: Delete Activity Log Characteristic
-    BT_GATT_CHARACTERISTIC(&delete_activity_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, nullptr,
-                           write_delete_activity_log_command_vnd, nullptr),
-    BT_GATT_CCC(cs_delete_activity_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CHARACTERISTIC(&delete_activity_log_command_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_delete_activity_log_command_vnd, nullptr),
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Secondary device delete commands - only on primary
 
     BT_GATT_CHARACTERISTIC(&delete_secondary_activity_log_command_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, nullptr,
-                           write_delete_secondary_activity_log_command_vnd,
-                           nullptr),
-    BT_GATT_CCC(cs_delete_secondary_activity_log_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+                           BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP, BT_GATT_PERM_WRITE, nullptr,
+                           write_delete_secondary_activity_log_command_vnd, nullptr),
+
 #endif
 
     // Connection Parameter Control Characteristic
-    BT_GATT_CHARACTERISTIC(&conn_param_control_uuid.uuid,
-                           BT_GATT_CHRC_READ | BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_READ | BT_GATT_PERM_WRITE,
-                           read_conn_param_control_vnd,
+    BT_GATT_CHARACTERISTIC(&conn_param_control_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE | BT_GATT_PERM_WRITE, read_conn_param_control_vnd,
                            write_conn_param_control_vnd, nullptr),
 
     // Weight Calibration Trigger Characteristic
-    BT_GATT_CHARACTERISTIC(&weight_calibration_uuid.uuid,
-                           BT_GATT_CHRC_WRITE | BT_GATT_CHRC_NOTIFY,
-                           BT_GATT_PERM_WRITE, nullptr,
-                           write_weight_calibration_trigger_vnd, nullptr),
-    BT_GATT_CCC(cs_weight_calibration_trigger_ccc_cfg_changed,
-                BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+    BT_GATT_CHARACTERISTIC(&weight_calibration_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_weight_calibration_trigger_vnd, nullptr),
 
     // GPS Update Characteristic
-    BT_GATT_CHARACTERISTIC(&gps_update_uuid.uuid, BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE, nullptr, write_gps_update_vnd,
-                           nullptr),
+    BT_GATT_CHARACTERISTIC(&gps_update_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_gps_update_vnd, nullptr),
 
     // Reset Bonds Characteristic
-    BT_GATT_CHARACTERISTIC(&reset_bonds_uuid.uuid, BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE, nullptr, write_reset_bonds_vnd,
-                           nullptr),
+    BT_GATT_CHARACTERISTIC(&reset_bonds_uuid.uuid, BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE, nullptr,
+                           write_reset_bonds_vnd, nullptr),
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // User Info Characteristic (primary device only)
-    BT_GATT_CHARACTERISTIC(&user_info_uuid.uuid, BT_GATT_CHRC_WRITE,
-                           BT_GATT_PERM_WRITE, nullptr, write_user_info_vnd,
-                           nullptr),
+    BT_GATT_CHARACTERISTIC(&user_info_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_user_info_vnd, nullptr),
+
 #endif
 
     // Erase External Flash Characteristic
-    BT_GATT_CHARACTERISTIC(&erase_external_flash_uuid.uuid,
-                           BT_GATT_CHRC_WRITE, BT_GATT_PERM_WRITE,
-                           nullptr,
-                           write_erase_external_flash_vnd,
-                           &external_flash_erase_status),
-    );
+    BT_GATT_CHARACTERISTIC(&erase_external_flash_uuid.uuid, BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+                           BT_GATT_PERM_WRITE, nullptr, write_erase_external_flash_vnd,
+                           &external_flash_erase_status), );
 
 /**
  * @brief Notifies subscribed devices about the metadata log deletion command.
@@ -361,10 +339,6 @@ BT_GATT_SERVICE_DEFINE(
  * @param stu The metadata log deletion command value.
  */
 
-
-
-
-
 /**
  * @brief Converts a 32-bit value from big endian to little endian.
  *
@@ -373,306 +347,336 @@ BT_GATT_SERVICE_DEFINE(
  * @param value The value to be converted.
  * @return The converted value in little endian format.
  */
-static uint32_t swap_to_little_endian(uint32_t value) {
-  return ((value << 24) & 0xFF000000) | ((value << 8) & 0x00FF0000) |
-         ((value >> 8) & 0x0000FF00) | ((value >> 24) & 0x000000FF);
+static uint32_t swap_to_little_endian(uint32_t value)
+{
+    return ((value << 24) & 0xFF000000) | ((value << 8) & 0x00FF0000) | ((value >> 8) & 0x0000FF00) |
+           ((value >> 24) & 0x000000FF);
 }
 
-// --- Start Activity Characteristic Handlers ---
 static bool start_activity_status_subscribed = false;
 static bool stop_activity_status_subscribed = false;
+static bool set_time_status_subscribed = false;
+static bool param_controle_status_subscribed = false;
+static bool gps_update_status_subscribed = false;
+static bool user_info_status_subscribed = false;
 
+static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                                uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
+    // Stop any previous streaming when an activity starts.
 
-static ssize_t write_start_activity_command_vnd(struct bt_conn *conn,
-                                                const struct bt_gatt_attr *attr,
-                                                const void *buf, uint16_t len,
-                                                uint16_t offset,
-                                                uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
-
-  if (len != sizeof(uint8_t)) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
-
-  uint8_t value = *((const uint8_t *)buf);
-
-  if (value == 1) {
-    // START ACTIVITY (New session)
-    // Update activity state
-    jis_update_activity_state(ACTIVITY_STATE_1_RUNNING);
-    
-    struct foot_sensor_start_activity_event *foot_evt =
-        new_foot_sensor_start_activity_event();
-    APP_EVENT_SUBMIT(foot_evt);
-
-    struct motion_sensor_start_activity_event *motion_evt =
-        new_motion_sensor_start_activity_event();
-    APP_EVENT_SUBMIT(motion_evt);
-
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the command to secondary device
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
-                        D2D_TX_CMD_START_ACTIVITY, value,
-                        "start activity command");
-#endif
-
-    // Start Logging Activity file
-    generic_message_t start_logging_msg = {};
-
-    start_logging_msg.sender = SENDER_BTH;
-    start_logging_msg.type = MSG_TYPE_COMMAND;
-    strncpy(start_logging_msg.data.command_str, "START_LOGGING_ACTIVITY",
-            sizeof(start_logging_msg.data.command_str) - 1);
-    start_logging_msg.data.command_str[sizeof(start_logging_msg.data.command_str) - 1] = '\0';
-    
-    // Start logging Activity file
-    if (k_msgq_put(&data_msgq, &start_logging_msg, K_NO_WAIT) != 0) {
-      LOG_WRN("Failed to send START_LOGGING_ACTIVITY command to DATA module");
-    } else {
-      LOG_INF("Sent START_LOGGING_ACTIVITY command to DATA module");
-    }
-
-    LOG_INF("Submitted start activity events for foot sensor and motion sensor "
-            "(input=1).");
-  } else if (value == 2) {
-    // UNPAUSE ACTIVITY (Resume existing session)
-    // Restore activity state from before pause
-    jis_restore_activity_state_from_pause();
-    
-    struct foot_sensor_start_activity_event *foot_evt =
-        new_foot_sensor_start_activity_event();
-    APP_EVENT_SUBMIT(foot_evt);
-
-    struct motion_sensor_start_activity_event *motion_evt =
-        new_motion_sensor_start_activity_event();
-    APP_EVENT_SUBMIT(motion_evt);
-
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the unpause command to secondary device (value=2)
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
-                        D2D_TX_CMD_START_ACTIVITY, value,
-                        "unpause activity command");
-#endif
-
-    // Send UNPAUSE command to processing modules
-    generic_message_t unpause_msg = {};
-    unpause_msg.sender = SENDER_BTH;
-    unpause_msg.type = MSG_TYPE_COMMAND;
-    
-    // Send to realtime metrics
-    strncpy(unpause_msg.data.command_str, "UNPAUSE_REALTIME_PROCESSING",
-            sizeof(unpause_msg.data.command_str) - 1);
-    unpause_msg.data.command_str[sizeof(unpause_msg.data.command_str) - 1] = '\0';
-    k_msgq_put(&sensor_data_msgq, &unpause_msg, K_NO_WAIT);
-    
-    // Send to analytics
-    strncpy(unpause_msg.data.command_str, "UNPAUSE_ANALYTICS",
-            sizeof(unpause_msg.data.command_str) - 1);
-    unpause_msg.data.command_str[sizeof(unpause_msg.data.command_str) - 1] = '\0';
-    k_msgq_put(&analytics_queue, &unpause_msg, K_NO_WAIT);
-    
-    // NOTE: DO NOT send START_LOGGING_ACTIVITY to data module - files remain open
-    LOG_INF("Activity UNPAUSED - sensors resumed, data files continue (input=2).");
-  } else if (value == 3) {
-    // START FOOT SENSOR STREAMING
-    // Update activity state
-    jis_update_activity_state(ACTIVITY_STATE_3_FOOT_STREAM);
-    
-    // Send streaming control event
-    struct streaming_control_event *evt = new_streaming_control_event();
-    evt->foot_sensor_streaming_enabled = true;
-    evt->quaternion_streaming_enabled = false;
-    APP_EVENT_SUBMIT(evt);
-    
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the command to secondary device (value=3)
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
-                        D2D_TX_CMD_START_ACTIVITY, value,
-                        "start foot sensor streaming");
-#endif
-    
-    LOG_INF("Foot sensor streaming ENABLED (input=3).");
-  } else if (value == 4) {
-    // START QUATERNION STREAMING
-    // Update activity state
-    jis_update_activity_state(ACTIVITY_STATE_4_QUAT_STREAM);
-    
-    // Send streaming control event
     struct streaming_control_event *evt = new_streaming_control_event();
     evt->foot_sensor_streaming_enabled = false;
-    evt->quaternion_streaming_enabled = true;
+    evt->quaternion_streaming_enabled = false;
     APP_EVENT_SUBMIT(evt);
-    
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the command to secondary device (value=4)
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
-                        D2D_TX_CMD_START_ACTIVITY, value,
-                        "start quaternion streaming");
-#endif
-    
-    LOG_INF("Quaternion streaming ENABLED (input=4).");
-  } else if (value == 5) {
-    // START BOTH FOOT SENSOR AND QUATERNION STREAMING
-    // Update activity state
-    jis_update_activity_state(ACTIVITY_STATE_5_BOTH_STREAM);
-    
-    // Send streaming control event
-    struct streaming_control_event *evt = new_streaming_control_event();
-    evt->foot_sensor_streaming_enabled = true;
-    evt->quaternion_streaming_enabled = true;
-    APP_EVENT_SUBMIT(evt);
-    
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    uint8_t value_d2d = 5;
     // Forward the command to secondary device (value=5)
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command,
-                        D2D_TX_CMD_START_ACTIVITY, value,
-                        "start both streams");
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command, D2D_TX_CMD_STOP_ACTIVITY, value_d2d,
+                        "stop both streams");
 #endif
-    
-    LOG_INF("Both foot sensor and quaternion streaming ENABLED (input=5).");
-  } else {
-    LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
-  }
 
-  return len;
+    k_msleep(10);
+
+    // Debug: Check write type
+    if (flags & BT_GATT_WRITE_FLAG_CMD)
+    {
+        LOG_WRN("Write without response received");
+    }
+    else
+    {
+        LOG_WRN("Write with response received");
+    }
+
+    if (len != sizeof(uint8_t))
+    {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    uint8_t value = *((const uint8_t *)buf);
+
+    if (value == 1)
+    {
+// START ACTIVITY (New session)
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command, D2D_TX_CMD_START_ACTIVITY, value,
+                            "start activity command");
+#endif
+
+        // Update activity state
+        jis_update_activity_state(ACTIVITY_STATE_1_RUNNING);
+
+        struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+
+        struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+
+        k_msleep(10);
+
+        // Start Logging Activity file
+        generic_message_t start_logging_msg = {};
+
+        start_logging_msg.sender = SENDER_BTH;
+        start_logging_msg.type = MSG_TYPE_COMMAND;
+        strncpy(start_logging_msg.data.command_str, "START_LOGGING_ACTIVITY",
+                sizeof(start_logging_msg.data.command_str) - 1);
+        start_logging_msg.data.command_str[sizeof(start_logging_msg.data.command_str) - 1] = '\0';
+
+        // Start logging Activity file
+        if (k_msgq_put(&data_msgq, &start_logging_msg, K_NO_WAIT) != 0)
+        {
+            LOG_WRN("Failed to send START_LOGGING_ACTIVITY command to DATA module");
+        }
+        else
+        {
+            LOG_INF("Sent START_LOGGING_ACTIVITY command to DATA module");
+        }
+
+        LOG_INF("Submitted start activity events for foot sensor and motion sensor "
+                "(input=1).");
+    }
+    else if (value == 2)
+    {
+        // UNPAUSE ACTIVITY (Resume existing session)
+        // Restore activity state from before pause
+        jis_restore_activity_state_from_pause();
+
+        struct foot_sensor_start_activity_event *foot_evt = new_foot_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+
+        struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the unpause command to secondary device (value=2)
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command, D2D_TX_CMD_START_ACTIVITY, value,
+                            "unpause activity command");
+#endif
+
+        // Send UNPAUSE command to processing modules
+        generic_message_t unpause_msg = {};
+        unpause_msg.sender = SENDER_BTH;
+        unpause_msg.type = MSG_TYPE_COMMAND;
+
+        // Send to realtime metrics
+        strncpy(unpause_msg.data.command_str, "UNPAUSE_REALTIME_PROCESSING", sizeof(unpause_msg.data.command_str) - 1);
+        unpause_msg.data.command_str[sizeof(unpause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&sensor_data_msgq, &unpause_msg, K_NO_WAIT);
+
+        // Send to analytics
+        strncpy(unpause_msg.data.command_str, "UNPAUSE_ANALYTICS", sizeof(unpause_msg.data.command_str) - 1);
+        unpause_msg.data.command_str[sizeof(unpause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&analytics_queue, &unpause_msg, K_NO_WAIT);
+
+        // NOTE: DO NOT send START_LOGGING_ACTIVITY to data module - files remain open
+        LOG_INF("Activity UNPAUSED - sensors resumed, data files continue (input=2).");
+    }
+    else if (value == 3)
+    {
+        // START FOOT SENSOR STREAMING
+        // Update activity state
+        jis_update_activity_state(ACTIVITY_STATE_3_FOOT_STREAM);
+
+        // Send streaming control event
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = true;
+        evt->quaternion_streaming_enabled = false;
+        APP_EVENT_SUBMIT(evt);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device (value=3)
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command, D2D_TX_CMD_START_ACTIVITY, value,
+                            "start foot sensor streaming");
+#endif
+
+        LOG_INF("Foot sensor streaming ENABLED (input=3).");
+    }
+    else if (value == 4)
+    {
+        // START QUATERNION STREAMING
+        // Update activity state
+        jis_update_activity_state(ACTIVITY_STATE_4_QUAT_STREAM);
+
+        // Send streaming control event
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = false;
+        evt->quaternion_streaming_enabled = true;
+        APP_EVENT_SUBMIT(evt);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device (value=4)
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command, D2D_TX_CMD_START_ACTIVITY, value,
+                            "start quaternion streaming");
+#endif
+
+        LOG_INF("Quaternion streaming ENABLED (input=4).");
+    }
+    else if (value == 5)
+    {
+        // START BOTH FOOT SENSOR AND QUATERNION STREAMING
+        // Update activity state
+        jis_update_activity_state(ACTIVITY_STATE_5_BOTH_STREAM);
+
+        // Send streaming control event
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = true;
+        evt->quaternion_streaming_enabled = true;
+        APP_EVENT_SUBMIT(evt);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device (value=5)
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_start_activity_command, D2D_TX_CMD_START_ACTIVITY, value,
+                            "start both streams");
+#endif
+
+        LOG_INF("Both foot sensor and quaternion streaming ENABLED (input=5).");
+    }
+    else
+    {
+        LOG_WRN("Start activity characteristic write ignored (input=%u).", value);
+    }
+
+    return len;
 }
 
 // --- GPS Update Handler ---
-static ssize_t write_gps_update_vnd(struct bt_conn *conn,
-                                    const struct bt_gatt_attr *attr,
-                                    const void *buf, uint16_t len,
-                                    uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_gps_update_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                    uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  // Check if we received the correct size for GPSUpdateCommand
-  if (len != sizeof(GPSUpdateCommand)) {
-    LOG_ERR("GPS update characteristic write: invalid length %u (expected %u)",
-            len, sizeof(GPSUpdateCommand));
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
+    // Check if we received the correct size for GPSUpdateCommand
+    if (len != sizeof(GPSUpdateCommand))
+    {
+        LOG_ERR("GPS update characteristic write: invalid length %u (expected %u)", len, sizeof(GPSUpdateCommand));
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
 
-  GPSUpdateCommand gps_data;
-  memcpy(&gps_data, buf, sizeof(GPSUpdateCommand));
+    GPSUpdateCommand gps_data;
+    memcpy(&gps_data, buf, sizeof(GPSUpdateCommand));
 
-  LOG_INF(
-      "GPS update received: lat=%d, lon=%d, speed=%u cm/s, dist=%u m, acc=%u m",
-      gps_data.latitude_e7, gps_data.longitude_e7, gps_data.speed_cms,
-      gps_data.distance_m, gps_data.accuracy_m);
+    LOG_INF("GPS update received: lat=%d, lon=%d, speed=%u cm/s, dist=%u m, acc=%u m", gps_data.latitude_e7,
+            gps_data.longitude_e7, gps_data.speed_cms, gps_data.distance_m, gps_data.accuracy_m);
 
-  // Send GPS update to activity metrics module
-  generic_message_t gps_msg = {};
-  gps_msg.sender = SENDER_BTH;
-  gps_msg.type = MSG_TYPE_GPS_UPDATE;
-  memcpy(&gps_msg.data.gps_update, &gps_data, sizeof(GPSUpdateCommand));
+    // Send GPS update to activity metrics module
+    generic_message_t gps_msg = {};
+    gps_msg.sender = SENDER_BTH;
+    gps_msg.type = MSG_TYPE_GPS_UPDATE;
+    memcpy(&gps_msg.data.gps_update, &gps_data, sizeof(GPSUpdateCommand));
 
-  if (k_msgq_put(&activity_metrics_msgq, &gps_msg, K_NO_WAIT) != 0) {
-    LOG_ERR("Failed to send GPS update to activity metrics");
-    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-  }
+    if (k_msgq_put(&activity_metrics_msgq, &gps_msg, K_NO_WAIT) != 0)
+    {
+        LOG_ERR("Failed to send GPS update to activity metrics");
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-  // Forward the GPS update to secondary device
-  int err = ble_d2d_tx_send_gps_update(&gps_data);
-  if (err) {
-    LOG_ERR("Failed to forward GPS update to secondary: %d", err);
-  } else {
-    LOG_DBG("Successfully forwarded GPS update to secondary");
-  }
+    // Forward the GPS update to secondary device
+    int err = ble_d2d_tx_send_gps_update(&gps_data);
+    if (err)
+    {
+        LOG_ERR("Failed to forward GPS update to secondary: %d", err);
+    }
+    else
+    {
+        LOG_DBG("Successfully forwarded GPS update to secondary");
+    }
 #endif
 
-  return len;
+    return len;
 }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 // --- User Info Handler ---
-static ssize_t write_user_info_vnd(struct bt_conn *conn,
-                                   const struct bt_gatt_attr *attr,
-                                   const void *buf, uint16_t len,
-                                   uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_user_info_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf, uint16_t len,
+                                   uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  // Check if we received the correct size for UserInfoData
-  if (len != sizeof(UserInfoData)) {
-    LOG_ERR("User info characteristic write: invalid length %u (expected %u)",
-            len, sizeof(UserInfoData));
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
+    // Check if we received the correct size for UserInfoData
+    if (len != sizeof(UserInfoData))
+    {
+        LOG_ERR("User info characteristic write: invalid length %u (expected %u)", len, sizeof(UserInfoData));
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
 
-  UserInfoData user_info;
-  memcpy(&user_info, buf, sizeof(UserInfoData));
+    UserInfoData user_info;
+    memcpy(&user_info, buf, sizeof(UserInfoData));
 
-  // Convert weight from decigrams to kilograms for logging
-  float weight_kg = user_info.weight_dg / 100.0f;
-  
-  // Convert height from millimeters to centimeters for logging
-  float height_cm = user_info.height_mm / 10.0f;
-  
-  // Log the received user information
-  LOG_INF("User info received:");
-  LOG_INF("  Age: %u years", user_info.age_years);
-  LOG_INF("  Gender: %u", user_info.gender);
-  LOG_INF("  Height: %u mm (%.1f cm)", user_info.height_mm, (double)height_cm);
-  LOG_INF("  Weight: %u dg (%.1f kg)", user_info.weight_dg, (double)weight_kg);
+    // Convert weight from decigrams to kilograms for logging
+    float weight_kg = user_info.weight_dg / 100.0f;
 
-  // TODO: Forward user info to secondary device if needed
-  // Currently just logging as requested - implementation of data usage to follow
-  
-  // TODO: Store user info in persistent storage or send to relevant modules
-  // This will be implemented based on future requirements
-  
-  return len;
+    // Convert height from millimeters to centimeters for logging
+    float height_cm = user_info.height_mm / 10.0f;
+
+    // Log the received user information
+    LOG_INF("User info received:");
+    LOG_INF("  Age: %u years", user_info.age_years);
+    LOG_INF("  Gender: %u", user_info.gender);
+    LOG_INF("  Height: %u mm (%.1f cm)", user_info.height_mm, (double)height_cm);
+    LOG_INF("  Weight: %u dg (%.1f kg)", user_info.weight_dg, (double)weight_kg);
+
+    // TODO: Forward user info to secondary device if needed
+    // Currently just logging as requested - implementation of data usage to follow
+
+    // TODO: Store user info in persistent storage or send to relevant modules
+    // This will be implemented based on future requirements
+
+    return len;
 }
 #endif // CONFIG_PRIMARY_DEVICE
 
-
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE) 
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 // --- Reset Bonds Handler ---
-static ssize_t write_reset_bonds_vnd(struct bt_conn *conn,
-                                     const struct bt_gatt_attr *attr,
-                                     const void *buf, uint16_t len,
-                                     uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_reset_bonds_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                     uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  if (len != sizeof(uint8_t)) {
-    LOG_ERR("Reset bonds characteristic write: invalid length %u (expected %u)",
-            len, sizeof(uint8_t));
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
-
-  uint8_t value = *((const uint8_t *)buf);
-
-  if (value == 1) {
-    LOG_INF("Reset bonds command received, resetting all BLE bonds");
-    
-    // Call the ble_reset_bonds function
-    err_t err = ble_reset_bonds();
-    if (err != err_t::NO_ERROR) {
-      LOG_ERR("Failed to reset BLE bonds: %d", (int)err);
-      return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    if (len != sizeof(uint8_t))
+    {
+        LOG_ERR("Reset bonds characteristic write: invalid length %u (expected %u)", len, sizeof(uint8_t));
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
-    
-    LOG_INF("Successfully reset all BLE bonds");
 
+    uint8_t value = *((const uint8_t *)buf);
 
-  } else {
-    LOG_WRN("Reset bonds characteristic write ignored (value=%u, expected 1)",
-            value);
-  }
+    if (value == 1)
+    {
+        LOG_INF("Reset bonds command received, resetting all BLE bonds");
 
-  return len;
+        // Call the ble_reset_bonds function
+        err_t err = ble_reset_bonds();
+        if (err != err_t::NO_ERROR)
+        {
+            LOG_ERR("Failed to reset BLE bonds: %d", (int)err);
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        }
+
+        LOG_INF("Successfully reset all BLE bonds");
+    }
+    else
+    {
+        LOG_WRN("Reset bonds characteristic write ignored (value=%u, expected 1)", value);
+    }
+
+    return len;
 }
 
 #endif // CONFIG_PRIMARY_DEVICE
@@ -680,98 +684,98 @@ static ssize_t write_reset_bonds_vnd(struct bt_conn *conn,
 // --- Weight Calibration Trigger Handler ---
 static bool weight_calibration_trigger_subscribed = false;
 
-static ssize_t write_weight_calibration_trigger_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_weight_calibration_trigger_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                    const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  // Check if this is a simple trigger (1 byte) or calibration data (4 bytes for
-  // float)
-  if (len == 1) {
-    // Legacy support: single byte trigger for measurement without known weight
-    uint8_t value = *((const uint8_t *)buf);
-    LOG_INF("Weight calibration trigger characteristic write (legacy): %u",
-            value);
+    // Check if this is a simple trigger (1 byte) or calibration data (4 bytes for
+    // float)
+    if (len == 1)
+    {
+        // Legacy support: single byte trigger for measurement without known weight
+        uint8_t value = *((const uint8_t *)buf);
+        LOG_INF("Weight calibration trigger characteristic write (legacy): %u", value);
 
-    if (value == 1) {
-      // Send weight calibration trigger without known weight
-      generic_message_t calib_msg = {};
-      calib_msg.sender = SENDER_BTH;
-      calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
+        if (value == 1)
+        {
+            // Send weight calibration trigger without known weight
+            generic_message_t calib_msg = {};
+            calib_msg.sender = SENDER_BTH;
+            calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
 
-      if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0) {
-        LOG_ERR(
-            "Failed to send weight calibration trigger to activity metrics");
-        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-      }
-
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-      // Forward the command to secondary device
-      FORWARD_D2D_COMMAND(ble_d2d_tx_send_weight_calibration_trigger_command,
-                          D2D_TX_CMD_WEIGHT_CALIBRATION_TRIGGER, value,
-                          "weight calibration trigger command");
-#endif
-    }
-  } else if (len == sizeof(weight_calibration_step_t)) {
-    // New format: calibration with known weight
-    weight_calibration_step_t *calib_data = (weight_calibration_step_t *)buf;
-    LOG_INF("Weight calibration trigger with known weight: %.1f kg",
-            (double)calib_data->known_weight_kg);
-
-    // Validate weight range
-    if (calib_data->known_weight_kg < 20.0f ||
-        calib_data->known_weight_kg > 300.0f) {
-      LOG_ERR("Invalid weight for calibration: %.1f kg",
-              (double)calib_data->known_weight_kg);
-      return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
-    }
-
-    // Send calibration data to activity metrics
-    generic_message_t calib_msg = {};
-    calib_msg.sender = SENDER_BTH;
-    calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
-    memcpy(&calib_msg.data.weight_calibration_step, calib_data,
-           sizeof(weight_calibration_step_t));
-
-    if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0) {
-      LOG_ERR("Failed to send weight calibration data to activity metrics");
-      return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-    }
+            if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to send weight calibration trigger to activity metrics");
+                return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+            }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward calibration data to secondary device
-    int err = ble_d2d_tx_send_weight_calibration_with_weight(calib_data);
-    if (err) {
-      LOG_ERR(
-          "Failed to forward weight calibration with weight to secondary: %d",
-          err);
-    } else {
-      LOG_INF(
-          "Successfully forwarded weight calibration with weight to secondary");
-    }
+            // Forward the command to secondary device
+            FORWARD_D2D_COMMAND(ble_d2d_tx_send_weight_calibration_trigger_command,
+                                D2D_TX_CMD_WEIGHT_CALIBRATION_TRIGGER, value, "weight calibration trigger command");
 #endif
-  } else {
-    LOG_ERR(
-        "Weight calibration trigger characteristic write: invalid length %u",
-        len);
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
+        }
+    }
+    else if (len == sizeof(weight_calibration_step_t))
+    {
+        // New format: calibration with known weight
+        weight_calibration_step_t *calib_data = (weight_calibration_step_t *)buf;
+        LOG_INF("Weight calibration trigger with known weight: %.1f kg", (double)calib_data->known_weight_kg);
 
-  return len;
+        // Validate weight range
+        if (calib_data->known_weight_kg < 20.0f || calib_data->known_weight_kg > 300.0f)
+        {
+            LOG_ERR("Invalid weight for calibration: %.1f kg", (double)calib_data->known_weight_kg);
+            return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+        }
+
+        // Send calibration data to activity metrics
+        generic_message_t calib_msg = {};
+        calib_msg.sender = SENDER_BTH;
+        calib_msg.type = MSG_TYPE_START_WEIGHT_CALIBRATION;
+        memcpy(&calib_msg.data.weight_calibration_step, calib_data, sizeof(weight_calibration_step_t));
+
+        if (k_msgq_put(&activity_metrics_msgq, &calib_msg, K_NO_WAIT) != 0)
+        {
+            LOG_ERR("Failed to send weight calibration data to activity metrics");
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward calibration data to secondary device
+        int err = ble_d2d_tx_send_weight_calibration_with_weight(calib_data);
+        if (err)
+        {
+            LOG_ERR("Failed to forward weight calibration with weight to secondary: %d", err);
+        }
+        else
+        {
+            LOG_INF("Successfully forwarded weight calibration with weight to secondary");
+        }
+#endif
+    }
+    else
+    {
+        LOG_ERR("Weight calibration trigger characteristic write: invalid length %u", len);
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
+
+    return len;
 }
 
-static void
-cs_weight_calibration_trigger_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                              uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_weight_calibration_trigger_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  weight_calibration_trigger_subscribed = value == BT_GATT_CCC_NOTIFY;
-  LOG_DBG("Weight Calibration Trigger CCC changed: %u", value);
+static void cs_weight_calibration_trigger_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_weight_calibration_trigger_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    weight_calibration_trigger_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Weight Calibration Trigger CCC changed: %u", value);
 }
 
 // --- Connection Parameter Control Handlers ---
@@ -781,13 +785,11 @@ cs_weight_calibration_trigger_ccc_cfg_changed(const struct bt_gatt_attr *attr,
  * Returns the current connection profile (0=FOREGROUND, 1=BACKGROUND,
  * 2=BACKGROUND_IDLE)
  */
-static ssize_t read_conn_param_control_vnd(struct bt_conn *conn,
-                                           const struct bt_gatt_attr *attr,
-                                           void *buf, uint16_t len,
-                                           uint16_t offset) {
-  uint8_t current_profile = (uint8_t)ble_conn_params_get_profile();
-  return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_profile,
-                           sizeof(current_profile));
+static ssize_t read_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                           uint16_t len, uint16_t offset)
+{
+    uint8_t current_profile = (uint8_t)ble_conn_params_get_profile();
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &current_profile, sizeof(current_profile));
 }
 
 /**
@@ -798,45 +800,45 @@ static ssize_t read_conn_param_control_vnd(struct bt_conn *conn,
  * @param buf Should contain 1 byte: 0=FOREGROUND, 1=BACKGROUND,
  * 2=BACKGROUND_IDLE
  */
-static ssize_t write_conn_param_control_vnd(struct bt_conn *conn,
-                                            const struct bt_gatt_attr *attr,
-                                            const void *buf, uint16_t len,
-                                            uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_conn_param_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                            uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  if (len != sizeof(uint8_t)) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
+    if (len != sizeof(uint8_t))
+    {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
 
-  uint8_t requested_profile = *((const uint8_t *)buf);
+    uint8_t requested_profile = *((const uint8_t *)buf);
 
-  // Validate profile value
-  if (requested_profile >= CONN_PROFILE_MAX) {
-    LOG_ERR("Invalid connection profile requested: %d", requested_profile);
-    return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
-  }
+    // Validate profile value
+    if (requested_profile >= CONN_PROFILE_MAX)
+    {
+        LOG_ERR("Invalid connection profile requested: %d", requested_profile);
+        return BT_GATT_ERR(BT_ATT_ERR_VALUE_NOT_ALLOWED);
+    }
 
-  LOG_INF("Mobile app requested connection profile change to: %d",
-          requested_profile);
+    LOG_INF("Mobile app requested connection profile change to: %d", requested_profile);
 
-  // Update connection parameters for primary device
-  int err = ble_conn_params_update(conn, (conn_profile_t)requested_profile);
-  if (err) {
-    LOG_ERR("Failed to update connection parameters: %d", err);
-    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-  }
+    // Update connection parameters for primary device
+    int err = ble_conn_params_update(conn, (conn_profile_t)requested_profile);
+    if (err)
+    {
+        LOG_ERR("Failed to update connection parameters: %d", err);
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-  // Forward the command to secondary device
-  FORWARD_D2D_COMMAND(ble_d2d_tx_send_conn_param_control_command,
-                      D2D_TX_CMD_CONN_PARAM_CONTROL, requested_profile,
-                      "connection parameter control command");
+    // Forward the command to secondary device
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_conn_param_control_command, D2D_TX_CMD_CONN_PARAM_CONTROL, requested_profile,
+                        "connection parameter control command");
 #endif
 
-  LOG_INF("Connection parameter update initiated successfully");
-  return len;
+    LOG_INF("Connection parameter update initiated successfully");
+    return len;
 }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -845,41 +847,41 @@ static ssize_t write_conn_param_control_vnd(struct bt_conn *conn,
  * Only forwards the command to secondary device via D2D.
  */
 
-
-
 /**
  * @brief Write callback for Delete Secondary Activity Log Command
  * Characteristic. Only forwards the command to secondary device via D2D.
  */
-static ssize_t write_delete_secondary_activity_log_command_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_delete_secondary_activity_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                               const void *buf, uint16_t len, uint16_t offset,
+                                                               uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  if (len != sizeof(uint8_t)) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
+    if (len != sizeof(uint8_t))
+    {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
 
-  uint8_t id_to_delete;
-  memcpy(&id_to_delete, buf, sizeof(uint8_t));
+    uint8_t id_to_delete;
+    memcpy(&id_to_delete, buf, sizeof(uint8_t));
 
-  // Only forward to secondary device
-  FORWARD_D2D_COMMAND(ble_d2d_tx_send_delete_activity_log_command,
-                      D2D_TX_CMD_DELETE_ACTIVITY_LOG, id_to_delete,
-                      "delete activity log command");
-  return len;
+    // Only forward to secondary device
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_delete_activity_log_command, D2D_TX_CMD_DELETE_ACTIVITY_LOG, id_to_delete,
+                        "delete activity log command");
+    return len;
 }
 
-static void cs_delete_secondary_activity_log_ccc_cfg_changed(
-    const struct bt_gatt_attr *attr, uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_delete_secondary_activity_log_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  LOG_DBG("Delete Secondary Activity Log CCC changed: %u", value);
+static void cs_delete_secondary_activity_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_delete_secondary_activity_log_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    LOG_DBG("Delete Secondary Activity Log CCC changed: %u", value);
 }
 #endif // CONFIG_PRIMARY_DEVICE
 
@@ -888,452 +890,543 @@ static void cs_delete_secondary_activity_log_ccc_cfg_changed(
  * Receives the ID of the activity log file to delete and sends a message to the
  * data module.
  */
-static ssize_t write_delete_activity_log_command_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_delete_activity_log_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                     const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  if (len != sizeof(uint8_t)) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
+    if (len != sizeof(uint8_t))
+    {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
 
-  uint8_t id_to_delete;
-  memcpy(&id_to_delete, buf, sizeof(uint8_t));
+    uint8_t id_to_delete;
+    memcpy(&id_to_delete, buf, sizeof(uint8_t));
 
-  generic_message_t delete_msg;
-  delete_msg.sender = SENDER_BTH;
-  delete_msg.type = MSG_TYPE_DELETE_ACTIVITY_LOG;
-  delete_msg.data.delete_cmd.type = RECORD_HARDWARE_ACTIVITY;
-  delete_msg.data.delete_cmd.id = id_to_delete;
+    generic_message_t delete_msg;
+    delete_msg.sender = SENDER_BTH;
+    delete_msg.type = MSG_TYPE_DELETE_ACTIVITY_LOG;
+    delete_msg.data.delete_cmd.type = RECORD_HARDWARE_ACTIVITY;
+    delete_msg.data.delete_cmd.id = id_to_delete;
 
-  if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0) {
-    LOG_ERR("Failed to send delete activity log message for ID %u.",
-            id_to_delete);
-    return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-  }
+    if (k_msgq_put(&data_msgq, &delete_msg, K_NO_WAIT) != 0)
+    {
+        LOG_ERR("Failed to send delete activity log message for ID %u.", id_to_delete);
+        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    }
 
-  LOG_INF("Delete activity log message for ID %u sent to data_msgq.",
-          id_to_delete);
+    LOG_INF("Delete activity log message for ID %u sent to data_msgq.", id_to_delete);
 
-  // Note: This only deletes from primary device storage
-  // Use delete_secondary_activity_log_command to delete from secondary
+    // Note: This only deletes from primary device storage
+    // Use delete_secondary_activity_log_command to delete from secondary
 
-  return len;
+    return len;
 }
 
 /**
  * @brief Callback for CCC configuration change of delete activity log command
  * characteristic.
  */
-static void
-cs_delete_activity_log_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                       uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_delete_activity_log_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  // Could use a separate flag, but reusing status_subscribed for simplicity
-  LOG_DBG("Delete Activity Log CCC changed: %u", value);
+static void cs_delete_activity_log_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_delete_activity_log_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    // Could use a separate flag, but reusing status_subscribed for simplicity
+    LOG_DBG("Delete Activity Log CCC changed: %u", value);
 }
 
 // --- Trigger BHI360 Calibration Characteristic Handlers ---
 static bool trigger_bhi360_calibration_subscribed = false;
 
-static ssize_t write_trigger_bhi360_calibration_vnd(
-    struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
-    uint16_t len, uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_trigger_bhi360_calibration_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                                    const void *buf, uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  if (len != sizeof(uint8_t)) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
-
-  uint8_t value = *((const uint8_t *)buf);
-
-  if (value == 1) {
-    // Send message to motion sensor to trigger calibration
-    generic_message_t calib_msg = {};
-    calib_msg.sender = SENDER_BTH;
-    calib_msg.type = MSG_TYPE_TRIGGER_BHI360_CALIBRATION;
-
-    if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0) {
-      LOG_ERR("Failed to send calibration trigger to motion sensor");
-      return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+    if (len != sizeof(uint8_t))
+    {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
 
+    uint8_t value = *((const uint8_t *)buf);
+
+    if (value == 1)
+    {
+        // Send message to motion sensor to trigger calibration
+        generic_message_t calib_msg = {};
+        calib_msg.sender = SENDER_BTH;
+        calib_msg.type = MSG_TYPE_TRIGGER_BHI360_CALIBRATION;
+
+        if (k_msgq_put(&motion_sensor_msgq, &calib_msg, K_NO_WAIT) != 0)
+        {
+            LOG_ERR("Failed to send calibration trigger to motion sensor");
+            return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+        }
+
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the command to secondary device
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_trigger_bhi360_calibration_command,
-                        D2D_TX_CMD_TRIGGER_CALIBRATION, value,
-                        "trigger calibration command");
+        // Forward the command to secondary device
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_trigger_bhi360_calibration_command, D2D_TX_CMD_TRIGGER_CALIBRATION, value,
+                            "trigger calibration command");
 #endif
 
-    LOG_INF("Triggered BHI360 calibration (input=1).");
-  } else {
-    LOG_WRN(
-        "Trigger BHI360 calibration characteristic write ignored (input=%u).",
-        value);
-  }
+        LOG_INF("Triggered BHI360 calibration (input=1).");
+    }
+    else
+    {
+        LOG_WRN("Trigger BHI360 calibration characteristic write ignored (input=%u).", value);
+    }
 
-  return len;
+    return len;
 }
 
-static void
-cs_trigger_bhi360_calibration_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                              uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_trigger_bhi360_calibration_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  trigger_bhi360_calibration_subscribed = value == BT_GATT_CCC_NOTIFY;
-  LOG_DBG("Trigger BHI360 Calibration CCC changed: %u", value);
+static void cs_trigger_bhi360_calibration_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_trigger_bhi360_calibration_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    trigger_bhi360_calibration_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Trigger BHI360 Calibration CCC changed: %u", value);
 }
 
-static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                              uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_start_activity_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  start_activity_status_subscribed = value == BT_GATT_CCC_NOTIFY;
-  LOG_DBG("Start Activity CCC changed: %u", value);
+static void cs_start_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_start_activity_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    start_activity_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Start Activity CCC changed: %u", value);
+}
+
+static void cs_set_time_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_set_time_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    set_time_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Set Time CCC changed: %u", value);
+}
+
+static void cs_gps_update_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_gps_update_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    param_controle_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("cs_gps_update_ccc_cfg_changed CCC changed: %u", value);
+}
+
+static void cs_param_control_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_param_control_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    gps_update_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("cs_param_control CCC changed: %u", value);
+}
+
+static void cs_user_info_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_user_info_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    user_info_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("cs_user_info CCC changed: %u", value);
 }
 
 // --- Stop Activity Characteristic Handlers ---
-static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn,
-                                               const struct bt_gatt_attr *attr,
-                                               const void *buf, uint16_t len,
-                                               uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(attr);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_stop_activity_command_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                               uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(attr);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  if (len != sizeof(uint8_t)) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
+    generic_message_t stop_msg = {};
+    stop_msg.sender = SENDER_ACTIVITY_METRICS;
+    stop_msg.type = MSG_TYPE_COMMAND;
 
-  uint8_t value = *((const uint8_t *)buf);
+    // Stop realtime metrics processing - send to sensor_data_queue (input queue for realtime_metrics)
+    strcpy(stop_msg.data.command_str, "STOP_REALTIME_PROCESSING");
+    k_msgq_put(&sensor_data_queue, &stop_msg, K_NO_WAIT);
 
-  if (value == 1) {
-    // STOP ACTIVITY (End session completely)
-    // Update activity state to idle
-    jis_update_activity_state(ACTIVITY_STATE_IDLE);
-    
-    struct foot_sensor_stop_activity_event *foot_evt =
-        new_foot_sensor_stop_activity_event();
-    APP_EVENT_SUBMIT(foot_evt);
+    // Debug: Check write type
+    if (flags & BT_GATT_WRITE_FLAG_CMD)
+    {
+        LOG_WRN("Write without response received");
+    }
+    else
+    {
+        LOG_WRN("Write with response received");
+    }
 
-    struct motion_sensor_stop_activity_event *motion_evt =
-        new_motion_sensor_stop_activity_event();
-    APP_EVENT_SUBMIT(motion_evt);
+    if (len != sizeof(uint8_t))
+    {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+    }
 
-    LOG_INF("Sending STOP_ACTIVITY message");
+    uint8_t value = *((const uint8_t *)buf);
+
+    if (value == 1)
+    {
+
+        // STOP ACTIVITY (End session completely)
+        // Update activity state to idle
+        jis_update_activity_state(ACTIVITY_STATE_IDLE);
+
+        struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+
+        struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+
+        LOG_INF("Sending STOP_ACTIVITY message");
+
+        // Stop  Logging Activity file
+        generic_message_t stop_logging_msg = {};
+
+        stop_logging_msg.sender = SENDER_BTH;
+        stop_logging_msg.type = MSG_TYPE_COMMAND;
+        strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING_ACTIVITY", sizeof(stop_logging_msg.data.command_str));
+        stop_logging_msg.data.command_str[sizeof(stop_logging_msg.data.command_str) - 1] = '\0';
+
+        // Stop logging Activity file
+        if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0)
+        {
+            LOG_WRN("Failed to send STOP_LOGGING_ACTIVITY command to DATA module");
+        }
+        else
+        {
+            LOG_INF("Sent STOP_LOGGING_ACTIVITY command to DATA module");
+        }
+
+        LOG_INF("Submitted stop activity events for foot sensor and motion sensor "
+                "(input=1).");
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command, D2D_TX_CMD_STOP_ACTIVITY, value,
+                            "stop activity command");
+#endif
+    }
+    else if (value == 2)
+    {
+        // PAUSE ACTIVITY (Suspend processing but keep files open)
+        // Update activity state to paused
+        jis_update_activity_state(ACTIVITY_STATE_PAUSED);
+
+        struct foot_sensor_stop_activity_event *foot_evt = new_foot_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(foot_evt);
+
+        struct motion_sensor_stop_activity_event *motion_evt = new_motion_sensor_stop_activity_event();
+        APP_EVENT_SUBMIT(motion_evt);
+
+        LOG_INF("Sending PAUSE_ACTIVITY message");
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the pause command to secondary device (value=2)
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command, D2D_TX_CMD_STOP_ACTIVITY, value,
+                            "pause activity command");
+#endif
+
+        // Send PAUSE command to processing modules
+        generic_message_t pause_msg = {};
+        pause_msg.sender = SENDER_BTH;
+        pause_msg.type = MSG_TYPE_COMMAND;
+
+        // Send to realtime metrics
+        strncpy(pause_msg.data.command_str, "PAUSE_REALTIME_PROCESSING", sizeof(pause_msg.data.command_str) - 1);
+        pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&sensor_data_msgq, &pause_msg, K_NO_WAIT);
+
+        // Send to analytics
+        strncpy(pause_msg.data.command_str, "PAUSE_ANALYTICS", sizeof(pause_msg.data.command_str) - 1);
+        pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&analytics_queue, &pause_msg, K_NO_WAIT);
+
+        // Send to sensor data
+        strncpy(pause_msg.data.command_str, "PAUSE_SENSOR_PROCESSING", sizeof(pause_msg.data.command_str) - 1);
+        pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
+        k_msgq_put(&sensor_data_msgq, &pause_msg, K_NO_WAIT);
+
+        // IMPORTANT: DO NOT send STOP_LOGGING_ACTIVITY to data module
+        // Files must remain open during pause
+        LOG_INF("Activity PAUSED - sensors stopped, data files remain open (input=2).");
+    }
+    else if (value == 3)
+    {
+        // STOP FOOT SENSOR STREAMING
+        // Check current state and update accordingly
+        activity_state_t current = jis_get_activity_state();
+        if (current == ACTIVITY_STATE_5_BOTH_STREAM)
+        {
+            // Was streaming both, now only quaternion
+            jis_update_activity_state(ACTIVITY_STATE_4_QUAT_STREAM);
+        }
+        else if (current == ACTIVITY_STATE_3_FOOT_STREAM)
+        {
+            // Was only streaming foot, now idle
+            jis_update_activity_state(ACTIVITY_STATE_IDLE);
+        }
+
+        // Send streaming control event (keep quaternion as-is, default enabled)
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = false;
+        APP_EVENT_SUBMIT(evt);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device (value=3)
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command, D2D_TX_CMD_STOP_ACTIVITY, value,
+                            "stop foot sensor streaming");
+#endif
+
+        LOG_INF("Foot sensor streaming DISABLED (input=3).");
+    }
+    else if (value == 4)
+    {
+        // STOP QUATERNION STREAMING
+        // Check current state and update accordingly
+        activity_state_t current = jis_get_activity_state();
+        if (current == ACTIVITY_STATE_5_BOTH_STREAM)
+        {
+            // Was streaming both, now only foot
+            jis_update_activity_state(ACTIVITY_STATE_3_FOOT_STREAM);
+        }
+        else if (current == ACTIVITY_STATE_4_QUAT_STREAM)
+        {
+            // Was only streaming quaternion, now idle
+            jis_update_activity_state(ACTIVITY_STATE_IDLE);
+        }
+
+        // Send streaming control event (keep foot sensor as-is, default enabled)
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->quaternion_streaming_enabled = false;
+        APP_EVENT_SUBMIT(evt);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device (value=4)
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command, D2D_TX_CMD_STOP_ACTIVITY, value,
+                            "stop quaternion streaming");
+#endif
+
+        LOG_INF("Quaternion streaming DISABLED (input=4).");
+    }
+    else if (value == 5)
+    {
+        // STOP BOTH FOOT SENSOR AND QUATERNION STREAMING
+        // Update activity state to idle (no streaming)
+        jis_update_activity_state(ACTIVITY_STATE_IDLE);
+
+        // Send streaming control event
+        struct streaming_control_event *evt = new_streaming_control_event();
+        evt->foot_sensor_streaming_enabled = false;
+        evt->quaternion_streaming_enabled = false;
+        APP_EVENT_SUBMIT(evt);
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        // Forward the command to secondary device (value=5)
+        FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command, D2D_TX_CMD_STOP_ACTIVITY, value,
+                            "stop both streams");
+#endif
+
+        LOG_INF("Both foot sensor and quaternion streaming DISABLED (input=5).");
+    }
+    else
+    {
+        LOG_WRN("Stop activity characteristic write ignored (input=%u).", value);
+    }
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Forward the command to secondary device
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
-                        D2D_TX_CMD_STOP_ACTIVITY, value,
+    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command, D2D_TX_CMD_STOP_ACTIVITY, value,
                         "stop activity command");
 #endif
 
-    // Stop  Logging Activity file
-    generic_message_t stop_logging_msg = {};
-
-    stop_logging_msg.sender = SENDER_BTH;
-    stop_logging_msg.type = MSG_TYPE_COMMAND;
-    strncpy(stop_logging_msg.data.command_str, "STOP_LOGGING_ACTIVITY",
-            sizeof(stop_logging_msg.data.command_str));
-    stop_logging_msg.data.command_str[sizeof(stop_logging_msg.data.command_str) - 1] = '\0';
-
-    // Stop logging Activity file
-    if (k_msgq_put(&data_msgq, &stop_logging_msg, K_NO_WAIT) != 0) {
-      LOG_WRN("Failed to send STOP_LOGGING_ACTIVITY command to DATA module");
-    } else {
-      LOG_INF("Sent STOP_LOGGING_ACTIVITY command to DATA module");
-    }
-
-    LOG_INF("Submitted stop activity events for foot sensor and motion sensor "
-            "(input=1).");
-  } else if (value == 2) {
-    // PAUSE ACTIVITY (Suspend processing but keep files open)
-    // Update activity state to paused
-    jis_update_activity_state(ACTIVITY_STATE_PAUSED);
-    
-    struct foot_sensor_stop_activity_event *foot_evt =
-        new_foot_sensor_stop_activity_event();
-    APP_EVENT_SUBMIT(foot_evt);
-
-    struct motion_sensor_stop_activity_event *motion_evt =
-        new_motion_sensor_stop_activity_event();
-    APP_EVENT_SUBMIT(motion_evt);
-
-    LOG_INF("Sending PAUSE_ACTIVITY message");
-
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the pause command to secondary device (value=2)
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
-                        D2D_TX_CMD_STOP_ACTIVITY, value,
-                        "pause activity command");
-#endif
-
-    // Send PAUSE command to processing modules
-    generic_message_t pause_msg = {};
-    pause_msg.sender = SENDER_BTH;
-    pause_msg.type = MSG_TYPE_COMMAND;
-    
-    // Send to realtime metrics
-    strncpy(pause_msg.data.command_str, "PAUSE_REALTIME_PROCESSING",
-            sizeof(pause_msg.data.command_str) - 1);
-    pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
-    k_msgq_put(&sensor_data_msgq, &pause_msg, K_NO_WAIT);
-    
-    // Send to analytics
-    strncpy(pause_msg.data.command_str, "PAUSE_ANALYTICS",
-            sizeof(pause_msg.data.command_str) - 1);
-    pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
-    k_msgq_put(&analytics_queue, &pause_msg, K_NO_WAIT);
-    
-    // Send to sensor data
-    strncpy(pause_msg.data.command_str, "PAUSE_SENSOR_PROCESSING",
-            sizeof(pause_msg.data.command_str) - 1);
-    pause_msg.data.command_str[sizeof(pause_msg.data.command_str) - 1] = '\0';
-    k_msgq_put(&sensor_data_msgq, &pause_msg, K_NO_WAIT);
-
-    // IMPORTANT: DO NOT send STOP_LOGGING_ACTIVITY to data module
-    // Files must remain open during pause
-    LOG_INF("Activity PAUSED - sensors stopped, data files remain open (input=2).");
-  } else if (value == 3) {
-    // STOP FOOT SENSOR STREAMING
-    // Check current state and update accordingly
-    activity_state_t current = jis_get_activity_state();
-    if (current == ACTIVITY_STATE_5_BOTH_STREAM) {
-        // Was streaming both, now only quaternion
-        jis_update_activity_state(ACTIVITY_STATE_4_QUAT_STREAM);
-    } else if (current == ACTIVITY_STATE_3_FOOT_STREAM) {
-        // Was only streaming foot, now idle
-        jis_update_activity_state(ACTIVITY_STATE_IDLE);
-    }
-    
-    // Send streaming control event (keep quaternion as-is, default enabled)
-    struct streaming_control_event *evt = new_streaming_control_event();
-    evt->foot_sensor_streaming_enabled = false;
-    APP_EVENT_SUBMIT(evt);
-    
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the command to secondary device (value=3)
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
-                        D2D_TX_CMD_STOP_ACTIVITY, value,
-                        "stop foot sensor streaming");
-#endif
-    
-    LOG_INF("Foot sensor streaming DISABLED (input=3).");
-  } else if (value == 4) {
-    // STOP QUATERNION STREAMING
-    // Check current state and update accordingly
-    activity_state_t current = jis_get_activity_state();
-    if (current == ACTIVITY_STATE_5_BOTH_STREAM) {
-        // Was streaming both, now only foot
-        jis_update_activity_state(ACTIVITY_STATE_3_FOOT_STREAM);
-    } else if (current == ACTIVITY_STATE_4_QUAT_STREAM) {
-        // Was only streaming quaternion, now idle
-        jis_update_activity_state(ACTIVITY_STATE_IDLE);
-    }
-    
-    // Send streaming control event (keep foot sensor as-is, default enabled)
-    struct streaming_control_event *evt = new_streaming_control_event();
-    evt->quaternion_streaming_enabled = false;
-    APP_EVENT_SUBMIT(evt);
-    
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the command to secondary device (value=4)
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
-                        D2D_TX_CMD_STOP_ACTIVITY, value,
-                        "stop quaternion streaming");
-#endif
-    
-    LOG_INF("Quaternion streaming DISABLED (input=4).");
-  } else if (value == 5) {
-    // STOP BOTH FOOT SENSOR AND QUATERNION STREAMING
-    // Update activity state to idle (no streaming)
-    jis_update_activity_state(ACTIVITY_STATE_IDLE);
-    
-    // Send streaming control event
-    struct streaming_control_event *evt = new_streaming_control_event();
-    evt->foot_sensor_streaming_enabled = false;
-    evt->quaternion_streaming_enabled = false;
-    APP_EVENT_SUBMIT(evt);
-    
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Forward the command to secondary device (value=5)
-    FORWARD_D2D_COMMAND(ble_d2d_tx_send_stop_activity_command,
-                        D2D_TX_CMD_STOP_ACTIVITY, value,
-                        "stop both streams");
-#endif
-    
-    LOG_INF("Both foot sensor and quaternion streaming DISABLED (input=5).");
-  } else {
-    LOG_WRN("Stop activity characteristic write ignored (input=%u).", value);
-  }
-
-  return len;
+    return len;
 }
 
 // --- Erase External Flash Handlers ---
 // Store the attribute pointer for notifications
 static const struct bt_gatt_attr *erase_flash_attr = NULL;
 
-static ssize_t write_erase_external_flash_vnd(struct bt_conn *conn,
-                                              const struct bt_gatt_attr *attr,
-                                              const void *buf, uint16_t len,
-                                              uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(offset);
-  ARG_UNUSED(flags);
+static ssize_t write_erase_external_flash_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                              uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(offset);
+    ARG_UNUSED(flags);
 
-  // Save the attribute pointer for notifications
-  erase_flash_attr = attr;
+    // Save the attribute pointer for notifications
+    erase_flash_attr = attr;
 
-  if (len != sizeof(uint8_t)) {
-    LOG_ERR("Erase external flash characteristic write: invalid length %u (expected %u)",
-            len, sizeof(uint8_t));
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-  }
-
-  uint8_t value = *((const uint8_t *)buf);
-
-  if (value == 1) {
-    // Only proceed if not already erasing
-    if (external_flash_erase_status == 0) {
-      LOG_INF("Erase external flash command received, sending to data module");
-      
-      // Update status to erasing
-      external_flash_erase_status = 1;
-      
-      // Send message to data module to trigger erase
-      generic_message_t erase_msg = {};
-      erase_msg.sender = SENDER_BTH;
-      erase_msg.type = MSG_TYPE_ERASE_EXTERNAL_FLASH;
-      
-      if (k_msgq_put(&data_msgq, &erase_msg, K_NO_WAIT) != 0) {
-        LOG_ERR("Failed to send erase external flash command to DATA module");
-        external_flash_erase_status = 0; // Reset status on failure
-        return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
-      }
-      
-      LOG_INF("Sent ERASE_EXTERNAL_FLASH command to DATA module");
-      
-      // Notify that erasing has started
-      if (erase_flash_attr) {
-        bt_gatt_notify(NULL, erase_flash_attr,
-            &external_flash_erase_status, sizeof(external_flash_erase_status));
-      }
-      
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-      // Forward the command to secondary device
-      FORWARD_D2D_COMMAND(ble_d2d_tx_send_erase_flash_command,
-                          D2D_TX_CMD_ERASE_FLASH, value,
-                          "erase flash");
-#endif
-      
-    } else {
-      LOG_WRN("Erase external flash already in progress (status=%u)",
-              external_flash_erase_status);
+    if (len != sizeof(uint8_t))
+    {
+        LOG_ERR("Erase external flash characteristic write: invalid length %u (expected %u)", len, sizeof(uint8_t));
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
     }
-  } else {
-    LOG_WRN("Erase external flash characteristic write ignored (value=%u, expected 1)",
-            value);
-  }
 
-  return len;
+    uint8_t value = *((const uint8_t *)buf);
+
+    if (value == 1)
+    {
+        // Only proceed if not already erasing
+        if (external_flash_erase_status == 0)
+        {
+            LOG_INF("Erase external flash command received, sending to data module");
+
+            // Update status to erasing
+            external_flash_erase_status = 1;
+
+            // Send message to data module to trigger erase
+            generic_message_t erase_msg = {};
+            erase_msg.sender = SENDER_BTH;
+            erase_msg.type = MSG_TYPE_ERASE_EXTERNAL_FLASH;
+
+            if (k_msgq_put(&data_msgq, &erase_msg, K_NO_WAIT) != 0)
+            {
+                LOG_ERR("Failed to send erase external flash command to DATA module");
+                external_flash_erase_status = 0; // Reset status on failure
+                return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+            }
+
+            LOG_INF("Sent ERASE_EXTERNAL_FLASH command to DATA module");
+
+            // Notify that erasing has started
+            if (erase_flash_attr)
+            {
+                bt_gatt_notify(NULL, erase_flash_attr, &external_flash_erase_status,
+                               sizeof(external_flash_erase_status));
+            }
+
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+            // Forward the command to secondary device
+            FORWARD_D2D_COMMAND(ble_d2d_tx_send_erase_flash_command, D2D_TX_CMD_ERASE_FLASH, value, "erase flash");
+#endif
+        }
+        else
+        {
+            LOG_WRN("Erase external flash already in progress (status=%u)", external_flash_erase_status);
+        }
+    }
+    else
+    {
+        LOG_WRN("Erase external flash characteristic write ignored (value=%u, expected 1)", value);
+    }
+
+    return len;
 }
 
-static ssize_t read_erase_external_flash_vnd(struct bt_conn *conn,
-                                             const struct bt_gatt_attr *attr,
-                                             void *buf, uint16_t len,
-                                             uint16_t offset) {
-  return bt_gatt_attr_read(conn, attr, buf, len, offset,
-                           &external_flash_erase_status,
-                           sizeof(external_flash_erase_status));
+static ssize_t read_erase_external_flash_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                             uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &external_flash_erase_status,
+                             sizeof(external_flash_erase_status));
 }
 
 // Function to be called by data module when erase is complete
-void cs_external_flash_erase_complete_notify(void) {
-  external_flash_erase_status = 2; // Set status to complete
-  
-  // Notify using the saved attribute pointer
-  if (erase_flash_attr) {
-    bt_gatt_notify(NULL, erase_flash_attr,
-        &external_flash_erase_status, sizeof(external_flash_erase_status));
-    LOG_INF("External flash erase complete notification sent (status=2)");
-  } else {
-    LOG_WRN("Cannot send erase complete notification - attribute not initialized");
-  }
-  
-  // Note: Status remains at 2 until next erase operation
-  // Client can read the characteristic to check status at any time
+void cs_external_flash_erase_complete_notify(void)
+{
+    external_flash_erase_status = 2; // Set status to complete
+
+    // Notify using the saved attribute pointer
+    if (erase_flash_attr)
+    {
+        bt_gatt_notify(NULL, erase_flash_attr, &external_flash_erase_status, sizeof(external_flash_erase_status));
+        LOG_INF("External flash erase complete notification sent (status=2)");
+    }
+    else
+    {
+        LOG_WRN("Cannot send erase complete notification - attribute not initialized");
+    }
+
+    // Note: Status remains at 2 until next erase operation
+    // Client can read the characteristic to check status at any time
 }
 
-
-static void cs_stop_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr,
-                                             uint16_t value) {
-  if (!attr) {
-    LOG_ERR("cs_stop_activity_ccc_cfg_changed: attr is NULL");
-    return;
-  }
-  stop_activity_status_subscribed = value == BT_GATT_CCC_NOTIFY;
-  LOG_DBG("Stop Activity CCC changed: %u", value);
+static void cs_stop_activity_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    if (!attr)
+    {
+        LOG_ERR("cs_stop_activity_ccc_cfg_changed: attr is NULL");
+        return;
+    }
+    stop_activity_status_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Stop Activity CCC changed: %u", value);
 }
 
-static ssize_t write_set_time_control_vnd(struct bt_conn *conn,
-                                          const struct bt_gatt_attr *attr,
-                                          const void *buf, uint16_t len,
-                                          uint16_t offset, uint8_t flags) {
-  ARG_UNUSED(conn);
-  ARG_UNUSED(flags);
-  uint32_t *value = static_cast<uint32_t *>(attr->user_data);
-  uint32_t temp_value = 0;
+static ssize_t write_set_time_control_vnd(struct bt_conn *conn, const struct bt_gatt_attr *attr, const void *buf,
+                                          uint16_t len, uint16_t offset, uint8_t flags)
+{
+    ARG_UNUSED(conn);
+    ARG_UNUSED(flags);
+    uint32_t *value = static_cast<uint32_t *>(attr->user_data);
+    uint32_t temp_value = 0;
 
-  if ((offset + len) > VND_MAX_LEN) {
-    return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
-  }
+    if ((offset + len) > VND_MAX_LEN)
+    {
+        return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
+    }
 
-  // This line copies the contents of the buffer buf of length len to the memory
-  // pointed to by value starting at the offset offset.
-  std::memcpy(value + offset, buf, len);
+    // This line copies the contents of the buffer buf of length len to the memory
+    // pointed to by value starting at the offset offset.
+    std::memcpy(value + offset, buf, len);
 
-  if (is_little_endian) {
-    temp_value = swap_to_little_endian(*value);
-  } else {
-    // the system is big endian, no need to convert
-    temp_value = *value;
-  }
+    if (is_little_endian)
+    {
+        temp_value = swap_to_little_endian(*value);
+    }
+    else
+    {
+        // the system is big endian, no need to convert
+        temp_value = *value;
+    }
 
-  // Save epoch time to RTC
-  set_current_time_from_epoch((temp_value));
+    // Save epoch time to RTC
+    set_current_time_from_epoch((temp_value));
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-  // Forward the command to secondary device
-  int err = ble_d2d_tx_send_set_time_command(temp_value);
-  if (err == -EINVAL && !ble_d2d_tx_is_ready()) {
-    // D2D TX not ready yet, queue the command
-    LOG_INF("D2D TX not ready, queuing set time command");
-    err = ble_d2d_tx_queue_command(D2D_TX_CMD_SET_TIME, &temp_value);
-    if (err) {
-      LOG_ERR("Failed to queue set time command: %d", err);
+    // Forward the command to secondary device
+    int err = ble_d2d_tx_send_set_time_command(temp_value);
+    if (err == -EINVAL && !ble_d2d_tx_is_ready())
+    {
+        // D2D TX not ready yet, queue the command
+        LOG_INF("D2D TX not ready, queuing set time command");
+        err = ble_d2d_tx_queue_command(D2D_TX_CMD_SET_TIME, &temp_value);
+        if (err)
+        {
+            LOG_ERR("Failed to queue set time command: %d", err);
+        }
     }
-  } else if (err) {
-    LOG_ERR("Failed to forward set time command to secondary: %d", err);
-  } else {
-    LOG_INF("Successfully forwarded set time command to secondary");
-  }
+    else if (err)
+    {
+        LOG_ERR("Failed to forward set time command to secondary: %d", err);
+    }
+    else
+    {
+        LOG_INF("Successfully forwarded set time command to secondary");
+    }
 #endif
 
-  return len;
+    return len;
 }

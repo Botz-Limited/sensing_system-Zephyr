@@ -25,7 +25,7 @@ config ANALYTICS_MODULE_LOG_LEVEL
 
 config ANALYTICS_MODULE_STACK_SIZE
 	int "Analytics thread stack size"
-	default 4096
+	default 6144
 	help
 	  Stack size for the analytics processing thread
 

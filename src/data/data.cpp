@@ -558,7 +558,7 @@ static void process_sensor_data_work_handler(struct k_work *work)
                                                     .avg_pronation_deg = metrics->avg_pronation_deg,
                                                     .vertical_ratio = metrics->vertical_ratio};
 
-        LOG_WRN("activity_packet_counter = %u\n"
+    /*    LOG_WRN("activity_packet_counter = %u\n"
                 "timestamp = %u\n"
                 "cadence = %u\n"
                 "pace = %u\n"
@@ -577,7 +577,7 @@ static void process_sensor_data_work_handler(struct k_work *work)
                 binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
                 binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms, binary_metrics.contact_time_asymmetry,
                 binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry, binary_metrics.left_strike_pattern,
-                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio);
+                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio); */
 
         // Add to batch buffer if there's space
         if (activity_batch_bytes + sizeof(binary_metrics) <= sizeof(activity_batch_buffer))
@@ -948,7 +948,7 @@ static err_t flush_activity_batch(void)
     activity_batch_bytes = 0;
     activity_batch_count = 0;
 
-    LOG_WRN("Flushed activity batch: %u samples", activity_batch_count);
+    LOG_INF("Flushed activity batch: %u samples", activity_batch_count);
     return err_t::NO_ERROR;
 }
 

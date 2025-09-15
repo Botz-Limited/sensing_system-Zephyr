@@ -22,7 +22,7 @@ config ACTIVITY_METRICS_MODULE_LOG_LEVEL
 
 config ACTIVITY_METRICS_MODULE_STACK_SIZE
     int "Stack size for activity metrics thread"
-    default 4096
+    default 6144
     help
       Stack size for the activity metrics processing thread.
       Increase if stack overflow occurs.

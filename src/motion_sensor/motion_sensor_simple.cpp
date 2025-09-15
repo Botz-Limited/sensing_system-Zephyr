@@ -1289,6 +1289,7 @@ static void motion_sensor_init(void)
         k_thread_create(&motion_sensor_thread_data, motion_sensor_stack, K_THREAD_STACK_SIZEOF(motion_sensor_stack),
                         motion_sensor_thread, NULL, NULL, NULL, CONFIG_MOTION_SENSOR_MODULE_PRIORITY, 0, K_NO_WAIT);
 
+    k_thread_suspend(motion_sensor_tid);
     k_thread_name_set(motion_sensor_tid, "motion_sensor");
     LOG_INF("Motion sensor module initialized successfully");
 }
@@ -1315,6 +1316,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
         LOG_INF("Received start activity event - enabling motion sensor logging");
         if (atomic_get(&logging_active) == 0)
         {
+            k_thread_resume(motion_sensor_tid);
             activity_logging_active = true;
             quaternion_streaming_enabled = false;
             activity_start_step_count = latest_step_count;
@@ -1330,6 +1332,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
         {
             activity_logging_active = false;
             atomic_set(&logging_active, 0);
+            k_thread_suspend(motion_sensor_tid);
         }
         return false;
     }
@@ -1338,6 +1341,14 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         auto *event = cast_streaming_control_event(aeh);
         quaternion_streaming_enabled = event->quaternion_streaming_enabled;
+        if(quaternion_streaming_enabled)
+        {
+            k_thread_resume(motion_sensor_tid);
+        }
+        else if(!quaternion_streaming_enabled)
+        {
+            k_thread_suspend(motion_sensor_tid);
+        }
         LOG_INF("Quaternion streaming %s", quaternion_streaming_enabled ? "enabled" : "disabled");
         return false;
     }

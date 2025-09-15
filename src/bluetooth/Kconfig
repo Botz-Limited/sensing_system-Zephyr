@@ -113,6 +113,14 @@ config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
 	int "Duration the system with advertise for"
 	default 60
 
+config BT_SETTINGS_CCC_STORE_MAX
+	int "Max number of Client Characteristic Configuration (CCC)"
+	default 80
+	range 1 96
+	help
+	  Defines the max number of Client Characteristic Configuration (CCC)
+	  that the stack can handle	
+
 config BLUETOOTH_MODULE_STACK_SIZE
 	int "BTH  module thread stack size"
 	default 8192

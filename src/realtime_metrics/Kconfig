@@ -19,7 +19,7 @@ config REALTIME_METRICS_MODULE_LOG_LEVEL
 
 config REALTIME_METRICS_MODULE_STACK_SIZE
 	int "Realtime metrics module thread stack size"
-	default 4096
+	default 6144
 	depends on REALTIME_METRICS_MODULE
 	help
 	  Stack size for realtime metrics processing thread
