@@ -1,0 +1,21 @@
+# Copyright Botz 2025
+
+
+menuconfig BQ25185
+    bool "BQ25185 Battery Charger Monitor"
+    default y
+    depends on DT_HAS_TI_BQ25185_ENABLED
+    select SPI
+    help
+      Enable driver for Texas Instruments BQ25185 battery charger monitor.
+      This driver supports monitoring battery status via STAT1 and STAT2 GPIO pins.
+
+if BQ25185
+
+module = BQ25185_MODULE
+module-str = app module
+source "subsys/logging/Kconfig.template.log_config"
+
+
+
+endif # BQ25185

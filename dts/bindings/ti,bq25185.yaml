@@ -1,0 +1,21 @@
+description: BQ25185 Battery Charger Status Monitor
+
+compatible: "ti,bq25185"
+
+properties:
+  status:
+    type: string
+    enum:
+      - "okay"
+      - "disabled"
+    description: Device status setting
+
+  stat1-gpios:
+    type: phandle-array
+    required: true
+    description: STAT1 status pin GPIO
+
+  stat2-gpios:
+    type: phandle-array
+    required: true
+    description: STAT2 status pin GPIO

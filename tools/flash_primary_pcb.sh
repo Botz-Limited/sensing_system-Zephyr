@@ -1,11 +1,25 @@
 #!/bin/bash
 # Flash script for PRIMARY device (Right foot)
 
+#!/bin/bash
+# Flash script for SECONDARY device (Right foot) with recovery option
+
 cd /home/ee/sensing_fw
 
-echo "Flashing PRIMARY device firmware..."
+echo "Flashing Secondary device firmware with recovery..."
 echo "Make sure the RIGHT foot device is connected!"
 read -p "Press Enter to continue..."
+
+# First recover both cores to ensure no access protection issues
+echo "Recovering network core..."
+nrfjprog --recover -f NRF53 --coprocessor CP_NETWORK
+
+echo "Recovering application core..."
+nrfjprog --recover -f NRF53 --coprocessor CP_APPLICATION
+
+# Small delay after recovery
+sleep 2
+
 
 # Flash network core first
 echo "Flashing network core..."

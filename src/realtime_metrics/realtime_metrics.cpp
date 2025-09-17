@@ -1201,7 +1201,7 @@ static void send_ble_update(void)
             LOG_WRN("Failed to send metrics to bluetooth queue: %d", ret);  
         }
     }
-
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Create message for data module
     generic_message_t data_msg = {};
     data_msg.sender = SENDER_REALTIME_METRICS;
@@ -1217,6 +1217,7 @@ static void send_ble_update(void)
     if (ret != 0) {
         LOG_WRN("Failed to send metrics to data queue: %d", ret);
     }
+#endif
     
     // Log alerts if any
     if (metrics_to_send.alerts != 0) {

@@ -1,0 +1,26 @@
+description: Texas Instruments BQ25185 Battery Charger
+
+compatible: "ti,bq25185"
+
+include: [base.yaml]
+
+properties:
+  stat1-gpios:
+    type: phandle-array
+    required: true
+    description: STAT1 status indicator pin
+
+  stat2-gpios:
+    type: phandle-array
+    required: true
+    description: STAT2 status indicator pin
+
+  charging-current-ua:
+    type: int
+    default: 500000
+    description: Charging current in microamps (default 500mA)
+
+  charging-voltage-uv:
+    type: int
+    default: 4200000
+    description: Charging voltage in microvolts (default 4.2V)

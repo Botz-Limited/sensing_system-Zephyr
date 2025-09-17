@@ -295,8 +295,7 @@ static void process_adc_samples(int16_t *raw_data)
             // Apply calibration offset and populate message
             for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
             {
-                //   int16_t calibrated_value = raw_data[i] - saadc_offset[i];
-                int16_t calibrated_value = raw_data[i]; // discard calibrated valuues at the moment.
+                int16_t calibrated_value = raw_data[i] - saadc_offset[i];
                 msg.data.foot_samples.values[i] = (calibrated_value < 0) ? 0 : calibrated_value;
             }
 
@@ -645,7 +644,7 @@ static void foot_sensor_init(void)
                                       K_PRIO_PREEMPT(5), // Priority 5
                                       0, K_NO_WAIT);
 
-    k_thread_suspend(foot_sensor_tid);
+   // k_thread_suspend(foot_sensor_tid);
     k_thread_name_set(foot_sensor_tid, "foot_sensor");
 
     LOG_INF("Foot sensor module initialized successfully");

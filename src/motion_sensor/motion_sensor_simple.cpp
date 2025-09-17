@@ -1289,7 +1289,7 @@ static void motion_sensor_init(void)
         k_thread_create(&motion_sensor_thread_data, motion_sensor_stack, K_THREAD_STACK_SIZEOF(motion_sensor_stack),
                         motion_sensor_thread, NULL, NULL, NULL, CONFIG_MOTION_SENSOR_MODULE_PRIORITY, 0, K_NO_WAIT);
 
-    k_thread_suspend(motion_sensor_tid);
+   // k_thread_suspend(motion_sensor_tid);
     k_thread_name_set(motion_sensor_tid, "motion_sensor");
     LOG_INF("Motion sensor module initialized successfully");
 }
