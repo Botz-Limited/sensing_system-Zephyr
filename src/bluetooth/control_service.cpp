@@ -381,8 +381,6 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
                         "stop both streams");
 #endif
 
-    k_msleep(10);
-
     // Debug: Check write type
     if (flags & BT_GATT_WRITE_FLAG_CMD)
     {
@@ -418,7 +416,6 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
         struct motion_sensor_start_activity_event *motion_evt = new_motion_sensor_start_activity_event();
         APP_EVENT_SUBMIT(motion_evt);
 
-        k_msleep(10);
 
         // Start Logging Activity file
         generic_message_t start_logging_msg = {};
@@ -429,6 +426,7 @@ static ssize_t write_start_activity_command_vnd(struct bt_conn *conn, const stru
                 sizeof(start_logging_msg.data.command_str) - 1);
         start_logging_msg.data.command_str[sizeof(start_logging_msg.data.command_str) - 1] = '\0';
 
+;
         // Start logging Activity file
         if (k_msgq_put(&data_msgq, &start_logging_msg, K_NO_WAIT) != 0)
         {

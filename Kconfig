@@ -21,12 +21,6 @@ menu "SENSING"
         help
            This option sets the buffer length for paths in the file system.
 
-    config DISABLE_UART_AND_JTAG_PROTECTIONS
-        bool "Disable UART and JLINK protections after device has entered shipping mode"
-        default n
-        help
-            This option will clear the set_uart calibration boolean and also clear write protection to the
-            jlink header, DO NOT leave enabled in production.
 
     config PRIMARY_DEVICE
         bool "Build as primary device (connects to phone)"

@@ -8,7 +8,7 @@ echo "Building SECONDARY device firmware with BT_CENTRAL support for PCB..."
 echo "This will enable the central role on the network core for connecting to primary device"
 
 # Clean previous build
-rm -rf build_secondary_pcb
+#rm -rf build_secondary_pcb
 
 # Base west command
 WEST_CMD="west build --build-dir /home/ee/sensing_fw/build_secondary_pcb /home/ee/sensing_fw/ --board nrf5340dk/nrf5340/cpuapp --sysbuild -- -DCONFIG_PRIMARY_DEVICE=n -Dipc_radio_EXTRA_CONF_FILE=/home/ee/sensing_fw/sysbuild/ipc_radio/prj_secondary.conf -DDTC_OVERLAY_FILE=/home/ee/sensing_fw/boards/nrf5340dk_nrf5340_cpuapp_pcb.overlay"

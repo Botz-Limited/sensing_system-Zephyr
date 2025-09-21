@@ -1,6 +1,6 @@
 config LOG_DECODER_SHELL_CMD
     bool "Enable log decoder shell commands"
-    default y
+    default n
     depends on SHELL
     depends on FILE_SYSTEM
     help

@@ -15,7 +15,6 @@ config BLUETOOTH_MODULE
 	# Settings
 	select SETTINGS
 	select SETTINGS_RUNTIME
-	select SHELL
 	select BT_SETTINGS
 	select MCUMGR_SMP_BT
 	select MCUMGR_SMP_BT_CONN_PARAM_CONTROL

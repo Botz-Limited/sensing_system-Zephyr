@@ -44,6 +44,17 @@ static constexpr uint16_t SAMPLE_RATE_HZ = 100;
 static constexpr uint32_t SAMPLE_PERIOD_MS = 1000 / SAMPLE_RATE_HZ; // 10ms
 static constexpr uint8_t BLUETOOTH_RATE_DIVIDER = 20;               // Send to BLE at 5Hz (100Hz / 20)
 
+
+//for VDD only monitoring 
+static constexpr uint32_t VDD_MONITOR_INTERVAL_MS = 1000; // Check VDD every 5 seconds
+static constexpr uint16_t VDD_LOW_THRESHOLD_MV = 3300;    // 3.3V threshold
+static int32_t vdd_voltage_mv = 0;
+static uint32_t last_vdd_check_ms = 0;
+static err_t configure_channel_for_vdd(uint8_t channel_num);
+static err_t restore_channel_to_pressure(uint8_t channel_num);
+static err_t read_vdd_voltage(uint8_t temp_channel);
+//End VDD monitoring constants
+
 // Thread stack and priority
 K_THREAD_STACK_DEFINE(foot_sensor_stack, 4096);
 static struct k_thread foot_sensor_thread_data;
@@ -605,6 +616,19 @@ static void foot_sensor_thread(void *p1, void *p2, void *p3)
             }
         }
 
+        // Check if it's time to monitor VDD (every 1 seconds)
+    /**    uint32_t current_time = k_uptime_get();
+        if (current_time - last_vdd_check_ms >= VDD_MONITOR_INTERVAL_MS) {
+            last_vdd_check_ms = current_time;
+            
+            // Use channel 0 for VDD monitoring
+            err_t vdd_err = read_vdd_voltage(0);
+            if (vdd_err == err_t::NO_ERROR) {
+                LOG_WRN("VDD monitoring successful: %d mV", vdd_voltage_mv);
+            }
+        }*/
+        
+
         // Read all 8 channels
         int ret = adc_read(adc_dev, &sequence);
         if (ret < 0)
@@ -629,6 +653,99 @@ static void foot_sensor_thread(void *p1, void *p2, void *p3)
         // Sleep for sampling period (10ms for 100Hz)
         k_msleep(SAMPLE_PERIOD_MS);
     }
+}
+
+/**
+ * @brief Configure a channel for VDD monitoring
+ */
+static err_t configure_channel_for_vdd(uint8_t channel_num)
+{
+    struct adc_channel_cfg vdd_cfg = {
+        .gain = ADC_GAIN_1_6,
+        .reference = ADC_REF_INTERNAL,
+        .acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10),
+        .channel_id = channel_num,
+        .input_positive = SAADC_CH_PSELP_PSELP_VDD,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC // Not connected
+    };
+
+    int err = adc_channel_setup(adc_dev, &vdd_cfg);
+    if (err < 0) {
+        LOG_ERR("Failed to setup ADC channel %d for VDD: %d", channel_num, err);
+        return err_t::ADC_ERROR;
+    }
+
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Restore a channel to its normal pressure sensor configuration
+ */
+static err_t restore_channel_to_pressure(uint8_t channel_num)
+{
+    int err = adc_channel_setup(adc_dev, &channel_configs[channel_num]);
+    if (err < 0) {
+        LOG_ERR("Failed to restore ADC channel %d to pressure sensor: %d", channel_num, err);
+        return err_t::ADC_ERROR;
+    }
+
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Read and calculate VDD voltage
+ */
+static err_t read_vdd_voltage(uint8_t temp_channel)
+{
+    int16_t vdd_sample;
+    struct adc_sequence vdd_sequence = {
+        .channels = BIT(temp_channel),
+        .buffer = &vdd_sample,
+        .buffer_size = sizeof(vdd_sample),
+        .resolution = 12, 
+        .oversampling = 4,
+        .calibrate = true,
+    };
+
+    // 1. Configure the temporary channel for VDD
+    err_t err = configure_channel_for_vdd(temp_channel);
+    if (err != err_t::NO_ERROR) {
+        return err;
+    }
+
+    // 2. Read the VDD sample
+    int ret = adc_read(adc_dev, &vdd_sequence);
+    if (ret < 0) {
+        LOG_ERR("VDD ADC read failed: %d", ret);
+        restore_channel_to_pressure(temp_channel);
+        return err_t::ADC_ERROR;
+    }
+
+    // 3. Calculate VDD
+    const int32_t ref_voltage_mv = 600; // Internal reference is 0.6V
+    const int32_t max_adc_value = (1 << vdd_sequence.resolution) - 1; // 4095 for 12-bit
+    
+   // LOG_WRN("Raw VDD sample: %d, Max ADC value: %d", vdd_sample, max_adc_value);
+
+
+     int32_t adc_voltage = (vdd_sample * ref_voltage_mv) / max_adc_value;
+    vdd_voltage_mv = adc_voltage * 6*1.12;
+
+  //  LOG_WRN("VDD voltage: %d mV", vdd_voltage_mv);
+
+    // 4. Restore the channel to pressure sensing
+    err = restore_channel_to_pressure(temp_channel);
+    if (err != err_t::NO_ERROR) {
+        return err;
+    }
+
+    // Check for low voltage
+    if (vdd_voltage_mv < VDD_LOW_THRESHOLD_MV) {
+        LOG_WRN("LOW VOLTAGE WARNING: %d mV (threshold: %d mV)", 
+                vdd_voltage_mv, VDD_LOW_THRESHOLD_MV);
+    }
+
+    return err_t::NO_ERROR;
 }
 
 /**

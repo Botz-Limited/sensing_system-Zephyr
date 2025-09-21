@@ -23,13 +23,17 @@ sleep 2
 
 # Flash network core first
 echo "Flashing network core..."
-nrfjprog --program build_primary_pcb/merged_CPUNET.hex --verify --chiperase --reset
+nrfjprog --program build_primary_pcb/merged_CPUNET.hex --verify --sectorerase -f NRF53 --coprocessor CP_NETWORK
 
 # Small delay
 sleep 2
 
 # Flash application core
 echo "Flashing application core..."
-nrfjprog --program build_primary_pcb/merged.hex --verify --chiperase --reset
+nrfjprog --program build_primary_pcb/merged.hex --verify --sectorerase -f NRF53 --coprocessor CP_APPLICATION
+
+# Final reset to start the application
+echo "Resetting device..."
+nrfjprog --reset -f NRF53
 
 echo "Primary device flashed successfully!"
