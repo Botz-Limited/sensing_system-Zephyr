@@ -897,7 +897,8 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     int ret_fs_open;
     int ret_write;
     const uint8_t *uuid;
-    typedef struct __attribute__((packed)) {
+    typedef struct __attribute__((packed))
+    {
         char magic[4];
         uint8_t version;
         uint32_t start_time;
@@ -1003,7 +1004,8 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
 
 cleanup_close:
     // If an error occurred after opening, close the file before cleaning up.
-    if (status != err_t::NO_ERROR) {
+    if (status != err_t::NO_ERROR)
+    {
         fs_close(&activity_log_file);
         activity_log_file.filep = nullptr;
     }
@@ -1011,11 +1013,12 @@ cleanup_close:
 cleanup:
     k_mutex_unlock(&activity_file_mutex);
     // Start the periodic sync timer after successfully opening the file
-    if (status == err_t::NO_ERROR) {
+    if (status == err_t::NO_ERROR)
+    {
         k_timer_start(&fs_sync_timer, K_SECONDS(5), K_SECONDS(5));
         LOG_INF("Periodic fs_sync timer started.");
     }
-    
+
     return status;
 }
 
