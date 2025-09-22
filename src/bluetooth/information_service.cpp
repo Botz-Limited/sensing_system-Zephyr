@@ -1425,12 +1425,12 @@ extern "C" void jis_activity_metrics_send_header(const ActivityFileHeaderV3 *hea
 
     memcpy(&activity_header, header, sizeof(activity_header));
 
-    if (activity_header_subscribed)
-    {
+   // if (activity_header_subscribed)
+   // {
         safe_gatt_notify(&activity_metrics_header_uuid.uuid, static_cast<const void *>(&activity_header),
                          sizeof(activity_header));
         LOG_INF("Activity Metrics Header sent");
-    }
+   // }
 }
 
 extern "C" void jis_activity_metrics_send_packet(const activity_metrics_binary_t *metrics)
@@ -1440,12 +1440,12 @@ extern "C" void jis_activity_metrics_send_packet(const activity_metrics_binary_t
     
     memcpy(&activity_metrics_binary, metrics, sizeof(activity_metrics_binary));
 
-    if (activity_metrics_subscribed)
-    {
+ //   if (activity_metrics_subscribed)
+   // {
         safe_gatt_notify(&activity_metrics_data_uuid.uuid, static_cast<const void *>(&activity_metrics_binary),
                          sizeof(activity_metrics_binary));
         LOG_DBG("Activity Metrics Packet sent: #%u", activity_metrics_binary.packet_number);
-    }
+  //  }
 }
 
 extern "C" void jis_activity_metrics_send_footer(const ActivityFileFooterV3 *footer)
@@ -1455,12 +1455,12 @@ extern "C" void jis_activity_metrics_send_footer(const ActivityFileFooterV3 *foo
 
     memcpy(&activity_footer, footer, sizeof(activity_footer));
 
-    if (activity_footer_subscribed)
-    {
+   // if (activity_footer_subscribed)
+  //  {
         safe_gatt_notify(&activity_metrics_footer_uuid.uuid, static_cast<const void *>(&activity_footer),
                          sizeof(activity_footer));
         LOG_INF("Activity Metrics Footer sent");
-    }
+   // }
 }
 
 // --- Activity Log Handlers ---
