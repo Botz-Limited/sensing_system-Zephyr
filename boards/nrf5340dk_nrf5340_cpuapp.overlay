@@ -28,21 +28,7 @@ bq25185: bq25185 {
     
 
 };
-&vregmain {
-    status = "okay";
-	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
-   // regulator-initial-mode = <NRF5X_REG_MODE_LDO>;
-};
 
-&vregradio {
-    status = "okay";
-	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
-   //  regulator-initial-mode = <NRF5X_REG_MODE_LDO>; 
-};
-
-&vregh {
-	status = "okay"; //comment out to disable dcdc
-};
 
 /delete-node/ &storage_partition;
 
@@ -51,14 +37,14 @@ bq25185: bq25185 {
         compatible = "zephyr,fstab";
         status = "okay";
         lfs1: lfs1 {
-            compatible = "zephyr,fstab,littlefs";
             mount-point = "/lfs1";
+            compatible = "zephyr,fstab,littlefs";
             partition = <&lfs1_part>;
-            read-size = <16>;
-            prog-size = <16>;
-            cache-size = <64>;
+            read-size = <256>;
+            prog-size = <256>;
+            cache-size = <512>;
             lookahead-size = <32>;
-            block-cycles = <512>;
+            block-cycles = <1000>;
         };
 
         sdhc_mount: sdhc_mount {

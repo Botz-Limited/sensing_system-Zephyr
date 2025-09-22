@@ -442,7 +442,7 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
 // Target service UUID: 5cb36a12-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
 // This is used by both primary (for advertising) and secondary (for scanning)
 static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x3f, 0x00, 0xa8, 0x89,
-                                                0x97, 0x4d, 0x69, 0xca, 0x14, 0x6a, 0xb3, 0x5c};
+                                                0x97, 0x4d, 0x69, 0xca, 0x12, 0x6a, 0xb3, 0x5c};
 
 // Getter function to access the target service UUID from other modules
 extern "C" const uint8_t *get_target_service_uuid(void)
@@ -734,7 +734,7 @@ static const struct bt_data ad[] = {
 /* Scan response data - put the 128-bit UUID here to avoid advertising packet
  * size issues */
 static const struct bt_data sd[] = {
-    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a14, 0xca69, 0x4d97, 0x89a8, 0x003ffc9ec8cd)),
+    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a11, 0xca69, 0x4d97, 0x89a8, 0x003ffc9ec8cd)),
 };
 
 /**

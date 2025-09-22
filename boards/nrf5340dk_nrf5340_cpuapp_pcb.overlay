@@ -39,11 +39,11 @@
             compatible = "zephyr,fstab,littlefs";
             mount-point = "/lfs1";
             partition = <&lfs1_part>;
-            read-size = <16>;
-            prog-size = <16>;
-            cache-size = <64>;
+            read-size = <256>;
+            prog-size = <256>;
+            cache-size = <512>;
             lookahead-size = <32>;
-            block-cycles = <512>;
+            block-cycles = <1000>;
         };
 
          sdhc_mount: sdhc_mount {
