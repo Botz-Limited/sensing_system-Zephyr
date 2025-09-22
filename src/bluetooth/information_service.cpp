@@ -46,11 +46,19 @@
 
 LOG_MODULE_DECLARE(MODULE, CONFIG_BLUETOOTH_MODULE_LOG_LEVEL);
 
+// Buffers for header, metrics, and footer
+static ActivityFileHeaderV3 activity_header = {0};
+static activity_metrics_binary_t activity_metrics_binary = {0};
+static ActivityFileFooterV3 activity_footer = {0};
+
+
+static bool activity_header_subscribed = false;
+static bool activity_metrics_subscribed = false;
+static bool activity_footer_subscribed = false;
 
 uint32_t device_status_bitfield = 0;
 static uint32_t previous_device_status_bitfield = 0; // Store the previous value
 static bool init_status_bt_update = false;           // A flag to force the first update
-
 
 static activity_state_t current_activity_state = ACTIVITY_STATE_IDLE;
 static activity_state_t pre_pause_activity_state = ACTIVITY_STATE_IDLE; // State before pause
@@ -193,6 +201,20 @@ static ssize_t jis_activity_log_path_primary_read(struct bt_conn* conn, const st
 static void jis_activity_log_path_primary_ccc_cfg_changed(const struct bt_gatt_attr* attr, uint16_t value);
 extern "C" void jis_activity_log_path_primary_notify(const char* path);
 
+static ssize_t jis_activity_metrics_header_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                                uint16_t len, uint16_t offset);
+
+static ssize_t jis_activity_metrics_data_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                              uint16_t len, uint16_t offset);       
+                                              
+static ssize_t jis_activity_metrics_footer_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                                uint16_t len, uint16_t offset);      
+                                                
+static void jis_activity_metrics_header_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value); 
+static void jis_activity_metrics_data_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);     
+static void jis_activity_metrics_footer_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value);                                          
+
+
 // Secondary Device Information Characteristics (Primary only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 static ssize_t jis_secondary_info_read(struct bt_conn* conn, const struct bt_gatt_attr* attr, void* buf, uint16_t len, uint16_t offset);
@@ -288,6 +310,16 @@ static struct bt_uuid_128 secondary_activity_log_available_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec0, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 static struct bt_uuid_128 secondary_activity_log_path_uuid =
     BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ec1, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+// Activity Metrics Streaming UUID
+static struct bt_uuid_128 activity_metrics_header_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ecd, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+static struct bt_uuid_128 activity_metrics_data_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ece, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
+
+static struct bt_uuid_128 activity_metrics_footer_uuid =
+    BT_UUID_INIT_128(BT_UUID_128_ENCODE(0x0c372ecf, 0x27eb, 0x437e, 0xbef4, 0x775aefaf3c97));
 
 BT_GATT_SERVICE_DEFINE(
     info_service, BT_GATT_PRIMARY_SERVICE(&SENSING_INFO_SERVICE_UUID),
@@ -457,7 +489,29 @@ BT_GATT_SERVICE_DEFINE(
         BT_GATT_PERM_READ,
         jis_secondary_activity_log_path_read, nullptr,
         secondary_activity_log_path),
-    BT_GATT_CCC(jis_secondary_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+    BT_GATT_CCC(jis_secondary_activity_log_path_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
+    // Activity Metrics Streaming Characteristic
+BT_GATT_CHARACTERISTIC(&activity_metrics_header_uuid.uuid,
+    BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+    BT_GATT_PERM_READ,
+    jis_activity_metrics_header_read, nullptr,
+    static_cast<void *>(&activity_header)),
+BT_GATT_CCC(jis_activity_metrics_header_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
+BT_GATT_CHARACTERISTIC(&activity_metrics_data_uuid.uuid,
+    BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+    BT_GATT_PERM_READ,
+    jis_activity_metrics_data_read, nullptr,
+    static_cast<void *>(&activity_metrics_binary)),
+BT_GATT_CCC(jis_activity_metrics_data_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+
+BT_GATT_CHARACTERISTIC(&activity_metrics_footer_uuid.uuid,
+    BT_GATT_CHRC_READ | BT_GATT_CHRC_NOTIFY,
+    BT_GATT_PERM_READ,
+    jis_activity_metrics_footer_read, nullptr,
+    static_cast<void *>(&activity_footer)),
+BT_GATT_CCC(jis_activity_metrics_footer_ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 #endif
     );
 
@@ -1328,6 +1382,87 @@ void jis_fota_progress_notify(const fota_progress_msg_t *progress)
     }
 }
 
+static ssize_t jis_activity_metrics_header_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                                uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &activity_header, sizeof(activity_header));
+}
+
+static ssize_t jis_activity_metrics_data_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                              uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &activity_metrics_binary, sizeof(activity_metrics_binary));
+}
+
+static ssize_t jis_activity_metrics_footer_read(struct bt_conn *conn, const struct bt_gatt_attr *attr, void *buf,
+                                                uint16_t len, uint16_t offset)
+{
+    return bt_gatt_attr_read(conn, attr, buf, len, offset, &activity_footer, sizeof(activity_footer));
+}
+
+static void jis_activity_metrics_header_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    activity_header_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Activity Metrics Header CCC Notify: %d", activity_header_subscribed);
+}
+
+static void jis_activity_metrics_data_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    activity_metrics_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Activity Metrics Data CCC Notify: %d", activity_metrics_subscribed);
+}
+
+static void jis_activity_metrics_footer_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+    activity_footer_subscribed = value == BT_GATT_CCC_NOTIFY;
+    LOG_DBG("Activity Metrics Footer CCC Notify: %d", activity_footer_subscribed);
+}
+
+extern "C" void jis_activity_metrics_send_header(const ActivityFileHeaderV3 *header)
+{
+    if (!header)
+        return;
+
+    memcpy(&activity_header, header, sizeof(activity_header));
+
+    if (activity_header_subscribed)
+    {
+        safe_gatt_notify(&activity_metrics_header_uuid.uuid, static_cast<const void *>(&activity_header),
+                         sizeof(activity_header));
+        LOG_INF("Activity Metrics Header sent");
+    }
+}
+
+extern "C" void jis_activity_metrics_send_packet(const activity_metrics_binary_t *metrics)
+{
+    if (!metrics)
+        return;
+    
+    memcpy(&activity_metrics_binary, metrics, sizeof(activity_metrics_binary));
+
+    if (activity_metrics_subscribed)
+    {
+        safe_gatt_notify(&activity_metrics_data_uuid.uuid, static_cast<const void *>(&activity_metrics_binary),
+                         sizeof(activity_metrics_binary));
+        LOG_DBG("Activity Metrics Packet sent: #%u", activity_metrics_binary.packet_number);
+    }
+}
+
+extern "C" void jis_activity_metrics_send_footer(const ActivityFileFooterV3 *footer)
+{
+    if (!footer)
+        return;
+
+    memcpy(&activity_footer, footer, sizeof(activity_footer));
+
+    if (activity_footer_subscribed)
+    {
+        safe_gatt_notify(&activity_metrics_footer_uuid.uuid, static_cast<const void *>(&activity_footer),
+                         sizeof(activity_footer));
+        LOG_INF("Activity Metrics Footer sent");
+    }
+}
+
 // --- Activity Log Handlers ---
 static void jis_activity_log_available_primary_ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
@@ -1647,24 +1782,26 @@ extern "C" void jis_device_status_packed_notify(void)
 
 /**
  * @brief Update the activity state in the status bitfield
- * 
+ *
  * @param new_state The new activity state to set
  */
 void jis_update_activity_state(activity_state_t new_state)
 {
     // Save previous state if transitioning to pause
-    if (new_state == ACTIVITY_STATE_PAUSED && current_activity_state != ACTIVITY_STATE_PAUSED) {
+    if (new_state == ACTIVITY_STATE_PAUSED && current_activity_state != ACTIVITY_STATE_PAUSED)
+    {
         pre_pause_activity_state = current_activity_state;
         LOG_DBG("Saving pre-pause state: %d", pre_pause_activity_state);
     }
-    
+
     current_activity_state = new_state;
-    
+
     // Clear all activity bits first
     uint32_t status = device_status_bitfield & ~STATUS_ACTIVITY_MASK;
-    
+
     // Set new activity state bits
-    switch(new_state) {
+    switch (new_state)
+    {
         case ACTIVITY_STATE_1_RUNNING:
             status |= STATUS_ACTIVITY_1_RUNNING;
             LOG_INF("Activity state: RUNNING (1)");
@@ -1691,13 +1828,13 @@ void jis_update_activity_state(activity_state_t new_state)
             LOG_INF("Activity state: IDLE");
             break;
     }
-    
+
     set_device_status(status);
 }
 
 /**
  * @brief Get the current activity state
- * 
+ *
  * @return The current activity state
  */
 extern "C" activity_state_t jis_get_activity_state(void)
@@ -1710,11 +1847,13 @@ extern "C" activity_state_t jis_get_activity_state(void)
  */
 extern "C" void jis_restore_activity_state_from_pause(void)
 {
-    if (pre_pause_activity_state != ACTIVITY_STATE_IDLE && 
-        pre_pause_activity_state != ACTIVITY_STATE_PAUSED) {
+    if (pre_pause_activity_state != ACTIVITY_STATE_IDLE && pre_pause_activity_state != ACTIVITY_STATE_PAUSED)
+    {
         LOG_INF("Restoring activity state from pause: %d", pre_pause_activity_state);
         jis_update_activity_state(pre_pause_activity_state);
-    } else {
+    }
+    else
+    {
         // Default to activity 1 if no valid previous state
         LOG_INF("No valid pre-pause state, defaulting to RUNNING");
         jis_update_activity_state(ACTIVITY_STATE_1_RUNNING);

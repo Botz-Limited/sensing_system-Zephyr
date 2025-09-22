@@ -133,6 +133,9 @@ static struct k_work device_info_work;
 static struct k_work weight_measurement_work;
 static struct k_work battery_level_primary_work;
 static struct k_work battery_level_secondary_work;
+static struct k_work activity_header_work;
+static struct k_work activity_metrics_work;
+static struct k_work activity_footer_work;
 
 // Message buffers for work items (protected by mutex for thread safety)
 K_MUTEX_DEFINE(bluetooth_msg_mutex);
@@ -153,6 +156,9 @@ static generic_message_t pending_device_info_msg;
 static generic_message_t pending_weight_msg;
 static generic_message_t pending_battery_primary_msg;
 static generic_message_t pending_battery_secondary_msg;
+static generic_message_t pending_activity_header_msg;
+static generic_message_t pending_activity_metrics_msg;
+static generic_message_t pending_activity_footer_msg;
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 // Static variables for step count aggregation (preserved from original)
@@ -167,6 +173,7 @@ static float secondary_weight_kg = 0;
 static bool waiting_for_secondary = false;
 static int64_t weight_request_time = 0;
 #endif
+
 
 // --- D2D Connection Tracking and Callbacks ---
 #include "ble_d2d_rx.hpp"
@@ -1348,8 +1355,8 @@ err_t bt_module_init(void)
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Initialize BLE recovery handler (only for primary device)
-//    ble_recovery_handler_init();
- //   LOG_INF("BLE recovery handler initialized");
+    //    ble_recovery_handler_init();
+    //   LOG_INF("BLE recovery handler initialized");
 
     // Initialize connection parameter manager
     int conn_params_err = ble_conn_params_init();
@@ -1484,6 +1491,9 @@ static void device_info_work_handler(struct k_work *work);
 static void weight_measurement_work_handler(struct k_work *work);
 static void battery_level_primary_work_handler(struct k_work *work);
 static void battery_level_secondary_work_handler(struct k_work *work);
+static void activity_header_work_handler(struct k_work *work);
+static void activity_metrics_work_handler(struct k_work *work);
+static void activity_footer_work_handler(struct k_work *work);
 
 void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 {
@@ -1517,6 +1527,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
     k_work_init(&weight_measurement_work, weight_measurement_work_handler);
     k_work_init(&battery_level_primary_work, battery_level_primary_work_handler);
     k_work_init(&battery_level_secondary_work, battery_level_secondary_work_handler);
+    k_work_init(&activity_header_work, activity_header_work_handler);
+    k_work_init(&activity_metrics_work, activity_metrics_work_handler);
+    k_work_init(&activity_footer_work, activity_footer_work_handler);
 
     LOG_INF("Bluetooth work queue initialized");
 
@@ -1671,14 +1684,14 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 
                     break;
 
-                case MSG_TYPE_ACTIVITY_METRICS_BLE:
-                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
-                    memcpy(&pending_metrics_msg, &msg, sizeof(msg));
-                    k_mutex_unlock(&bluetooth_msg_mutex);
+           //     case MSG_TYPE_ACTIVITY_METRICS_BLE:
+             //       k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+               //     memcpy(&pending_metrics_msg, &msg, sizeof(msg));
+                 //   k_mutex_unlock(&bluetooth_msg_mutex);
 
-                    k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
+                   // k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
 
-                    break;
+                  //  break;
 
                 case MSG_TYPE_DEVICE_INFO:
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
@@ -1746,6 +1759,27 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // Secondary device: flash erase complete, no BLE notification needed
                     LOG_INF("Secondary device: Flash erase complete (no BLE notification)");
 #endif
+                    break;
+
+                case MSG_TYPE_ACTIVITY_HEADER:
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_activity_header_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_header_work);
+                    break;
+
+                case MSG_TYPE_ACTIVITY_METRICS:
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_activity_metrics_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_work);
+                    break;
+
+                case MSG_TYPE_ACTIVITY_FOOTER:
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_activity_footer_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_footer_work);
                     break;
 
                 default:
@@ -1988,6 +2022,54 @@ static void weight_measurement_timeout_work_handler(struct k_work *work)
     }
 }
 #endif
+
+static void activity_metrics_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+    generic_message_t msg = pending_activity_metrics_msg;
+    k_mutex_unlock(&bluetooth_msg_mutex);
+
+    activity_metrics_binary_t *activity_data = &msg.data.activity_metrics;
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Primary device: This handler now only processes primary activity header data
+    jis_activity_metrics_send_packet(activity_data);
+
+#endif
+}
+
+static void activity_header_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+    generic_message_t msg = pending_activity_header_msg;
+    k_mutex_unlock(&bluetooth_msg_mutex);
+
+    ActivityFileHeaderV3 *activity_header = &msg.data.activity_header;
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Primary device: This handler now only processes primary activity header data
+    jis_activity_metrics_send_header(activity_header);
+
+#endif
+}
+
+static void activity_footer_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+    generic_message_t msg = pending_activity_footer_msg;
+    k_mutex_unlock(&bluetooth_msg_mutex);
+
+    ActivityFileFooterV3 *activity_footer = &msg.data.activity_footer;
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Primary device: This handler now only processes primary activity footer data
+    jis_activity_metrics_send_footer(activity_footer);
+
+#endif
+}
 
 /**
  * @brief Work handler for processing foot samples
@@ -2722,7 +2804,7 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
                 if (atomic_get(&logging_active) == 1)
                 {
                     // Only update if logging is active
-                   // ams_update_biomechanics_extended(&ble_bio_data);
+                    // ams_update_biomechanics_extended(&ble_bio_data);
 
                     LOG_DBG("Updated biomechanics: pronation L/R=%d/%d, loading L/R=%u/%u", bio_data->pronation_left,
                             bio_data->pronation_right, bio_data->loading_rate_left, bio_data->loading_rate_right);

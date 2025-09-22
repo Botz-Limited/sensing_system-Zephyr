@@ -90,6 +90,9 @@ typedef enum
     MSG_TYPE_COPY_FILE_TO_SD, // Command to copy a file to SD card (LAB_VERSION only)
     MSG_TYPE_START_FOOT_WEIGHT_MAP, // Start foot weight map calibration
     MSG_TYPE_FOOT_WEIGHT_MAP_DATA, // Foot weight map calibration data
+    MSG_TYPE_ACTIVITY_HEADER,
+    MSG_TYPE_ACTIVITY_METRICS,
+    MSG_TYPE_ACTIVITY_FOOTER,
 } msg_type_t;
 
 // Define sender types
