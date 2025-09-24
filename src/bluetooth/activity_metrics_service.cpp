@@ -273,15 +273,15 @@ static bhi360_step_count_fixed_t activity_step_count_value = {0, 0};
 
 // CCC (Client Characteristic Configuration) storage for individual
 // characteristics
-static bool cadence_spm_notify_enabled = false;
-static bool pace_sec_km_notify_enabled = false;
-static bool distance_m_notify_enabled = false;
-static bool form_score_notify_enabled = false;
-static bool balance_lr_pct_notify_enabled = false;
-static bool ground_contact_ms_notify_enabled = false;
-static bool flight_time_ms_notify_enabled = false;
-static bool efficiency_score_notify_enabled = false;
-static bool alerts_notify_enabled = false;
+static bool cadence_spm_notify_enabled = true;
+static bool pace_sec_km_notify_enabled = true;
+static bool distance_m_notify_enabled = true;
+static bool form_score_notify_enabled = true;
+static bool balance_lr_pct_notify_enabled = true;
+static bool ground_contact_ms_notify_enabled = true;
+static bool flight_time_ms_notify_enabled = true;
+static bool efficiency_score_notify_enabled = true;
+static bool alerts_notify_enabled = true;
 
 static bool contact_time_asym_notify_enabled = false;
 static bool flight_time_asym_notify_enabled = false;
@@ -297,13 +297,13 @@ static bool loading_rate_right_notify_enabled = false;
 static bool arch_collapse_left_notify_enabled = false;
 static bool arch_collapse_right_notify_enabled = false;
 
-static bool total_distance_m_notify_enabled = false;
-static bool avg_pace_sec_km_notify_enabled = false;
-static bool avg_cadence_spm_notify_enabled = false;
-static bool total_steps_notify_enabled = false;
-static bool calories_kcal_notify_enabled = false;
-static bool avg_form_score_notify_enabled = false;
-static bool duration_sec_notify_enabled = false;
+static bool total_distance_m_notify_enabled = true;
+static bool avg_pace_sec_km_notify_enabled = true;
+static bool avg_cadence_spm_notify_enabled = true;
+static bool total_steps_notify_enabled = true;
+static bool calories_kcal_notify_enabled = true;
+static bool avg_form_score_notify_enabled = true;
+static bool duration_sec_notify_enabled = true;
 
 static bool total_step_count_notify_enabled = false;
 static bool activity_step_count_notify_enabled = false;
@@ -1601,6 +1601,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
   // Send notifications for individual real-time metrics if enabled and
   // connected
   if (current_conn) {
+    cadence_spm_notify_enabled=true;
     if (cadence_spm_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
@@ -1610,6 +1611,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
       if (err)
         LOG_WRN("Failed to send Cadence SPM notification: %d", err);
     }
+    pace_sec_km_notify_enabled=true;
     if (pace_sec_km_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
@@ -1637,6 +1639,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
       if (err)
         LOG_WRN("Failed to send Form Score notification: %d", err);
     } */
+     balance_lr_pct_notify_enabled=true;
     if (balance_lr_pct_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
@@ -1656,6 +1659,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
       if (err)
         LOG_WRN("Failed to send Ground Contact MS notification: %d", err);
     }
+    flight_time_ms_notify_enabled=true;
     if (flight_time_ms_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
@@ -2041,14 +2045,14 @@ void ams_set_connection(struct bt_conn *conn) {
   if (!conn) {
     // Connection lost, reset notification states for all individual
     // characteristics
-    cadence_spm_notify_enabled = false;
-    pace_sec_km_notify_enabled = false;
-    distance_m_notify_enabled = false;
-    form_score_notify_enabled = false;
-    balance_lr_pct_notify_enabled = false;
-    ground_contact_ms_notify_enabled = false;
-    flight_time_ms_notify_enabled = false;
-    efficiency_score_notify_enabled = false;
+    cadence_spm_notify_enabled = true;
+    pace_sec_km_notify_enabled = true;
+    distance_m_notify_enabled = true;
+    form_score_notify_enabled = true;
+    balance_lr_pct_notify_enabled = true;
+    ground_contact_ms_notify_enabled = true;
+    flight_time_ms_notify_enabled = true;
+    efficiency_score_notify_enabled = true;
     alerts_notify_enabled = false;
 
     contact_time_asym_notify_enabled = false;
@@ -2065,9 +2069,9 @@ void ams_set_connection(struct bt_conn *conn) {
     arch_collapse_left_notify_enabled = false;
     arch_collapse_right_notify_enabled = false;
 
-    total_distance_m_notify_enabled = false;
-    avg_pace_sec_km_notify_enabled = false;
-    avg_cadence_spm_notify_enabled = false;
+    total_distance_m_notify_enabled = true;
+    avg_pace_sec_km_notify_enabled = true;
+    avg_cadence_spm_notify_enabled = true;
     total_steps_notify_enabled = false;
     calories_kcal_notify_enabled = false;
     avg_form_score_notify_enabled = false;

@@ -24,7 +24,7 @@ extern "C" {
 /* Configuration constants for 100Hz foot sensor sampling rate */
 /* GAIT_BUFFER_SIZE_SAMPLES is already defined in gait_advanced_features.h (300 samples) */
 #ifndef GAIT_BUFFER_SIZE_SAMPLES
-#define GAIT_BUFFER_SIZE_SAMPLES   300    /* 3 seconds @ 100Hz */
+#define GAIT_BUFFER_SIZE_SAMPLES   400    /* 2 seconds @ 200Hz */
 #endif
 #define GAIT_SAMPLING_RATE         100.0f /* Hz (foot sensor rate) */
 #define GAIT_MIN_STRIDE_TIME       0.33f  /* 330ms minimum between strides */

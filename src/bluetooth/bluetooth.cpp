@@ -1354,8 +1354,8 @@ err_t bt_module_init(void)
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Initialize BLE recovery handler (only for primary device)
-//    ble_recovery_handler_init();
- //   LOG_INF("BLE recovery handler initialized");
+    //    ble_recovery_handler_init();
+    //   LOG_INF("BLE recovery handler initialized");
 
     // Initialize connection parameter manager
     int conn_params_err = ble_conn_params_init();
@@ -2803,7 +2803,7 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
                 if (atomic_get(&logging_active) == 1)
                 {
                     // Only update if logging is active
-                   // ams_update_biomechanics_extended(&ble_bio_data);
+                    // ams_update_biomechanics_extended(&ble_bio_data);
 
                     LOG_DBG("Updated biomechanics: pronation L/R=%d/%d, loading L/R=%u/%u", bio_data->pronation_left,
                             bio_data->pronation_right, bio_data->loading_rate_left, bio_data->loading_rate_right);
