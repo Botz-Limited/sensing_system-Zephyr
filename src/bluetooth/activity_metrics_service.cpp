@@ -1600,6 +1600,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
 
   // Send notifications for individual real-time metrics if enabled and
   // connected
+  cadence_spm_notify_enabled=true;
   if (current_conn) {
     if (cadence_spm_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
@@ -1610,6 +1611,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
       if (err)
         LOG_WRN("Failed to send Cadence SPM notification: %d", err);
     }
+    pace_sec_km_notify_enabled=true;
     if (pace_sec_km_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
@@ -1637,6 +1639,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics) {
       if (err)
         LOG_WRN("Failed to send Form Score notification: %d", err);
     } */
+     balance_lr_pct_notify_enabled=true;
     if (balance_lr_pct_notify_enabled) {
       auto *status_gatt = bt_gatt_find_by_uuid(
           activity_metrics_service.attrs, activity_metrics_service.attr_count,
@@ -2041,15 +2044,15 @@ void ams_set_connection(struct bt_conn *conn) {
   if (!conn) {
     // Connection lost, reset notification states for all individual
     // characteristics
-    cadence_spm_notify_enabled = false;
-    pace_sec_km_notify_enabled = false;
-    distance_m_notify_enabled = false;
-    form_score_notify_enabled = false;
-    balance_lr_pct_notify_enabled = false;
-    ground_contact_ms_notify_enabled = false;
-    flight_time_ms_notify_enabled = false;
-    efficiency_score_notify_enabled = false;
-    alerts_notify_enabled = false;
+    cadence_spm_notify_enabled = true;
+    pace_sec_km_notify_enabled = true;
+    distance_m_notify_enabled = true;
+    form_score_notify_enabled = true;
+    balance_lr_pct_notify_enabled = true;
+    ground_contact_ms_notify_enabled = true;
+    flight_time_ms_notify_enabled = true;
+    efficiency_score_notify_enabled = true;
+    alerts_notify_enabled = true;
 
     contact_time_asym_notify_enabled = false;
     flight_time_asym_notify_enabled = false;
