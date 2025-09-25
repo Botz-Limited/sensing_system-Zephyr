@@ -8,12 +8,16 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <math.h>
+#include <app.hpp>
 
 /* Include sensor data processing headers for algorithm functions */
 #include "sensor_data/sensor_data_enhanced_algorithms.hpp"
 #include "sensor_data/sensor_data_fast_processing.hpp"
 
 LOG_MODULE_REGISTER(gait_events, LOG_LEVEL_WRN);
+
+ extern struct k_msgq sensor_data_queue;
+ generic_message_t metrics_msg;
 
 /* Constants */
 #ifndef M_PI
@@ -1308,13 +1312,16 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
         detector->metrics_count++;
         
         if (detector->use_advanced_features) {
-            LOG_INF("Stride %d metrics: GCT=%.3fs, duration=%.3fs, cadence=%.1f, length=%.2fm, speed=%.2fm/s (smoothed)",
+            LOG_WRN("ADVANCED Stride %d metrics: GCT=%.3fs, duration=%.3fs, cadence=%.1f, length=%.2fm, speed=%.2fm/s (smoothed)",
                     s, m->gct, m->duration, m->cadence, m->stride_length, m->speed_anthropometric);
         } else {
-            LOG_INF("Stride %d metrics: GCT=%.3fs, duration=%.3fs, cadence=%.1f, length=%.2fm",
+            LOG_WRN("NOT ADVANCED Stride %d metrics: GCT=%.3fs, duration=%.3fs, cadence=%.1f, length=%.2fm",
                     s, m->gct, m->duration, m->cadence, m->stride_length);
         }
     }
+
+    metrics_msg.sender = GAIT_EVENT_DETECTOR;
+    metrics_msg.type = MSG_TYPE_REALTIME_METRICS_GAIT;  
     
     /* Log advanced feature statistics if enabled */
     if (detector->use_advanced_features && detector->stride_count > 0) {
@@ -1324,6 +1331,9 @@ static void calculate_stride_metrics(gait_event_detector_t *detector)
                (unsigned long)detector->quaternion_updates);
     }
 }
+
+           
+                    
 
 /**
  * Check if buffer has enough data for processing

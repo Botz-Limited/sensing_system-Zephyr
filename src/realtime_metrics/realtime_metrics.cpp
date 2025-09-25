@@ -790,7 +790,7 @@ static void calculate_realtime_metrics(void)
     } else if (current_cadence > 0 && metrics_state.current_metrics.ground_contact_ms > 0) {
         // Estimate flight time from cadence and GCT
         uint32_t step_cycle_ms = 60000 / current_cadence;
-        uint32_t estimated_flight = step_cycle_ms - metrics_state.current_metrics.ground_contact_ms;
+        uint32_t estimated_flight = step_cycle_ms - 2*(metrics_state.current_metrics.ground_contact_ms);
         if (estimated_flight > 0 && estimated_flight < 1000) {
             metrics_state.current_metrics.flight_time_ms = estimated_flight;
         }
@@ -1027,7 +1027,7 @@ static void calculate_realtime_metrics(void)
     metrics_state.current_metrics.form_score = 85;  // Default reasonable value
     
     // No bilateral metrics on secondary (balance, asymmetry set to neutral)
-    metrics_state.current_metrics.balance_lr_pct = 50;  // Neutral balance
+    metrics_state.current_metrics.balance_lr_pct = 0;  // Neutral balance
     metrics_state.current_metrics.contact_time_asymmetry = 0;
     metrics_state.current_metrics.force_asymmetry = 0;
     metrics_state.current_metrics.pronation_asymmetry = 0;
@@ -1169,18 +1169,18 @@ static void send_ble_update(void)
             // Metrics are too old, send default values but keep non-zero form/balance
             memset(&metrics_to_send, 0, sizeof(realtime_metrics_t));
             metrics_to_send.timestamp_ms = current_time;
-            metrics_to_send.form_score = 85;  // Default form score
-            metrics_to_send.balance_lr_pct = 50;  // Default neutral balance
-            metrics_to_send.efficiency_score = 85;  // Default efficiency
+          //  metrics_to_send.form_score = 85;  // Default form score
+            metrics_to_send.balance_lr_pct = 0;  // Default neutral balance
+         //   metrics_to_send.efficiency_score = 85;  // Default efficiency
             LOG_WRN("Preserved metrics too old (%u ms), sending defaults", good_metrics_age);
         }
     } else {
         // No good metrics available yet, send defaults
         memset(&metrics_to_send, 0, sizeof(realtime_metrics_t));
         metrics_to_send.timestamp_ms = current_time;
-        metrics_to_send.form_score = 85;  // Default form score
-        metrics_to_send.balance_lr_pct = 50;  // Default neutral balance  
-        metrics_to_send.efficiency_score = 85;  // Default efficiency
+      //  metrics_to_send.form_score = 85;  // Default form score
+        metrics_to_send.balance_lr_pct = 0;  // Default neutral balance  
+      //  metrics_to_send.efficiency_score = 85;  // Default efficiency
         LOG_DBG("No good metrics yet, sending defaults");
     }
     

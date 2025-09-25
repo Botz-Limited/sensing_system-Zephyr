@@ -190,6 +190,7 @@ typedef struct
 {
     uint32_t packet_number;
     uint32_t timestamp;
+    uint32_t uptime_ms;
     uint16_t cadence_spm;
     uint16_t pace_sec_km;
     uint16_t speed_kmh_x10; // Speed in km/h * 10 (fixed point, 1 decimal)

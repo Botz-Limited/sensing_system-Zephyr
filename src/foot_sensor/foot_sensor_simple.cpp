@@ -329,7 +329,7 @@ static void process_adc_samples(int16_t *raw_data)
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // SECONDARY (LEFT FOOT) characteristics:
             is_left_foot = true;
-            phase_offset = 300; // Half of 600ms cycle for opposite phase
+            phase_offset = 375; // Half of 750ms cycle for opposite phase
             // Add small realistic variation (±10ms) for natural gait
             phase_offset += ((current_time / 1000) % 21) - 10; // -10 to +10 ms variation
 
@@ -360,10 +360,10 @@ static void process_adc_samples(int16_t *raw_data)
 #endif
 
             // Adjust cycle time for GCT differences
-            int cycle_time = (current_time + phase_offset) % 600; // 600ms gait cycle with phase offset
+            int cycle_time = (current_time + phase_offset) % 750; // 750ms gait cycle with phase offset
 
             // Adjust stance phase duration based on GCT multiplier
-            int stance_duration = (int)(300 * gct_multiplier); // Normally 300ms
+            int stance_duration = (int)(375 * gct_multiplier); // Normally 375ms
 
             // Create realistic pressure pattern with 14-bit ADC range
             // Total pressure during midstance: ~70,000-80,000 (clear detection)
@@ -372,7 +372,7 @@ static void process_adc_samples(int16_t *raw_data)
             if (cycle_time < stance_duration)
             {
                 // Stance phase - foot is on ground (adjusted duration for GCT differences)
-                if (cycle_time < 50)
+                if (cycle_time < 62)
                 {
                     // Initial contact/loading (0-50ms) - heel strike
                     // Sharp ramp up pressure from 0 to 10000
@@ -412,7 +412,7 @@ static void process_adc_samples(int16_t *raw_data)
                         msg.data.foot_samples.values[7] = pressure_value * 0.95;      // Heel medial - less pressure
                     }
                 }
-                else if (cycle_time < 150)
+                else if (cycle_time < 187)
                 {
                     // Midstance (50-150ms) - full foot contact, weight bearing
                     // All sensors have significant pressure - apply multiplier
@@ -452,7 +452,7 @@ static void process_adc_samples(int16_t *raw_data)
                         msg.data.foot_samples.values[7] = (int16_t)(8000 * pressure_multiplier * 0.98);  // Heel medial
                     }
                 }
-                else if (cycle_time < (stance_duration - 50))
+                else if (cycle_time < (stance_duration - 62))
                 {
                     // Push-off phase - weight shifts to forefoot/toes
                     // Adjust timing based on stance_duration
@@ -494,8 +494,8 @@ static void process_adc_samples(int16_t *raw_data)
                     // Toe-off transition (250-300ms) - leaving ground
                     // Pressure rapidly decreasing as foot leaves ground
                     // Fixed calculation: linear ramp from max to 0
-                    int16_t time_in_phase = cycle_time - 250;            // 0 to 50
-                    int16_t fade_factor = 13000 - (time_in_phase * 260); // 13000 to 0 over 50ms
+                    int16_t time_in_phase = cycle_time - 312;            // 0 to 50
+                    int16_t fade_factor = 13000 - (time_in_phase * 208); // 13000 to 0 over 62ms
                     if (fade_factor < 0)
                         fade_factor = 0;
 

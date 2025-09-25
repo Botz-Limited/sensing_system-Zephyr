@@ -517,8 +517,8 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
 static void process_sensor_data_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
-    uint32_t current_epoch = get_current_epoch_time();
-    uint16_t delta_epoch = 0U;
+ //   uint32_t current_epoch = get_current_epoch_time();
+ //   uint16_t delta_epoch = 0U;
 
     // Make a local copy of the message under mutex protection
     k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
@@ -542,7 +542,8 @@ static void process_sensor_data_work_handler(struct k_work *work)
         }
 
         activity_metrics_binary_t binary_metrics = {.packet_number = activity_packet_counter++,
-                                                    .timestamp = current_epoch,
+                                                   // .timestamp = current_epoch,
+                                                    .uptime_ms= k_uptime_get_32(),
                                                     .cadence_spm = metrics->cadence_spm,
                                                     .pace_sec_km = metrics->pace_sec_km,
                                                     .speed_kmh_x10 =
@@ -558,7 +559,7 @@ static void process_sensor_data_work_handler(struct k_work *work)
                                                     .avg_pronation_deg = metrics->avg_pronation_deg,
                                                     .vertical_ratio = metrics->vertical_ratio};
 
-        /*    LOG_WRN("activity_packet_counter = %u\n"
+            LOG_WRN("activity_packet_counter = %u\n"
                     "timestamp = %u\n"
                     "cadence = %u\n"
                     "pace = %u\n"
@@ -573,12 +574,12 @@ static void process_sensor_data_work_handler(struct k_work *work)
                     "right_strike_pattern = %u\n"
                     "avg_pronation_deg = %d\n"
                     "vertical_ratio = %u\n",
-                    binary_metrics.packet_number, binary_metrics.timestamp_ms, binary_metrics.cadence_spm,
+                    binary_metrics.packet_number, binary_metrics.uptime_ms, binary_metrics.cadence_spm,
                     binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
                     binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms,
            binary_metrics.contact_time_asymmetry, binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry,
            binary_metrics.left_strike_pattern, binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg,
-           binary_metrics.vertical_ratio); */
+           binary_metrics.vertical_ratio); 
 
         // TODO: workaround only, send data to bluetooth:
         generic_message_t msg = {};
