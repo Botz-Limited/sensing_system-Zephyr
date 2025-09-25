@@ -1340,7 +1340,7 @@ bool gait_events_ready_to_process(gait_event_detector_t *detector)
 
 /**
  * Consumer function - processes buffered data to detect events
- * This implements the consumer pattern from    implementation
+ * This implements the consumer pattern
  */
 int gait_events_process(gait_event_detector_t *detector)
 {
@@ -1348,7 +1348,7 @@ int gait_events_process(gait_event_detector_t *detector)
         return 0;
     }
     
-    /* Wait for sufficient data (implements wait_for_data) */
+    /* Wait for sufficient data  */
     if (!gait_events_ready_to_process(detector)) {
         detector->waiting_for_data = true;
         return 0;
