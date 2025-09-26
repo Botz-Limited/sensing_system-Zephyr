@@ -1303,32 +1303,38 @@ static void calculate_bilateral_metrics(void)
     }
 
     // Ground contact time (average) and flight time
-    if (d2d_metric_is_valid(secondary, IDX_GCT) && primary->gct > 0)
-    {
-        float avg_gct = (secondary->metrics[IDX_GCT] + primary->gct * 1000.0f) / 2.0f;
-        rt_metrics->ground_contact_ms = (uint16_t)avg_gct;
-        rt_metrics->contact_time_asymmetry = (uint8_t)MIN(gct_asymmetry, 100.0f);
+    // Ground contact time (average) and flight time
+if (d2d_metric_is_valid(secondary, IDX_GCT) && primary->gct > 0)
+{
+    float avg_gct = (secondary->metrics[IDX_GCT] + primary->gct * 1000.0f) / 2.0f;
+    rt_metrics->ground_contact_ms = (uint16_t)avg_gct;
+    rt_metrics->contact_time_asymmetry = (uint8_t)MIN(gct_asymmetry, 100.0f);
 
-        // Calculate flight time from stride duration and GCT
-        if (primary->duration > 0)
-        {
-            float flight_time = (primary->duration - primary->gct) * 1000.0f;
-            if (d2d_metric_is_valid(secondary, IDX_SWING_TIME))
-            {
-                flight_time = (flight_time + secondary->metrics[IDX_SWING_TIME]) / 2.0f;
-            }
+
+    if (primary->duration > 0)
+    {
+        float primary_contact = primary->gct * 1000.0f;
+        float secondary_contact = secondary->metrics[IDX_GCT]; // Already valid from above condition
+        float total_contact_time = primary_contact + secondary_contact;
+        float flight_time = (primary->duration * 1000.0f) - total_contact_time;
+        
+        if (flight_time > 0) {
             rt_metrics->flight_time_ms = (uint16_t)flight_time;
+            LOG_INF("TRUE FLIGHT TIME: %.1f ms", (double)flight_time);
+        } else {
+            rt_metrics->flight_time_ms = 0;
         }
     }
+}
 
-    // Flight time asymmetry
-    if (d2d_metric_is_valid(secondary, IDX_SWING_TIME) && primary->duration > 0)
-    {
-        float pri_flight = (primary->duration - primary->gct) * 1000.0f;
-        float sec_flight = secondary->metrics[IDX_SWING_TIME];
-        float flight_asym = fabsf(sec_flight - pri_flight) / ((sec_flight + pri_flight) / 2.0f) * 100.0f;
-        rt_metrics->flight_time_asymmetry = (uint8_t)MIN(flight_asym, 100.0f);
-    }
+// Flight time asymmetry (swing time comparison - keep this as is)
+if (d2d_metric_is_valid(secondary, IDX_SWING_TIME) && primary->duration > 0)
+{
+    float pri_swing = (primary->duration - primary->gct) * 1000.0f;  // Swing time
+    float sec_swing = secondary->metrics[IDX_SWING_TIME];  // Swing time
+    float swing_asym = fabsf(sec_swing - pri_swing) / ((sec_swing + pri_swing) / 2.0f) * 100.0f;
+    rt_metrics->flight_time_asymmetry = (uint8_t)MIN(swing_asym, 100.0f);
+}
 
     // Stride metrics
     if (d2d_metric_is_valid(secondary, IDX_STRIDE_LENGTH) && primary->stride_length > 0)

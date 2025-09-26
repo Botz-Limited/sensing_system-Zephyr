@@ -517,8 +517,8 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
 static void process_sensor_data_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
- //   uint32_t current_epoch = get_current_epoch_time();
- //   uint16_t delta_epoch = 0U;
+    //   uint32_t current_epoch = get_current_epoch_time();
+    //   uint16_t delta_epoch = 0U;
 
     // Make a local copy of the message under mutex protection
     k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
@@ -533,7 +533,6 @@ static void process_sensor_data_work_handler(struct k_work *work)
         LOG_INF("Writing Activity data metrics %d", metrics->timestamp_ms);
         // Prepare a binary structure to store in the file
 
-
         // Reset counter if approaching maximum to prevent overflow
         if (activity_packet_counter >= (UINT32_MAX - 100))
         {
@@ -541,45 +540,56 @@ static void process_sensor_data_work_handler(struct k_work *work)
             activity_packet_counter = 0;
         }
 
-        activity_metrics_binary_t binary_metrics = {.packet_number = activity_packet_counter++,
-                                                   // .timestamp = current_epoch,
-                                                    .uptime_ms= k_uptime_get_32(),
-                                                    .cadence_spm = metrics->cadence_spm,
-                                                    .pace_sec_km = metrics->pace_sec_km,
-                                                    .speed_kmh_x10 =
-                                                        (metrics->pace_sec_km > 0) ? (36000 / metrics->pace_sec_km) : 0,
-                                                    .balance_lr_pct = metrics->balance_lr_pct,
-                                                    .ground_contact_ms = metrics->ground_contact_ms,
-                                                    .flight_time_ms = metrics->flight_time_ms,
-                                                    .contact_time_asymmetry = metrics->contact_time_asymmetry,
-                                                    .force_asymmetry = metrics->force_asymmetry,
-                                                    .pronation_asymmetry = metrics->pronation_asymmetry,
-                                                    .left_strike_pattern = metrics->left_strike_pattern,
-                                                    .right_strike_pattern = metrics->right_strike_pattern,
-                                                    .avg_pronation_deg = metrics->avg_pronation_deg,
-                                                    .vertical_ratio = metrics->vertical_ratio};
+        activity_metrics_binary_t binary_metrics = {
+            .packet_number = activity_packet_counter++,
+            .uptime_ms = k_uptime_get_32(),
+            .cadence_spm = metrics->cadence_spm,
+            .pace_sec_km = metrics->pace_sec_km,
 
-            LOG_WRN("activity_packet_counter = %u\n"
-                    "timestamp = %u\n"
-                    "cadence = %u\n"
-                    "pace = %u\n"
-                    "speed = %u\n"
-                    "balance = %d\n"
-                    "ground_contact = %u\n"
-                    "flight_time = %u\n"
-                    "contact_time_asymmetry = %d\n"
-                    "force_asymmetry = %d\n"
-                    "pronation_asymmetry = %d\n"
-                    "left_strike_pattern = %u\n"
-                    "right_strike_pattern = %u\n"
-                    "avg_pronation_deg = %d\n"
-                    "vertical_ratio = %u\n",
-                    binary_metrics.packet_number, binary_metrics.uptime_ms, binary_metrics.cadence_spm,
-                    binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
-                    binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms,
-           binary_metrics.contact_time_asymmetry, binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry,
-           binary_metrics.left_strike_pattern, binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg,
-           binary_metrics.vertical_ratio); 
+            // FIXED: Correct speed calculation with proper scaling
+            .speed_kmh_x10 = (metrics->pace_sec_km > 0) ? (uint16_t)((3600.0f / metrics->pace_sec_km) * 10.0f) : 0,
+
+            .balance_lr_pct = metrics->balance_lr_pct,
+            .ground_contact_ms = metrics->ground_contact_ms,
+
+            // VALIDATED: Cap flight time to realistic values
+            .flight_time_ms = (metrics->flight_time_ms > 300) ? 0 : metrics->flight_time_ms,
+
+            .contact_time_asymmetry = metrics->contact_time_asymmetry,
+            .force_asymmetry = metrics->force_asymmetry,
+            .pronation_asymmetry = metrics->pronation_asymmetry,
+            .left_strike_pattern = metrics->left_strike_pattern,
+            .right_strike_pattern = metrics->right_strike_pattern,
+            .avg_pronation_deg = metrics->avg_pronation_deg,
+            .vertical_ratio = metrics->vertical_ratio};
+
+            // ADD MISSING FIELDS:
+          //  .stride_length_cm = metrics->stride_length_cm,
+          ///  .stride_duration_ms = metrics->stride_duration_ms,
+          //  .vertical_oscillation_cm = metrics->vertical_oscillation_cm,
+          //  .efficiency_score = metrics->efficiency_score,
+          //  .form_score = metrics->form_score};
+
+        LOG_WRN("activity_packet_counter = %u\n"
+                "timestamp = %u\n"
+                "cadence = %u\n"
+                "pace = %u\n"
+                "speed = %u\n"
+                "balance = %d\n"
+                "ground_contact = %u\n"
+                "flight_time = %u\n"
+                "contact_time_asymmetry = %d\n"
+                "force_asymmetry = %d\n"
+                "pronation_asymmetry = %d\n"
+                "left_strike_pattern = %u\n"
+                "right_strike_pattern = %u\n"
+                "avg_pronation_deg = %d\n"
+                "vertical_ratio = %u\n",
+                binary_metrics.packet_number, binary_metrics.uptime_ms, binary_metrics.cadence_spm,
+                binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
+                binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms, binary_metrics.contact_time_asymmetry,
+                binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry, binary_metrics.left_strike_pattern,
+                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio);
 
         // TODO: workaround only, send data to bluetooth:
         generic_message_t msg = {};
@@ -1060,8 +1070,6 @@ err_t end_activity_logging()
             .percentage = 90,   // Placeholder, replace with actual battery reading
         };
 
-
-
         ActivityFileFooterV3 footer = {.end_time = get_current_epoch_time(),
                                        .record_count = activity_batch_count,
                                        .packet_count = activity_packet_counter,
@@ -1072,7 +1080,7 @@ err_t end_activity_logging()
         msg.sender = SENDER_DATA;
         msg.type = MSG_TYPE_ACTIVITY_FOOTER;
 
-            memcpy(&msg.data.activity_footer, &footer, sizeof(footer));
+        memcpy(&msg.data.activity_footer, &footer, sizeof(footer));
 
         if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
         {

@@ -257,6 +257,12 @@ static void apply_zupt(gait_event_detector_t *detector, bool is_stance);
 static float calculate_adaptive_threshold(const foot_samples_t *buffer, 
                                          int start, int count);
 
+void gait_events_enable_bilateral_mode(gait_event_detector_t *detector, bool enable);
+bool gait_events_is_bilateral_ready(const gait_event_detector_t *detector);
+void gait_events_set_bilateral_partner_data(gait_event_detector_t *detector, 
+                                           const gait_metrics_t *partner_metrics, 
+                                           uint32_t timestamp_ms);                                         
+
 #ifdef __cplusplus
 }
 #endif

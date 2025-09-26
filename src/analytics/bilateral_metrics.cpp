@@ -2,8 +2,8 @@
  * @file bilateral_metrics.cpp
  * @brief Primary device bilateral metrics processing
  * 
- * This module receives metrics from the secondary device and combines them
- * with locally calculated metrics to produce bilateral gait analysis.
+ * This module receives pre-calculated metrics from gait events (right foot) and 
+ * D2D (left foot), then combines them for bilateral gait analysis.
  */
 
 #include <zephyr/kernel.h>
@@ -14,13 +14,9 @@
 #include <app.hpp>
 #include <d2d_metrics.h>
 #include "bilateral_metrics.h"
-#include <choros_buffer.hpp>
 #include "../realtime_metrics/realtime_metrics.h"
 
 LOG_MODULE_REGISTER(bilateral_metrics, CONFIG_ANALYTICS_MODULE_LOG_LEVEL);
-
-// External Choros buffer instance
-extern choros_ring_buffer_t choros_buffer;
 
 // Message queue for analytics module (only on primary device)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -28,8 +24,8 @@ K_MSGQ_DEFINE(analytics_msgq, sizeof(generic_message_t), 10, 4);
 #endif
 
 // Store latest metrics from both feet
-static d2d_metrics_packet_t left_foot_metrics;  // From secondary
-static d2d_metrics_packet_t right_foot_metrics; // Local calculation
+static d2d_metrics_packet_t left_foot_metrics;  // From secondary via D2D
+static d2d_metrics_packet_t right_foot_metrics; // From local gait events module
 static bool left_metrics_valid = false;
 static bool right_metrics_valid = false;
 
@@ -44,91 +40,69 @@ static struct {
     uint32_t last_calculation_ms;
 } bilateral_results;
 
-// Timer for local metrics calculation
-static struct k_timer primary_metrics_timer;
-static uint16_t primary_sequence_num = 0;
 static bool activity_active = false;  // Track if activity is running
 
 /**
- * @brief Calculate local (right foot) metrics
+ * @brief Receive pre-calculated right foot metrics from gait events module
+ * This replaces the duplicate calculation - we consume instead of recalculate
  */
-static void calculate_right_foot_metrics(void)
+void bilateral_metrics_update_right_foot(const gait_metrics_t *right_metrics)
 {
-    // Clear packet
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    if (!right_metrics || !right_metrics->valid) {
+        LOG_DBG("Invalid right foot metrics received");
+        right_metrics_valid = false;
+        return;
+    }
+    
+    // Store the pre-calculated metrics (no recalculation needed)
+    right_foot_metrics.timestamp = (uint32_t)(right_metrics->timestamp * 1000); // s → ms
+    static uint16_t right_sequence_num = 0;
+    right_foot_metrics.sequence_num = right_sequence_num++;
+    
+    // Clear previous metrics
     d2d_metrics_clear(&right_foot_metrics);
     
-    // Set metadata
-    right_foot_metrics.timestamp = k_uptime_get_32();
-    right_foot_metrics.sequence_num = primary_sequence_num++;
+    // Use the already-calculated values from gait_events
+    right_foot_metrics.metrics[IDX_GCT] = right_metrics->gct * 1000.0f; // s → ms
+    d2d_metric_set_valid(&right_foot_metrics, IDX_GCT);
     
-    // Check buffer health
-    if (!choros_buffer_is_healthy()) {
-        right_foot_metrics.calculation_status = 2; // Error
-        LOG_WRN("Right foot buffer unhealthy");
-        return;
+    right_foot_metrics.metrics[IDX_STRIDE_LENGTH] = right_metrics->stride_length * 100.0f; // m → cm
+    d2d_metric_set_valid(&right_foot_metrics, IDX_STRIDE_LENGTH);
+    
+    right_foot_metrics.metrics[IDX_CADENCE] = right_metrics->cadence;
+    d2d_metric_set_valid(&right_foot_metrics, IDX_CADENCE);
+    
+    right_foot_metrics.metrics[IDX_PRONATION] = right_metrics->max_pronation;
+    d2d_metric_set_valid(&right_foot_metrics, IDX_PRONATION);
+    
+    // Add other metrics if available
+    if (right_metrics->peak_pressure > 0) {
+        right_foot_metrics.metrics[IDX_PEAK_PRESSURE] = (float)right_metrics->peak_pressure;
+        d2d_metric_set_valid(&right_foot_metrics, IDX_PEAK_PRESSURE);
     }
     
-    if (choros_buffer.count < 100) {
-        right_foot_metrics.calculation_status = 1; // Warm-up
-        LOG_DBG("Right foot buffer warming up: %d samples", choros_buffer.count);
-        return;
-    }
-    
-    right_foot_metrics.calculation_status = 0; // OK
-    
-    // Calculate ground contact time
-    float gct = choros_get_gct_safe(0);
-    if (gct > 0) {
-        right_foot_metrics.metrics[IDX_GCT] = gct;
-        d2d_metric_set_valid(&right_foot_metrics, IDX_GCT);
-    }
-    
-    // Calculate stride length
-    float stride = choros_get_stride_length_safe(0);
-    if (stride > 0) {
-        right_foot_metrics.metrics[IDX_STRIDE_LENGTH] = stride * 100; // Convert to cm
-        d2d_metric_set_valid(&right_foot_metrics, IDX_STRIDE_LENGTH);
-    }
-    
-    // Calculate cadence
-    float cadence = choros_get_cadence_safe(0);
-    if (cadence > 0) {
-        right_foot_metrics.metrics[IDX_CADENCE] = cadence;
-        d2d_metric_set_valid(&right_foot_metrics, IDX_CADENCE);
-    }
-    
-    // Calculate pronation
-    float pronation = choros_get_pronation_safe(0);
-    if (pronation != 0) {
-        right_foot_metrics.metrics[IDX_PRONATION] = pronation;
-        d2d_metric_set_valid(&right_foot_metrics, IDX_PRONATION);
+    // Add timing metrics if available
+    if (right_metrics->duration > 0) {
+        right_foot_metrics.metrics[IDX_STANCE_TIME] = right_metrics->gct * 1000.0f;
+        right_foot_metrics.metrics[IDX_SWING_TIME] = (right_metrics->duration - right_metrics->gct) * 1000.0f;
+        d2d_metric_set_valid(&right_foot_metrics, IDX_STANCE_TIME);
+        d2d_metric_set_valid(&right_foot_metrics, IDX_SWING_TIME);
     }
     
     right_metrics_valid = true;
+    right_foot_metrics.calculation_status = 0; // OK
     
-    // Comprehensive logging of RIGHT foot metrics
-    LOG_INF("=== PRIMARY DEVICE METRICS (Right Foot) ===");
-    LOG_INF("Timestamp: %u ms, Sequence: %u", right_foot_metrics.timestamp, right_foot_metrics.sequence_num);
+    LOG_DBG("Right foot metrics updated: GCT=%.1fms, cadence=%.1f, stride=%.2fm", 
+            (double)(right_metrics->gct * 1000.0f), 
+            (double)right_metrics->cadence,
+            (double)right_metrics->stride_length);
     
-    if (d2d_metric_is_valid(&right_foot_metrics, IDX_GCT)) {
-        LOG_INF("  Ground Contact Time (GCT): %.1f ms", (double)right_foot_metrics.metrics[IDX_GCT]);
+    // Trigger bilateral calculation if we have both feet data
+    if (left_metrics_valid) {
+        calculate_bilateral_metrics();
     }
-    
-    if (d2d_metric_is_valid(&right_foot_metrics, IDX_STRIDE_LENGTH)) {
-        LOG_INF("  Stride Length: %.2f cm (%.2f m)",
-                (double)right_foot_metrics.metrics[IDX_STRIDE_LENGTH],
-                (double)(right_foot_metrics.metrics[IDX_STRIDE_LENGTH] / 100.0f));
-    }
-    
-    if (d2d_metric_is_valid(&right_foot_metrics, IDX_CADENCE)) {
-        LOG_INF("  Cadence: %.1f steps/min", (double)right_foot_metrics.metrics[IDX_CADENCE]);
-    }
-    
-    if (d2d_metric_is_valid(&right_foot_metrics, IDX_PRONATION)) {
-        LOG_INF("  Pronation Angle: %.1f degrees", (double)right_foot_metrics.metrics[IDX_PRONATION]);
-    }
-    
-    LOG_INF("=============================================");
+#endif
 }
 
 /**
@@ -154,6 +128,8 @@ static float calculate_gait_symmetry(void)
             float gct_symmetry = 100.0f * (1.0f - fabsf(left_gct - right_gct) / avg_gct);
             symmetry_sum += gct_symmetry;
             symmetry_count++;
+            LOG_DBG("GCT symmetry: L=%.1fms, R=%.1fms, symmetry=%.1f%%", 
+                    (double)left_gct, (double)right_gct, (double)gct_symmetry);
         }
     }
     
@@ -167,6 +143,8 @@ static float calculate_gait_symmetry(void)
             float stride_symmetry = 100.0f * (1.0f - fabsf(left_stride - right_stride) / avg_stride);
             symmetry_sum += stride_symmetry;
             symmetry_count++;
+            LOG_DBG("Stride symmetry: L=%.1fcm, R=%.1fcm, symmetry=%.1f%%", 
+                    (double)left_stride, (double)right_stride, (double)stride_symmetry);
         }
     }
     
@@ -180,10 +158,16 @@ static float calculate_gait_symmetry(void)
             float cadence_symmetry = 100.0f * (1.0f - fabsf(left_cadence - right_cadence) / avg_cadence);
             symmetry_sum += cadence_symmetry;
             symmetry_count++;
+            LOG_DBG("Cadence symmetry: L=%.1fspm, R=%.1fspm, symmetry=%.1f%%", 
+                    (double)left_cadence, (double)right_cadence, (double)cadence_symmetry);
         }
     }
     
-    return (symmetry_count > 0) ? (symmetry_sum / symmetry_count) : 0;
+    float overall_symmetry = (symmetry_count > 0) ? (symmetry_sum / symmetry_count) : 0;
+    LOG_DBG("Overall gait symmetry: %.1f%% (based on %d metrics)", 
+            (double)overall_symmetry, symmetry_count);
+    
+    return overall_symmetry;
 }
 
 /**
@@ -196,30 +180,40 @@ static float calculate_phase_coordination(void)
         return 0;
     }
     
-    // Check if we have stance and swing times
-    if (!d2d_metric_is_valid(&left_foot_metrics, IDX_STANCE_TIME) ||
-        !d2d_metric_is_valid(&right_foot_metrics, IDX_STANCE_TIME) ||
-        !d2d_metric_is_valid(&left_foot_metrics, IDX_SWING_TIME) ||
-        !d2d_metric_is_valid(&right_foot_metrics, IDX_SWING_TIME)) {
-        
-        // Estimate from GCT if available
-        if (d2d_metric_is_valid(&left_foot_metrics, IDX_GCT) &&
-            d2d_metric_is_valid(&right_foot_metrics, IDX_GCT)) {
-            float left_gct = left_foot_metrics.metrics[IDX_GCT];
-            float right_gct = right_foot_metrics.metrics[IDX_GCT];
-            
-            // Ideal phase is 180 degrees (0.5 cycle) offset
-            // Estimate phase from GCT ratio
-            float phase_diff = fabsf(left_gct - right_gct) / (left_gct + right_gct);
-            float coordination = 100.0f * (1.0f - 2.0f * phase_diff);
-            return fmaxf(0, coordination);
-        }
-    }
+    // Use stance/swing times if available, otherwise estimate from GCT
+    float left_stance, right_stance, left_swing, right_swing;
     
-    float left_stance = left_foot_metrics.metrics[IDX_STANCE_TIME];
-    float right_stance = right_foot_metrics.metrics[IDX_STANCE_TIME];
-    float left_swing = left_foot_metrics.metrics[IDX_SWING_TIME];
-    float right_swing = right_foot_metrics.metrics[IDX_SWING_TIME];
+    if (d2d_metric_is_valid(&left_foot_metrics, IDX_STANCE_TIME) &&
+        d2d_metric_is_valid(&left_foot_metrics, IDX_SWING_TIME) &&
+        d2d_metric_is_valid(&right_foot_metrics, IDX_STANCE_TIME) &&
+        d2d_metric_is_valid(&right_foot_metrics, IDX_SWING_TIME)) {
+        
+        // Use precise timing data
+        left_stance = left_foot_metrics.metrics[IDX_STANCE_TIME];
+        left_swing = left_foot_metrics.metrics[IDX_SWING_TIME];
+        right_stance = right_foot_metrics.metrics[IDX_STANCE_TIME];
+        right_swing = right_foot_metrics.metrics[IDX_SWING_TIME];
+    } else {
+        // Estimate from GCT and cadence
+        float left_gct = d2d_metric_is_valid(&left_foot_metrics, IDX_GCT) ? 
+                        left_foot_metrics.metrics[IDX_GCT] : 250.0f;
+        float right_gct = d2d_metric_is_valid(&right_foot_metrics, IDX_GCT) ? 
+                         right_foot_metrics.metrics[IDX_GCT] : 250.0f;
+        
+        // Estimate cycle time from cadence
+        float avg_cadence = 160.0f; // Default
+        if (d2d_metric_is_valid(&left_foot_metrics, IDX_CADENCE) &&
+            d2d_metric_is_valid(&right_foot_metrics, IDX_CADENCE)) {
+            avg_cadence = (left_foot_metrics.metrics[IDX_CADENCE] + 
+                          right_foot_metrics.metrics[IDX_CADENCE]) / 2.0f;
+        }
+        
+        float cycle_time = 60000.0f / avg_cadence; // ms per cycle
+        left_swing = cycle_time - left_gct;
+        right_swing = cycle_time - right_gct;
+        left_stance = left_gct;
+        right_stance = right_gct;
+    }
     
     // Calculate phase relationship
     float left_cycle = left_stance + left_swing;
@@ -227,12 +221,20 @@ static float calculate_phase_coordination(void)
     
     if (left_cycle > 0 && right_cycle > 0) {
         // Calculate phase offset (should be ~0.5 for normal gait)
-        float phase_offset = fabsf(left_stance / left_cycle - right_stance / right_cycle);
+        float left_phase = left_stance / left_cycle;
+        float right_phase = right_stance / right_cycle;
+        float phase_offset = fabsf(left_phase - right_phase);
         float ideal_offset = 0.5f;
         float phase_error = fabsf(phase_offset - ideal_offset);
         
-        // Convert to 0-100 scale
-        return 100.0f * (1.0f - 2.0f * phase_error);
+        // Convert to 0-100 scale (100 = perfect coordination)
+        float coordination = 100.0f * (1.0f - 2.0f * phase_error);
+        coordination = MAX(0.0f, MIN(100.0f, coordination));
+        
+        LOG_DBG("Phase coordination: L_phase=%.2f, R_phase=%.2f, error=%.2f, coordination=%.1f", 
+                (double)left_phase, (double)right_phase, (double)phase_error, (double)coordination);
+        
+        return coordination;
     }
     
     return 0;
@@ -258,6 +260,8 @@ static float calculate_load_distribution(void)
         if (total_pressure > 0) {
             // Calculate distribution (-100 = all left, +100 = all right, 0 = balanced)
             float distribution = 100.0f * (right_pressure - left_pressure) / total_pressure;
+            LOG_DBG("Load distribution from pressure: L=%.0f, R=%.0f, dist=%.1f%%", 
+                    (double)left_pressure, (double)right_pressure, (double)distribution);
             return distribution;
         }
     }
@@ -272,6 +276,8 @@ static float calculate_load_distribution(void)
         if (total_gct > 0) {
             // Longer GCT typically indicates higher load
             float distribution = 100.0f * (right_gct - left_gct) / total_gct;
+            LOG_DBG("Load distribution from GCT: L=%.1fms, R=%.1fms, dist=%.1f%%", 
+                    (double)left_gct, (double)right_gct, (double)distribution);
             return distribution;
         }
     }
@@ -280,158 +286,170 @@ static float calculate_load_distribution(void)
 }
 
 /**
- * @brief Timer callback for primary metrics calculation
+ * @brief Calculate flight time and other bilateral timing metrics
  */
-static void primary_metrics_timer_callback(struct k_timer *timer)
+static void calculate_timing_metrics(float *flight_time, float *double_support_time)
 {
-    ARG_UNUSED(timer);
+    if (flight_time) *flight_time = 0;
+    if (double_support_time) *double_support_time = 0;
     
-#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    // Calculate local (right foot) metrics
-    calculate_right_foot_metrics();
+    if (!left_metrics_valid || !right_metrics_valid) return;
     
-    // Check if we have fresh left foot metrics
-    // Consider metrics stale if older than 5 seconds
-    bool left_metrics_fresh = false;
-    if (left_metrics_valid) {
-        uint32_t age_ms = k_uptime_get_32() - left_foot_metrics.timestamp;
-        left_metrics_fresh = (age_ms < 5000);
-        
-        if (!left_metrics_fresh) {
-            LOG_DBG("Left foot metrics stale (age: %u ms)", age_ms);
-            left_metrics_valid = false;
-        }
+    // Get GCT from both feet
+    float left_gct = d2d_metric_is_valid(&left_foot_metrics, IDX_GCT) ? 
+                    left_foot_metrics.metrics[IDX_GCT] : 0;
+    float right_gct = d2d_metric_is_valid(&right_foot_metrics, IDX_GCT) ? 
+                     right_foot_metrics.metrics[IDX_GCT] : 0;
+    
+    // Estimate stride duration from cadence
+    float avg_cadence = 160.0f;
+    if (d2d_metric_is_valid(&left_foot_metrics, IDX_CADENCE) &&
+        d2d_metric_is_valid(&right_foot_metrics, IDX_CADENCE)) {
+        avg_cadence = (left_foot_metrics.metrics[IDX_CADENCE] + 
+                      right_foot_metrics.metrics[IDX_CADENCE]) / 2.0f;
     }
     
-    // If no fresh left foot metrics, zero out
-    if (!left_metrics_fresh) {
-        d2d_metrics_clear(&left_foot_metrics);
-        left_foot_metrics.calculation_status = 3; // No connection/stale
-        left_metrics_valid = false;
+    float stride_duration = 60000.0f / avg_cadence; // ms
+    
+    // Calculate flight time: stride_duration - (GCT_left + GCT_right)
+    if (flight_time && left_gct > 0 && right_gct > 0) {
+        *flight_time = stride_duration - (left_gct + right_gct);
+        *flight_time = MAX(0.0f, *flight_time); // Ensure non-negative
     }
     
-    // Calculate bilateral metrics if both feet data available
-    if (left_metrics_valid && right_metrics_valid) {
-        // Check timestamps are reasonably close (within 2 seconds)
-        int32_t time_diff = (int32_t)(right_foot_metrics.timestamp - left_foot_metrics.timestamp);
-        if (abs(time_diff) > 2000) {
-            LOG_WRN("Metrics timestamp mismatch: %d ms", time_diff);
-        }
-        
-        // Calculate bilateral metrics
-        bilateral_results.gait_symmetry_index = calculate_gait_symmetry();
-        bilateral_results.phase_coordination = calculate_phase_coordination();
-        bilateral_results.load_distribution = calculate_load_distribution();
-        bilateral_results.last_calculation_ms = k_uptime_get_32();
-        
-        // Comprehensive logging of BILATERAL metrics
-        LOG_INF("=== BILATERAL METRICS (Both Feet) ===");
-        LOG_INF("D2D Status: CONNECTED");
-        LOG_INF("  Gait Symmetry Index: %.1f%% (100%% = perfect symmetry)",
-                (double)bilateral_results.gait_symmetry_index);
-        LOG_INF("  Phase Coordination: %.1f (0-100, higher = better coordination)",
-                (double)bilateral_results.phase_coordination);
-        LOG_INF("  Load Distribution: %.1f%% (-100=all left, 0=balanced, +100=all right)",
-                (double)bilateral_results.load_distribution);
-        
-        // Log left foot metrics received from secondary
-        LOG_INF("--- Left Foot (from D2D) ---");
-        if (d2d_metric_is_valid(&left_foot_metrics, IDX_GCT)) {
-            LOG_INF("  Left GCT: %.1f ms", (double)left_foot_metrics.metrics[IDX_GCT]);
-        }
-        if (d2d_metric_is_valid(&left_foot_metrics, IDX_STRIDE_LENGTH)) {
-            LOG_INF("  Left Stride: %.2f cm", (double)left_foot_metrics.metrics[IDX_STRIDE_LENGTH]);
-        }
-        if (d2d_metric_is_valid(&left_foot_metrics, IDX_CADENCE)) {
-            LOG_INF("  Left Cadence: %.1f spm", (double)left_foot_metrics.metrics[IDX_CADENCE]);
-        }
-        if (d2d_metric_is_valid(&left_foot_metrics, IDX_PRONATION)) {
-            LOG_INF("  Left Pronation: %.1f deg", (double)left_foot_metrics.metrics[IDX_PRONATION]);
-        }
-        if (d2d_metric_is_valid(&left_foot_metrics, IDX_PEAK_PRESSURE)) {
-            LOG_INF("  Left Peak Pressure: %.1f kPa", (double)left_foot_metrics.metrics[IDX_PEAK_PRESSURE]);
-        }
-        
-        // Calculate and log asymmetry values
-        if (d2d_metric_is_valid(&left_foot_metrics, IDX_GCT) &&
-            d2d_metric_is_valid(&right_foot_metrics, IDX_GCT)) {
-            float gct_diff = right_foot_metrics.metrics[IDX_GCT] - left_foot_metrics.metrics[IDX_GCT];
-            LOG_INF("  GCT Asymmetry: %.1f ms (R-L)", (double)gct_diff);
-        }
-        
-        if (d2d_metric_is_valid(&left_foot_metrics, IDX_STRIDE_LENGTH) &&
-            d2d_metric_is_valid(&right_foot_metrics, IDX_STRIDE_LENGTH)) {
-            float stride_diff = right_foot_metrics.metrics[IDX_STRIDE_LENGTH] - left_foot_metrics.metrics[IDX_STRIDE_LENGTH];
-            LOG_INF("  Stride Asymmetry: %.1f cm (R-L)", (double)stride_diff);
-        }
-        
-        LOG_INF("=============================================");
-        
-        // Send consolidated metrics to phone via realtime_metrics
-        realtime_metrics_t consolidated = {};
-        
-        // Always send right foot metrics (local data)
-        if (d2d_metric_is_valid(&right_foot_metrics, IDX_GCT)) {
-            consolidated.ground_contact_ms = right_foot_metrics.metrics[IDX_GCT];
-        }
-        if (d2d_metric_is_valid(&right_foot_metrics, IDX_STRIDE_LENGTH)) {
-            consolidated.stride_length_cm = right_foot_metrics.metrics[IDX_STRIDE_LENGTH]; // Already in cm
-        }
-        if (d2d_metric_is_valid(&right_foot_metrics, IDX_CADENCE)) {
-            consolidated.cadence_spm = right_foot_metrics.metrics[IDX_CADENCE];
-        }
-        if (d2d_metric_is_valid(&right_foot_metrics, IDX_PRONATION)) {
-            consolidated.avg_pronation_deg = right_foot_metrics.metrics[IDX_PRONATION];
-        }
-        
-        // Only include bilateral metrics if both feet valid
-        if (left_metrics_valid && right_metrics_valid) {
-            // Bilateral metrics - store in balance field (convert to -50 to +50 range)
-            // Symmetry of 100% = balance of 0, symmetry of 80% = balance of ±10
-            consolidated.balance_lr_pct = (int8_t)((100.0f - bilateral_results.gait_symmetry_index) / 2.0f);
-            if (bilateral_results.load_distribution > 0) {
-                consolidated.balance_lr_pct = -consolidated.balance_lr_pct; // Right-heavy is negative
-            }
-        } else {
-            // No bilateral data - set balance to neutral (0)
-            consolidated.balance_lr_pct = 0;
-        }
-        
-        // Send to sensor data queue (realtime metrics input)
-        generic_message_t msg = {};
-        msg.sender = SENDER_ANALYTICS;
-        msg.type = MSG_TYPE_REALTIME_METRICS;
-        memcpy(&msg.data.realtime_metrics, &consolidated, sizeof(realtime_metrics_t));
-        
-        extern struct k_msgq sensor_data_queue;
-        if (k_msgq_put(&sensor_data_queue, &msg, K_NO_WAIT) != 0) {
-            LOG_ERR("Failed to send consolidated metrics to realtime module");
-        }
-    } else {
-        // Only right foot metrics available (unilateral mode)
-        if (right_metrics_valid && !left_metrics_valid) {
-            LOG_INF("=== UNILATERAL MODE (Right Foot Only) ===");
-            LOG_INF("D2D Status: %s", left_metrics_fresh ? "CONNECTED" : "NO DATA FROM SECONDARY");
-            LOG_INF("  Bilateral metrics not available");
-            LOG_INF("  Continuing with right foot metrics only");
-            LOG_INF("=============================================");
-            
-            // Zero out bilateral results when no secondary connected
-            bilateral_results.gait_symmetry_index = 0;
-            bilateral_results.phase_coordination = 0;
-            bilateral_results.load_distribution = 0;
-            bilateral_results.last_calculation_ms = k_uptime_get_32();
-        } else {
-            LOG_DBG("Waiting for metrics - Left:%s, Right:%s",
-                    left_metrics_valid ? "valid" : "invalid",
-                    right_metrics_valid ? "valid" : "invalid");
-        }
+    // Estimate double support time (simplified)
+    if (double_support_time) {
+        // Double support occurs during gait transitions
+        // Simplified: assume 10% of stride duration as double support
+        *double_support_time = stride_duration * 0.1f;
     }
-#endif
 }
 
 /**
- * @brief Process received D2D metrics from secondary
+ * @brief Main bilateral metrics calculation
+ */
+static void calculate_bilateral_metrics(void)
+{
+    if (!left_metrics_valid || !right_metrics_valid) {
+        LOG_DBG("Cannot calculate bilateral metrics - missing foot data");
+        return;
+    }
+    
+    // Check if metrics are reasonably recent (within 5 seconds)
+    uint32_t current_time = k_uptime_get_32();
+    uint32_t left_age = current_time - left_foot_metrics.timestamp;
+    uint32_t right_age = current_time - right_foot_metrics.timestamp;
+    
+    if (left_age > 5000 || right_age > 5000) {
+        LOG_WRN("Bilateral metrics stale: L_age=%ums, R_age=%ums", left_age, right_age);
+        if (left_age > 5000) left_metrics_valid = false;
+        if (right_age > 5000) right_metrics_valid = false;
+        return;
+    }
+    
+    // Calculate all bilateral metrics
+    bilateral_results.gait_symmetry_index = calculate_gait_symmetry();
+    bilateral_results.phase_coordination = calculate_phase_coordination();
+    bilateral_results.load_distribution = calculate_load_distribution();
+    bilateral_results.last_calculation_ms = current_time;
+    
+    // Calculate timing metrics
+    float flight_time, double_support_time;
+    calculate_timing_metrics(&flight_time, &double_support_time);
+    
+    // Comprehensive logging
+    LOG_INF("=== BILATERAL METRICS ANALYSIS ===");
+    LOG_INF("Gait Symmetry: %.1f%% (100%% = perfect)", (double)bilateral_results.gait_symmetry_index);
+    LOG_INF("Phase Coordination: %.1f/100", (double)bilateral_results.phase_coordination);
+    LOG_INF("Load Distribution: %.1f%%", (double)bilateral_results.load_distribution);
+    LOG_INF("Flight Time: %.1fms, Double Support: %.1fms", (double)flight_time, (double)double_support_time);
+    
+    // Log individual foot metrics
+    LOG_INF("--- Left Foot (Secondary) ---");
+    if (d2d_metric_is_valid(&left_foot_metrics, IDX_GCT)) {
+        LOG_INF("  GCT: %.1fms", (double)left_foot_metrics.metrics[IDX_GCT]);
+    }
+    if (d2d_metric_is_valid(&left_foot_metrics, IDX_CADENCE)) {
+        LOG_INF("  Cadence: %.1fspm", (double)left_foot_metrics.metrics[IDX_CADENCE]);
+    }
+    if (d2d_metric_is_valid(&left_foot_metrics, IDX_STRIDE_LENGTH)) {
+        LOG_INF("  Stride: %.1fcm", (double)left_foot_metrics.metrics[IDX_STRIDE_LENGTH]);
+    }
+    
+    LOG_INF("--- Right Foot (Primary) ---");
+    if (d2d_metric_is_valid(&right_foot_metrics, IDX_GCT)) {
+        LOG_INF("  GCT: %.1fms", (double)right_foot_metrics.metrics[IDX_GCT]);
+    }
+    if (d2d_metric_is_valid(&right_foot_metrics, IDX_CADENCE)) {
+        LOG_INF("  Cadence: %.1fspm", (double)right_foot_metrics.metrics[IDX_CADENCE]);
+    }
+    if (d2d_metric_is_valid(&right_foot_metrics, IDX_STRIDE_LENGTH)) {
+        LOG_INF("  Stride: %.1fcm", (double)right_foot_metrics.metrics[IDX_STRIDE_LENGTH]);
+    }
+    
+    // Calculate and log asymmetry values
+    if (d2d_metric_is_valid(&left_foot_metrics, IDX_GCT) &&
+        d2d_metric_is_valid(&right_foot_metrics, IDX_GCT)) {
+        float gct_diff = right_foot_metrics.metrics[IDX_GCT] - left_foot_metrics.metrics[IDX_GCT];
+        float gct_asymmetry = fabsf(gct_diff) / ((left_foot_metrics.metrics[IDX_GCT] + 
+                                                right_foot_metrics.metrics[IDX_GCT]) / 2.0f) * 100.0f;
+        LOG_INF("GCT Asymmetry: %.1fms (R-L), %.1f%%", (double)gct_diff, (double)gct_asymmetry);
+    }
+    
+    LOG_INF("===================================");
+    
+    // Send consolidated metrics to realtime module
+    send_consolidated_metrics();
+}
+
+/**
+ * @brief Send consolidated metrics to realtime metrics module
+ */
+static void send_consolidated_metrics(void)
+{
+    realtime_metrics_t consolidated = {};
+    
+    // Always send right foot metrics (local data)
+    if (d2d_metric_is_valid(&right_foot_metrics, IDX_GCT)) {
+        consolidated.ground_contact_ms = right_foot_metrics.metrics[IDX_GCT];
+    }
+    if (d2d_metric_is_valid(&right_foot_metrics, IDX_STRIDE_LENGTH)) {
+        consolidated.stride_length_cm = right_foot_metrics.metrics[IDX_STRIDE_LENGTH];
+    }
+    if (d2d_metric_is_valid(&right_foot_metrics, IDX_CADENCE)) {
+        consolidated.cadence_spm = right_foot_metrics.metrics[IDX_CADENCE];
+    }
+    if (d2d_metric_is_valid(&right_foot_metrics, IDX_PRONATION)) {
+        consolidated.avg_pronation_deg = right_foot_metrics.metrics[IDX_PRONATION];
+    }
+    
+    // Include bilateral metrics if both feet valid
+    if (left_metrics_valid && right_metrics_valid) {
+        // Convert symmetry to balance metric (-50 to +50)
+        consolidated.balance_lr_pct = (int8_t)((100.0f - bilateral_results.gait_symmetry_index) / 2.0f);
+        if (bilateral_results.load_distribution > 0) {
+            consolidated.balance_lr_pct = -consolidated.balance_lr_pct; // Right-heavy is negative
+        }
+    } else {
+        consolidated.balance_lr_pct = 0;
+    }
+    
+    // Send to sensor data queue
+    generic_message_t msg = {};
+    msg.sender = SENDER_ANALYTICS;
+    msg.type = MSG_TYPE_REALTIME_METRICS;
+    memcpy(&msg.data.realtime_metrics, &consolidated, sizeof(realtime_metrics_t));
+    
+    extern struct k_msgq sensor_data_queue;
+    if (k_msgq_put(&sensor_data_queue, &msg, K_NO_WAIT) != 0) {
+        LOG_ERR("Failed to send consolidated metrics to realtime module");
+    } else {
+        LOG_DBG("Sent consolidated metrics to realtime module");
+    }
+}
+
+/**
+ * @brief Process received D2D metrics from secondary (left foot)
  */
 void bilateral_metrics_process_d2d(const d2d_metrics_packet_t *metrics)
 {
@@ -445,40 +463,29 @@ void bilateral_metrics_process_d2d(const d2d_metrics_packet_t *metrics)
     memcpy(&left_foot_metrics, metrics, sizeof(d2d_metrics_packet_t));
     left_metrics_valid = true;
     
-    LOG_INF("=== RECEIVED D2D METRICS FROM SECONDARY (Left Foot) ===");
+    LOG_INF("=== RECEIVED LEFT FOOT METRICS VIA D2D ===");
     LOG_INF("Timestamp: %u ms, Sequence: %u, Status: %u",
             metrics->timestamp, metrics->sequence_num, metrics->calculation_status);
     
-    // Log ALL received metrics from secondary
+    // Log received metrics
     if (d2d_metric_is_valid(metrics, IDX_GCT)) {
-        LOG_INF("  [D2D] Ground Contact Time: %.1f ms", (double)metrics->metrics[IDX_GCT]);
+        LOG_INF("  GCT: %.1f ms", (double)metrics->metrics[IDX_GCT]);
     }
     if (d2d_metric_is_valid(metrics, IDX_STRIDE_LENGTH)) {
-        LOG_INF("  [D2D] Stride Length: %.2f cm", (double)metrics->metrics[IDX_STRIDE_LENGTH]);
+        LOG_INF("  Stride Length: %.2f cm", (double)metrics->metrics[IDX_STRIDE_LENGTH]);
     }
     if (d2d_metric_is_valid(metrics, IDX_CADENCE)) {
-        LOG_INF("  [D2D] Cadence: %.1f steps/min", (double)metrics->metrics[IDX_CADENCE]);
+        LOG_INF("  Cadence: %.1f spm", (double)metrics->metrics[IDX_CADENCE]);
     }
     if (d2d_metric_is_valid(metrics, IDX_PRONATION)) {
-        LOG_INF("  [D2D] Pronation: %.1f degrees", (double)metrics->metrics[IDX_PRONATION]);
+        LOG_INF("  Pronation: %.1f deg", (double)metrics->metrics[IDX_PRONATION]);
     }
-    if (d2d_metric_is_valid(metrics, IDX_COP_X) && d2d_metric_is_valid(metrics, IDX_COP_Y)) {
-        LOG_INF("  [D2D] Center of Pressure: X=%.1f mm, Y=%.1f mm",
-                (double)metrics->metrics[IDX_COP_X], (double)metrics->metrics[IDX_COP_Y]);
+    LOG_INF("===========================================");
+    
+    // Trigger bilateral calculation if we have both feet data
+    if (right_metrics_valid) {
+        calculate_bilateral_metrics();
     }
-    if (d2d_metric_is_valid(metrics, IDX_PEAK_PRESSURE)) {
-        LOG_INF("  [D2D] Peak Pressure: %.1f kPa", (double)metrics->metrics[IDX_PEAK_PRESSURE]);
-    }
-    if (d2d_metric_is_valid(metrics, IDX_STANCE_TIME)) {
-        LOG_INF("  [D2D] Stance Time: %.1f ms", (double)metrics->metrics[IDX_STANCE_TIME]);
-    }
-    if (d2d_metric_is_valid(metrics, IDX_SWING_TIME)) {
-        LOG_INF("  [D2D] Swing Time: %.1f ms", (double)metrics->metrics[IDX_SWING_TIME]);
-    }
-    if (d2d_metric_is_valid(metrics, IDX_STEP_COUNT)) {
-        LOG_INF("  [D2D] Step Count: %u", (uint32_t)metrics->metrics[IDX_STEP_COUNT]);
-    }
-    LOG_INF("=============================================");
 #endif
 }
 
@@ -498,14 +505,10 @@ static void bilateral_metrics_start(void)
     // Clear state
     left_metrics_valid = false;
     right_metrics_valid = false;
-    primary_sequence_num = 0;
     memset(&bilateral_results, 0, sizeof(bilateral_results));
     
-    // Start timer for periodic calculations (3s warmup, then 1Hz)
-    k_timer_start(&primary_metrics_timer, K_SECONDS(3), K_SECONDS(1));
     activity_active = true;
-    
-    LOG_INF("Bilateral metrics started - timer will fire in 3 seconds");
+    LOG_INF("Bilateral metrics started - waiting for foot metrics");
 #endif
 }
 
@@ -521,9 +524,6 @@ static void bilateral_metrics_stop(void)
     }
     
     LOG_INF("Stopping bilateral metrics processing");
-    
-    // Stop timer
-    k_timer_stop(&primary_metrics_timer);
     
     // Clear state
     left_metrics_valid = false;
@@ -553,22 +553,17 @@ static void bilateral_metrics_thread(void *p1, void *p2, void *p3)
         if (k_msgq_get(&analytics_msgq, &msg, K_FOREVER) == 0) {
             switch (msg.type) {
                 case MSG_TYPE_D2D_METRICS_RECEIVED:
-                    // Only process if activity is active
+                    // Process left foot metrics from secondary
                     if (activity_active) {
                         bilateral_metrics_process_d2d(&msg.data.d2d_metrics);
-                    } else {
-                        LOG_DBG("Ignoring D2D metrics - activity not active");
                     }
                     break;
                     
                 case MSG_TYPE_COMMAND:
-                    // Handle start/stop commands - listen for REALTIME_PROCESSING commands
-                    // These are sent by analytics.cpp when activity starts/stops
+                    // Handle start/stop commands
                     if (strncmp(msg.data.command_str, "START_REALTIME_PROCESSING", MAX_COMMAND_STRING_LEN) == 0) {
-                        LOG_INF("Bilateral metrics received START_REALTIME_PROCESSING command");
                         bilateral_metrics_start();
                     } else if (strncmp(msg.data.command_str, "STOP_REALTIME_PROCESSING", MAX_COMMAND_STRING_LEN) == 0) {
-                        LOG_INF("Bilateral metrics received STOP_REALTIME_PROCESSING command");
                         bilateral_metrics_stop();
                     }
                     break;
@@ -610,9 +605,6 @@ void bilateral_metrics_init(void)
                     K_NO_WAIT);
     
     k_thread_name_set(&bilateral_metrics_thread_data, "bilateral_metrics");
-    
-    // Initialize timer but don't start it yet
-    k_timer_init(&primary_metrics_timer, primary_metrics_timer_callback, NULL);
     
     LOG_INF("Bilateral metrics initialized - waiting for START_REALTIME_PROCESSING command");
 #else
