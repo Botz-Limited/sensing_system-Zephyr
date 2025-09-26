@@ -66,6 +66,8 @@ extern struct k_msgq data_msgq;         // Output to data
 static bool module_initialized = false;
 static atomic_t processing_active = ATOMIC_INIT(0);
 
+static realtime_metrics_t metrics_to_send_last;
+
 // Metrics state
 static struct
 {
@@ -177,7 +179,7 @@ static void process_command_work_handler(struct k_work *work);
  * @note This function is complete and triggers BLE updates at 1Hz when processing is active.
  *       Data Requirements: Motion sensor data (BHI360), Foot sensor data (both feet).
  */
-static void ble_update_work_handler(struct k_work *work);
+
 static void process_gps_update_work_handler(struct k_work *work);
 
 // Initialize the realtime metrics module
@@ -202,7 +204,6 @@ static void realtime_metrics_init(void)
     k_work_init(&process_consolidated_data_work, process_consolidated_data_work_handler);
     k_work_init(&process_command_work, process_command_work_handler);
     k_work_init(&process_gps_update_work, process_gps_update_work_handler);
-    k_work_init_delayable(&ble_update_work, ble_update_work_handler);
 
     // Create the message processing thread
     realtime_metrics_tid = k_thread_create(
@@ -211,8 +212,6 @@ static void realtime_metrics_init(void)
 
     k_thread_name_set(realtime_metrics_tid, "realtime_metrics");
 
-    // Start BLE update timer (1Hz)
-    k_work_schedule_for_queue(&realtime_metrics_work_q, &ble_update_work, K_SECONDS(1));
 
     module_initialized = true;
     module_set_state(MODULE_STATE_READY);
@@ -392,34 +391,6 @@ static void process_command_work_handler(struct k_work *work)
     }
 }
 
-// Work handler for periodic BLE updates
-static void ble_update_work_handler(struct k_work *work)
-{
-    ARG_UNUSED(work);
-
-    if (atomic_get(&processing_active) == 1)
-    {
-        // Always send BLE update every second for mobile app responsiveness
-        // The send_ble_update function will handle using fresh vs preserved data
-        uint32_t current_time = k_uptime_get_32();
-        uint32_t metrics_age = current_time - metrics_state.current_metrics.timestamp_ms;
-
-        if (metrics_age < 2000)
-        {
-            LOG_DBG("Sending BLE update with fresh data (age: %u ms)", metrics_age);
-        }
-        else
-        {
-            LOG_DBG("Sending BLE update with preserved data (fresh data age: %u ms)", metrics_age);
-        }
-
-        send_ble_update();
-        metrics_state.last_ble_update = current_time;
-    }
-
-    // Always reschedule for next update (1Hz for mobile app)
-    k_work_schedule_for_queue(&realtime_metrics_work_q, &ble_update_work, K_SECONDS(1));
-}
 
 // Work handler for processing GPS updates
 static void process_gps_update_work_handler(struct k_work *work)
@@ -1149,7 +1120,7 @@ static void send_ble_update(void)
     metrics_to_send.timestamp_ms = k_uptime_get_32();
 
     // Log what we're actually sending
-    LOG_INF("SENDING PURE BILATERAL METRICS: Cadence=%u, Pace=%u, GCT=%u, Flight=%u", metrics_to_send.cadence_spm,
+    LOG_WRN("SENDING  BILATERAL METRICS: Cadence=%u, Pace=%u, GCT=%u, Flight=%u", metrics_to_send.cadence_spm,
             metrics_to_send.pace_sec_km, metrics_to_send.ground_contact_ms, metrics_to_send.flight_time_ms);
 
     // Send to Bluetooth
@@ -1196,6 +1167,8 @@ static void send_ble_update(void)
     {
         LOG_WRN("Alerts active: 0x%02x", metrics_to_send.alerts);
     }
+
+    memcpy(&metrics_to_send_last, &metrics_to_send, sizeof(realtime_metrics_t));
 }
 
 // Module event handler

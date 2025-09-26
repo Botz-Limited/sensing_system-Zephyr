@@ -26,6 +26,8 @@ void app_log(const char *fmt, ...);
 
 static constexpr uint8_t MAX_FILE_PATH_LEN = 34;
 
+static constexpr uint16_t SAMPLE_RATE_HZ = 100;
+
 // Define a structure for foot sensor samples
 static constexpr uint8_t NUM_FOOT_SENSOR_CHANNELS = 8;
 struct foot_samples_t
@@ -190,7 +192,6 @@ typedef struct
 {
     uint32_t packet_number;
     uint32_t timestamp;
-    uint32_t uptime_ms;
     uint16_t cadence_spm;
     uint16_t pace_sec_km;
     uint16_t speed_kmh_x10; // Speed in km/h * 10 (fixed point, 1 decimal)

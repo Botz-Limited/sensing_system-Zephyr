@@ -16,6 +16,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+
 // Add MIN/MAX macros if not defined
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
