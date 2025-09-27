@@ -589,7 +589,7 @@ static void process_sensor_data_work_handler(struct k_work *work)
                 binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
                 binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms, binary_metrics.contact_time_asymmetry,
                 binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry, binary_metrics.left_strike_pattern,
-                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio);
+                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio);  
 
         // TODO: workaround only, send data to bluetooth:
         generic_message_t msg = {};

@@ -1268,7 +1268,7 @@ __attribute__((unused)) static void ble_set_power_off()
 int set_bluetooth_name()
 {
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-    const char *name = "BotRightSh";
+    const char *name = "BotzRightSh";
     int err = bt_set_name(name);
     if (err == 0)
     {

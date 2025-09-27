@@ -52,9 +52,9 @@ static activity_metrics_binary_t activity_metrics_binary = {0};
 static ActivityFileFooterV3 activity_footer = {0};
 
 
-static bool activity_header_subscribed = false;
-static bool activity_metrics_subscribed = false;
-static bool activity_footer_subscribed = false;
+static bool activity_header_subscribed = true;
+static bool activity_metrics_subscribed = true;
+static bool activity_footer_subscribed = true;
 
 uint32_t device_status_bitfield = 0;
 static uint32_t previous_device_status_bitfield = 0; // Store the previous value
