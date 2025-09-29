@@ -194,7 +194,7 @@ bq25185: bq25185 {
 
 &i2c3 {
     compatible = "nordic,nrf-twim";
-    status = "okay";
+    status = "ok";
     pinctrl-0 = <&i2c3_default>;
     pinctrl-1 = <&i2c3_sleep>;
     pinctrl-names = "default", "sleep";
@@ -202,7 +202,7 @@ bq25185: bq25185 {
     bq27441: bq27441@55 {
         compatible = "ti,bq274xx";
         reg = <0x55>;
-        status = "okay";
+        status = "ok";
         design-voltage = <3700>;
         design-capacity = <1800>;
         taper-current = <45>;
@@ -237,7 +237,7 @@ bq25185: bq25185 {
         wifi-max-tx-pwr-5g-high-mcs0 = <20>;
         wifi-max-tx-pwr-5g-high-mcs7 = <20>;
         label = "NRF7002";
-        status = "okay";
+        status = "disabled";
 	};
 };
 

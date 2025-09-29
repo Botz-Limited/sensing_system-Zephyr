@@ -1,13 +1,14 @@
 /**
  * @file motion_sensor_simple.cpp
  * @brief Simplified motion sensor module using BHI360 with polling mode
- * @version 2.1.0
+ * @version 2.2.0
  * @date 2025-01-09
  *
  * @copyright Botz Innovation 2025
  *
  * This is a simplified version using polling instead of interrupts,
- * similar to foot_sensor_simple.cpp architecture
+ * similar to foot_sensor_simple.cpp architecture.
+ * Version 2.2.0 adds a software calibration state machine for orientation-agnostic zeroing.
  */
 
 #define MODULE motion_sensor
@@ -36,7 +37,7 @@
 #include "BHY2-Sensor-API/bhy2.h"
 #include "BHY2-Sensor-API/bhy2_parse.h"
 // Try basic firmware which should have all standard sensors including step counter
-#include "BHY2-Sensor-API/firmware/bhi360/BHI360.fw.h"  // Basic firmware with standard sensors
+#include "BHY2-Sensor-API/firmware/bhi360/BHI360.fw.h" // Basic firmware with standard sensors
 #include <bhi360.h>
 
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -121,6 +122,28 @@ static float latest_gravity_x = 0, latest_gravity_y = 0, latest_gravity_z = 0;  
 static uint8_t latest_activity_type = 0;  // Activity recognition result
 static uint64_t latest_timestamp = 0;
 
+// =================== STATE MACHINE AND CALIBRATION START ===================
+enum class MotionSensorState {
+    POLLING,
+    CALIBRATING_START_GYRO,
+    CALIBRATING_ACCUMULATE_SAMPLES,
+    CALIBRATING_FINISH
+};
+
+static MotionSensorState current_state = MotionSensorState::POLLING;
+static int64_t state_start_time = 0;
+
+// Variables for software offset calculation
+static float accel_offset_x = 0.0f, accel_offset_y = 0.0f, accel_offset_z = 0.0f;
+static float gyro_offset_x = 0.0f, gyro_offset_y = 0.0f, gyro_offset_z = 0.0f;
+
+// Variables for accumulating data during calibration
+static double acc_sum_x = 0, acc_sum_y = 0, acc_sum_z = 0;
+static double gyro_sum_x = 0, gyro_sum_y = 0, gyro_sum_z = 0;
+static uint32_t calibration_sample_count = 0;
+static constexpr uint32_t CALIBRATION_DURATION_MS = 3000; // Calibrate for 3 seconds
+// =================== STATE MACHINE AND CALIBRATION END =====================
+
 // Forward declarations
 static void motion_sensor_thread(void *p1, void *p2, void *p3);
 static err_t init_bhi360(void);
@@ -129,7 +152,7 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
 static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
 static void process_sensor_data(void);
 static void handle_messages(void);
-static void perform_bhi360_calibration(void);
+// perform_bhi360_calibration() is now removed and replaced by the state machine
 static void apply_calibration_data(const bhi360_calibration_data_t *calib_data);
 static void save_calibration_profile(const struct device *bhi360_dev, enum bhi360_sensor_type sensor,
                                      const char *sensor_name);
@@ -835,18 +858,34 @@ static void process_sensor_data(void)
     static uint8_t ble_sample_counter = 0;
     static uint16_t log_sample_counter = 0;
 
+    // Apply the software offsets
+    // NOTE: Quaternion is a rotation vector and should not be offset like linear sensors.
+    // If a "zero" rotation is needed, that logic should be handled at a higher level.
+    float calibrated_lacc_x = latest_lacc_x - accel_offset_x;
+    float calibrated_lacc_y = latest_lacc_y - accel_offset_y;
+    float calibrated_lacc_z = latest_lacc_z - accel_offset_z;
+
+    float calibrated_gyro_x = latest_gyro_x - gyro_offset_x;
+    float calibrated_gyro_y = latest_gyro_y - gyro_offset_y;
+    float calibrated_gyro_z = latest_gyro_z - gyro_offset_z;
+    
+    // Also apply to the raw accelerometer data
+    float calibrated_acc_x = latest_acc_x - accel_offset_x;
+    float calibrated_acc_y = latest_acc_y - accel_offset_y;
+    float calibrated_acc_z = latest_acc_z - accel_offset_z;
+
     // Update driver with latest sensor data
     struct bhi360_sensor_data driver_data = {.quat_x = latest_quat_x,
                                              .quat_y = latest_quat_y,
                                              .quat_z = latest_quat_z,
                                              .quat_w = latest_quat_w,
                                              .quat_accuracy = (uint8_t)latest_quat_accuracy,
-                                             .lacc_x = latest_lacc_x,
-                                             .lacc_y = latest_lacc_y,
-                                             .lacc_z = latest_lacc_z,
-                                             .gyro_x = latest_gyro_x,
-                                             .gyro_y = latest_gyro_y,
-                                             .gyro_z = latest_gyro_z,
+                                             .lacc_x = calibrated_lacc_x,
+                                             .lacc_y = calibrated_lacc_y,
+                                             .lacc_z = calibrated_lacc_z,
+                                             .gyro_x = calibrated_gyro_x,
+                                             .gyro_y = calibrated_gyro_y,
+                                             .gyro_z = calibrated_gyro_z,
                                              .step_count = latest_step_count,
                                              .timestamp = latest_timestamp};
     bhi360_update_sensor_data(bhi360_dev, &driver_data);
@@ -860,12 +899,12 @@ static void process_sensor_data(void)
     msg.data.bhi360_log_record.quat_z = latest_quat_z;
     msg.data.bhi360_log_record.quat_w = latest_quat_w;
     msg.data.bhi360_log_record.quat_accuracy = latest_quat_accuracy;
-    msg.data.bhi360_log_record.lacc_x = latest_lacc_x;
-    msg.data.bhi360_log_record.lacc_y = latest_lacc_y;
-    msg.data.bhi360_log_record.lacc_z = latest_lacc_z;
-    msg.data.bhi360_log_record.gyro_x = latest_gyro_x;
-    msg.data.bhi360_log_record.gyro_y = latest_gyro_y;
-    msg.data.bhi360_log_record.gyro_z = latest_gyro_z;
+    msg.data.bhi360_log_record.lacc_x = calibrated_lacc_x;
+    msg.data.bhi360_log_record.lacc_y = calibrated_lacc_y;
+    msg.data.bhi360_log_record.lacc_z = calibrated_lacc_z;
+    msg.data.bhi360_log_record.gyro_x = calibrated_gyro_x;
+    msg.data.bhi360_log_record.gyro_y = calibrated_gyro_y;
+    msg.data.bhi360_log_record.gyro_z = calibrated_gyro_z;
     msg.data.bhi360_log_record.step_count = latest_step_count;
     msg.data.bhi360_log_record.timestamp = latest_timestamp;
 
@@ -901,17 +940,17 @@ static void process_sensor_data(void)
                     (double)latest_quat_accuracy);
             
             // Log Gyroscope data (rad/s)
-            LOG_INF("BHI360 Gyro: x=%.4f, y=%.4f, z=%.4f rad/s",
-                    (double)latest_gyro_x, (double)latest_gyro_y, (double)latest_gyro_z);
+            LOG_INF("BHI360 Gyro (cal): x=%.4f, y=%.4f, z=%.4f rad/s",
+                    (double)calibrated_gyro_x, (double)calibrated_gyro_y, (double)calibrated_gyro_z);
             
             // Log Accelerometer data (with gravity) - always available
-            LOG_INF("BHI360 Accel: x=%.4f, y=%.4f, z=%.4f m/s² (with gravity)",
-                    (double)latest_acc_x, (double)latest_acc_y, (double)latest_acc_z);
+            LOG_INF("BHI360 Accel (cal): x=%.4f, y=%.4f, z=%.4f m/s² (with gravity)",
+                    (double)calibrated_acc_x, (double)calibrated_acc_y, (double)calibrated_acc_z);
             
             // Log Linear Acceleration data (gravity removed) - if different from accel
             if (lacc_available) {
-                LOG_INF("BHI360 LinAcc: x=%.4f, y=%.4f, z=%.4f m/s² (gravity removed)",
-                        (double)latest_lacc_x, (double)latest_lacc_y, (double)latest_lacc_z);
+                LOG_INF("BHI360 LinAcc (cal): x=%.4f, y=%.4f, z=%.4f m/s² (gravity removed)",
+                        (double)calibrated_lacc_x, (double)calibrated_lacc_y, (double)calibrated_lacc_z);
             }
             
             // Log Gravity Vector - if available
@@ -1004,7 +1043,12 @@ static void handle_messages(void)
         {
             case MSG_TYPE_TRIGGER_BHI360_CALIBRATION:
                 LOG_INF("Received calibration trigger from %s", get_sender_name(msg.sender));
-                perform_bhi360_calibration();
+                if (current_state == MotionSensorState::POLLING) {
+                    LOG_INF("Starting calibration state machine.");
+                    current_state = MotionSensorState::CALIBRATING_START_GYRO;
+                } else {
+                    LOG_WRN("Ignoring calibration trigger, another operation is in progress.");
+                }
                 break;
 
             case MSG_TYPE_BHI360_CALIBRATION_DATA:
@@ -1065,90 +1109,99 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
     // Main polling loop
     while (true)
     {
-        // Handle incoming messages
-        //    handle_messages();
+        // Handle incoming messages (e.g., to trigger calibration)
+        handle_messages();
 
-        // Periodically check and save calibration improvements
-        if (++calibration_check_counter >= CALIBRATION_CHECK_INTERVAL)
-        {
-            calibration_check_counter = 0;
-            check_and_save_calibration_updates(bhi360_dev);
-        }
-
-        // Poll BHI360 FIFO (this is the key difference from interrupt mode)
+        // Always poll BHI360 FIFO to keep data fresh for all states
         if (bhy2_ptr)
         {
             int8_t rslt = bhy2_get_and_process_fifo(work_buffer, sizeof(work_buffer), bhy2_ptr);
-            // BHY2_OK (0) means success, any negative value is an error
-            // Empty FIFO is not an error - the function just processes what's available
             if (rslt != BHY2_OK)
             {
                 LOG_WRN("BHI360: FIFO processing error: %d", rslt);
             }
+        }
+        
+        // --- State Machine Logic ---
+        switch (current_state)
+        {
+            case MotionSensorState::POLLING:
+                // Periodically check and save hardware auto-calibration improvements
+                if (++calibration_check_counter >= CALIBRATION_CHECK_INTERVAL)
+                {
+                    calibration_check_counter = 0;
+                    check_and_save_calibration_updates(bhi360_dev);
+                }
 
-            // Debug: Log polling status periodically
-            if (++poll_counter % 1000 == 0)
-            { // Every 10 seconds at 100Hz
-                LOG_DBG("Motion sensor polling active - %u polls completed", poll_counter);
-            }
+                // Debug: Log polling status periodically
+                if (++poll_counter % 1000 == 0)
+                { // Every 10 seconds at 100Hz
+                    LOG_DBG("Motion sensor polling active - %u polls completed", poll_counter);
+                }
+                break;
+            
+            case MotionSensorState::CALIBRATING_START_GYRO:
+                LOG_INF("Step 1: Gyro FOC. Keep device still...");
+                struct bhi360_foc_result foc_result;
+                bhi360_perform_gyro_foc(bhi360_dev, &foc_result);
+                if (foc_result.success) {
+                    LOG_INF("Gyro FOC successful.");
+                } else {
+                    LOG_WRN("Gyro FOC failed.");
+                }
+                
+                LOG_INF("Step 2: Software Accel/Gyro offset capture. Keep still for %u ms...", CALIBRATION_DURATION_MS);
+                // Reset accumulators
+                acc_sum_x = 0; acc_sum_y = 0; acc_sum_z = 0;
+                gyro_sum_x = 0; gyro_sum_y = 0; gyro_sum_z = 0;
+                calibration_sample_count = 0;
+
+                state_start_time = k_uptime_get();
+                current_state = MotionSensorState::CALIBRATING_ACCUMULATE_SAMPLES;
+                break;
+
+            case MotionSensorState::CALIBRATING_ACCUMULATE_SAMPLES:
+                // Data is collected via the FIFO processing that now runs every loop.
+                // Here, we just add the latest values to our sums.
+                acc_sum_x += latest_lacc_x; // Use linear accel if available
+                acc_sum_y += latest_lacc_y;
+                acc_sum_z += latest_lacc_z;
+                gyro_sum_x += latest_gyro_x;
+                gyro_sum_y += latest_gyro_y;
+                gyro_sum_z += latest_gyro_z;
+                calibration_sample_count++;
+
+                if (k_uptime_get() - state_start_time >= CALIBRATION_DURATION_MS) {
+                    current_state = MotionSensorState::CALIBRATING_FINISH;
+                }
+                break;
+
+            case MotionSensorState::CALIBRATING_FINISH:
+                if (calibration_sample_count > 0) {
+                    // Calculate the average to find the offset
+                    accel_offset_x = (float)(acc_sum_x / calibration_sample_count);
+                    accel_offset_y = (float)(acc_sum_y / calibration_sample_count);
+                    accel_offset_z = (float)(acc_sum_z / calibration_sample_count);
+                    gyro_offset_x = (float)(gyro_sum_x / calibration_sample_count);
+                    gyro_offset_y = (float)(gyro_sum_y / calibration_sample_count);
+                    gyro_offset_z = (float)(gyro_sum_z / calibration_sample_count);
+
+                    LOG_INF("Calibration complete. Samples: %u", calibration_sample_count);
+                    LOG_INF("--> Accel Offsets: x=%.4f, y=%.4f, z=%.4f",
+                            (double)accel_offset_x, (double)accel_offset_y, (double)accel_offset_z);
+                    LOG_INF("--> Gyro Offsets: x=%.4f, y=%.4f, z=%.4f",
+                            (double)gyro_offset_x, (double)gyro_offset_y, (double)gyro_offset_z);
+                } else {
+                    LOG_ERR("Calibration failed: no samples collected.");
+                }
+                // Return to normal polling mode
+                current_state = MotionSensorState::POLLING;
+                break;
         }
 
-        // Sleep for 10ms to achieve 100Hz polling rate
+        // Sleep for 10ms to maintain the desired loop rate
         k_msleep(SAMPLE_PERIOD_MS);
     }
-}
-
-/**
- * @brief Perform BHI360 calibration
- */
-static void perform_bhi360_calibration(void)
-{
-    LOG_INF("Starting BHI360 calibration sequence...");
-
-    struct bhi360_calibration_status calib_status;
-    int ret = bhi360_get_calibration_status(bhi360_dev, &calib_status);
-    if (ret == 0)
-    {
-        LOG_INF("Current calibration status - Accel: %d, Gyro: %d", calib_status.accel_calib_status,
-                calib_status.gyro_calib_status);
-    }
-
-    // Perform gyroscope calibration
-    LOG_INF("Performing gyroscope calibration...");
-    LOG_INF("Please keep the device stationary");
-    k_sleep(K_SECONDS(2));
-
-    struct bhi360_foc_result foc_result;
-    ret = bhi360_perform_gyro_foc(bhi360_dev, &foc_result);
-    if (ret == 0 && foc_result.success)
-    {
-        LOG_INF("Gyro calibration successful! Offsets: X=%d, Y=%d, Z=%d", foc_result.x_offset, foc_result.y_offset,
-                foc_result.z_offset);
-        save_calibration_profile(bhi360_dev, BHI360_SENSOR_GYRO, "gyro");
-    }
-    else
-    {
-        LOG_ERR("Gyro calibration failed");
-    }
-
-    // Perform accelerometer calibration
-    LOG_INF("Performing accelerometer calibration...");
-    LOG_INF("Please place device on flat surface with Z-axis up");
-    k_sleep(K_SECONDS(3));
-
-    ret = bhi360_perform_accel_foc(bhi360_dev, &foc_result);
-    if (ret == 0 && foc_result.success)
-    {
-        LOG_INF("Accel calibration successful! Offsets: X=%d, Y=%d, Z=%d", foc_result.x_offset, foc_result.y_offset,
-                foc_result.z_offset);
-        save_calibration_profile(bhi360_dev, BHI360_SENSOR_ACCEL, "accel");
-    }
-    else
-    {
-        LOG_ERR("Accel calibration failed");
-    }
-
-    LOG_INF("BHI360 calibration sequence complete");
 }
 
 /**

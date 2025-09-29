@@ -123,6 +123,7 @@ static struct
     float right_stride_length;
     bool last_left_contact;
     bool last_right_contact;
+    double total_distance_m;
 } metrics_state;
 
 // User configuration (should come from settings)
@@ -269,8 +270,29 @@ static void realtime_metrics_thread_fn(void *arg1, void *arg2, void *arg3)
                             msg.data.realtime_metrics.cadence_spm, msg.data.realtime_metrics.pace_sec_km,
                             msg.data.realtime_metrics.ground_contact_ms);
 
+                    // Calculate distance covered in this interval and add to total
+                    if (msg.data.realtime_metrics.cadence_spm > 0 && msg.data.realtime_metrics.stride_length_cm > 0)
+                    {
+                        // Get metrics from the message
+                        float cadence_spm = (float)msg.data.realtime_metrics.cadence_spm;
+                        float stride_len_m = (float)msg.data.realtime_metrics.stride_length_cm / 100.0f;
+                        
+                        // This message arrives roughly every 1 second.
+                        // Steps in this interval = cadence (steps/min) / 60 (sec/min)
+                        float steps_in_interval = cadence_spm / 60.0f;
+                        
+                        // Distance delta = steps * length_per_step
+                        double distance_delta_m = (double)(steps_in_interval * stride_len_m);
+                        
+                        // Add to our persistent total
+                        metrics_state.total_distance_m += distance_delta_m;
+                    }        
+
                     // Copy exactly as received - no modifications!
                     memcpy(&metrics_state.current_metrics, &msg.data.realtime_metrics, sizeof(realtime_metrics_t));
+
+                     // Overwrite the distance field with the  new accumulated total
+                    metrics_state.current_metrics.distance_m = (uint32_t)metrics_state.total_distance_m;
 
                     // Update timestamp only
                     metrics_state.current_metrics.timestamp_ms = k_uptime_get_32();
