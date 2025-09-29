@@ -10,20 +10,22 @@
 #ifndef APP_INCLUDE_BLE_SERVICES_HEADER_
 #define APP_INCLUDE_BLE_SERVICES_HEADER_
 
+#include "ble_data_seq.hpp"
 #include "time.h"
+#include <app.hpp>
 #include <cstdint>
+#include <errors.hpp>
 #include <stdint.h>
 #include <zephyr/kernel.h>
-#include <app.hpp>
-#include <errors.hpp>
-#include "ble_data_seq.hpp"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 // Activity state enum (matches information_service.cpp)
-typedef enum {
+typedef enum
+{
     ACTIVITY_STATE_IDLE = 0,
     ACTIVITY_STATE_1_RUNNING,
     ACTIVITY_STATE_3_FOOT_STREAM,
@@ -47,21 +49,24 @@ void jis_foot_sensor_log_available_notify(uint8_t log_id);
 void jis_foot_sensor_req_id_path_notify(const char *file_path);
 void jis_bhi360_log_available_notify(uint8_t log_id);
 void jis_bhi360_req_id_path_notify(const char *file_path);
+extern "C" void jis_activity_metrics_send_packet(const activity_metrics_binary_t *metrics);
+extern "C" void jis_activity_metrics_send_header(const ActivityFileHeaderV3 *header);
+extern "C" void jis_activity_metrics_send_footer(const ActivityFileFooterV3 *footer);
 
 // Device status setter/getter (bitfield)
 void set_device_status(uint32_t new_status);
 uint32_t get_device_status(void);
 
 // BHI360 Bluetooth notify functions
-void jis_bhi360_data1_notify(const bhi360_3d_mapping_t* data);
-void jis_bhi360_data2_notify(const bhi360_step_count_t* data);
-void jis_bhi360_data3_notify(const bhi360_linear_accel_t* data);
-void jis_bhi360_quaternion_notify(const float* quat);
-void jis_bhi360_linear_accel_notify(const float* lacc);
+void jis_bhi360_data1_notify(const bhi360_3d_mapping_t *data);
+void jis_bhi360_data2_notify(const bhi360_step_count_t *data);
+void jis_bhi360_data3_notify(const bhi360_linear_accel_t *data);
+void jis_bhi360_quaternion_notify(const float *quat);
+void jis_bhi360_linear_accel_notify(const float *lacc);
 void jis_bhi360_step_count_notify(uint32_t step_count);
 
 // FOTA progress notify function
-void jis_fota_progress_notify(const fota_progress_msg_t* progress);
+void jis_fota_progress_notify(const fota_progress_msg_t *progress);
 
 // Step count notify functions
 extern "C" void jis_total_step_count_notify(uint32_t total_steps, uint32_t activity_duration);
@@ -82,8 +87,8 @@ void jis_bhi360_data3_notify_ble(const bhi360_linear_accel_ble_t *data);
 
 // Secondary device info functions (primary only)
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
-void jis_update_secondary_device_info(const char *manufacturer, const char *model, 
-                                     const char *serial, const char *hw_rev, const char *fw_rev);
+void jis_update_secondary_device_info(const char *manufacturer, const char *model, const char *serial,
+                                      const char *hw_rev, const char *fw_rev);
 void jis_clear_secondary_device_info(void);
 void jis_secondary_weight_measurement_notify(float weight_kg);
 err_t ble_reset_bonds(void);
@@ -104,7 +109,7 @@ void set_current_time_from_epoch(uint32_t new_epoch_time_s);
 uint32_t get_current_epoch_time(void);
 int init_rtc_time();
 void update_cts_characteristic_buffer(void);
-const void* get_current_time_char_value_ptr(void);
+const void *get_current_time_char_value_ptr(void);
 size_t get_current_time_char_value_size(void);
 
 #ifdef __cplusplus
@@ -124,7 +129,7 @@ static inline void send_error_to_bluetooth(sender_type_t sender, err_t error_cod
     msg.type = MSG_TYPE_ERROR_STATUS;
     msg.data.error_status.error_code = error_code;
     msg.data.error_status.is_set = is_set;
-    
+
     // Send to queue, ignore if full (non-blocking)
     k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT);
 }

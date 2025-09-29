@@ -69,18 +69,18 @@
     w25q128: w25q128jv@0 {
         compatible = "nordic,qspi-nor";
         reg = <0>;
-        //sck-frequency = <133000000>; /* 133 MHz */
-          sck-frequency = <36000000>; 
-   
-    
-        
+        sck-frequency = <8000000>;
         jedec-id = [ef 40 18];
-
-         size = <134217728>; /* 128 Mbit = 16 MB */
-  /* Power management */
+        sfdp-bfp = [
+            e5 20 f1 ff  ff ff ff 03  44 eb 08 6b  08 3b 04 bb
+            ee ff ff ff  ff ff 00 ff  ff ff 00 ff  0c 20 0f 52
+            10 d8 00 ff  23 72 f5 00  82 ed 04 cc  44 83 68 44
+            30 b0 30 b0  f7 c4 d5 5c  00 be 29 ff  f0 d0 ff ff
+        ];
+        size = <134217728>; /* 128 Mbit = 16 MB */
         has-dpd;
-        t-enter-dpd = <3000>;   /* 3 µs to enter deep power-down */
-        t-exit-dpd  = <30000>;  /* 30 µs to exit deep power-down */
+        t-enter-dpd = <10000>;
+        t-exit-dpd = <35000>;
         status = "okay";
         
         partitions {
@@ -90,11 +90,12 @@
 
             lfs1_part: partition@0 {
                 label = "storage";
-                reg = <0x00000000 0x01000000>;
+                reg = <0x00000000 0x00006000>;
             };
         };
     };
 };
+
 
 &adc {
     status = "okay";

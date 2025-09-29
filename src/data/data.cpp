@@ -39,6 +39,7 @@
 #include <activity_messages.pb.h>
 #include <app.hpp>
 #include <app_fixed_point.hpp>
+#include <app_version.h>
 #include <bhi360_sensor_messages.pb.h>
 #include <ble_services.hpp>
 #include <data.hpp>
@@ -192,7 +193,7 @@ struct LogFileEntry
     char name[util::max_path_length];
 };
 
-// TODO: Grab the user setting from moble phone
+// TODO: Grab the user setting from mobile phone
 //  Default values that can be overwritten by settings
 user_config_t user_config = {
     .user_height_cm = 175, // Default 175cm
@@ -201,7 +202,7 @@ user_config_t user_config = {
     .user_sex = 1          // Default 1 (Male)
 };
 
-battery_info_t battery_start = {};
+battery_level_msg_t battery_level = {};
 
 // Initialize the data module
 static void data_init(void)
@@ -412,6 +413,10 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     }
                     break;
 
+                case MSG_TYPE_BATTERY_LEVEL_PRIMARY:
+                    battery_level = msg.data.battery_level;
+                    break;
+
                 case MSG_TYPE_DELETE_ACTIVITY_LOG: {
 // Process delete activity log command
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
@@ -532,24 +537,6 @@ static void process_sensor_data_work_handler(struct k_work *work)
 
         LOG_INF("Writing Activity data metrics %d", metrics->timestamp_ms);
         // Prepare a binary structure to store in the file
-        typedef struct
-        {
-            uint32_t packet_number;
-            uint32_t timestamp;
-            uint16_t cadence_spm;
-            uint16_t pace_sec_km;
-            uint16_t speed_kmh_x10; // Speed in km/h * 10 (fixed point, 1 decimal)
-            int8_t balance_lr_pct;
-            uint16_t ground_contact_ms;
-            uint16_t flight_time_ms;
-            int8_t contact_time_asymmetry;
-            int8_t force_asymmetry;
-            int8_t pronation_asymmetry;
-            uint8_t left_strike_pattern;
-            uint8_t right_strike_pattern;
-            int8_t avg_pronation_deg;
-            uint8_t vertical_ratio;
-        } __attribute__((packed)) activity_metrics_binary_t;
 
         // Reset counter if approaching maximum to prevent overflow
         if (activity_packet_counter >= (UINT32_MAX - 100))
@@ -558,56 +545,73 @@ static void process_sensor_data_work_handler(struct k_work *work)
             activity_packet_counter = 0;
         }
 
-        activity_metrics_binary_t binary_metrics = {.packet_number = activity_packet_counter++,
-                                                    .timestamp = current_epoch,
-                                                    .cadence_spm = metrics->cadence_spm,
-                                                    .pace_sec_km = metrics->pace_sec_km,
-                                                    .speed_kmh_x10 =
-                                                        (metrics->pace_sec_km > 0) ? (36000 / metrics->pace_sec_km) : 0,
-                                                    .balance_lr_pct = metrics->balance_lr_pct,
-                                                    .ground_contact_ms = metrics->ground_contact_ms,
-                                                    .flight_time_ms = metrics->flight_time_ms,
-                                                    .contact_time_asymmetry = metrics->contact_time_asymmetry,
-                                                    .force_asymmetry = metrics->force_asymmetry,
-                                                    .pronation_asymmetry = metrics->pronation_asymmetry,
-                                                    .left_strike_pattern = metrics->left_strike_pattern,
-                                                    .right_strike_pattern = metrics->right_strike_pattern,
-                                                    .avg_pronation_deg = metrics->avg_pronation_deg,
-                                                    .vertical_ratio = metrics->vertical_ratio};
+        activity_metrics_binary_t binary_metrics = {
+            .packet_number = activity_packet_counter++,
+            .timestamp = current_epoch,
+            .cadence_spm = metrics->cadence_spm,
+            .pace_sec_km = metrics->pace_sec_km,
 
-        /*    LOG_WRN("activity_packet_counter = %u\n"
-                    "timestamp = %u\n"
-                    "cadence = %u\n"
-                    "pace = %u\n"
-                    "speed = %u\n"
-                    "balance = %d\n"
-                    "ground_contact = %u\n"
-                    "flight_time = %u\n"
-                    "contact_time_asymmetry = %d\n"
-                    "force_asymmetry = %d\n"
-                    "pronation_asymmetry = %d\n"
-                    "left_strike_pattern = %u\n"
-                    "right_strike_pattern = %u\n"
-                    "avg_pronation_deg = %d\n"
-                    "vertical_ratio = %u\n",
-                    binary_metrics.packet_number, binary_metrics.timestamp_ms, binary_metrics.cadence_spm,
-                    binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
-                    binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms,
-           binary_metrics.contact_time_asymmetry, binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry,
-           binary_metrics.left_strike_pattern, binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg,
-           binary_metrics.vertical_ratio); */
+            // FIXED: Correct speed calculation with proper scaling
+            .speed_kmh_x10 = (metrics->pace_sec_km > 0) ? (uint16_t)((3600.0f / metrics->pace_sec_km) * 10.0f) : 0,
+
+            .balance_lr_pct = metrics->balance_lr_pct,
+            .ground_contact_ms = metrics->ground_contact_ms,
+
+            // VALIDATED: Cap flight time to realistic values
+            .flight_time_ms = (metrics->flight_time_ms > 300) ? 0 : metrics->flight_time_ms,
+
+            .contact_time_asymmetry = metrics->contact_time_asymmetry,
+            .force_asymmetry = metrics->force_asymmetry,
+            .pronation_asymmetry = metrics->pronation_asymmetry,
+            .left_strike_pattern = metrics->left_strike_pattern,
+            .right_strike_pattern = metrics->right_strike_pattern,
+            .avg_pronation_deg = metrics->avg_pronation_deg,
+            .vertical_ratio = metrics->vertical_ratio};
+
+        // ADD MISSING FIELDS:
+        //  .stride_length_cm = metrics->stride_length_cm,
+        ///  .stride_duration_ms = metrics->stride_duration_ms,
+        //  .vertical_oscillation_cm = metrics->vertical_oscillation_cm,
+        //  .efficiency_score = metrics->efficiency_score,
+        //  .form_score = metrics->form_score};
+
+        LOG_WRN("activity_packet_counter = %u\n"
+                "timestamp = %u\n"
+                "cadence = %u\n"
+                "pace = %u\n"
+                "speed = %u\n"
+                "balance = %d\n"
+                "ground_contact = %u\n"
+                "flight_time = %u\n"
+                "contact_time_asymmetry = %d\n"
+                "force_asymmetry = %d\n"
+                "pronation_asymmetry = %d\n"
+                "left_strike_pattern = %u\n"
+                "right_strike_pattern = %u\n"
+                "avg_pronation_deg = %d\n"
+                "vertical_ratio = %u\n",
+                binary_metrics.packet_number, binary_metrics.timestamp, binary_metrics.cadence_spm,
+                binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
+                binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms, binary_metrics.contact_time_asymmetry,
+                binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry, binary_metrics.left_strike_pattern,
+                binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio);
+
+        // TODO: workaround only, send data to bluetooth:
+        generic_message_t msg = {};
+        msg.sender = SENDER_DATA;
+        msg.type = MSG_TYPE_ACTIVITY_METRICS;
+
+        memcpy(&msg.data.activity_metrics, &binary_metrics, sizeof(binary_metrics));
+
+        if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
+        {
+            LOG_WRN("Bluetooth queue full, dropping activity metrics");
+        }
 
         k_mutex_lock(&activity_file_mutex, K_FOREVER);
         int ret = fs_write(&activity_log_file, &binary_metrics, sizeof(binary_metrics));
         k_mutex_unlock(&activity_file_mutex);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to write activity buffer: %d", ret);
 
-            return;
-        }
-
-        // Set a flag that a sync is needed
         atomic_set(&sync_pending, 1);
     }
 }
@@ -637,7 +641,6 @@ static void process_command_work_handler(struct k_work *work)
     {
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
         return;
-        ;
 #endif
         if (atomic_get(&logging_activity_active) == 0)
         {
@@ -887,6 +890,17 @@ static err_t littlefs_flash_erase(unsigned int id)
 // Start activity logging
 err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version)
 {
+
+    static char dis_fw_rev[10] = {(uint8_t)(((APP_VERSION_MAJOR / 100) % 10) + '0'), // Hundreds digit (if applicable)
+                                  (uint8_t)(((APP_VERSION_MAJOR / 10) % 10) + '0'),  // Tens digit
+                                  (uint8_t)((APP_VERSION_MAJOR % 10) + '0'),         // Units digit
+                                  '.',
+                                  (uint8_t)(((APP_VERSION_MINOR / 10) % 10) + '0'), // Tens digit
+                                  (uint8_t)((APP_VERSION_MINOR % 10) + '0'),        // Units digit
+                                  '.',
+                                  (uint8_t)(((APP_PATCHLEVEL / 10) % 10) + '0'), // Tens digit
+                                  (uint8_t)((APP_PATCHLEVEL % 10) + '0'),        // Units digit
+                                  '\0'};
     // Acquire a mutex for all activity file operations to ensure atomicity.
     k_mutex_lock(&activity_file_mutex, K_FOREVER);
 
@@ -924,12 +938,6 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
 
     // Create directory if needed
     ret_mkdir = fs_mkdir(hardware_dir_path);
-    if (ret_mkdir != 0 && ret_mkdir != -EEXIST)
-    {
-        LOG_ERR("Failed to create directory %s: %d", hardware_dir_path, ret_mkdir);
-        status = err_t::FILE_SYSTEM_ERROR;
-        goto cleanup;
-    }
 
     // Get next sequence number and create file path
     next_activity_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
@@ -949,26 +957,21 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
 
     // Open file
     ret_fs_open = fs_open(&activity_log_file, activity_file_path, FS_O_CREATE | FS_O_RDWR | FS_O_APPEND);
-    if (ret_fs_open != 0)
-    {
-        LOG_ERR("Failed to open activity log %s: %d", activity_file_path, ret_fs_open);
-        status = err_t::FILE_SYSTEM_ERROR;
-        goto cleanup;
-    }
+
     LOG_INF("Opened new activity log file: %s", activity_file_path);
 
     // Initialize the header struct
     header = {.magic = {'B', 'O', 'T', 'Z'},
               .version = 3,
               .start_time = activity_last_timestamp_ms,
-              .sample_rate = sampling_frequency,
+              .sample_rate = SAMPLE_RATE_HZ,
               .user_height_cm = user_config.user_height_cm,
               .user_weight_kg = user_config.user_weight_kg,
               .user_age_years = user_config.user_age_years,
               .user_sex = user_config.user_sex,
-              .battery = battery_start};
+              .battery = {.voltage_mV = 0, .percentage = battery_level.level, .status = 0}};
 
-    strncpy(header.fw_version, fw_version, sizeof(header.fw_version) - 1);
+    strncpy(header.fw_version, dis_fw_rev, sizeof(header.fw_version) - 1);
     header.fw_version[sizeof(header.fw_version) - 1] = '\0';
 
     uuid = get_target_service_uuid();
@@ -983,12 +986,22 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
         LOG_WRN("Could not get BLE service UUID, using zeros");
     }
 
+    generic_message_t msg = {};
+    msg.sender = SENDER_DATA;
+    msg.type = MSG_TYPE_ACTIVITY_HEADER;
+
+    memcpy(&msg.data.activity_header, &header, sizeof(header));
+
+    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
+    {
+        LOG_WRN("Bluetooth queue full, dropping activity header");
+    }
+
     ret_write = fs_write(&activity_log_file, &header, sizeof(header));
     if (ret_write < 0)
     {
         LOG_ERR("Failed to write activity header: %d", ret_write);
         status = err_t::DATA_ERROR;
-        goto cleanup_close;
     }
 
     ret_write = fs_sync(&activity_log_file);
@@ -996,22 +1009,26 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     {
         LOG_ERR("Failed to sync activity file: %d", ret_write);
         status = err_t::DATA_ERROR;
-        goto cleanup_close;
     }
 
-    LOG_INF("Activity session started. Battery: %d%%, Voltage: %dmV", battery_start.percentage,
-            battery_start.voltage_mV);
-
-cleanup_close:
-    // If an error occurred after opening, close the file before cleaning up.
-    if (status != err_t::NO_ERROR)
-    {
-        fs_close(&activity_log_file);
-        activity_log_file.filep = nullptr;
-    }
-
-cleanup:
     k_mutex_unlock(&activity_file_mutex);
+
+    LOG_WRN("Header is:\n"
+            "  Magic: %.4s\n"
+            "  Version: %u\n"
+            "  Start Time: %u\n"
+            "  Firmware Version: %s\n"
+            "  Sample Rate: %u Hz\n"
+            "  User Height: %u cm\n"
+            "  User Weight: %u kg\n"
+            "  User Age: %u years\n"
+            "  User Sex: %u\n"
+            "  Battery: %u%%\n"
+            "  Voltage: %u mV\n",
+            header.magic, header.version, header.start_time, header.fw_version, header.sample_rate,
+            header.user_height_cm, header.user_weight_kg, header.user_age_years, header.user_sex,
+            header.battery.percentage, header.battery.voltage_mV);
+
     // Start the periodic sync timer after successfully opening the file
     if (status == err_t::NO_ERROR)
     {
@@ -1039,7 +1056,7 @@ err_t end_activity_logging()
     LOG_INF("Periodic fs_sync timer stopped.");
 
     // Lock the mutex for all file operations
-    k_mutex_lock(&activity_file_mutex, K_FOREVER);
+    //   k_mutex_lock(&activity_file_mutex, K_FOREVER);
 
     if (activity_log_file.filep != nullptr)
     {
@@ -1052,21 +1069,22 @@ err_t end_activity_logging()
             .percentage = 90,   // Placeholder, replace with actual battery reading
         };
 
-        // 3. Prepare V4 footer structure
-        typedef struct __attribute__((packed))
-        {
-            uint32_t end_time;      // end epoch time
-            uint32_t record_count;  // Total records written
-            uint32_t packet_count;  // Total packets processed
-            uint32_t file_crc;      // CRC-32 placeholder
-            battery_info_t battery; // Battery at session end
-        } ActivityFileFooterV2;
-
-        ActivityFileFooterV2 footer = {.end_time = get_current_epoch_time(),
+        ActivityFileFooterV3 footer = {.end_time = get_current_epoch_time(),
                                        .record_count = activity_batch_count,
                                        .packet_count = activity_packet_counter,
                                        .file_crc = 0, // Would be calculated in full implementation
-                                       .battery = battery_end};
+                                       .battery = {.voltage_mV = 0, .percentage = battery_level.level, .status = 0}};
+
+        generic_message_t msg = {};
+        msg.sender = SENDER_DATA;
+        msg.type = MSG_TYPE_ACTIVITY_FOOTER;
+
+        memcpy(&msg.data.activity_footer, &footer, sizeof(footer));
+
+        if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
+        {
+            LOG_WRN("Bluetooth queue full, dropping activity footer");
+        }
 
         int ret = fs_write(&activity_log_file, &footer, sizeof(footer));
         if (ret < 0)

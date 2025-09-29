@@ -68,6 +68,7 @@ typedef enum
     MSG_TYPE_DEVICE_INFO, // Device information for D2D sharing
     MSG_TYPE_SENSOR_DATA_CONSOLIDATED, // Consolidated sensor data from sensor_data module
     MSG_TYPE_REALTIME_METRICS, // Real-time metrics from realtime_metrics module
+    MSG_TYPE_REALTIME_METRICS_GAIT,
     MSG_TYPE_ANALYTICS_RESULTS, // Analytics results from analytics module
     MSG_TYPE_ACTIVITY_METRICS_BLE, // Activity metrics for BLE transmission
     MSG_TYPE_SAVE_WEIGHT_CALIBRATION, // Save weight calibration data to storage
@@ -90,6 +91,9 @@ typedef enum
     MSG_TYPE_COPY_FILE_TO_SD, // Command to copy a file to SD card (LAB_VERSION only)
     MSG_TYPE_START_FOOT_WEIGHT_MAP, // Start foot weight map calibration
     MSG_TYPE_FOOT_WEIGHT_MAP_DATA, // Foot weight map calibration data
+    MSG_TYPE_ACTIVITY_HEADER,
+    MSG_TYPE_ACTIVITY_METRICS,
+    MSG_TYPE_ACTIVITY_FOOTER,
 } msg_type_t;
 
 // Define sender types
@@ -108,6 +112,7 @@ typedef enum
     SENDER_REALTIME_METRICS, // Real-time metrics module
     SENDER_ANALYTICS, // Analytics module
     SENDER_BATTTERY, // Analytics module
+    GAIT_EVENT_DETECTOR, // Gait event detector module
 } sender_type_t;
 #ifdef __cplusplus
 }

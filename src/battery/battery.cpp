@@ -144,6 +144,8 @@ static void battery_update_work_handler(struct k_work *work)
     msg.type = MSG_TYPE_BATTERY_LEVEL_PRIMARY;
     msg.data.battery_level = (battery_level_msg_t){.level = level}; // Use the new battery_level_msg_t structure
     k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT); // Send to Bluetooth module via message queue on secondary
+    //Also send to the data module
+    k_msgq_put(&data_msgq, &msg, K_NO_WAIT); // Send to Data module via message queue
 #else
     generic_message_t msg;
     msg.sender = SENDER_BATTTERY;
