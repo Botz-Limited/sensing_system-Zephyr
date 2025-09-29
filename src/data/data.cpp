@@ -608,11 +608,11 @@ static void process_sensor_data_work_handler(struct k_work *work)
             LOG_WRN("Bluetooth queue full, dropping activity metrics");
         }
 
-        k_mutex_lock(&activity_file_mutex, K_FOREVER);
-        int ret = fs_write(&activity_log_file, &binary_metrics, sizeof(binary_metrics));
-        k_mutex_unlock(&activity_file_mutex);
+        /*  k_mutex_lock(&activity_file_mutex, K_FOREVER);
+          int ret = fs_write(&activity_log_file, &binary_metrics, sizeof(binary_metrics));
+          k_mutex_unlock(&activity_file_mutex);
 
-        atomic_set(&sync_pending, 1);
+          atomic_set(&sync_pending, 1); */
     }
 }
 
@@ -937,28 +937,28 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
     activity_packet_counter = 0;
 
     // Create directory if needed
-    ret_mkdir = fs_mkdir(hardware_dir_path);
+    //   ret_mkdir = fs_mkdir(hardware_dir_path);
 
     // Get next sequence number and create file path
-    next_activity_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
-    if (next_activity_file_sequence == 0)
-    {
-        next_activity_file_sequence = 1;
-    }
-    snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.dat", hardware_dir_path, activity_file_prefix,
-             next_activity_file_sequence);
+    /*  next_activity_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
+      if (next_activity_file_sequence == 0)
+      {
+          next_activity_file_sequence = 1;
+      }
+      snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.dat", hardware_dir_path, activity_file_prefix,
+               next_activity_file_sequence);
 
-    LOG_WRN("activity_file_path=%s, activity_file_path_size=%d, hardware_dir_path=%s,    activity_file_prefix=%s, "
-            "next_activity_file_sequence=%d",
-            activity_file_path, sizeof(activity_file_path), hardware_dir_path, activity_file_prefix,
-            next_activity_file_sequence);
-    LOG_WRN("Start Epoch time is %u", activity_last_timestamp_ms);
-    fs_file_t_init(&activity_log_file);
+      LOG_WRN("activity_file_path=%s, activity_file_path_size=%d, hardware_dir_path=%s,    activity_file_prefix=%s, "
+              "next_activity_file_sequence=%d",
+              activity_file_path, sizeof(activity_file_path), hardware_dir_path, activity_file_prefix,
+              next_activity_file_sequence);
+      LOG_WRN("Start Epoch time is %u", activity_last_timestamp_ms);
+      fs_file_t_init(&activity_log_file);
 
-    // Open file
-    ret_fs_open = fs_open(&activity_log_file, activity_file_path, FS_O_CREATE | FS_O_RDWR | FS_O_APPEND);
 
-    LOG_INF("Opened new activity log file: %s", activity_file_path);
+      ret_fs_open = fs_open(&activity_log_file, activity_file_path, FS_O_CREATE | FS_O_RDWR | FS_O_APPEND);
+
+      LOG_INF("Opened new activity log file: %s", activity_file_path); */
 
     // Initialize the header struct
     header = {.magic = {'B', 'O', 'T', 'Z'},
@@ -997,42 +997,44 @@ err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version
         LOG_WRN("Bluetooth queue full, dropping activity header");
     }
 
-    ret_write = fs_write(&activity_log_file, &header, sizeof(header));
-    if (ret_write < 0)
-    {
-        LOG_ERR("Failed to write activity header: %d", ret_write);
-        status = err_t::DATA_ERROR;
-    }
+    return err_t::NO_ERROR;
 
-    ret_write = fs_sync(&activity_log_file);
-    if (ret_write != 0)
-    {
-        LOG_ERR("Failed to sync activity file: %d", ret_write);
-        status = err_t::DATA_ERROR;
-    }
+    /*  ret_write = fs_write(&activity_log_file, &header, sizeof(header));
+      if (ret_write < 0)
+      {
+          LOG_ERR("Failed to write activity header: %d", ret_write);
+          status = err_t::DATA_ERROR;
+      }  */
 
-    k_mutex_unlock(&activity_file_mutex);
+    /*   ret_write = fs_sync(&activity_log_file);
+       if (ret_write != 0)
+       {
+           LOG_ERR("Failed to sync activity file: %d", ret_write);
+           status = err_t::DATA_ERROR;
+       }
 
-    LOG_WRN("Header is:\n"
-            "  Magic: %.4s\n"
-            "  Version: %u\n"
-            "  Start Time: %u\n"
-            "  Firmware Version: %s\n"
-            "  Sample Rate: %u Hz\n"
-            "  User Height: %u cm\n"
-            "  User Weight: %u kg\n"
-            "  User Age: %u years\n"
-            "  User Sex: %u\n"
-            "  Battery: %u%%\n"
-            "  Voltage: %u mV\n",
-            header.magic, header.version, header.start_time, header.fw_version, header.sample_rate,
-            header.user_height_cm, header.user_weight_kg, header.user_age_years, header.user_sex,
-            header.battery.percentage, header.battery.voltage_mV);
+       k_mutex_unlock(&activity_file_mutex);
+
+       LOG_WRN("Header is:\n"
+               "  Magic: %.4s\n"
+               "  Version: %u\n"
+               "  Start Time: %u\n"
+               "  Firmware Version: %s\n"
+               "  Sample Rate: %u Hz\n"
+               "  User Height: %u cm\n"
+               "  User Weight: %u kg\n"
+               "  User Age: %u years\n"
+               "  User Sex: %u\n"
+               "  Battery: %u%%\n"
+               "  Voltage: %u mV\n",
+               header.magic, header.version, header.start_time, header.fw_version, header.sample_rate,
+               header.user_height_cm, header.user_weight_kg, header.user_age_years, header.user_sex,
+               header.battery.percentage, header.battery.voltage_mV); */
 
     // Start the periodic sync timer after successfully opening the file
     if (status == err_t::NO_ERROR)
     {
-        k_timer_start(&fs_sync_timer, K_SECONDS(5), K_SECONDS(5));
+        //  k_timer_start(&fs_sync_timer, K_SECONDS(5), K_SECONDS(5));
         LOG_INF("Periodic fs_sync timer started.");
     }
 
@@ -1052,22 +1054,15 @@ err_t end_activity_logging()
     LOG_WRN("Closing file");
 
     // Stop the periodic timer
-    k_timer_stop(&fs_sync_timer);
-    LOG_INF("Periodic fs_sync timer stopped.");
+   // k_timer_stop(&fs_sync_timer);
+   // LOG_INF("Periodic fs_sync timer stopped.");
 
     // Lock the mutex for all file operations
     //   k_mutex_lock(&activity_file_mutex, K_FOREVER);
 
-    if (activity_log_file.filep != nullptr)
-    {
+   // if (activity_log_file.filep != nullptr)
+   // {
 
-        // 2. Get final battery state
-        // battery_info_t battery_end = get_battery_info();
-
-        battery_info_t battery_end = {
-            .voltage_mV = 3500, // Placeholder, replace with actual voltage reading
-            .percentage = 90,   // Placeholder, replace with actual battery reading
-        };
 
         ActivityFileFooterV3 footer = {.end_time = get_current_epoch_time(),
                                        .record_count = activity_batch_count,
@@ -1086,53 +1081,55 @@ err_t end_activity_logging()
             LOG_WRN("Bluetooth queue full, dropping activity footer");
         }
 
-        int ret = fs_write(&activity_log_file, &footer, sizeof(footer));
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to write activity buffer: %d", ret);
-        }
+        return err_t::NO_ERROR;
 
-        ret = fs_sync(&activity_log_file);
-        if (ret != 0)
-        {
-            LOG_ERR("Failed to sync activity file: %d", ret);
-        }
+        /*  int ret = fs_write(&activity_log_file, &footer, sizeof(footer));
+          if (ret < 0)
+          {
+              LOG_ERR("Failed to write activity buffer: %d", ret);
+          }
 
-        // 7. Close file
-        int ret_close = fs_close(&activity_log_file);
-        if (ret_close != 0)
-        {
-            LOG_ERR("Failed to close file: %d", ret_close);
-            overall_status = err_t::FILE_SYSTEM_ERROR;
-        }
-        else
-        {
-            LOG_INF("Session ended");
-        }
+          ret = fs_sync(&activity_log_file);
+          if (ret != 0)
+          {
+              LOG_ERR("Failed to sync activity file: %d", ret);
+          }
 
-        // Always send notification after closing, regardless of close result
-        generic_message_t activity_msg;
-        activity_msg.sender = SENDER_DATA;
-        activity_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
-        activity_msg.data.new_hardware_log_file.file_sequence_id = next_activity_file_sequence;
-        strncpy(activity_msg.data.new_hardware_log_file.file_path, activity_file_path,
-                sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1);
-        activity_msg.data.new_hardware_log_file
-            .file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+          // 7. Close file
+          int ret_close = fs_close(&activity_log_file);
+          if (ret_close != 0)
+          {
+              LOG_ERR("Failed to close file: %d", ret_close);
+              overall_status = err_t::FILE_SYSTEM_ERROR;
+          }
+          else
+          {
+              LOG_INF("Session ended");
+          }
 
-        if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
-        {
-            LOG_WRN("Failed to send session notification");
-        }
+          // Always send notification after closing, regardless of close result
+          generic_message_t activity_msg;
+          activity_msg.sender = SENDER_DATA;
+          activity_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
+          activity_msg.data.new_hardware_log_file.file_sequence_id = next_activity_file_sequence;
+          strncpy(activity_msg.data.new_hardware_log_file.file_path, activity_file_path,
+                  sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1);
+          activity_msg.data.new_hardware_log_file
+              .file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+          if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
+          {
+              LOG_WRN("Failed to send session notification");
+          } */
 
         // 9. Reset state
         activity_batch_count = 0;
         activity_write_buffer_pos = 0;
-        activity_log_file.filep = nullptr; // Explicitly set to nullptr after closing
+      //  activity_log_file.filep = nullptr; // Explicitly set to nullptr after closing
 
         // Unlock the mutex after all file operations are complete
-        k_mutex_unlock(&activity_file_mutex);
-    }
+     //   k_mutex_unlock(&activity_file_mutex);
+ //   }
 
     LOG_WRN("Closing file CLOSED!!!!!!!!");
 
@@ -1162,14 +1159,14 @@ err_t end_activity_logging()
 #endif
 
     // TODO: test only - list directory contents
-    LOG_WRN("About to list directory contents for: %s", hardware_dir_path);
-    int lsdir_result = lsdir(hardware_dir_path);
-    if (lsdir_result != 0)
-    {
-        LOG_ERR("lsdir failed with error: %d", lsdir_result);
-    }
+    //   LOG_WRN("About to list directory contents for: %s", hardware_dir_path);
+    //    int lsdir_result = lsdir(hardware_dir_path);
+    //  if (lsdir_result != 0)
+    //   {
+    //      LOG_ERR("lsdir failed with error: %d", lsdir_result);
+    //  }
 
-    return overall_status;
+    // return overall_status;
 }
 
 // Save BHI360 calibration data
