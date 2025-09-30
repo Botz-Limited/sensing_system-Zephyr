@@ -53,20 +53,6 @@ err_t store_bhi360_calibration_data(uint8_t sensor_type, const uint8_t *profile_
 // Weight calibration API functions
 err_t save_weight_calibration_data(const weight_calibration_data_t *calib_data);
 
-typedef struct __attribute__((packed)) {
-    uint16_t voltage_mV;    // Battery voltage in millivolts
-    int8_t percentage;      // Estimated charge percentage (-1 if unknown)
-    uint8_t status;         // Charging status (0=discharging, 1=charging, 2=full)
-} battery_info_t;
-
-typedef struct {
-    uint8_t user_height_cm;
-    uint8_t user_weight_kg;
-    uint8_t user_age_years;
-    uint8_t user_sex;
-} user_config_t;
-
-extern user_config_t user_config;
 
 err_t load_weight_calibration_data(void);
 

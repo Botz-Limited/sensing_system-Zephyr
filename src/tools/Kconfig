@@ -11,7 +11,7 @@ if LOG_DECODER_TOOL
 
 config LOG_DECODER_SHELL_CMDS
     bool "Enable shell commands for log decoder"
-    default y
+    default n
     depends on SHELL
     help
       Enable shell commands for the log decoder tool.

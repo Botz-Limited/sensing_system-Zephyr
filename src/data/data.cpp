@@ -39,6 +39,7 @@
 #include <activity_messages.pb.h>
 #include <app.hpp>
 #include <app_fixed_point.hpp>
+#include <app_version.h>
 #include <bhi360_sensor_messages.pb.h>
 #include <ble_services.hpp>
 #include <data.hpp>
@@ -51,11 +52,25 @@
 #include "../../include/events/motion_sensor_event.h"
 
 // External function to get the BLE service UUID from bluetooth module
-extern "C" const uint8_t* get_target_service_uuid(void);
+extern "C" const uint8_t *get_target_service_uuid(void);
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_DATA_MODULE_LOG_LEVEL);
 
-static uint32_t current_packet_number = 0;
+// Timer for periodic filesystem sync
+static K_TIMER_DEFINE(fs_sync_timer, NULL, NULL);
+
+// Flag to indicate a pending sync operation
+static atomic_t sync_pending = ATOMIC_INIT(0);
+
+static void fs_sync_work_handler(struct k_work *work);
+
+// Work item for syncing the file system
+static struct k_work fs_sync_work;
+
+static uint32_t current_packet_number = 0U;
+static uint32_t activity_start_epoch_time = 0U; // Epoch time when logging started
+static uint32_t last_epoch_timestamp = 0U;      // Last epoch timestamp for delta calculation
+static uint32_t start_epoch_timestamp = 0U;
 
 // Constants from original implementation
 constexpr char calibration_dir_path[] = "/lfs1/calibration";
@@ -86,7 +101,7 @@ static struct k_thread data_thread_data;
 static k_tid_t data_tid;
 
 // Work Queue Configuration
-static constexpr int data_workq_stack_size = 2048;
+static constexpr int data_workq_stack_size = 4096;
 K_THREAD_STACK_DEFINE(data_workq_stack, data_workq_stack_size);
 static struct k_work_q data_work_q;
 
@@ -94,7 +109,6 @@ static struct k_work_q data_work_q;
 static struct k_work process_sensor_data_work;
 static struct k_work process_command_work;
 static struct k_work process_calibration_work;
-static struct k_work_delayable periodic_flush_work;
 static struct k_work process_erase_flash_work;
 
 // Message Buffers (protected by mutexes for thread safety)
@@ -124,8 +138,6 @@ constexpr size_t FLASH_PAGE_SIZE = 256;
 constexpr size_t PROTOBUF_ENCODE_BUFFER_SIZE = 64;
 static uint8_t activity_write_buffer[FLASH_PAGE_SIZE];
 static size_t activity_write_buffer_pos = 0;
-static uint8_t activity_batch_buffer[FLASH_PAGE_SIZE];
-static size_t activity_batch_bytes = 0;
 static size_t activity_batch_count = 0;
 
 // Timing and Sequence
@@ -147,14 +159,9 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3);
 static void process_sensor_data_work_handler(struct k_work *work);
 static void process_command_work_handler(struct k_work *work);
 static void process_calibration_work_handler(struct k_work *work);
-static void periodic_flush_work_handler(struct k_work *work);
 static void process_erase_flash_work_handler(struct k_work *work);
 static err_t mount_file_system(struct fs_mount_t *mount);
 static err_t littlefs_flash_erase(unsigned int id);
-static err_t flush_activity_buffer(void);
-static err_t flush_activity_batch(void);
-static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLogMessage *sensor_msg);
-static bool encode_string_callback(pb_ostream_t *stream, const pb_field_t *field, void *const *arg);
 static uint32_t get_next_file_sequence(const char *dir_path, const char *file_prefix);
 err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version);
 err_t end_activity_logging();
@@ -186,7 +193,7 @@ struct LogFileEntry
     char name[util::max_path_length];
 };
 
-// TODO: Grab the user setting from moble phone
+// TODO: Grab the user setting from mobile phone
 //  Default values that can be overwritten by settings
 user_config_t user_config = {
     .user_height_cm = 175, // Default 175cm
@@ -195,7 +202,7 @@ user_config_t user_config = {
     .user_sex = 1          // Default 1 (Male)
 };
 
-battery_info_t battery_start = {};
+battery_level_msg_t battery_level = {};
 
 // Initialize the data module
 static void data_init(void)
@@ -233,17 +240,16 @@ static void data_init(void)
     k_work_init(&process_sensor_data_work, process_sensor_data_work_handler);
     k_work_init(&process_command_work, process_command_work_handler);
     k_work_init(&process_calibration_work, process_calibration_work_handler);
-    k_work_init_delayable(&periodic_flush_work, periodic_flush_work_handler);
     k_work_init(&process_erase_flash_work, process_erase_flash_work_handler);
+
+    // Initialize the fs_sync work item
+    k_work_init(&fs_sync_work, fs_sync_work_handler);
 
     // Create the message processing thread
     data_tid = k_thread_create(&data_thread_data, data_stack_area, K_THREAD_STACK_SIZEOF(data_stack_area),
                                data_thread_fn, NULL, NULL, NULL, data_priority, 0, K_NO_WAIT);
 
     k_thread_name_set(data_tid, "data");
-
-    // Start periodic flush timer (1Hz)
-    k_work_schedule_for_queue(&data_work_q, &periodic_flush_work, K_NO_WAIT);
 
     module_set_state(MODULE_STATE_READY);
     LOG_INF("Data module initialized");
@@ -353,9 +359,16 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
 
                 case MSG_TYPE_REALTIME_METRICS_DATA:
 
-                    k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
+                    if (atomic_get(&logging_activity_active) != 1)
+                    {
+                        break;
+                    }
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    break;
+#endif
+
                     memcpy(&pending_sensor_data_msg, &msg, sizeof(generic_message_t));
-                    k_mutex_unlock(&sensor_data_msg_mutex);
+
                     k_work_submit_to_queue(&data_work_q, &process_sensor_data_work);
 
                     break;
@@ -400,8 +413,15 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     }
                     break;
 
+                case MSG_TYPE_BATTERY_LEVEL_PRIMARY:
+                    battery_level = msg.data.battery_level;
+                    break;
+
                 case MSG_TYPE_DELETE_ACTIVITY_LOG: {
-                    // Process delete activity log command
+// Process delete activity log command
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+                    break;
+#endif
                     LOG_INF("Received delete activity log command for ID: %u", msg.data.delete_cmd.id);
 
                     // Stop any active logging first if we're deleting files
@@ -426,6 +446,70 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
                     break;
                 }
 
+                case MSG_TYPE_FOOT_WEIGHT_MAP_DATA: {
+                    // Process foot weight map calibration data
+                    LOG_INF("Received foot weight map calibration data");
+
+                    // Save the calibration data to external flash
+                    if (filesystem_available)
+                    {
+                        // Create calibration directory if it doesn't exist
+                        int ret = fs_mkdir(calibration_dir_path);
+                        if (ret != 0 && ret != -EEXIST)
+                        {
+                            LOG_ERR("Failed to create calibration directory: %d", ret);
+                        }
+                        else
+                        {
+                            // Create filename for foot weight map calibration
+                            char filename[util::max_path_length];
+                            snprintk(filename, sizeof(filename), "%s/foot_weight_map.bin", calibration_dir_path);
+
+                            // Open file for writing
+                            struct fs_file_t file;
+                            fs_file_t_init(&file);
+
+                            ret = fs_open(&file, filename, FS_O_CREATE | FS_O_WRITE);
+                            if (ret != 0)
+                            {
+                                LOG_ERR("Failed to open foot weight map file %s: %d", filename, ret);
+                            }
+                            else
+                            {
+                                // Write calibration data
+                                ret = fs_write(&file, &msg.data.foot_weight_map, sizeof(foot_weight_map_data_t));
+                                if (ret < 0)
+                                {
+                                    LOG_ERR("Failed to write foot weight map data: %d", ret);
+                                }
+                                else
+                                {
+                                    LOG_INF("Foot weight map calibration saved to %s", filename);
+                                    LOG_INF("  Total weight: %u", msg.data.foot_weight_map.total_weight);
+                                    LOG_INF("  Timestamp: %u ms", msg.data.foot_weight_map.timestamp_ms);
+                                    LOG_INF("  Sample count: %u", msg.data.foot_weight_map.sample_count);
+
+                                    // Log sensor distribution
+                                    for (uint8_t i = 0; i < NUM_FOOT_SENSOR_CHANNELS; i++)
+                                    {
+                                        LOG_INF("  Sensor[%d]: %u (%.1f%%)", i, msg.data.foot_weight_map.sensor_map[i],
+                                                msg.data.foot_weight_map.weight_distribution[i]);
+                                    }
+                                }
+
+                                // Sync and close file
+                                fs_sync(&file);
+                                fs_close(&file);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        LOG_WRN("Cannot save foot weight map - filesystem not available");
+                    }
+                    break;
+                }
+
                 default:
                     LOG_WRN("Received unsupported message type %d  from sender %d", msg.type, msg.sender);
                     break;
@@ -438,6 +522,8 @@ static void data_thread_fn(void *arg1, void *arg2, void *arg3)
 static void process_sensor_data_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
+    uint32_t current_epoch = get_current_epoch_time();
+    uint16_t delta_epoch = 0U;
 
     // Make a local copy of the message under mutex protection
     k_mutex_lock(&sensor_data_msg_mutex, K_MSEC(100));
@@ -451,24 +537,6 @@ static void process_sensor_data_work_handler(struct k_work *work)
 
         LOG_INF("Writing Activity data metrics %d", metrics->timestamp_ms);
         // Prepare a binary structure to store in the file
-        typedef struct
-        {
-            uint32_t packet_number;
-            uint32_t timestamp_ms;
-            uint16_t cadence_spm;
-            uint16_t pace_sec_km;
-            uint16_t speed_kmh_x10;  // Speed in km/h * 10 (fixed point, 1 decimal)
-            int8_t balance_lr_pct;
-            uint16_t ground_contact_ms;
-            uint16_t flight_time_ms;
-            int8_t contact_time_asymmetry;
-            int8_t force_asymmetry;
-            int8_t pronation_asymmetry;
-            uint8_t left_strike_pattern;
-            uint8_t right_strike_pattern;
-            int8_t avg_pronation_deg;
-            uint8_t vertical_ratio;
-        } __attribute__((packed)) activity_metrics_binary_t;
 
         // Reset counter if approaching maximum to prevent overflow
         if (activity_packet_counter >= (UINT32_MAX - 100))
@@ -477,21 +545,35 @@ static void process_sensor_data_work_handler(struct k_work *work)
             activity_packet_counter = 0;
         }
 
-        activity_metrics_binary_t binary_metrics = {.packet_number = activity_packet_counter++,
-                                                    .timestamp_ms = metrics->timestamp_ms,
-                                                    .cadence_spm = metrics->cadence_spm,
-                                                    .pace_sec_km = metrics->pace_sec_km,
-                                                    .speed_kmh_x10 = (metrics->pace_sec_km > 0) ? (36000 / metrics->pace_sec_km) : 0,
-                                                    .balance_lr_pct = metrics->balance_lr_pct,
-                                                    .ground_contact_ms = metrics->ground_contact_ms,
-                                                    .flight_time_ms = metrics->flight_time_ms,
-                                                    .contact_time_asymmetry = metrics->contact_time_asymmetry,
-                                                    .force_asymmetry = metrics->force_asymmetry,
-                                                    .pronation_asymmetry = metrics->pronation_asymmetry,
-                                                    .left_strike_pattern = metrics->left_strike_pattern,
-                                                    .right_strike_pattern = metrics->right_strike_pattern,
-                                                    .avg_pronation_deg = metrics->avg_pronation_deg,
-                                                    .vertical_ratio = metrics->vertical_ratio};
+        activity_metrics_binary_t binary_metrics = {
+            .packet_number = activity_packet_counter++,
+            .timestamp = current_epoch,
+            .cadence_spm = metrics->cadence_spm,
+            .pace_sec_km = metrics->pace_sec_km,
+
+            // FIXED: Correct speed calculation with proper scaling
+            .speed_kmh_x10 = (metrics->pace_sec_km > 0) ? (uint16_t)((3600.0f / metrics->pace_sec_km) * 10.0f) : 0,
+
+            .balance_lr_pct = metrics->balance_lr_pct,
+            .ground_contact_ms = metrics->ground_contact_ms,
+
+            // VALIDATED: Cap flight time to realistic values
+            .flight_time_ms = (metrics->flight_time_ms > 300) ? 0 : metrics->flight_time_ms,
+
+            .contact_time_asymmetry = metrics->contact_time_asymmetry,
+            .force_asymmetry = metrics->force_asymmetry,
+            .pronation_asymmetry = metrics->pronation_asymmetry,
+            .left_strike_pattern = metrics->left_strike_pattern,
+            .right_strike_pattern = metrics->right_strike_pattern,
+            .avg_pronation_deg = metrics->avg_pronation_deg,
+            .vertical_ratio = metrics->vertical_ratio};
+
+        // ADD MISSING FIELDS:
+        //  .stride_length_cm = metrics->stride_length_cm,
+        ///  .stride_duration_ms = metrics->stride_duration_ms,
+        //  .vertical_oscillation_cm = metrics->vertical_oscillation_cm,
+        //  .efficiency_score = metrics->efficiency_score,
+        //  .form_score = metrics->form_score};
 
         LOG_WRN("activity_packet_counter = %u\n"
                 "timestamp = %u\n"
@@ -508,35 +590,29 @@ static void process_sensor_data_work_handler(struct k_work *work)
                 "right_strike_pattern = %u\n"
                 "avg_pronation_deg = %d\n"
                 "vertical_ratio = %u\n",
-                binary_metrics.packet_number, binary_metrics.timestamp_ms, binary_metrics.cadence_spm,
+                binary_metrics.packet_number, binary_metrics.timestamp, binary_metrics.cadence_spm,
                 binary_metrics.pace_sec_km, binary_metrics.speed_kmh_x10, binary_metrics.balance_lr_pct,
                 binary_metrics.ground_contact_ms, binary_metrics.flight_time_ms, binary_metrics.contact_time_asymmetry,
                 binary_metrics.force_asymmetry, binary_metrics.pronation_asymmetry, binary_metrics.left_strike_pattern,
                 binary_metrics.right_strike_pattern, binary_metrics.avg_pronation_deg, binary_metrics.vertical_ratio);
 
-        // Add to batch buffer if there's space
-        if (activity_batch_bytes + sizeof(binary_metrics) <= sizeof(activity_batch_buffer))
-        {
-            memcpy(&activity_batch_buffer[activity_batch_bytes], &binary_metrics, sizeof(binary_metrics));
-            activity_batch_bytes += sizeof(binary_metrics);
-            activity_batch_count++;
+        // TODO: workaround only, send data to bluetooth:
+        generic_message_t msg = {};
+        msg.sender = SENDER_DATA;
+        msg.type = MSG_TYPE_ACTIVITY_METRICS;
 
-            // Flush batch if full or buffer is getting full
-            if (activity_batch_count >= ACTIVITY_BATCH_SIZE ||
-                activity_batch_bytes > (sizeof(activity_batch_buffer) - sizeof(binary_metrics)))
-            {
-                err_t write_status = flush_activity_batch();
-                if (write_status != err_t::NO_ERROR)
-                {
-                    LOG_ERR("Failed to flush activity batch: %d", (int)write_status);
-                }
-            }
-        }
-        else
+        memcpy(&msg.data.activity_metrics, &binary_metrics, sizeof(binary_metrics));
+
+        if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
         {
-            // Buffer full - flush and retry
-            flush_activity_batch();
+            LOG_WRN("Bluetooth queue full, dropping activity metrics");
         }
+
+          k_mutex_lock(&activity_file_mutex, K_FOREVER);
+          int ret = fs_write(&activity_log_file, &binary_metrics, sizeof(binary_metrics));
+          k_mutex_unlock(&activity_file_mutex);
+
+          atomic_set(&sync_pending, 1); 
     }
 }
 
@@ -563,6 +639,9 @@ static void process_command_work_handler(struct k_work *work)
 
     if (strcmp(command_str, "START_LOGGING_ACTIVITY") == 0)
     {
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        return;
+#endif
         if (atomic_get(&logging_activity_active) == 0)
         {
             LOG_INF("Starting activity logging");
@@ -584,6 +663,9 @@ static void process_command_work_handler(struct k_work *work)
     }
     else if (strcmp(command_str, "STOP_LOGGING_ACTIVITY") == 0)
     {
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+        return;
+#endif
         if (atomic_get(&logging_activity_active) == 1)
         {
             LOG_INF("Stopping activity logging");
@@ -721,20 +803,6 @@ static void process_erase_flash_work_handler(struct k_work *work)
     }
 }
 
-// Periodic flush work handler
-static void periodic_flush_work_handler(struct k_work *work)
-{
-    ARG_UNUSED(work);
-
-    if (atomic_get(&logging_activity_active))
-    {
-        flush_activity_buffer();
-    }
-
-    // Reschedule for next update (1Hz)
-    k_work_schedule_for_queue(&data_work_q, &periodic_flush_work, K_SECONDS(1));
-}
-
 // Mount the file system
 static err_t mount_file_system(struct fs_mount_t *mount)
 {
@@ -745,7 +813,7 @@ static err_t mount_file_system(struct fs_mount_t *mount)
     flash_device = DEVICE_DT_GET(DT_NODELABEL(w25q128));
     if (device_is_ready(flash_device))
     {
-        LOG_INF("Using Winbond W25Q128 flash (PCB)");
+        LOG_WRN("Using Winbond W25Q128 flash (PCB)");
     }
     else
 #endif
@@ -819,343 +887,247 @@ static err_t littlefs_flash_erase(unsigned int id)
     return err_t::NO_ERROR;
 }
 
-// Flush activity buffer to file
-static err_t flush_activity_buffer(void)
-{
-    if (activity_write_buffer_pos > 0)
-    {
-        k_mutex_lock(&activity_file_mutex, K_MSEC(100));
-        int ret = fs_write(&activity_log_file, activity_write_buffer, activity_write_buffer_pos);
-        if (ret < 0)
-        {
-            LOG_ERR("Failed to write activity buffer: %d", ret);
-            k_mutex_unlock(&activity_file_mutex);
-            return err_t::FILE_SYSTEM_ERROR;
-        }
-
-        ret = fs_sync(&activity_log_file);
-        if (ret != 0)
-        {
-            LOG_ERR("Failed to sync activity file: %d", ret);
-            k_mutex_unlock(&activity_file_mutex);
-            return err_t::FILE_SYSTEM_ERROR;
-        }
-
-        activity_write_buffer_pos = 0;
-        k_mutex_unlock(&activity_file_mutex);
-    }
-    return err_t::NO_ERROR;
-}
-
-// Flush activity batch buffer
-static err_t flush_activity_batch(void)
-{
-    if (activity_batch_bytes == 0)
-    {
-        return err_t::NO_ERROR;
-    }
-
-    // Write the batched data through the page-aligned buffer system
-    size_t bytes_written = 0;
-    while (bytes_written < activity_batch_bytes)
-    {
-        size_t remaining = activity_batch_bytes - bytes_written;
-        size_t space_in_buffer = FLASH_PAGE_SIZE - activity_write_buffer_pos;
-        size_t to_copy = (remaining < space_in_buffer) ? remaining : space_in_buffer;
-
-        // Copy to write buffer
-        memcpy(&activity_write_buffer[activity_write_buffer_pos], &activity_batch_buffer[bytes_written], to_copy);
-        activity_write_buffer_pos += to_copy;
-        bytes_written += to_copy;
-
-        // Flush write buffer if full
-        if (activity_write_buffer_pos >= FLASH_PAGE_SIZE)
-        {
-            err_t status = flush_activity_buffer();
-            if (status != err_t::NO_ERROR)
-            {
-                return status;
-            }
-        }
-    }
-
-    // Reset batch
-    activity_batch_bytes = 0;
-    activity_batch_count = 0;
-
-    LOG_WRN("Flushed activity batch: %u samples", activity_batch_count);
-    return err_t::NO_ERROR;
-}
-
-// Write protobuf data to activity log
-static err_t write_activity_protobuf_data(const sensor_data_messages_ActivityLogMessage *sensor_msg)
-{
-    if (!filesystem_available)
-    {
-        return err_t::FILE_SYSTEM_ERROR;
-    }
-
-    uint8_t buffer[PROTOBUF_ENCODE_BUFFER_SIZE];
-    pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
-
-    bool status = pb_encode(&stream, sensor_data_messages_ActivityLogMessage_fields, sensor_msg);
-    if (!status)
-    {
-        LOG_ERR("Activity Protobuf encode error: %s", stream.errmsg);
-        return err_t::PROTO_ENCODE_ERROR;
-    }
-
-    // Lock mutex for buffer access
-    k_mutex_lock(&activity_file_mutex, K_MSEC(100));
-
-    // Batch buffering logic
-    if (activity_write_buffer_pos + stream.bytes_written > FLASH_PAGE_SIZE)
-    {
-        flush_activity_buffer();
-    }
-    memcpy(&activity_write_buffer[activity_write_buffer_pos], buffer, stream.bytes_written);
-    activity_write_buffer_pos += stream.bytes_written;
-
-    // Optionally, flush immediately for header or session end messages
-    if (sensor_msg->which_payload == sensor_data_messages_ActivityLogMessage_sensing_data_tag ||
-        sensor_msg->which_payload == sensor_data_messages_ActivityLogMessage_session_end_tag)
-    {
-        flush_activity_buffer();
-    }
-
-    k_mutex_unlock(&activity_file_mutex);
-
-    LOG_WRN("Activity data buffered (%u bytes, buffer at %u/%u).", stream.bytes_written,
-            (unsigned)activity_write_buffer_pos, FLASH_PAGE_SIZE);
-    return err_t::NO_ERROR;
-}
-
-// Protobuf string encoding callback
-static bool encode_string_callback(pb_ostream_t *stream, const pb_field_t *field, void *const *arg)
-{
-    const char *str = (const char *)(*arg);
-    if (str == NULL)
-    {
-        return true;
-    }
-    if (!pb_encode_tag_for_field(stream, field))
-    {
-        return false;
-    }
-    return pb_encode_string(stream, (pb_byte_t *)str, strlen(str));
-}
-
 // Start activity logging
 err_t start_activity_logging(uint32_t sampling_frequency, const char *fw_version)
 {
+
+    static char dis_fw_rev[10] = {(uint8_t)(((APP_VERSION_MAJOR / 100) % 10) + '0'), // Hundreds digit (if applicable)
+                                  (uint8_t)(((APP_VERSION_MAJOR / 10) % 10) + '0'),  // Tens digit
+                                  (uint8_t)((APP_VERSION_MAJOR % 10) + '0'),         // Units digit
+                                  '.',
+                                  (uint8_t)(((APP_VERSION_MINOR / 10) % 10) + '0'), // Tens digit
+                                  (uint8_t)((APP_VERSION_MINOR % 10) + '0'),        // Units digit
+                                  '.',
+                                  (uint8_t)(((APP_PATCHLEVEL / 10) % 10) + '0'), // Tens digit
+                                  (uint8_t)((APP_PATCHLEVEL % 10) + '0'),        // Units digit
+                                  '\0'};
+    // Acquire a mutex for all activity file operations to ensure atomicity.
+    k_mutex_lock(&activity_file_mutex, K_FOREVER);
+
     err_t status = err_t::NO_ERROR;
-    k_mutex_lock(&activity_file_mutex, K_MSEC(100));
+
+    // Declare all variables at the beginning of the function
+    int ret_mkdir;
+    int ret_fs_open;
+    int ret_write;
+    const uint8_t *uuid;
+    typedef struct __attribute__((packed))
+    {
+        char magic[4];
+        uint8_t version;
+        uint32_t start_time;
+        uint32_t sample_rate;
+        char fw_version[16];
+        uint8_t user_height_cm;
+        uint8_t user_weight_kg;
+        uint8_t user_age_years;
+        uint8_t user_sex;
+        battery_info_t battery;
+        uint8_t service_uuid[16];
+    } ActivityFileHeaderV3;
+    ActivityFileHeaderV3 header;
 
     // Reset tracking variables
-    activity_last_timestamp_ms = (uint32_t)k_uptime_get();
+    activity_last_timestamp_ms = get_current_epoch_time();
+    start_epoch_timestamp = activity_last_timestamp_ms;
+    last_epoch_timestamp = 0;
     activity_first_packet = true;
     activity_batch_count = 0;
     activity_write_buffer_pos = 0;
     activity_packet_counter = 0;
 
     // Create directory if needed
-    int ret_mkdir = fs_mkdir(hardware_dir_path);
-    if (ret_mkdir != 0 && ret_mkdir != -EEXIST)
+       ret_mkdir = fs_mkdir(hardware_dir_path);
+
+    // Get next sequence number and create file path
+      next_activity_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
+      if (next_activity_file_sequence == 0)
+      {
+          next_activity_file_sequence = 1;
+      }
+      snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.dat", hardware_dir_path, activity_file_prefix,
+               next_activity_file_sequence);
+
+      LOG_WRN("activity_file_path=%s, activity_file_path_size=%d, hardware_dir_path=%s,    activity_file_prefix=%s, "
+              "next_activity_file_sequence=%d",
+              activity_file_path, sizeof(activity_file_path), hardware_dir_path, activity_file_prefix,
+              next_activity_file_sequence);
+      LOG_WRN("Start Epoch time is %u", activity_last_timestamp_ms);
+      fs_file_t_init(&activity_log_file);
+
+
+      ret_fs_open = fs_open(&activity_log_file, activity_file_path, FS_O_CREATE | FS_O_RDWR | FS_O_APPEND);
+
+      LOG_INF("Opened new activity log file: %s", activity_file_path); 
+
+    // Initialize the header struct
+    header = {.magic = {'B', 'O', 'T', 'Z'},
+              .version = 3,
+              .start_time = activity_last_timestamp_ms,
+              .sample_rate = SAMPLE_RATE_HZ,
+              .user_height_cm = user_config.user_height_cm,
+              .user_weight_kg = user_config.user_weight_kg,
+              .user_age_years = user_config.user_age_years,
+              .user_sex = user_config.user_sex,
+              .battery = {.voltage_mV = 0, .percentage = battery_level.level, .status = 0}};
+
+    strncpy(header.fw_version, dis_fw_rev, sizeof(header.fw_version) - 1);
+    header.fw_version[sizeof(header.fw_version) - 1] = '\0';
+
+    uuid = get_target_service_uuid();
+    if (uuid != nullptr)
     {
-        LOG_ERR("Failed to create directory %s: %d", hardware_dir_path, ret_mkdir);
-    }
-
-    // Get next sequence number
-    k_mutex_lock(&sequence_number_mutex, K_MSEC(100));
-    next_activity_file_sequence = (uint8_t)get_next_file_sequence(hardware_dir_path, activity_file_prefix);
-    if (next_activity_file_sequence == 0)
-    {
-        next_activity_file_sequence = 1;
-    }
-    k_mutex_unlock(&sequence_number_mutex);
-
-    // Create file path
-    snprintk(activity_file_path, sizeof(activity_file_path), "%s/%s%03u.dat", hardware_dir_path, activity_file_prefix,
-             next_activity_file_sequence);
-
-    LOG_WRN("activity_file_path=%s, activity_file_path_size=%d, hardware_dir_path=%s,    activity_file_prefix=%s, "
-            "next_activity_file_sequence=%d",
-            activity_file_path, sizeof(activity_file_path), hardware_dir_path, activity_file_prefix,
-            next_activity_file_sequence);
-    fs_file_t_init(&activity_log_file);
-
-    // Open file
-    int ret_fs_open = fs_open(&activity_log_file, activity_file_path, FS_O_CREATE | FS_O_RDWR | FS_O_APPEND);
-    if (ret_fs_open != 0)
-    {
-        LOG_ERR("Failed to open activity log %s: %d", activity_file_path, ret_fs_open);
-        status = err_t::FILE_SYSTEM_ERROR;
+        memcpy(header.service_uuid, uuid, 16);
+        LOG_INF("Activity header includes BLE service UUID");
     }
     else
     {
-        LOG_INF("Opened new activity log file: %s", activity_file_path);
-
-        // Get current battery state
-        //  battery_info_t battery_start = get_battery_info();  to be implmented
-
-        // Version 3 header with battery and UUID support
-        typedef struct __attribute__((packed))
-        {
-            char magic[4];          // "BOTZ"
-            uint8_t version;        // File format version (3)
-            uint32_t start_time;    // Milliseconds the activity starts from up time
-            uint32_t sample_rate;   // Sampling frequency (Hz)
-            char fw_version[16];    // Null-terminated string
-            uint8_t user_height_cm; // User profile data
-            uint8_t user_weight_kg;
-            uint8_t user_age_years;
-            uint8_t user_sex;
-            battery_info_t battery; // Battery state at start
-            uint8_t service_uuid[16]; // BLE service UUID
-        } ActivityFileHeaderV3;
-
-        ActivityFileHeaderV3 header = {.magic = {'B', 'O', 'T', 'Z'},
-                                       .version = 3,
-                                       .start_time = activity_last_timestamp_ms,
-                                       .sample_rate = sampling_frequency,
-                                       .user_height_cm = user_config.user_height_cm,
-                                       .user_weight_kg = user_config.user_weight_kg,
-                                       .user_age_years = user_config.user_age_years,
-                                       .user_sex = user_config.user_sex,
-                                       .battery = battery_start};
-        
-        strncpy(header.fw_version, fw_version, sizeof(header.fw_version) - 1);
-        header.fw_version[sizeof(header.fw_version) - 1] = '\0';
-        
-        // Get the BLE service UUID from bluetooth module
-        const uint8_t* uuid = get_target_service_uuid();
-        if (uuid != nullptr) {
-            memcpy(header.service_uuid, uuid, 16);
-            LOG_INF("Activity header includes BLE service UUID");
-        } else {
-            memset(header.service_uuid, 0, 16);
-            LOG_WRN("Could not get BLE service UUID, using zeros");
-        }
-
-        // Write header through buffer system
-        if (activity_write_buffer_pos + sizeof(header) > sizeof(activity_write_buffer))
-        {
-            flush_activity_buffer();
-        }
-        memcpy(activity_write_buffer + activity_write_buffer_pos, &header, sizeof(header));
-        activity_write_buffer_pos += sizeof(header);
-
-        // Flush header immediately
-        err_t flush_status = flush_activity_buffer();
-        if (flush_status != err_t::NO_ERROR)
-        {
-            LOG_ERR("Failed to flush activity header: %d", (int)flush_status);
-            fs_close(&activity_log_file);
-            status = err_t::FILE_SYSTEM_ERROR;
-        }
-        else
-        {
-            LOG_INF("Activity session started. Battery: %d%%, Voltage: %dmV", battery_start.percentage,
-                    battery_start.voltage_mV);
-        }
+        memset(header.service_uuid, 0, 16);
+        LOG_WRN("Could not get BLE service UUID, using zeros");
     }
 
-    k_mutex_unlock(&activity_file_mutex);
+    generic_message_t msg = {};
+    msg.sender = SENDER_DATA;
+    msg.type = MSG_TYPE_ACTIVITY_HEADER;
+
+    memcpy(&msg.data.activity_header, &header, sizeof(header));
+
+    if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
+    {
+        LOG_WRN("Bluetooth queue full, dropping activity header");
+    }
+
+
+
+      ret_write = fs_write(&activity_log_file, &header, sizeof(header));
+      if (ret_write < 0)
+      {
+          LOG_ERR("Failed to write activity header: %d", ret_write);
+          status = err_t::DATA_ERROR;
+      }  
+
+       ret_write = fs_sync(&activity_log_file);
+       if (ret_write != 0)
+       {
+           LOG_ERR("Failed to sync activity file: %d", ret_write);
+           status = err_t::DATA_ERROR;
+       }
+
+       k_mutex_unlock(&activity_file_mutex);
+
+       LOG_WRN("Header is:\n"
+               "  Magic: %.4s\n"
+               "  Version: %u\n"
+               "  Start Time: %u\n"
+               "  Firmware Version: %s\n"
+               "  Sample Rate: %u Hz\n"
+               "  User Height: %u cm\n"
+               "  User Weight: %u kg\n"
+               "  User Age: %u years\n"
+               "  User Sex: %u\n"
+               "  Battery: %u%%\n"
+               "  Voltage: %u mV\n",
+               header.magic, header.version, header.start_time, header.fw_version, header.sample_rate,
+               header.user_height_cm, header.user_weight_kg, header.user_age_years, header.user_sex,
+               header.battery.percentage, header.battery.voltage_mV); 
+
+    // Start the periodic sync timer after successfully opening the file
+    if (status == err_t::NO_ERROR)
+    {
+        //  k_timer_start(&fs_sync_timer, K_SECONDS(5), K_SECONDS(5));
+        LOG_INF("Periodic fs_sync timer started.");
+    }
+
     return status;
 }
 
 // End activity logging
 err_t end_activity_logging()
 {
+
+#if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    return err_t::NO_ERROR;
+#endif
+
     err_t overall_status = err_t::NO_ERROR;
 
     LOG_WRN("Closing file");
 
+    // Stop the periodic timer
+    k_timer_stop(&fs_sync_timer);
+    LOG_INF("Periodic fs_sync timer stopped.");
+
+    // Lock the mutex for all file operations
+       k_mutex_lock(&activity_file_mutex, K_FOREVER);
+
     if (activity_log_file.filep != nullptr)
     {
-        // 1. Flush any remaining data
-        err_t flush_status = flush_activity_buffer();
-        if (flush_status != err_t::NO_ERROR)
-        {
-            LOG_ERR("Failed to flush final data: %d", (int)flush_status);
-            overall_status = flush_status;
-        }
 
-        // 2. Get final battery state
-        // battery_info_t battery_end = get_battery_info();
 
-        battery_info_t battery_end = {
-            .voltage_mV = 3500, // Placeholder, replace with actual voltage reading
-            .percentage = 90,   // Placeholder, replace with actual battery reading
-        };
-
-        // 3. Prepare V2 footer structure
-        typedef struct __attribute__((packed))
-        {
-            uint32_t end_time;      // Duration in milliseconds
-            uint32_t record_count;  // Total records written
-            uint32_t packet_count;  // Total packets processed
-            uint32_t file_crc;      // CRC-32 placeholder
-            battery_info_t battery; // Battery at session end
-        } ActivityFileFooterV2;
-
-        ActivityFileFooterV2 footer = {.end_time = k_uptime_get(),
+        ActivityFileFooterV3 footer = {.end_time = get_current_epoch_time(),
                                        .record_count = activity_batch_count,
                                        .packet_count = activity_packet_counter,
                                        .file_crc = 0, // Would be calculated in full implementation
-                                       .battery = battery_end};
+                                       .battery = {.voltage_mV = 0, .percentage = battery_level.level, .status = 0}};
 
-        // 5. Write footer
-        if (activity_write_buffer_pos + sizeof(footer) > sizeof(activity_write_buffer))
-        {
-            flush_status = flush_activity_buffer();
-            if (flush_status != err_t::NO_ERROR)
-            {
-                LOG_ERR("Failed pre-footer flush: %d", (int)flush_status);
-                overall_status = flush_status;
-            }
-        }
-        memcpy(activity_write_buffer + activity_write_buffer_pos, &footer, sizeof(footer));
-        activity_write_buffer_pos += sizeof(footer);
+        generic_message_t msg = {};
+        msg.sender = SENDER_DATA;
+        msg.type = MSG_TYPE_ACTIVITY_FOOTER;
 
-        // 6. Final flush
-        flush_status = flush_activity_buffer();
-        if (flush_status != err_t::NO_ERROR)
+        memcpy(&msg.data.activity_footer, &footer, sizeof(footer));
+
+        if (k_msgq_put(&bluetooth_msgq, &msg, K_NO_WAIT) != 0)
         {
-            LOG_ERR("Failed to flush footer: %d", (int)flush_status);
-            overall_status = flush_status;
+            LOG_WRN("Bluetooth queue full, dropping activity footer");
         }
 
-        // 7. Close file
-        int ret_close = fs_close(&activity_log_file);
-        if (ret_close != 0)
-        {
-            LOG_ERR("Failed to close file: %d", ret_close);
-            overall_status = err_t::FILE_SYSTEM_ERROR;
-        }
-        else
-        {
-            LOG_INF("Session ended");
-        }
 
-        // Always send notification after closing, regardless of close result
-        generic_message_t activity_msg;
-        activity_msg.sender = SENDER_DATA;
-        activity_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
-        activity_msg.data.new_hardware_log_file.file_sequence_id = next_activity_file_sequence;
-        strncpy(activity_msg.data.new_hardware_log_file.file_path, activity_file_path,
-                sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1);
-        activity_msg.data.new_hardware_log_file
-            .file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+          int ret = fs_write(&activity_log_file, &footer, sizeof(footer));
+          if (ret < 0)
+          {
+              LOG_ERR("Failed to write activity buffer: %d", ret);
+          }
 
-        if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
-        {
-            LOG_WRN("Failed to send session notification");
-        }
+          ret = fs_sync(&activity_log_file);
+          if (ret != 0)
+          {
+              LOG_ERR("Failed to sync activity file: %d", ret);
+          }
+
+          // 7. Close file
+          int ret_close = fs_close(&activity_log_file);
+          if (ret_close != 0)
+          {
+              LOG_ERR("Failed to close file: %d", ret_close);
+              overall_status = err_t::FILE_SYSTEM_ERROR;
+          }
+          else
+          {
+              LOG_INF("Session ended");
+          }
+
+          // Always send notification after closing, regardless of close result
+          generic_message_t activity_msg;
+          activity_msg.sender = SENDER_DATA;
+          activity_msg.type = MSG_TYPE_NEW_ACTIVITY_LOG_FILE;
+          activity_msg.data.new_hardware_log_file.file_sequence_id = next_activity_file_sequence;
+          strncpy(activity_msg.data.new_hardware_log_file.file_path, activity_file_path,
+                  sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1);
+          activity_msg.data.new_hardware_log_file
+              .file_path[sizeof(activity_msg.data.new_hardware_log_file.file_path) - 1] = '\0';
+
+          if (k_msgq_put(&bluetooth_msgq, &activity_msg, K_NO_WAIT) != 0)
+          {
+              LOG_WRN("Failed to send session notification");
+          } 
 
         // 9. Reset state
         activity_batch_count = 0;
         activity_write_buffer_pos = 0;
+        activity_log_file.filep = nullptr; // Explicitly set to nullptr after closing
+
+        // Unlock the mutex after all file operations are complete
+        k_mutex_unlock(&activity_file_mutex);
     }
 
     LOG_WRN("Closing file CLOSED!!!!!!!!");
@@ -1165,34 +1137,35 @@ err_t end_activity_logging()
     generic_message_t copy_msg = {};
     copy_msg.sender = SENDER_DATA;
     copy_msg.type = MSG_TYPE_COPY_FILE_TO_SD;
-    
+
     // Copy the current activity file path
-    strncpy(copy_msg.data.copy_to_sd.source_path, activity_file_path, 
-            sizeof(copy_msg.data.copy_to_sd.source_path) - 1);
+    strncpy(copy_msg.data.copy_to_sd.source_path, activity_file_path, sizeof(copy_msg.data.copy_to_sd.source_path) - 1);
     copy_msg.data.copy_to_sd.source_path[sizeof(copy_msg.data.copy_to_sd.source_path) - 1] = '\0';
-    
+
     // Generate destination filename (keep same name but with different extension for clarity)
-    snprintf(copy_msg.data.copy_to_sd.dest_filename, 
-             sizeof(copy_msg.data.copy_to_sd.dest_filename),
+    snprintf(copy_msg.data.copy_to_sd.dest_filename, sizeof(copy_msg.data.copy_to_sd.dest_filename),
              "activity_%03u_copy.dat", next_activity_file_sequence);
-    
-    if (k_msgq_put(&data_sd_msgq, &copy_msg, K_NO_WAIT) != 0) {
+
+    if (k_msgq_put(&data_sd_msgq, &copy_msg, K_NO_WAIT) != 0)
+    {
         LOG_ERR("Failed to send copy file message to SD module");
-    } else {
-        LOG_INF("Requested copy of activity file %s to SD card as %s", 
-                activity_file_path, copy_msg.data.copy_to_sd.dest_filename);
+    }
+    else
+    {
+        LOG_INF("Requested copy of activity file %s to SD card as %s", activity_file_path,
+                copy_msg.data.copy_to_sd.dest_filename);
     }
 #endif
 
     // TODO: test only - list directory contents
-    LOG_WRN("About to list directory contents for: %s", hardware_dir_path);
-    int lsdir_result = lsdir(hardware_dir_path);
-    if (lsdir_result != 0)
-    {
-        LOG_ERR("lsdir failed with error: %d", lsdir_result);
-    }
+    //   LOG_WRN("About to list directory contents for: %s", hardware_dir_path);
+        int lsdir_result = lsdir(hardware_dir_path);
+      if (lsdir_result != 0)
+       {
+          LOG_ERR("lsdir failed with error: %d", lsdir_result);
+      }
 
-    return overall_status;
+     return overall_status;
 }
 
 // Save BHI360 calibration data
@@ -1971,6 +1944,30 @@ static int lsdir(const char *path)
     }
 
     return res;
+}
+
+static void fs_sync_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    // Only run if the file is open and a sync is actually pending
+    if (activity_log_file.filep != nullptr && atomic_get(&sync_pending))
+    {
+        LOG_INF("Timer-triggered file sync operation initiated.");
+        k_mutex_lock(&activity_file_mutex, K_FOREVER);
+        int ret = fs_sync(&activity_log_file);
+        if (ret != 0)
+        {
+            LOG_ERR("Failed to sync activity file: %d", ret);
+        }
+        else
+        {
+            LOG_INF("File sync successful.");
+        }
+        // Clear the pending flag
+        atomic_set(&sync_pending, 0);
+        k_mutex_unlock(&activity_file_mutex);
+    }
 }
 
 // App event handler

@@ -19,7 +19,7 @@ config SENSOR_DATA_MODULE_LOG_LEVEL
 
 config SENSOR_DATA_MODULE_STACK_SIZE
 	int "Sensor data module thread stack size"
-	default 4096
+	default 6144
 	depends on SENSOR_DATA_MODULE
 	help
 	  Stack size for sensor data processing thread

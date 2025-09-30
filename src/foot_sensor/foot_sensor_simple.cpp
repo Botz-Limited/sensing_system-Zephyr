@@ -32,6 +32,7 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_FOOT_SENSOR_MODULE_LOG_LEVEL);
 // External message queues
 extern struct k_msgq sensor_data_msgq;
 extern struct k_msgq bluetooth_msgq;
+extern struct k_msgq data_msgq; // For sending calibration data to data module
 #if IS_ENABLED(CONFIG_LAB_VERSION)
 extern struct k_msgq data_sd_msgq; // For sending to data_sd module (lab version)
 #endif
@@ -39,12 +40,23 @@ extern struct k_msgq data_sd_msgq; // For sending to data_sd module (lab version
 // Constants
 static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
 static constexpr uint8_t CALIBRATION_SAMPLES = 100;
-static constexpr uint16_t SAMPLE_RATE_HZ = 100;
-static constexpr uint32_t SAMPLE_PERIOD_MS = 1000 / SAMPLE_RATE_HZ; // 10ms
-static constexpr uint8_t BLUETOOTH_RATE_DIVIDER = 20;               // Send to BLE at 5Hz (100Hz / 20)
+
+static constexpr uint32_t SAMPLE_PERIOD_MS = 1000 / SAMPLE_RATE_HZ; // 5ms
+static constexpr uint8_t BLUETOOTH_RATE_DIVIDER = 40;               // Send to BLE at 5Hz (200Hz / 40)
+
+
+//for VDD only monitoring 
+static constexpr uint32_t VDD_MONITOR_INTERVAL_MS = 1000; // Check VDD every 5 seconds
+static constexpr uint16_t VDD_LOW_THRESHOLD_MV = 3300;    // 3.3V threshold
+static int32_t vdd_voltage_mv = 0;
+static uint32_t last_vdd_check_ms = 0;
+static err_t configure_channel_for_vdd(uint8_t channel_num);
+static err_t restore_channel_to_pressure(uint8_t channel_num);
+static err_t read_vdd_voltage(uint8_t temp_channel);
+//End VDD monitoring constants
 
 // Thread stack and priority
-K_THREAD_STACK_DEFINE(foot_sensor_stack, 3096);
+K_THREAD_STACK_DEFINE(foot_sensor_stack, 4096);
 static struct k_thread foot_sensor_thread_data;
 static k_tid_t foot_sensor_tid = NULL;
 
@@ -53,6 +65,13 @@ static atomic_t logging_active = ATOMIC_INIT(0);
 
 // Local streaming state
 static bool foot_sensor_streaming_enabled = false;
+
+// Weight map calibration state
+static bool weight_map_calibration_active = false;
+static uint32_t weight_map_sample_count = 0;
+static constexpr uint32_t WEIGHT_MAP_SAMPLES = 500;        // 5 seconds at 100Hz
+static uint32_t weight_map_sum[SAADC_CHANNEL_COUNT] = {0}; // Changed to uint32_t to avoid overflow
+static foot_weight_map_data_t weight_map_data;
 
 // ADC device and configuration
 static const struct device *adc_dev;
@@ -75,6 +94,9 @@ static void foot_sensor_thread(void *p1, void *p2, void *p3);
 static err_t init_adc_channels(void);
 static void calibrate_channels(void);
 static void process_adc_samples(int16_t *raw_data);
+static void start_weight_map_calibration(void);
+static void process_weight_map_sample(int16_t *raw_data);
+static void complete_weight_map_calibration(void);
 
 /**
  * @brief Initialize ADC channels
@@ -92,7 +114,7 @@ static err_t init_adc_channels(void)
     // Configure all 8 channels
     for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
     {
-        channel_configs[i].gain = ADC_GAIN_1;
+        channel_configs[i].gain = ADC_GAIN_1_6;
         channel_configs[i].reference = ADC_REF_INTERNAL;
         channel_configs[i].acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10);
         channel_configs[i].channel_id = i;                                         // Channel 0-7 maps to AIN0-AIN7
@@ -131,11 +153,122 @@ static void calibrate_channels(void)
 }
 
 /**
+ * @brief Start weight map calibration
+ */
+static void start_weight_map_calibration(void)
+{
+    LOG_INF("Starting foot weight map calibration - stand still for 5 seconds");
+
+    // Reset calibration state
+    weight_map_calibration_active = true;
+    weight_map_sample_count = 0;
+    memset(weight_map_sum, 0, sizeof(weight_map_sum));
+    memset(&weight_map_data, 0, sizeof(weight_map_data));
+}
+
+/**
+ * @brief Process weight map calibration sample
+ */
+static void process_weight_map_sample(int16_t *raw_data)
+{
+    if (weight_map_sample_count < WEIGHT_MAP_SAMPLES)
+    {
+        // Accumulate sensor values
+        for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+        {
+            // Use raw values without offset calibration for weight map
+            // ADC is 14-bit (0-16383), ensure we handle as unsigned
+            uint16_t value = (raw_data[i] < 0) ? 0 : (uint16_t)raw_data[i];
+
+            // Accumulate safely - max possible: 16383 * 500 = 8,191,500 (fits in uint32_t)
+            weight_map_sum[i] += value;
+        }
+
+        weight_map_sample_count++;
+
+        // Log progress every second (100 samples)
+        if (weight_map_sample_count % 100 == 0)
+        {
+            LOG_INF("Weight map calibration progress: %d/%d samples", weight_map_sample_count, WEIGHT_MAP_SAMPLES);
+        }
+
+        // Check if calibration is complete
+        if (weight_map_sample_count >= WEIGHT_MAP_SAMPLES)
+        {
+            complete_weight_map_calibration();
+        }
+    }
+}
+
+/**
+ * @brief Complete weight map calibration and send data
+ */
+static void complete_weight_map_calibration(void)
+{
+    LOG_INF("Weight map calibration complete - processing data");
+
+    // Calculate averages and total weight
+    uint32_t total = 0;
+    for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+    {
+        weight_map_data.sensor_map[i] = (uint16_t)(weight_map_sum[i] / WEIGHT_MAP_SAMPLES);
+        total += weight_map_data.sensor_map[i];
+    }
+
+    weight_map_data.total_weight = total;
+    weight_map_data.sample_count = WEIGHT_MAP_SAMPLES;
+    weight_map_data.timestamp_ms = k_uptime_get_32();
+    weight_map_data.is_valid = true;
+
+    // Calculate weight distribution percentages
+    if (total > 0)
+    {
+        for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+        {
+            weight_map_data.weight_distribution[i] = (float)weight_map_data.sensor_map[i] * 100.0f / (float)total;
+        }
+    }
+
+    // Log the calibration results
+    LOG_INF("Weight map calibration results:");
+    LOG_INF("  Total weight: %u", weight_map_data.total_weight);
+    for (uint8_t i = 0; i < SAADC_CHANNEL_COUNT; i++)
+    {
+        LOG_INF("  Sensor[%d]: %u (%.1f%%)", i, weight_map_data.sensor_map[i], weight_map_data.weight_distribution[i]);
+    }
+
+    // Send calibration data to data module for storage
+    generic_message_t msg;
+    msg.sender = SENDER_FOOT_SENSOR_THREAD;
+    msg.type = MSG_TYPE_FOOT_WEIGHT_MAP_DATA;
+    memcpy(&msg.data.foot_weight_map, &weight_map_data, sizeof(foot_weight_map_data_t));
+
+    if (k_msgq_put(&data_msgq, &msg, K_NO_WAIT) != 0)
+    {
+        LOG_ERR("Failed to send weight map calibration data to data module");
+    }
+    else
+    {
+        LOG_INF("Weight map calibration data sent to data module");
+    }
+
+    // Reset calibration state
+    weight_map_calibration_active = false;
+}
+
+/**
  * @brief Process ADC samples and send to message queues
  */
 static void process_adc_samples(int16_t *raw_data)
 {
     static uint8_t ble_sample_counter = 0;
+
+    // Handle weight map calibration if active
+    if (weight_map_calibration_active)
+    {
+        process_weight_map_sample(raw_data);
+        return; // Don't process normal samples during calibration
+    }
 
     if (!calibration_done)
     {
@@ -196,7 +329,7 @@ static void process_adc_samples(int16_t *raw_data)
 #if !IS_ENABLED(CONFIG_PRIMARY_DEVICE)
             // SECONDARY (LEFT FOOT) characteristics:
             is_left_foot = true;
-            phase_offset = 300; // Half of 600ms cycle for opposite phase
+            phase_offset = 375; // Half of 750ms cycle for opposite phase
             // Add small realistic variation (±10ms) for natural gait
             phase_offset += ((current_time / 1000) % 21) - 10; // -10 to +10 ms variation
 
@@ -227,10 +360,10 @@ static void process_adc_samples(int16_t *raw_data)
 #endif
 
             // Adjust cycle time for GCT differences
-            int cycle_time = (current_time + phase_offset) % 600; // 600ms gait cycle with phase offset
+            int cycle_time = (current_time + phase_offset) % 750; // 750ms gait cycle with phase offset
 
             // Adjust stance phase duration based on GCT multiplier
-            int stance_duration = (int)(300 * gct_multiplier); // Normally 300ms
+            int stance_duration = (int)(375 * gct_multiplier); // Normally 375ms
 
             // Create realistic pressure pattern with 14-bit ADC range
             // Total pressure during midstance: ~70,000-80,000 (clear detection)
@@ -239,7 +372,7 @@ static void process_adc_samples(int16_t *raw_data)
             if (cycle_time < stance_duration)
             {
                 // Stance phase - foot is on ground (adjusted duration for GCT differences)
-                if (cycle_time < 50)
+                if (cycle_time < 62)
                 {
                     // Initial contact/loading (0-50ms) - heel strike
                     // Sharp ramp up pressure from 0 to 10000
@@ -279,7 +412,7 @@ static void process_adc_samples(int16_t *raw_data)
                         msg.data.foot_samples.values[7] = pressure_value * 0.95;      // Heel medial - less pressure
                     }
                 }
-                else if (cycle_time < 150)
+                else if (cycle_time < 187)
                 {
                     // Midstance (50-150ms) - full foot contact, weight bearing
                     // All sensors have significant pressure - apply multiplier
@@ -319,7 +452,7 @@ static void process_adc_samples(int16_t *raw_data)
                         msg.data.foot_samples.values[7] = (int16_t)(8000 * pressure_multiplier * 0.98);  // Heel medial
                     }
                 }
-                else if (cycle_time < (stance_duration - 50))
+                else if (cycle_time < (stance_duration - 62))
                 {
                     // Push-off phase - weight shifts to forefoot/toes
                     // Adjust timing based on stance_duration
@@ -361,8 +494,8 @@ static void process_adc_samples(int16_t *raw_data)
                     // Toe-off transition (250-300ms) - leaving ground
                     // Pressure rapidly decreasing as foot leaves ground
                     // Fixed calculation: linear ramp from max to 0
-                    int16_t time_in_phase = cycle_time - 250;            // 0 to 50
-                    int16_t fade_factor = 13000 - (time_in_phase * 260); // 13000 to 0 over 50ms
+                    int16_t time_in_phase = cycle_time - 312;            // 0 to 50
+                    int16_t fade_factor = 13000 - (time_in_phase * 208); // 13000 to 0 over 62ms
                     if (fade_factor < 0)
                         fade_factor = 0;
 
@@ -472,6 +605,30 @@ static void foot_sensor_thread(void *p1, void *p2, void *p3)
     // Main sampling loop
     while (true)
     {
+        // Check for weight map calibration command via message queue
+        generic_message_t cmd_msg;
+        if (k_msgq_get(&bluetooth_msgq, &cmd_msg, K_NO_WAIT) == 0)
+        {
+            if (cmd_msg.type == MSG_TYPE_START_FOOT_WEIGHT_MAP)
+            {
+                LOG_INF("Received weight map calibration command");
+                start_weight_map_calibration();
+            }
+        }
+
+        // Check if it's time to monitor VDD (every 1 seconds)
+    /**    uint32_t current_time = k_uptime_get();
+        if (current_time - last_vdd_check_ms >= VDD_MONITOR_INTERVAL_MS) {
+            last_vdd_check_ms = current_time;
+            
+            // Use channel 0 for VDD monitoring
+            err_t vdd_err = read_vdd_voltage(0);
+            if (vdd_err == err_t::NO_ERROR) {
+                LOG_WRN("VDD monitoring successful: %d mV", vdd_voltage_mv);
+            }
+        }*/
+        
+
         // Read all 8 channels
         int ret = adc_read(adc_dev, &sequence);
         if (ret < 0)
@@ -499,6 +656,99 @@ static void foot_sensor_thread(void *p1, void *p2, void *p3)
 }
 
 /**
+ * @brief Configure a channel for VDD monitoring
+ */
+static err_t configure_channel_for_vdd(uint8_t channel_num)
+{
+    struct adc_channel_cfg vdd_cfg = {
+        .gain = ADC_GAIN_1_6,
+        .reference = ADC_REF_INTERNAL,
+        .acquisition_time = ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10),
+        .channel_id = channel_num,
+        .input_positive = SAADC_CH_PSELP_PSELP_VDD,
+        .input_negative = SAADC_CH_PSELN_PSELN_NC // Not connected
+    };
+
+    int err = adc_channel_setup(adc_dev, &vdd_cfg);
+    if (err < 0) {
+        LOG_ERR("Failed to setup ADC channel %d for VDD: %d", channel_num, err);
+        return err_t::ADC_ERROR;
+    }
+
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Restore a channel to its normal pressure sensor configuration
+ */
+static err_t restore_channel_to_pressure(uint8_t channel_num)
+{
+    int err = adc_channel_setup(adc_dev, &channel_configs[channel_num]);
+    if (err < 0) {
+        LOG_ERR("Failed to restore ADC channel %d to pressure sensor: %d", channel_num, err);
+        return err_t::ADC_ERROR;
+    }
+
+    return err_t::NO_ERROR;
+}
+
+/**
+ * @brief Read and calculate VDD voltage
+ */
+static err_t read_vdd_voltage(uint8_t temp_channel)
+{
+    int16_t vdd_sample;
+    struct adc_sequence vdd_sequence = {
+        .channels = BIT(temp_channel),
+        .buffer = &vdd_sample,
+        .buffer_size = sizeof(vdd_sample),
+        .resolution = 12, 
+        .oversampling = 4,
+        .calibrate = true,
+    };
+
+    // 1. Configure the temporary channel for VDD
+    err_t err = configure_channel_for_vdd(temp_channel);
+    if (err != err_t::NO_ERROR) {
+        return err;
+    }
+
+    // 2. Read the VDD sample
+    int ret = adc_read(adc_dev, &vdd_sequence);
+    if (ret < 0) {
+        LOG_ERR("VDD ADC read failed: %d", ret);
+        restore_channel_to_pressure(temp_channel);
+        return err_t::ADC_ERROR;
+    }
+
+    // 3. Calculate VDD
+    const int32_t ref_voltage_mv = 600; // Internal reference is 0.6V
+    const int32_t max_adc_value = (1 << vdd_sequence.resolution) - 1; // 4095 for 12-bit
+    
+   // LOG_WRN("Raw VDD sample: %d, Max ADC value: %d", vdd_sample, max_adc_value);
+
+
+     int32_t adc_voltage = (vdd_sample * ref_voltage_mv) / max_adc_value;
+    vdd_voltage_mv = adc_voltage * 6*1.12;
+
+  //  LOG_WRN("VDD voltage: %d mV", vdd_voltage_mv);
+
+    // 4. Restore the channel to pressure sensing
+    err = restore_channel_to_pressure(temp_channel);
+    if (err != err_t::NO_ERROR) {
+        return err;
+    }
+
+    // Check for low voltage
+    if (vdd_voltage_mv < VDD_LOW_THRESHOLD_MV) {
+        LOG_WRN("LOW VOLTAGE WARNING: %d mV (threshold: %d mV)", 
+                vdd_voltage_mv, VDD_LOW_THRESHOLD_MV);
+    }
+
+    return err_t::NO_ERROR;
+}
+
+/**
  * @brief Initialize foot sensor module
  */
 static void foot_sensor_init(void)
@@ -511,6 +761,7 @@ static void foot_sensor_init(void)
                                       K_PRIO_PREEMPT(5), // Priority 5
                                       0, K_NO_WAIT);
 
+   // k_thread_suspend(foot_sensor_tid);
     k_thread_name_set(foot_sensor_tid, "foot_sensor");
 
     LOG_INF("Foot sensor module initialized successfully");
@@ -537,6 +788,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     if (is_foot_sensor_start_activity_event(aeh))
     {
         LOG_INF("Received start activity event - enabling foot sensor sampling");
+        k_thread_resume(foot_sensor_tid);
         atomic_set(&logging_active, 1);
         foot_sensor_streaming_enabled = false;
         return false;
@@ -546,6 +798,7 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         LOG_INF("Received stop activity event - disabling foot sensor sampling");
         atomic_set(&logging_active, 0);
+        k_thread_suspend(foot_sensor_tid);
         return false;
     }
 
@@ -553,6 +806,15 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         auto *event = cast_streaming_control_event(aeh);
         foot_sensor_streaming_enabled = event->foot_sensor_streaming_enabled;
+        if (foot_sensor_streaming_enabled)
+        {
+            k_thread_resume(foot_sensor_tid);
+        }
+        else
+        {
+
+            k_thread_suspend(foot_sensor_tid);
+        }
         LOG_INF("foot_samples_work %s", foot_sensor_streaming_enabled ? "enabled" : "disabled");
 
 // If in lab version, we have to stop the raw file logging in the sd card

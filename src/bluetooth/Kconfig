@@ -15,7 +15,6 @@ config BLUETOOTH_MODULE
 	# Settings
 	select SETTINGS
 	select SETTINGS_RUNTIME
-	select SHELL
 	select BT_SETTINGS
 	select MCUMGR_SMP_BT
 	select MCUMGR_SMP_BT_CONN_PARAM_CONTROL
@@ -39,7 +38,7 @@ config BLUETOOTH_MODULE
 	select MCUMGR_CMD_FS_MGMT
 	select MCUMGR_SMP_SHELL
 	select MCUMGR_GRP_ZEPHYR_BASIC
-	select MCUMGR_GRP_BASIC_CMD_STORAGE_ERASE
+	#select MCUMGR_GRP_BASIC_CMD_STORAGE_ERASE
 	select MCUMGR_CMD_IMG_MGMT
 	select MCUMGR_CMD_OS_MGMT
 	select MCUMGR_CMD_STAT_MGMT
@@ -112,6 +111,14 @@ config BLUETOOTH_MODULE_LOG_LEVEL
 config BLUETOOTH_MODULE_ADV_TIMEOUT_SECS
 	int "Duration the system with advertise for"
 	default 60
+
+config BT_SETTINGS_CCC_STORE_MAX
+	int "Max number of Client Characteristic Configuration (CCC)"
+	default 80
+	range 1 96
+	help
+	  Defines the max number of Client Characteristic Configuration (CCC)
+	  that the stack can handle	
 
 config BLUETOOTH_MODULE_STACK_SIZE
 	int "BTH  module thread stack size"

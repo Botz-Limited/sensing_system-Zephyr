@@ -3,4 +3,5 @@
 
 
 rsource "bosch/Kconfig"
+rsource "ti/bq25185/Kconfig"
 

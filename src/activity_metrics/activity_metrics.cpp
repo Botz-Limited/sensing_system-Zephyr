@@ -1308,6 +1308,7 @@ static uint16_t calculate_pace_no_gps(uint32_t steps, uint32_t time_ms)
         return 0;
     }
     
+    //TODO: Make the function accurate not based on assumption
     // Estimate stride length based on height (simplified)
     float stride_length_m = 0.7f; // Default 0.7m
     

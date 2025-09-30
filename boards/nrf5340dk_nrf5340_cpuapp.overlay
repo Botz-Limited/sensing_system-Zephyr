@@ -18,6 +18,14 @@
         wifi0 = &nrf7002;
     };
 
+bq25185: bq25185 {
+        compatible = "ti,bq25185";
+        status = "okay";
+        stat1-gpios = <&gpio1 5 GPIO_ACTIVE_HIGH>;  /* P1.05 */
+        stat2-gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;  /* P1.06 */
+    };
+
+    
 
 };
 
@@ -29,14 +37,14 @@
         compatible = "zephyr,fstab";
         status = "okay";
         lfs1: lfs1 {
-            compatible = "zephyr,fstab,littlefs";
             mount-point = "/lfs1";
+            compatible = "zephyr,fstab,littlefs";
             partition = <&lfs1_part>;
-            read-size = <16>;
-            prog-size = <16>;
-            cache-size = <64>;
+            read-size = <256>;
+            prog-size = <256>;
+            cache-size = <512>;
             lookahead-size = <32>;
-            block-cycles = <512>;
+            block-cycles = <1000>;
         };
 
         sdhc_mount: sdhc_mount {
@@ -177,10 +185,32 @@
 	status = "disabled";
 };
 
-
+&i2c1 {
+    status = "disabled";
+};
 &spi1 {
     status = "disabled";
 };
+
+&i2c3 {
+    compatible = "nordic,nrf-twim";
+    status = "ok";
+    pinctrl-0 = <&i2c3_default>;
+    pinctrl-1 = <&i2c3_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    bq27441: bq27441@55 {
+        compatible = "ti,bq274xx";
+        reg = <0x55>;
+        status = "ok";
+        design-voltage = <3700>;
+        design-capacity = <1800>;
+        taper-current = <45>;
+        terminate-voltage = <3000>;
+        int-gpios = <&gpio0 23 GPIO_ACTIVE_HIGH>;
+    };
+};
+
 
 &spi4 {
 	compatible = "nordic,nrf-spim";
@@ -207,7 +237,7 @@
         wifi-max-tx-pwr-5g-high-mcs0 = <20>;
         wifi-max-tx-pwr-5g-high-mcs7 = <20>;
         label = "NRF7002";
-        status = "okay";
+        status = "disabled";
 	};
 };
 
@@ -269,7 +299,24 @@
     };
 };
 
+
 &pinctrl {
+
+    i2c3_default: i2c3_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 1, 2)>,    /* P1.02 as SDA */
+                    <NRF_PSEL(TWIM_SCL, 1, 3)>;    /* P1.03 as SCL */
+        };
+    };
+
+    i2c3_sleep: i2c3_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 1, 2)>,
+                    <NRF_PSEL(TWIM_SCL, 1, 3)>;
+            low-power-enable;
+        };
+    };
+    
     spi1_default_alt: spi1_default_alt {
         group1 {
             psels = <NRF_PSEL(SPIM_SCK, 1, 14)>,

@@ -44,8 +44,8 @@
 
 #include <app.hpp>
 #include <app_event_manager.h>
-#include <app_version.h>
 #include <app_fixed_point.hpp>
+#include <app_version.h>
 #include <ble_connection_state.h>
 #include <caf/events/module_state_event.h>
 #include <errors.hpp>
@@ -100,6 +100,8 @@ static err_t ble_start_hidden(void);
 #define BLE_ADVERTISING_TIMEOUT_MS 30000                  // 30 seconds advertising timeout
 static constexpr uint32_t DISCOVERY_INITIAL_DELAY_MS = 2; // Delay before starting discovery
 
+static atomic_t logging_active = ATOMIC_INIT(0);
+
 /********************************** BTH THREAD ********************************/
 static constexpr int bluetooth_stack_size = CONFIG_BLUETOOTH_MODULE_STACK_SIZE;
 static constexpr int bluetooth_priority = CONFIG_BLUETOOTH_MODULE_PRIORITY;
@@ -131,6 +133,9 @@ static struct k_work device_info_work;
 static struct k_work weight_measurement_work;
 static struct k_work battery_level_primary_work;
 static struct k_work battery_level_secondary_work;
+static struct k_work activity_header_work;
+static struct k_work activity_metrics_work;
+static struct k_work activity_footer_work;
 
 // Message buffers for work items (protected by mutex for thread safety)
 K_MUTEX_DEFINE(bluetooth_msg_mutex);
@@ -151,6 +156,9 @@ static generic_message_t pending_device_info_msg;
 static generic_message_t pending_weight_msg;
 static generic_message_t pending_battery_primary_msg;
 static generic_message_t pending_battery_secondary_msg;
+static generic_message_t pending_activity_header_msg;
+static generic_message_t pending_activity_metrics_msg;
+static generic_message_t pending_activity_footer_msg;
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
 // Static variables for step count aggregation (preserved from original)
@@ -327,7 +335,7 @@ static void d2d_connected(struct bt_conn *conn, uint8_t err)
         // now, we'll set d2d_conn when we discover D2D services
         LOG_INF("Connection established, will determine if D2D after service "
                 "discovery");
-        jis_update_d2d_connection_status(true);        
+        jis_update_d2d_connection_status(true);
 #else
         // For secondary device, any connection is to the primary (D2D)
         d2d_conn = conn;
@@ -437,13 +445,13 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
     }
 }
 
-// Target service UUID: 5cb36a12-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
+// Target service UUID: 5cb36a11-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
 // This is used by both primary (for advertising) and secondary (for scanning)
 static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x3f, 0x00, 0xa8, 0x89,
-                                                0x97, 0x4d, 0x69, 0xca, 0x14, 0x6a, 0xb3, 0x5c};
+                                                0x97, 0x4d, 0x69, 0xca, 0x16, 0x6a, 0xb3, 0x5c};
 
 // Getter function to access the target service UUID from other modules
-extern "C" const uint8_t* get_target_service_uuid(void)
+extern "C" const uint8_t *get_target_service_uuid(void)
 {
     return target_service_uuid;
 }
@@ -732,7 +740,7 @@ static const struct bt_data ad[] = {
 /* Scan response data - put the 128-bit UUID here to avoid advertising packet
  * size issues */
 static const struct bt_data sd[] = {
-    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a14, 0xca69, 0x4d97, 0x89a8, 0x003ffc9ec8cd)),
+    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a16, 0xca69, 0x4d97, 0x89a8, 0x003ffc9ec8cd)),
 };
 
 /**
@@ -1346,8 +1354,8 @@ err_t bt_module_init(void)
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Initialize BLE recovery handler (only for primary device)
-    ble_recovery_handler_init();
-    LOG_INF("BLE recovery handler initialized");
+    //    ble_recovery_handler_init();
+    //   LOG_INF("BLE recovery handler initialized");
 
     // Initialize connection parameter manager
     int conn_params_err = ble_conn_params_init();
@@ -1482,6 +1490,9 @@ static void device_info_work_handler(struct k_work *work);
 static void weight_measurement_work_handler(struct k_work *work);
 static void battery_level_primary_work_handler(struct k_work *work);
 static void battery_level_secondary_work_handler(struct k_work *work);
+static void activity_header_work_handler(struct k_work *work);
+static void activity_metrics_work_handler(struct k_work *work);
+static void activity_footer_work_handler(struct k_work *work);
 
 void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
 {
@@ -1515,6 +1526,9 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
     k_work_init(&weight_measurement_work, weight_measurement_work_handler);
     k_work_init(&battery_level_primary_work, battery_level_primary_work_handler);
     k_work_init(&battery_level_secondary_work, battery_level_secondary_work_handler);
+    k_work_init(&activity_header_work, activity_header_work_handler);
+    k_work_init(&activity_metrics_work, activity_metrics_work_handler);
+    k_work_init(&activity_footer_work, activity_footer_work_handler);
 
     LOG_INF("Bluetooth work queue initialized");
 
@@ -1720,7 +1734,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_metrics_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    
+
                     // Process via existing activity metrics handler
                     k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
                     break;
@@ -1730,7 +1744,7 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
                     memcpy(&pending_metrics_msg, &msg, sizeof(msg));
                     k_mutex_unlock(&bluetooth_msg_mutex);
-                    
+
                     // Process via existing activity metrics handler
                     k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_ble_work);
                     break;
@@ -1744,6 +1758,27 @@ void bluetooth_process(void * /*unused*/, void * /*unused*/, void * /*unused*/)
                     // Secondary device: flash erase complete, no BLE notification needed
                     LOG_INF("Secondary device: Flash erase complete (no BLE notification)");
 #endif
+                    break;
+
+                case MSG_TYPE_ACTIVITY_HEADER:
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_activity_header_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_header_work);
+                    break;
+
+                case MSG_TYPE_ACTIVITY_METRICS:
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_activity_metrics_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_metrics_work);
+                    break;
+
+                case MSG_TYPE_ACTIVITY_FOOTER:
+                    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+                    memcpy(&pending_activity_footer_msg, &msg, sizeof(msg));
+                    k_mutex_unlock(&bluetooth_msg_mutex);
+                    k_work_submit_to_queue(&bluetooth_work_q, &activity_footer_work);
                     break;
 
                 default:
@@ -1986,6 +2021,54 @@ static void weight_measurement_timeout_work_handler(struct k_work *work)
     }
 }
 #endif
+
+static void activity_metrics_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+    generic_message_t msg = pending_activity_metrics_msg;
+    k_mutex_unlock(&bluetooth_msg_mutex);
+
+    activity_metrics_binary_t *activity_data = &msg.data.activity_metrics;
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Primary device: This handler now only processes primary activity header data
+    jis_activity_metrics_send_packet(activity_data);
+
+#endif
+}
+
+static void activity_header_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+    generic_message_t msg = pending_activity_header_msg;
+    k_mutex_unlock(&bluetooth_msg_mutex);
+
+    ActivityFileHeaderV3 *activity_header = &msg.data.activity_header;
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Primary device: This handler now only processes primary activity header data
+    jis_activity_metrics_send_header(activity_header);
+
+#endif
+}
+
+static void activity_footer_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    k_mutex_lock(&bluetooth_msg_mutex, K_FOREVER);
+    generic_message_t msg = pending_activity_footer_msg;
+    k_mutex_unlock(&bluetooth_msg_mutex);
+
+    ActivityFileFooterV3 *activity_footer = &msg.data.activity_footer;
+#if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
+    // Primary device: This handler now only processes primary activity footer data
+    jis_activity_metrics_send_footer(activity_footer);
+
+#endif
+}
 
 /**
  * @brief Work handler for processing foot samples
@@ -2679,7 +2762,8 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
 
 #if IS_ENABLED(CONFIG_PRIMARY_DEVICE)
     // Handle different types of activity metrics updates
-    switch (msg.type) {
+    switch (msg.type)
+    {
         case MSG_TYPE_ACTIVITY_METRICS_BLE:
             // Handle realtime metrics from activity_metrics or realtime_metrics module
             if (msg.sender == SENDER_REALTIME_METRICS || msg.sender == SENDER_ACTIVITY_METRICS)
@@ -2689,18 +2773,22 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
                 memcpy(&metrics, &msg.data.realtime_metrics, sizeof(metrics));
 
                 // Update the Activity Metrics Service
-                ams_update_realtime_metrics(&metrics);
+                if (atomic_get(&logging_active) == 1)
+                {
+                    // Only update if logging is active
+                    ams_update_realtime_metrics(&metrics);
 
-                LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d",
-                        metrics.cadence_spm, metrics.pace_sec_km, metrics.form_score);
+                    LOG_DBG("Updated activity metrics: cadence=%d, pace=%d, form=%d", metrics.cadence_spm,
+                            metrics.pace_sec_km, metrics.form_score);
+                }
             }
             break;
-            
+
         case MSG_TYPE_BIOMECHANICS_EXTENDED:
             // Handle biomechanics extended data
             {
                 biomechanics_extended_msg_t *bio_data = &msg.data.biomechanics_extended;
-                
+
                 // Convert to BLE structure format
                 biomechanics_extended_ble_t ble_bio_data;
                 ble_bio_data.pronation_left = bio_data->pronation_left;
@@ -2709,21 +2797,25 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
                 ble_bio_data.loading_rate_right = bio_data->loading_rate_right;
                 ble_bio_data.arch_collapse_left = bio_data->arch_collapse_left;
                 ble_bio_data.arch_collapse_right = bio_data->arch_collapse_right;
-                
-                // Update Activity Metrics Service with biomechanics data
-                ams_update_biomechanics_extended(&ble_bio_data);
-                
-                LOG_DBG("Updated biomechanics: pronation L/R=%d/%d, loading L/R=%u/%u",
-                        bio_data->pronation_left, bio_data->pronation_right,
-                        bio_data->loading_rate_left, bio_data->loading_rate_right);
+
+                // TODO: Re enable
+                //  Update Activity Metrics Service with biomechanics data
+                if (atomic_get(&logging_active) == 1)
+                {
+                    // Only update if logging is active
+                    // ams_update_biomechanics_extended(&ble_bio_data);
+
+                    LOG_DBG("Updated biomechanics: pronation L/R=%d/%d, loading L/R=%u/%u", bio_data->pronation_left,
+                            bio_data->pronation_right, bio_data->loading_rate_left, bio_data->loading_rate_right);
+                }
             }
             break;
-            
+
         case MSG_TYPE_SESSION_SUMMARY:
             // Handle session summary data
             {
                 session_summary_msg_t *summary = &msg.data.session_summary;
-                
+
                 // Convert to BLE structure format
                 session_summary_ble_t ble_summary;
                 ble_summary.total_distance_m = summary->total_distance_m;
@@ -2733,16 +2825,16 @@ static void activity_metrics_ble_work_handler(struct k_work *work)
                 ble_summary.calories_kcal = summary->calories_kcal;
                 ble_summary.avg_form_score = summary->avg_form_score;
                 ble_summary.duration_sec = summary->duration_sec;
-                
+
                 // Update Activity Metrics Service with session summary
                 ams_update_session_summary(&ble_summary);
-                
+
                 LOG_INF("Session summary: distance=%um, pace=%us/km, cadence=%uspm, steps=%u",
-                        summary->total_distance_m, summary->avg_pace_sec_km,
-                        summary->avg_cadence_spm, summary->total_steps);
+                        summary->total_distance_m, summary->avg_pace_sec_km, summary->avg_cadence_spm,
+                        summary->total_steps);
             }
             break;
-            
+
         default:
             LOG_WRN("Unexpected message type %d in activity_metrics_ble_work_handler", msg.type);
             break;
@@ -2879,21 +2971,24 @@ static void battery_level_secondary_work_handler(struct k_work *work)
 
 /**
  * @brief Update D2D connection status
- * 
+ *
  * @param connected true if secondary device is connected, false otherwise
  */
 void jis_update_d2d_connection_status(bool connected)
 {
     uint32_t status = device_status_bitfield;
-    
-    if (connected) {
+
+    if (connected)
+    {
         status |= STATUS_D2D_CONNECTED;
         LOG_INF("D2D connection status: CONNECTED");
-    } else {
+    }
+    else
+    {
         status &= ~STATUS_D2D_CONNECTED;
         LOG_INF("D2D connection status: DISCONNECTED");
     }
-    
+
     set_device_status(status);
 }
 
@@ -2963,9 +3058,26 @@ static bool app_event_handler(const struct app_event_header *aeh)
         }
         return false;
     }
+
+    if (is_foot_sensor_start_activity_event(aeh))
+    {
+        LOG_WRN("Received start activity event - enabling ble metric transfer");
+        atomic_set(&logging_active, 1);
+        return false;
+    }
+
+    if (is_foot_sensor_stop_activity_event(aeh))
+    {
+        LOG_WRN("Received stop activity event - disabling ble metrics transfer");
+        atomic_set(&logging_active, 0);
+        return false;
+    }
+
     return false;
 }
 
 APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
+APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_start_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_stop_activity_event);
 APP_EVENT_SUBSCRIBE_FINAL(MODULE, module_state_event);

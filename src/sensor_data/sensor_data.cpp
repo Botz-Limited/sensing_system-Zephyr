@@ -16,6 +16,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+
 // Add MIN/MAX macros if not defined
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -1497,10 +1498,10 @@ process_synchronized_foot_data(const synchronized_foot_data_t *sync_data) {
   if (both_in_air) {
     LOG_WRN("TRUE FLIGHT detected! (L:%u, R:%u)", left_total, right_total);
     // Update bilateral timing in sensor state
-    sensor_state.true_flight_time_ms += 10; // Assuming 100Hz sampling
+    sensor_state.true_flight_time_ms += 5; // Assuming 200Hz sampling
   } else if (both_on_ground) {
     LOG_WRN("DOUBLE SUPPORT phase (L:%u, R:%u)", left_total, right_total);
-    sensor_state.double_support_time_ms += 10;
+    sensor_state.double_support_time_ms += 5;
   } else {
     // Reset counters when not in pure bilateral state
     sensor_state.true_flight_time_ms = 0;

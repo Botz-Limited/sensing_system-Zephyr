@@ -235,24 +235,21 @@ uint8_t calculate_asymmetry_percentage(uint16_t left_value, uint16_t right_value
 // Calculate balance percentage (negative = left dominant, positive = right dominant)
 int8_t calculate_balance_percentage(uint16_t left_force, uint16_t right_force)
 {
-    uint32_t total = left_force + right_force;
+    uint32_t total = (uint32_t)left_force + (uint32_t)right_force;
     
     if (total == 0) {
         return 0;
     }
     
-    // Calculate percentage for each side
-    uint8_t left_pct = (uint8_t)((left_force * 100) / total);
-    uint8_t right_pct = 100 - left_pct;
-    
-    // Return difference (positive means right side dominant)
-    int8_t balance = (int8_t)right_pct - (int8_t)left_pct;
+    // Calculate balance directly without intermediate percentages
+    // This avoids precision loss and overflow issues
+    int32_t balance = ((int32_t)right_force - (int32_t)left_force) * 100 / (int32_t)total;
     
     // Clamp to valid range
     if (balance > 50) return 50;
     if (balance < -50) return -50;
     
-    return balance;
+    return (int8_t)balance;
 }
 
 float calibrate_stride_with_gps(pace_estimator_t *estimator, float gps_distance_m, uint32_t step_count_delta) {
