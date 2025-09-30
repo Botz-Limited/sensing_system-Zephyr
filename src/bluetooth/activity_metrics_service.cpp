@@ -1257,6 +1257,7 @@ void ams_update_realtime_metrics(const realtime_metrics_t *metrics)
     cadence_spm_value = metrics->cadence_spm;
     pace_sec_km_value = metrics->pace_sec_km;
     distance_m_value = metrics->distance_m;
+
     // form_score_value = metrics->form_score;
     balance_lr_pct_value = metrics->balance_lr_pct;
     ground_contact_ms_value = metrics->ground_contact_ms;

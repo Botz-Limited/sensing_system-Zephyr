@@ -19,6 +19,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
@@ -32,6 +33,7 @@
 #include <events/motion_sensor_event.h>
 #include <events/streaming_control_event.h>
 #include <status_codes.h>
+#include <zephyr/sys/reboot.h>
 
 // BHI360 includes
 #include "BHY2-Sensor-API/bhy2.h"
@@ -45,6 +47,9 @@
 #endif
 
 LOG_MODULE_REGISTER(MODULE, CONFIG_MOTION_SENSOR_MODULE_LOG_LEVEL);
+
+static const struct gpio_dt_spec int_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(bhi360), int_gpios);
+static struct gpio_callback bhi360_int_cb_data;
 
 // External message queues
 extern struct k_msgq sensor_data_msgq;
@@ -67,6 +72,9 @@ K_THREAD_STACK_DEFINE(motion_sensor_stack, CONFIG_MOTION_SENSOR_MODULE_STACK_SIZ
 static struct k_thread motion_sensor_thread_data;
 static k_tid_t motion_sensor_tid = NULL;
 
+static void bhi360_work_handler(struct k_work *work);
+K_WORK_DEFINE(bhi360_work, bhi360_work_handler);
+
 // Get BHI360 device from device tree
 #define BHI360_NODE DT_NODELABEL(bhi360)
 static const struct device *const bhi360_dev = DEVICE_DT_GET(BHI360_NODE);
@@ -74,6 +82,7 @@ static struct bhy2_dev *bhy2_ptr = nullptr;
 
 // Use atomic for thread-safe access to logging state
 static atomic_t logging_active = ATOMIC_INIT(0);
+static atomic_t is_in_sleep_mode = ATOMIC_INIT(0);
 
 // Local streaming state
 static bool quaternion_streaming_enabled = false;
@@ -87,26 +96,28 @@ static bool activity_logging_active = false;
 #include <zephyr/drivers/sensor.h> // For standard sensor value types
 
 // Sensor IDs for BHI360 virtual sensors - Core sensors
-static constexpr uint8_t QUAT_SENSOR_ID = BHY2_SENSOR_ID_GAMERV;      // 28: Game Rotation Vector (no mag)
-static constexpr uint8_t ACCEL_SENSOR_ID = BHY2_SENSOR_ID_ACC;        // 4: Calibrated Accelerometer (with gravity)
-static constexpr uint8_t GYRO_SENSOR_ID = BHY2_SENSOR_ID_GYRO;        // 13: Calibrated Gyroscope
+static constexpr uint8_t QUAT_SENSOR_ID = BHY2_SENSOR_ID_GAMERV; // 28: Game Rotation Vector (no mag)
+static constexpr uint8_t ACCEL_SENSOR_ID = BHY2_SENSOR_ID_ACC;   // 4: Calibrated Accelerometer (with gravity)
+static constexpr uint8_t GYRO_SENSOR_ID = BHY2_SENSOR_ID_GYRO;   // 13: Calibrated Gyroscope
 
 // Step counter variants - try multiple versions to find which one is available
-static constexpr uint8_t STEP_COUNTER_SENSOR_ID = BHY2_SENSOR_ID_STC; // 52: Step Counter (standard)
+static constexpr uint8_t STEP_COUNTER_SENSOR_ID = BHY2_SENSOR_ID_STC;  // 52: Step Counter (standard)
 static constexpr uint8_t STEP_DETECTOR_SENSOR_ID = BHY2_SENSOR_ID_STD; // 50: Step Detector (individual steps)
 static constexpr uint8_t STEP_COUNTER_WU_ID = BHY2_SENSOR_ID_STC_WU;   // 53: Step Counter Wake Up
 static constexpr uint8_t STEP_DETECTOR_WU_ID = BHY2_SENSOR_ID_STD_WU;  // 94: Step Detector Wake Up
 static constexpr uint8_t STEP_COUNTER_LP_ID = BHY2_SENSOR_ID_STC_LP;   // 136: Step Counter Low Power
 static constexpr uint8_t STEP_DETECTOR_LP_ID = BHY2_SENSOR_ID_STD_LP;  // 137: Step Detector Low Power
 
+static constexpr uint8_t ANY_MOTION_SENSOR_ID = BHY2_SENSOR_ID_ANY_MOTION_LP_WU; // Wake-up version
+
 // Track which step counter variant is actually available
 static uint8_t active_step_counter_id = 0;
 static uint8_t active_step_detector_id = 0;
 
 // Additional sensors available with HWActivity firmware
-static constexpr uint8_t LACC_SENSOR_ID = BHY2_SENSOR_ID_LACC;        // 31: Linear Acceleration (gravity removed)
-static constexpr uint8_t GRAVITY_SENSOR_ID = BHY2_SENSOR_ID_GRA;      // 28: Gravity vector
-static constexpr uint8_t ACTIVITY_SENSOR_ID = BHY2_SENSOR_ID_AR;      // 63: Activity Recognition
+static constexpr uint8_t LACC_SENSOR_ID = BHY2_SENSOR_ID_LACC;   // 31: Linear Acceleration (gravity removed)
+static constexpr uint8_t GRAVITY_SENSOR_ID = BHY2_SENSOR_ID_GRA; // 28: Gravity vector
+static constexpr uint8_t ACTIVITY_SENSOR_ID = BHY2_SENSOR_ID_AR; // 63: Activity Recognition
 
 // Track which sensors are actually available
 static bool lacc_available = false;
@@ -115,15 +126,16 @@ static bool activity_available = false;
 
 // Static variables to hold the latest sensor values (file scope for access across functions)
 static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0, latest_quat_w = 0, latest_quat_accuracy = 0;
-static float latest_acc_x = 0, latest_acc_y = 0, latest_acc_z = 0;  // Accelerometer with gravity
-static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0;  // Linear acceleration (gravity removed)
+static float latest_acc_x = 0, latest_acc_y = 0, latest_acc_z = 0;    // Accelerometer with gravity
+static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0; // Linear acceleration (gravity removed)
 static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
-static float latest_gravity_x = 0, latest_gravity_y = 0, latest_gravity_z = 0;  // Gravity vector
-static uint8_t latest_activity_type = 0;  // Activity recognition result
+static float latest_gravity_x = 0, latest_gravity_y = 0, latest_gravity_z = 0; // Gravity vector
+static uint8_t latest_activity_type = 0;                                       // Activity recognition result
 static uint64_t latest_timestamp = 0;
 
 // =================== STATE MACHINE AND CALIBRATION START ===================
-enum class MotionSensorState {
+enum class MotionSensorState
+{
     POLLING,
     CALIBRATING_START_GYRO,
     CALIBRATING_ACCUMULATE_SAMPLES,
@@ -152,11 +164,15 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
 static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_info, void *callback_ref);
 static void process_sensor_data(void);
 static void handle_messages(void);
+
 // perform_bhi360_calibration() is now removed and replaced by the state machine
 static void apply_calibration_data(const bhi360_calibration_data_t *calib_data);
 static void save_calibration_profile(const struct device *bhi360_dev, enum bhi360_sensor_type sensor,
                                      const char *sensor_name);
 static void check_and_save_calibration_updates(const struct device *bhi360_dev);
+static void bhi360_isr_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
+static void bhi360_work_handler(struct k_work *work);
+static void motion_sensor_enter_sleep_mode();
 
 /**
  * @brief Initialize BHI360 sensor
@@ -254,25 +270,33 @@ static err_t init_bhi360(void)
 
     // Check sensor availability before configuration
     LOG_INF("BHI360: Checking sensor availability with firmware");
-    
+
     // First check if physical step counter/detector are present
     LOG_INF("  Checking physical sensors:");
     uint8_t phys_present[32] = {0};
-    rslt = bhy2_get_parameter(BHY2_PARAM_SYS_PHYS_SENSOR_PRESENT, phys_present, sizeof(phys_present), &actual_len, bhy2_ptr);
-    if (rslt == BHY2_OK) {
+    rslt = bhy2_get_parameter(BHY2_PARAM_SYS_PHYS_SENSOR_PRESENT, phys_present, sizeof(phys_present), &actual_len,
+                              bhy2_ptr);
+    if (rslt == BHY2_OK)
+    {
         // Check for physical step counter (ID 32) and detector (ID 33)
-        if (phys_present[32/8] & (1 << (32 % 8))) {
+        if (phys_present[32 / 8] & (1 << (32 % 8)))
+        {
             LOG_INF("    Physical Step Counter (32) - Present");
-        } else {
+        }
+        else
+        {
             LOG_WRN("    Physical Step Counter (32) - Not Present");
         }
-        if (phys_present[33/8] & (1 << (33 % 8))) {
+        if (phys_present[33 / 8] & (1 << (33 % 8)))
+        {
             LOG_INF("    Physical Step Detector (33) - Present");
-        } else {
+        }
+        else
+        {
             LOG_WRN("    Physical Step Detector (33) - Not Present");
         }
     }
-    
+
     // Check core sensors (these should always be available)
     if (bhy2_is_sensor_available(QUAT_SENSOR_ID, bhy2_ptr))
     {
@@ -283,7 +307,7 @@ static err_t init_bhi360(void)
         LOG_ERR("  Quaternion sensor not available!");
         return err_t::MOTION_ERROR;
     }
-    
+
     if (bhy2_is_sensor_available(ACCEL_SENSOR_ID, bhy2_ptr))
     {
         LOG_INF("  Accelerometer (with gravity) - Available");
@@ -292,7 +316,7 @@ static err_t init_bhi360(void)
     {
         LOG_WRN("  Accelerometer sensor not available");
     }
-    
+
     if (bhy2_is_sensor_available(GYRO_SENSOR_ID, bhy2_ptr))
     {
         LOG_INF("  Gyroscope - Available");
@@ -302,10 +326,10 @@ static err_t init_bhi360(void)
         LOG_ERR("  Gyroscope sensor not available!");
         return err_t::MOTION_ERROR;
     }
-    
+
     // Check all step counter variants to find which one is available
     LOG_INF("  Checking step counter variants:");
-    
+
     if (bhy2_is_sensor_available(STEP_COUNTER_SENSOR_ID, bhy2_ptr))
     {
         LOG_INF("    Step Counter (52) - Available");
@@ -325,7 +349,7 @@ static err_t init_bhi360(void)
     {
         LOG_WRN("    No step counter variant available");
     }
-    
+
     if (bhy2_is_sensor_available(STEP_DETECTOR_SENSOR_ID, bhy2_ptr))
     {
         LOG_INF("    Step Detector (50) - Available");
@@ -345,7 +369,7 @@ static err_t init_bhi360(void)
     {
         LOG_WRN("    No step detector variant available");
     }
-    
+
     // Check additional sensors from HWActivity firmware
     lacc_available = bhy2_is_sensor_available(LACC_SENSOR_ID, bhy2_ptr);
     if (lacc_available)
@@ -356,7 +380,7 @@ static err_t init_bhi360(void)
     {
         LOG_WRN("  Linear Acceleration not available, will use regular accelerometer");
     }
-    
+
     gravity_available = bhy2_is_sensor_available(GRAVITY_SENSOR_ID, bhy2_ptr);
     if (gravity_available)
     {
@@ -366,7 +390,7 @@ static err_t init_bhi360(void)
     {
         LOG_DBG("  Gravity Vector not available");
     }
-    
+
     activity_available = bhy2_is_sensor_available(ACTIVITY_SENSOR_ID, bhy2_ptr);
     if (activity_available)
     {
@@ -380,7 +404,7 @@ static err_t init_bhi360(void)
     // Configure sensors at 100Hz
     float motion_sensor_rate = 100.0f;
     float step_counter_rate = 20.0f;
-    float activity_rate = 5.0f;  // Activity recognition at 5Hz
+    float activity_rate = 5.0f; // Activity recognition at 5Hz
     uint32_t report_latency_ms = 0;
 
     LOG_INF("BHI360: Configuring sensors");
@@ -407,8 +431,8 @@ static err_t init_bhi360(void)
         LOG_ERR("Failed to configure gyroscope sensor: %d", rslt);
         return err_t::MOTION_ERROR;
     }
-k_msleep(SAMPLE_PERIOD_MS);
-    
+    k_msleep(SAMPLE_PERIOD_MS);
+
     // Configure whichever step counter variant is available
     if (active_step_counter_id != 0)
     {
@@ -423,9 +447,9 @@ k_msleep(SAMPLE_PERIOD_MS);
             LOG_INF("Step counter configured successfully (ID %u)", active_step_counter_id);
         }
     }
-    
+
     k_msleep(SAMPLE_PERIOD_MS);
-    
+
     // Configure whichever step detector variant is available
     if (active_step_detector_id != 0)
     {
@@ -440,7 +464,7 @@ k_msleep(SAMPLE_PERIOD_MS);
             LOG_INF("Step detector configured successfully (ID %u)", active_step_detector_id);
         }
     }
-k_msleep(SAMPLE_PERIOD_MS);
+    k_msleep(SAMPLE_PERIOD_MS);
     // Configure optional sensors if available
     if (lacc_available)
     {
@@ -471,15 +495,15 @@ k_msleep(SAMPLE_PERIOD_MS);
             activity_available = false;
         }
     }
-k_msleep(SAMPLE_PERIOD_MS);
+    k_msleep(SAMPLE_PERIOD_MS);
     // Register callbacks - ESSENTIAL for data parsing
     LOG_INF("BHI360: Registering callbacks");
-    
+
     // Register core sensor callbacks (always register these)
     rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
     rslt |= bhy2_register_fifo_parse_callback(ACCEL_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
     rslt |= bhy2_register_fifo_parse_callback(GYRO_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
-    
+
     // Register callbacks for whichever step counter/detector variants are available
     if (active_step_counter_id != 0)
     {
@@ -489,7 +513,7 @@ k_msleep(SAMPLE_PERIOD_MS);
     {
         rslt |= bhy2_register_fifo_parse_callback(active_step_detector_id, parse_all_sensors, NULL, bhy2_ptr);
     }
-    
+
     // Register optional sensor callbacks if available
     if (lacc_available)
     {
@@ -503,7 +527,7 @@ k_msleep(SAMPLE_PERIOD_MS);
     {
         rslt |= bhy2_register_fifo_parse_callback(ACTIVITY_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
     }
-    
+
     // Always register meta event callback
     rslt |= bhy2_register_fifo_parse_callback(BHY2_SYS_ID_META_EVENT, parse_meta_event, NULL, bhy2_ptr);
 
@@ -521,6 +545,33 @@ k_msleep(SAMPLE_PERIOD_MS);
     request_msg.sender = SENDER_MOTION_SENSOR;
     request_msg.type = MSG_TYPE_REQUEST_BHI360_CALIBRATION;
     k_msgq_put(&data_msgq, &request_msg, K_NO_WAIT);
+
+    // For waking up
+    if (bhy2_is_sensor_available(ANY_MOTION_SENSOR_ID, bhy2_ptr))
+    {
+        LOG_INF("Any Motion (Wake Up) sensor available.");
+        bhy2_set_virt_sensor_cfg(ANY_MOTION_SENSOR_ID, 0, 0, bhy2_ptr);
+    }
+    else
+    {
+        LOG_WRN("Any Motion (Wake Up) sensor NOT available. Wake-from-sleep will not work!");
+    }
+
+    if (!gpio_is_ready_dt(&int_gpio))
+    {
+        LOG_ERR("BHI360 interrupt GPIO not ready");
+        return err_t::MOTION_ERROR;
+    }
+    gpio_pin_configure_dt(&int_gpio, GPIO_INPUT);
+    gpio_init_callback(&bhi360_int_cb_data, bhi360_isr_handler, BIT(int_gpio.pin));
+    int ret = gpio_add_callback(int_gpio.port, &bhi360_int_cb_data);
+    if (ret != 0)
+    {
+        LOG_ERR("Failed to add GPIO callback for BHI360 INT: %d", ret);
+        return err_t::MOTION_ERROR;
+    }
+    gpio_pin_interrupt_configure_dt(&int_gpio, GPIO_INT_DISABLE);
+    LOG_INF("BHI360 GPIO interrupt handler configured.");
 
     return err_t::NO_ERROR;
 }
@@ -622,9 +673,10 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             latest_acc_x = (float)data.x / 1000.0f;
             latest_acc_y = (float)data.y / 1000.0f;
             latest_acc_z = (float)data.z / 1000.0f;
-            
+
             // For backward compatibility, also update lacc variables if true LACC not available
-            if (!lacc_available) {
+            if (!lacc_available)
+            {
                 latest_lacc_x = latest_acc_x;
                 latest_lacc_y = latest_acc_y;
                 latest_lacc_z = latest_acc_z;
@@ -634,7 +686,8 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
         }
 
         case LACC_SENSOR_ID: {
-            if (lacc_available) {
+            if (lacc_available)
+            {
                 struct bhy2_data_xyz data;
                 bhy2_parse_xyz(callback_info->data_ptr, &data);
 
@@ -649,7 +702,8 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
         }
 
         case GRAVITY_SENSOR_ID: {
-            if (gravity_available) {
+            if (gravity_available)
+            {
                 struct bhy2_data_xyz data;
                 bhy2_parse_xyz(callback_info->data_ptr, &data);
 
@@ -663,10 +717,12 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
         }
 
         case ACTIVITY_SENSOR_ID: {
-            if (activity_available) {
+            if (activity_available)
+            {
                 // Activity recognition data format varies by firmware
                 // Typically first byte is activity type
-                if (callback_info->data_size >= 1) {
+                if (callback_info->data_size >= 1)
+                {
                     latest_activity_type = callback_info->data_ptr[0];
                     // Activity types (firmware dependent):
                     // 0: Unknown, 1: Still, 2: Walking, 3: Running, 4: On Bicycle, 5: In Vehicle, 6: Tilting
@@ -689,9 +745,9 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             break;
         }
 
-        case BHY2_SENSOR_ID_STD:      // 50: Step Detector
-        case BHY2_SENSOR_ID_STD_WU:   // 94: Step Detector Wake Up
-        case BHY2_SENSOR_ID_STD_LP:   // 137: Step Detector Low Power
+        case BHY2_SENSOR_ID_STD:    // 50: Step Detector
+        case BHY2_SENSOR_ID_STD_WU: // 94: Step Detector Wake Up
+        case BHY2_SENSOR_ID_STD_LP: // 137: Step Detector Low Power
         {
             // Step detector fires for each individual step detected
             // This helps ensure the step counter is working
@@ -701,9 +757,9 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             break;
         }
 
-        case BHY2_SENSOR_ID_STC:      // 52: Step Counter
-        case BHY2_SENSOR_ID_STC_WU:   // 53: Step Counter Wake Up
-        case BHY2_SENSOR_ID_STC_LP:   // 136: Step Counter Low Power
+        case BHY2_SENSOR_ID_STC:    // 52: Step Counter
+        case BHY2_SENSOR_ID_STC_WU: // 53: Step Counter Wake Up
+        case BHY2_SENSOR_ID_STC_LP: // 136: Step Counter Low Power
         {
             if (callback_info->data_size < 4)
             {
@@ -712,14 +768,13 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             }
 
             // Parse the step count value
-            uint32_t new_step_count = (callback_info->data_ptr[0]) | 
-                                     (callback_info->data_ptr[1] << 8) |
-                                     (callback_info->data_ptr[2] << 16) | 
-                                     (callback_info->data_ptr[3] << 24);
+            uint32_t new_step_count = (callback_info->data_ptr[0]) | (callback_info->data_ptr[1] << 8) |
+                                      (callback_info->data_ptr[2] << 16) | (callback_info->data_ptr[3] << 24);
 
             // Log raw step counter data for debugging
             static uint32_t last_logged_count = 0;
-            if (new_step_count != last_logged_count) {
+            if (new_step_count != last_logged_count)
+            {
                 LOG_INF("Step counter raw value changed: %u -> %u", last_logged_count, new_step_count);
                 last_logged_count = new_step_count;
             }
@@ -868,7 +923,7 @@ static void process_sensor_data(void)
     float calibrated_gyro_x = latest_gyro_x - gyro_offset_x;
     float calibrated_gyro_y = latest_gyro_y - gyro_offset_y;
     float calibrated_gyro_z = latest_gyro_z - gyro_offset_z;
-    
+
     // Also apply to the raw accelerometer data
     float calibrated_acc_x = latest_acc_x - accel_offset_x;
     float calibrated_acc_y = latest_acc_y - accel_offset_y;
@@ -933,50 +988,64 @@ static void process_sensor_data(void)
         if (++log_sample_counter >= LOG_RATE_DIVIDER)
         {
             log_sample_counter = 0;
-            
+
             // Log Quaternion data
-            LOG_INF("BHI360 Quat: x=%.4f, y=%.4f, z=%.4f, w=%.4f, accuracy=%.1f",
-                    (double)latest_quat_x, (double)latest_quat_y, (double)latest_quat_z, (double)latest_quat_w,
-                    (double)latest_quat_accuracy);
-            
+            LOG_INF("BHI360 Quat: x=%.4f, y=%.4f, z=%.4f, w=%.4f, accuracy=%.1f", (double)latest_quat_x,
+                    (double)latest_quat_y, (double)latest_quat_z, (double)latest_quat_w, (double)latest_quat_accuracy);
+
             // Log Gyroscope data (rad/s)
-            LOG_INF("BHI360 Gyro (cal): x=%.4f, y=%.4f, z=%.4f rad/s",
-                    (double)calibrated_gyro_x, (double)calibrated_gyro_y, (double)calibrated_gyro_z);
-            
+            LOG_INF("BHI360 Gyro (cal): x=%.4f, y=%.4f, z=%.4f rad/s", (double)calibrated_gyro_x,
+                    (double)calibrated_gyro_y, (double)calibrated_gyro_z);
+
             // Log Accelerometer data (with gravity) - always available
-            LOG_INF("BHI360 Accel (cal): x=%.4f, y=%.4f, z=%.4f m/s² (with gravity)",
-                    (double)calibrated_acc_x, (double)calibrated_acc_y, (double)calibrated_acc_z);
-            
+            LOG_INF("BHI360 Accel (cal): x=%.4f, y=%.4f, z=%.4f m/s² (with gravity)", (double)calibrated_acc_x,
+                    (double)calibrated_acc_y, (double)calibrated_acc_z);
+
             // Log Linear Acceleration data (gravity removed) - if different from accel
-            if (lacc_available) {
-                LOG_INF("BHI360 LinAcc (cal): x=%.4f, y=%.4f, z=%.4f m/s² (gravity removed)",
-                        (double)calibrated_lacc_x, (double)calibrated_lacc_y, (double)calibrated_lacc_z);
+            if (lacc_available)
+            {
+                LOG_INF("BHI360 LinAcc (cal): x=%.4f, y=%.4f, z=%.4f m/s² (gravity removed)", (double)calibrated_lacc_x,
+                        (double)calibrated_lacc_y, (double)calibrated_lacc_z);
             }
-            
+
             // Log Gravity Vector - if available
-            if (gravity_available) {
-                LOG_INF("BHI360 Gravity: x=%.4f, y=%.4f, z=%.4f m/s²",
-                        (double)latest_gravity_x, (double)latest_gravity_y, (double)latest_gravity_z);
+            if (gravity_available)
+            {
+                LOG_INF("BHI360 Gravity: x=%.4f, y=%.4f, z=%.4f m/s²", (double)latest_gravity_x,
+                        (double)latest_gravity_y, (double)latest_gravity_z);
             }
-            
+
             // Log Activity Recognition - if available
-            if (activity_available && latest_activity_type != 0) {
+            if (activity_available && latest_activity_type != 0)
+            {
                 const char *activity_name = "Unknown";
-                switch (latest_activity_type) {
-                    case 1: activity_name = "Still"; break;
-                    case 2: activity_name = "Walking"; break;
-                    case 3: activity_name = "Running"; break;
-                    case 4: activity_name = "On Bicycle"; break;
-                    case 5: activity_name = "In Vehicle"; break;
-                    case 6: activity_name = "Tilting"; break;
+                switch (latest_activity_type)
+                {
+                    case 1:
+                        activity_name = "Still";
+                        break;
+                    case 2:
+                        activity_name = "Walking";
+                        break;
+                    case 3:
+                        activity_name = "Running";
+                        break;
+                    case 4:
+                        activity_name = "On Bicycle";
+                        break;
+                    case 5:
+                        activity_name = "In Vehicle";
+                        break;
+                    case 6:
+                        activity_name = "Tilting";
+                        break;
                 }
                 LOG_INF("BHI360 Activity: %s (type=%u)", activity_name, latest_activity_type);
             }
-            
+
             // Log Step Count data
-            LOG_INF("BHI360 Steps: total=%u, activity=%u",
-                    latest_step_count, latest_activity_step_count);
-            
+            LOG_INF("BHI360 Steps: total=%u, activity=%u", latest_step_count, latest_activity_step_count);
+
             // Log timestamp (convert from nanoseconds to milliseconds for readability)
             uint32_t timestamp_ms = (uint32_t)(latest_timestamp / 1000000);
             LOG_INF("BHI360 Timestamp: %u ms", timestamp_ms);
@@ -1043,10 +1112,13 @@ static void handle_messages(void)
         {
             case MSG_TYPE_TRIGGER_BHI360_CALIBRATION:
                 LOG_INF("Received calibration trigger from %s", get_sender_name(msg.sender));
-                if (current_state == MotionSensorState::POLLING) {
+                if (current_state == MotionSensorState::POLLING)
+                {
                     LOG_INF("Starting calibration state machine.");
                     current_state = MotionSensorState::CALIBRATING_START_GYRO;
-                } else {
+                }
+                else
+                {
                     LOG_WRN("Ignoring calibration trigger, another operation is in progress.");
                 }
                 break;
@@ -1054,6 +1126,13 @@ static void handle_messages(void)
             case MSG_TYPE_BHI360_CALIBRATION_DATA:
                 LOG_INF("Received calibration data from %s", get_sender_name(msg.sender));
                 apply_calibration_data(&msg.data.bhi360_calibration);
+                break;
+
+            case MSG_TYPE_COMMAND:
+                if (strncmp(msg.data.command_str, "ENTER_SLEEP", MAX_COMMAND_STRING_LEN) == 0)
+                {
+                    motion_sensor_enter_sleep_mode();
+                }
                 break;
 
             default:
@@ -1074,34 +1153,6 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
 
     LOG_INF("Motion sensor thread started (polling mode)");
 
-    // Initialize BHI360
-    err_t err = init_bhi360();
-    if (err != err_t::NO_ERROR)
-    {
-        LOG_ERR("Failed to initialize BHI360");
-
-        // Report error to Bluetooth module
-        generic_message_t err_msg;
-        err_msg.sender = SENDER_MOTION_SENSOR;
-        err_msg.type = MSG_TYPE_ERROR_STATUS;
-        err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
-        err_msg.data.error_status.is_set = true;
-        k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT);
-
-#if IS_ENABLED(CONFIG_MOTION_SENSOR_OPTIONAL)
-        LOG_WRN("Motion sensor initialization failed but continuing (non-critical)");
-        module_set_state(MODULE_STATE_READY);
-#else
-        LOG_ERR("Motion sensor initialization failed (critical)");
-        module_set_state(MODULE_STATE_ERROR);
-        return;
-#endif
-    }
-    else
-    {
-        module_set_state(MODULE_STATE_READY);
-    }
-
     uint8_t work_buffer[WORK_BUFFER_SIZE];
     uint32_t calibration_check_counter = 0;
     uint32_t poll_counter = 0;
@@ -1121,7 +1172,7 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                 LOG_WRN("BHI360: FIFO processing error: %d", rslt);
             }
         }
-        
+
         // --- State Machine Logic ---
         switch (current_state)
         {
@@ -1139,21 +1190,28 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                     LOG_DBG("Motion sensor polling active - %u polls completed", poll_counter);
                 }
                 break;
-            
+
             case MotionSensorState::CALIBRATING_START_GYRO:
                 LOG_INF("Step 1: Gyro FOC. Keep device still...");
                 struct bhi360_foc_result foc_result;
                 bhi360_perform_gyro_foc(bhi360_dev, &foc_result);
-                if (foc_result.success) {
+                if (foc_result.success)
+                {
                     LOG_INF("Gyro FOC successful.");
-                } else {
+                }
+                else
+                {
                     LOG_WRN("Gyro FOC failed.");
                 }
-                
+
                 LOG_INF("Step 2: Software Accel/Gyro offset capture. Keep still for %u ms...", CALIBRATION_DURATION_MS);
                 // Reset accumulators
-                acc_sum_x = 0; acc_sum_y = 0; acc_sum_z = 0;
-                gyro_sum_x = 0; gyro_sum_y = 0; gyro_sum_z = 0;
+                acc_sum_x = 0;
+                acc_sum_y = 0;
+                acc_sum_z = 0;
+                gyro_sum_x = 0;
+                gyro_sum_y = 0;
+                gyro_sum_z = 0;
                 calibration_sample_count = 0;
 
                 state_start_time = k_uptime_get();
@@ -1171,13 +1229,15 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                 gyro_sum_z += latest_gyro_z;
                 calibration_sample_count++;
 
-                if (k_uptime_get() - state_start_time >= CALIBRATION_DURATION_MS) {
+                if (k_uptime_get() - state_start_time >= CALIBRATION_DURATION_MS)
+                {
                     current_state = MotionSensorState::CALIBRATING_FINISH;
                 }
                 break;
 
             case MotionSensorState::CALIBRATING_FINISH:
-                if (calibration_sample_count > 0) {
+                if (calibration_sample_count > 0)
+                {
                     // Calculate the average to find the offset
                     accel_offset_x = (float)(acc_sum_x / calibration_sample_count);
                     accel_offset_y = (float)(acc_sum_y / calibration_sample_count);
@@ -1187,11 +1247,13 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                     gyro_offset_z = (float)(gyro_sum_z / calibration_sample_count);
 
                     LOG_INF("Calibration complete. Samples: %u", calibration_sample_count);
-                    LOG_INF("--> Accel Offsets: x=%.4f, y=%.4f, z=%.4f",
-                            (double)accel_offset_x, (double)accel_offset_y, (double)accel_offset_z);
-                    LOG_INF("--> Gyro Offsets: x=%.4f, y=%.4f, z=%.4f",
-                            (double)gyro_offset_x, (double)gyro_offset_y, (double)gyro_offset_z);
-                } else {
+                    LOG_INF("--> Accel Offsets: x=%.4f, y=%.4f, z=%.4f", (double)accel_offset_x, (double)accel_offset_y,
+                            (double)accel_offset_z);
+                    LOG_INF("--> Gyro Offsets: x=%.4f, y=%.4f, z=%.4f", (double)gyro_offset_x, (double)gyro_offset_y,
+                            (double)gyro_offset_z);
+                }
+                else
+                {
                     LOG_ERR("Calibration failed: no samples collected.");
                 }
                 // Return to normal polling mode
@@ -1337,15 +1399,78 @@ static void motion_sensor_init(void)
 {
     LOG_INF("Initializing motion sensor module (simplified polling version)");
 
+    // Initialize BHI360
+    err_t err = init_bhi360();
+    if (err != err_t::NO_ERROR)
+    {
+        LOG_ERR("Failed to initialize BHI360");
+
+        // Report error to Bluetooth module
+        generic_message_t err_msg;
+        err_msg.sender = SENDER_MOTION_SENSOR;
+        err_msg.type = MSG_TYPE_ERROR_STATUS;
+        err_msg.data.error_status.error_code = err_t::MOTION_ERROR;
+        err_msg.data.error_status.is_set = true;
+        k_msgq_put(&bluetooth_msgq, &err_msg, K_NO_WAIT);
+
+        LOG_WRN("Motion sensor initialization failed but continuing (non-critical)");
+        module_set_state(MODULE_STATE_READY);
+    }
+    else
+    {
+        LOG_WRN("Motion sensor initialization ok");
+        module_set_state(MODULE_STATE_READY);
+    }
+
     // Create and start the sampling thread
     motion_sensor_tid =
         k_thread_create(&motion_sensor_thread_data, motion_sensor_stack, K_THREAD_STACK_SIZEOF(motion_sensor_stack),
                         motion_sensor_thread, NULL, NULL, NULL, CONFIG_MOTION_SENSOR_MODULE_PRIORITY, 0, K_NO_WAIT);
 
-   // k_thread_suspend(motion_sensor_tid);
+    //  k_thread_suspend(motion_sensor_tid);
     k_thread_name_set(motion_sensor_tid, "motion_sensor");
     LOG_INF("Motion sensor module initialized successfully");
 }
+
+// =================== Interrupt and Mode-Switching Logic ===================
+static void bhi360_isr_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
+{
+    k_work_submit(&bhi360_work);
+}
+
+static void bhi360_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+    // ONLY reboot if the interrupt happens while we are in sleep mode
+    if (atomic_get(&is_in_sleep_mode) == 1)
+    {
+        LOG_WRN("Motion detected during sleep, triggering system reboot!");
+        k_msleep(100); // Allow log to flush
+        sys_reboot(SYS_REBOOT_COLD);
+    }
+}
+
+static void motion_sensor_enter_sleep_mode()
+{
+    LOG_INF("Switching BHI360 to low-power interrupt mode for wake-up.");
+    atomic_set(&is_in_sleep_mode, 1); // Set the flag
+
+    // Turn off high-frequency sensors
+    bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, 0, 0, bhy2_ptr);
+    bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, 0, 0, bhy2_ptr);
+    bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, 0, 0, bhy2_ptr);
+
+    // Turn on the wake-up sensor
+    bhy2_set_virt_sensor_cfg(ANY_MOTION_SENSOR_ID, 1.0f, 0, bhy2_ptr);
+
+    // Enable the BHI360's interrupt line
+    bhy2_set_host_interrupt_ctrl(0, bhy2_ptr);
+
+    // Enable the MCU's GPIO interrupt
+    gpio_pin_interrupt_configure_dt(&int_gpio, GPIO_INT_EDGE_TO_ACTIVE);
+}
+
+// =================== Event Handling ===================
 
 /**
  * @brief Event handler for motion sensor module
@@ -1394,11 +1519,11 @@ static bool app_event_handler(const struct app_event_header *aeh)
     {
         auto *event = cast_streaming_control_event(aeh);
         quaternion_streaming_enabled = event->quaternion_streaming_enabled;
-        if(quaternion_streaming_enabled)
+        if (quaternion_streaming_enabled)
         {
             k_thread_resume(motion_sensor_tid);
         }
-        else if(!quaternion_streaming_enabled)
+        else if (!quaternion_streaming_enabled)
         {
             k_thread_suspend(motion_sensor_tid);
         }

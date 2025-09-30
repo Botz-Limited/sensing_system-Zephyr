@@ -304,23 +304,6 @@
 };
 
 
-/* Force LDO mode on all regulators of nRF5340 */
-//&vregmain {
-  //  status = "okay";
-	//regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
-//    regulator-initial-mode = <NRF5X_REG_MODE_LDO>;
-//};
-
-//&vregradio {
-  //  status = "okay";
-//	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
-//     regulator-initial-mode = <NRF5X_REG_MODE_LDO>; 
-//};
-
-//&vregh {
-//	status = "okay"; //comment out to disable dcdc
-//};
-
 &pinctrl {
     i2c3_default: i2c3_default {
         group1 {
