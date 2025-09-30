@@ -8,7 +8,7 @@
  *
  * This is a simplified version using polling instead of interrupts,
  * similar to foot_sensor_simple.cpp architecture.
- * Version 2.2.0 adds a software calibration state machine for orientation-agnostic zeroing.
+
  */
 
 #define MODULE motion_sensor
@@ -165,7 +165,6 @@ static void parse_meta_event(const struct bhy2_fifo_parse_data_info *callback_in
 static void process_sensor_data(void);
 static void handle_messages(void);
 
-// perform_bhi360_calibration() is now removed and replaced by the state machine
 static void apply_calibration_data(const bhi360_calibration_data_t *calib_data);
 static void save_calibration_profile(const struct device *bhi360_dev, enum bhi360_sensor_type sensor,
                                      const char *sensor_name);
