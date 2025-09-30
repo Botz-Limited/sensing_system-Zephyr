@@ -674,7 +674,7 @@ static void process_bhi360_data_work_handler(struct k_work *work)
     // Get the containing work item structure
     struct bhi360_data_work *work_item = CONTAINER_OF(work, struct bhi360_data_work, work);
     
-    LOG_WRN("Processing BHI360 data, type: %d", work_item->type);
+    LOG_INF("Processing BHI360 data, type: %d", work_item->type);
     
     // Create a temporary message with the appropriate data
     generic_message_t temp_msg;

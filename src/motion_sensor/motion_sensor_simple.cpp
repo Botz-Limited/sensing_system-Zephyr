@@ -51,6 +51,12 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_MOTION_SENSOR_MODULE_LOG_LEVEL);
 static const struct gpio_dt_spec int_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(bhi360), int_gpios);
 static struct gpio_callback bhi360_int_cb_data;
 
+struct bhy2_orient_matrix mounting_matrix_struct = {{
+    0, 0, 1, // Logical X -> Sensor Z
+    0, 1, 0, // Logical Y -> Sensor Y
+    1, 0, 0  // Logical Z -> Sensor X
+}};
+
 // External message queues
 extern struct k_msgq sensor_data_msgq;
 extern struct k_msgq bluetooth_msgq;
@@ -258,6 +264,8 @@ static err_t init_bhi360(void)
 
     LOG_INF("BHI360: Boot successful, kernel version %u", version);
 
+    LOG_INF("BHI360: Setting orientation matrix");
+
     // Update virtual sensor list
     LOG_INF("BHI360: Updating virtual sensor list");
     rslt = bhy2_update_virtual_sensor_list(bhy2_ptr);
@@ -266,6 +274,28 @@ static err_t init_bhi360(void)
         LOG_ERR("Failed to update virtual sensor list: %d", rslt);
         return err_t::MOTION_ERROR;
     }
+
+    // Apply the matrix to the sensor fusion output
+
+    rslt = bhy2_set_orientation_matrix(QUAT_SENSOR_ID, mounting_matrix_struct, bhy2_ptr);
+    if (rslt != BHY2_OK)
+    {
+        LOG_WRN("Failed to set orientation matrix: %d", rslt);
+    }
+
+    rslt = bhy2_set_orientation_matrix(ACCEL_SENSOR_ID, mounting_matrix_struct, bhy2_ptr);
+    if (rslt != BHY2_OK)
+    {
+        LOG_WRN("Failed to set orientation matrix for accelerometer: %d", rslt);
+    }
+
+    rslt = bhy2_set_orientation_matrix(GYRO_SENSOR_ID, mounting_matrix_struct, bhy2_ptr);
+    if (rslt != BHY2_OK)
+    {
+        LOG_WRN("Failed to set orientation matrix for gyroscope: %d", rslt);
+    }
+
+    k_msleep(20);
 
     // Check sensor availability before configuration
     LOG_INF("BHI360: Checking sensor availability with firmware");
@@ -915,18 +945,22 @@ static void process_sensor_data(void)
     // Apply the software offsets
     // NOTE: Quaternion is a rotation vector and should not be offset like linear sensors.
     // If a "zero" rotation is needed, that logic should be handled at a higher level.
-    float calibrated_lacc_x = latest_lacc_x - accel_offset_x;
-    float calibrated_lacc_y = latest_lacc_y - accel_offset_y;
-    float calibrated_lacc_z = latest_lacc_z - accel_offset_z;
+    // Fused outputs are already corrected by the BHI360's internal matrix and fusion engine.
+    // Do NOT apply a software offset to these.
+    float calibrated_lacc_x = latest_lacc_x;
+    float calibrated_lacc_y = latest_lacc_y;
+    float calibrated_lacc_z = latest_lacc_z;
 
+    // The raw gyroscope data benefits from removing the zero-rate offset. This is CORRECT.
     float calibrated_gyro_x = latest_gyro_x - gyro_offset_x;
     float calibrated_gyro_y = latest_gyro_y - gyro_offset_y;
     float calibrated_gyro_z = latest_gyro_z - gyro_offset_z;
 
-    // Also apply to the raw accelerometer data
-    float calibrated_acc_x = latest_acc_x - accel_offset_x;
-    float calibrated_acc_y = latest_acc_y - accel_offset_y;
-    float calibrated_acc_z = latest_acc_z - accel_offset_z;
+    // The raw accelerometer data should NOT be offset. The BHI360 fusion engine needs
+    // the unaltered gravity vector to function correctly.
+    float calibrated_acc_x = latest_acc_x;
+    float calibrated_acc_y = latest_acc_y;
+    float calibrated_acc_z = latest_acc_z;
 
     // Update driver with latest sensor data
     struct bhi360_sensor_data driver_data = {.quat_x = latest_quat_x,
@@ -1155,6 +1189,8 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
     uint8_t work_buffer[WORK_BUFFER_SIZE];
     uint32_t calibration_check_counter = 0;
     uint32_t poll_counter = 0;
+    int foc_ret = 0;
+    struct bhi360_foc_result foc_result;
 
     // Main polling loop
     while (true)
@@ -1191,19 +1227,7 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                 break;
 
             case MotionSensorState::CALIBRATING_START_GYRO:
-                LOG_INF("Step 1: Gyro FOC. Keep device still...");
-                struct bhi360_foc_result foc_result;
-                bhi360_perform_gyro_foc(bhi360_dev, &foc_result);
-                if (foc_result.success)
-                {
-                    LOG_INF("Gyro FOC successful.");
-                }
-                else
-                {
-                    LOG_WRN("Gyro FOC failed.");
-                }
 
-                LOG_INF("Step 2: Software Accel/Gyro offset capture. Keep still for %u ms...", CALIBRATION_DURATION_MS);
                 // Reset accumulators
                 acc_sum_x = 0;
                 acc_sum_y = 0;
@@ -1220,9 +1244,7 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
             case MotionSensorState::CALIBRATING_ACCUMULATE_SAMPLES:
                 // Data is collected via the FIFO processing that now runs every loop.
                 // Here, we just add the latest values to our sums.
-                acc_sum_x += latest_lacc_x; // Use linear accel if available
-                acc_sum_y += latest_lacc_y;
-                acc_sum_z += latest_lacc_z;
+
                 gyro_sum_x += latest_gyro_x;
                 gyro_sum_y += latest_gyro_y;
                 gyro_sum_z += latest_gyro_z;
@@ -1238,18 +1260,10 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                 if (calibration_sample_count > 0)
                 {
                     // Calculate the average to find the offset
-                    accel_offset_x = (float)(acc_sum_x / calibration_sample_count);
-                    accel_offset_y = (float)(acc_sum_y / calibration_sample_count);
-                    accel_offset_z = (float)(acc_sum_z / calibration_sample_count);
+
                     gyro_offset_x = (float)(gyro_sum_x / calibration_sample_count);
                     gyro_offset_y = (float)(gyro_sum_y / calibration_sample_count);
                     gyro_offset_z = (float)(gyro_sum_z / calibration_sample_count);
-
-                    LOG_INF("Calibration complete. Samples: %u", calibration_sample_count);
-                    LOG_INF("--> Accel Offsets: x=%.4f, y=%.4f, z=%.4f", (double)accel_offset_x, (double)accel_offset_y,
-                            (double)accel_offset_z);
-                    LOG_INF("--> Gyro Offsets: x=%.4f, y=%.4f, z=%.4f", (double)gyro_offset_x, (double)gyro_offset_y,
-                            (double)gyro_offset_z);
                 }
                 else
                 {
@@ -1257,6 +1271,13 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                 }
                 // Return to normal polling mode
                 current_state = MotionSensorState::POLLING;
+
+                // Check if we should suspend the thread now that calibration is done.
+                if (atomic_get(&logging_active) == 0 && !quaternion_streaming_enabled)
+                {
+                    LOG_INF("Calibration finished. Suspending thread as no activity or streaming is active.");
+                    k_thread_suspend(motion_sensor_tid);
+                }
                 break;
         }
 

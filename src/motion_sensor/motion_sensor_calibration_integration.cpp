@@ -7,11 +7,14 @@
  */
 
 #include <data.hpp>
+#include <app.hpp>
 #include <bhi360.h>
 #include <bhi360_calibration.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_DECLARE(motion_sensor);
+
+struct bhi360_calibration_status calib_status;
 
 /**
  * @brief Load saved calibrations from storage
@@ -120,7 +123,7 @@ void motion_sensor_calibration_with_storage(const struct device *bhi360_dev)
     load_saved_calibrations(bhi360_dev);
     
     // Then check current calibration status
-    struct bhi360_calibration_status calib_status;
+    
     int ret = bhi360_get_calibration_status(bhi360_dev, &calib_status);
     if (ret == 0) {
         LOG_INF("BHI360: Calibration status after loading - Accel: %d, Gyro: %d, Mag: %d",
