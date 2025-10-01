@@ -55,6 +55,7 @@
 #include <events/foot_sensor_event.h>
 #include <events/motion_sensor_event.h>
 #include <status_codes.h>
+#include <events/idle_event.h>
 
 #include "ble_d2d_file_transfer.hpp"
 #include "ble_d2d_rx.hpp"
@@ -448,7 +449,7 @@ static void d2d_disconnected(struct bt_conn *conn, uint8_t reason)
 // Target service UUID: 5cb36a11-ca69-4d97-89a8-003ffc9ec8cd (changed 002f to 003f for unique pairing)
 // This is used by both primary (for advertising) and secondary (for scanning)
 static const uint8_t target_service_uuid[16] = {0xcd, 0xc8, 0x9e, 0xfc, 0x3f, 0x00, 0xa8, 0x89,
-                                                0x97, 0x4d, 0x69, 0xca, 0x16, 0x6a, 0xb3, 0x5c};
+                                                0x97, 0x4d, 0x69, 0xca, 0x10, 0x6a, 0xb3, 0x5c};
 
 // Getter function to access the target service UUID from other modules
 extern "C" const uint8_t *get_target_service_uuid(void)
@@ -740,7 +741,7 @@ static const struct bt_data ad[] = {
 /* Scan response data - put the 128-bit UUID here to avoid advertising packet
  * size issues */
 static const struct bt_data sd[] = {
-    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a16, 0xca69, 0x4d97, 0x89a8, 0x003ffc9ec8cd)),
+    BT_DATA_BYTES(BT_DATA_UUID128_ALL, BT_UUID_128_ENCODE(0x5cb36a10, 0xca69, 0x4d97, 0x89a8, 0x003ffc9ec8cd)),
 };
 
 /**
@@ -3080,4 +3081,6 @@ APP_EVENT_LISTENER(MODULE, app_event_handler);
 APP_EVENT_SUBSCRIBE(MODULE, app_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_start_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, foot_sensor_stop_activity_event);
+APP_EVENT_SUBSCRIBE(MODULE, sleep_state_event);
 APP_EVENT_SUBSCRIBE_FINAL(MODULE, module_state_event);
+

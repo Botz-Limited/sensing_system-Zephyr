@@ -203,6 +203,7 @@
     pinctrl-0 = <&i2c3_default>;
     pinctrl-1 = <&i2c3_sleep>;
     pinctrl-names = "default", "sleep";
+    clock-frequency = <I2C_BITRATE_STANDARD>;
 
     bq27441: bq27441@55 {
         compatible = "ti,bq274xx";
@@ -234,7 +235,7 @@
 /* Enable UART2 for console/logging */
 &uart2 {
     compatible = "nordic,nrf-uarte";
-    status = "okay";
+    status = "disabled";
     current-speed = <115200>;
     parity= "none";
     stop-bits = "1";

@@ -11,6 +11,7 @@
 
  */
 
+#include <cstdint>
 #define MODULE motion_sensor
 
 #include <cmath>
@@ -62,6 +63,7 @@ extern struct k_msgq sensor_data_msgq;
 extern struct k_msgq bluetooth_msgq;
 extern struct k_msgq data_msgq;
 extern struct k_msgq motion_sensor_msgq;
+extern struct k_msgq idle_msgq;
 #if IS_ENABLED(CONFIG_LAB_VERSION)
 extern struct k_msgq data_sd_msgq; // For sending to data_sd module (lab version)
 #endif
@@ -69,7 +71,7 @@ extern struct k_msgq data_sd_msgq; // For sending to data_sd module (lab version
 // Constants
 static constexpr uint16_t WORK_BUFFER_SIZE = 2048;
 static constexpr uint32_t SAMPLE_PERIOD_MS = 10;             // 10ms for 100Hz polling
-static constexpr uint8_t BLUETOOTH_RATE_DIVIDER = 20;        // Send to BLE at 5Hz (100Hz / 20)
+static constexpr uint8_t BLUETOOTH_RATE_DIVIDER = 10;        // Send to BLE at 10Hz (100Hz / 20)
 static constexpr uint16_t LOG_RATE_DIVIDER = 100;            // Log at 1Hz (100Hz / 100)
 static constexpr uint32_t CALIBRATION_CHECK_INTERVAL = 1000; // Check every 1000 iterations
 
@@ -77,9 +79,6 @@ static constexpr uint32_t CALIBRATION_CHECK_INTERVAL = 1000; // Check every 1000
 K_THREAD_STACK_DEFINE(motion_sensor_stack, CONFIG_MOTION_SENSOR_MODULE_STACK_SIZE);
 static struct k_thread motion_sensor_thread_data;
 static k_tid_t motion_sensor_tid = NULL;
-
-static void bhi360_work_handler(struct k_work *work);
-K_WORK_DEFINE(bhi360_work, bhi360_work_handler);
 
 // Get BHI360 device from device tree
 #define BHI360_NODE DT_NODELABEL(bhi360)
@@ -104,7 +103,7 @@ static bool activity_logging_active = false;
 // Sensor IDs for BHI360 virtual sensors - Core sensors
 static constexpr uint8_t QUAT_SENSOR_ID = BHY2_SENSOR_ID_GAMERV; // 28: Game Rotation Vector (no mag)
 static constexpr uint8_t ACCEL_SENSOR_ID = BHY2_SENSOR_ID_ACC;   // 4: Calibrated Accelerometer (with gravity)
-static constexpr uint8_t GYRO_SENSOR_ID = BHY2_SENSOR_ID_GYRO;   // 13: Calibrated Gyroscope
+//static constexpr uint8_t GYRO_SENSOR_ID = BHY2_SENSOR_ID_GYRO;   // 13: Calibrated Gyroscope
 
 // Step counter variants - try multiple versions to find which one is available
 static constexpr uint8_t STEP_COUNTER_SENSOR_ID = BHY2_SENSOR_ID_STC;  // 52: Step Counter (standard)
@@ -134,7 +133,7 @@ static bool activity_available = false;
 static float latest_quat_x = 0, latest_quat_y = 0, latest_quat_z = 0, latest_quat_w = 0, latest_quat_accuracy = 0;
 static float latest_acc_x = 0, latest_acc_y = 0, latest_acc_z = 0;    // Accelerometer with gravity
 static float latest_lacc_x = 0, latest_lacc_y = 0, latest_lacc_z = 0; // Linear acceleration (gravity removed)
-static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
+//static float latest_gyro_x = 0, latest_gyro_y = 0, latest_gyro_z = 0;
 static float latest_gravity_x = 0, latest_gravity_y = 0, latest_gravity_z = 0; // Gravity vector
 static uint8_t latest_activity_type = 0;                                       // Activity recognition result
 static uint64_t latest_timestamp = 0;
@@ -153,11 +152,11 @@ static int64_t state_start_time = 0;
 
 // Variables for software offset calculation
 static float accel_offset_x = 0.0f, accel_offset_y = 0.0f, accel_offset_z = 0.0f;
-static float gyro_offset_x = 0.0f, gyro_offset_y = 0.0f, gyro_offset_z = 0.0f;
+//static float gyro_offset_x = 0.0f, gyro_offset_y = 0.0f, gyro_offset_z = 0.0f;
 
 // Variables for accumulating data during calibration
 static double acc_sum_x = 0, acc_sum_y = 0, acc_sum_z = 0;
-static double gyro_sum_x = 0, gyro_sum_y = 0, gyro_sum_z = 0;
+//static double gyro_sum_x = 0, gyro_sum_y = 0, gyro_sum_z = 0;
 static uint32_t calibration_sample_count = 0;
 static constexpr uint32_t CALIBRATION_DURATION_MS = 3000; // Calibrate for 3 seconds
 // =================== STATE MACHINE AND CALIBRATION END =====================
@@ -175,9 +174,6 @@ static void apply_calibration_data(const bhi360_calibration_data_t *calib_data);
 static void save_calibration_profile(const struct device *bhi360_dev, enum bhi360_sensor_type sensor,
                                      const char *sensor_name);
 static void check_and_save_calibration_updates(const struct device *bhi360_dev);
-static void bhi360_isr_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins);
-static void bhi360_work_handler(struct k_work *work);
-static void motion_sensor_enter_sleep_mode();
 
 /**
  * @brief Initialize BHI360 sensor
@@ -289,11 +285,18 @@ static err_t init_bhi360(void)
         LOG_WRN("Failed to set orientation matrix for accelerometer: %d", rslt);
     }
 
-    rslt = bhy2_set_orientation_matrix(GYRO_SENSOR_ID, mounting_matrix_struct, bhy2_ptr);
+    rslt = bhy2_set_orientation_matrix(LACC_SENSOR_ID, mounting_matrix_struct, bhy2_ptr);
+    if (rslt != BHY2_OK)
+    {
+        LOG_WRN("Failed to set orientation matrix for accelerometer: %d", rslt);
+    }
+
+
+   /* rslt = bhy2_set_orientation_matrix(GYRO_SENSOR_ID, mounting_matrix_struct, bhy2_ptr);
     if (rslt != BHY2_OK)
     {
         LOG_WRN("Failed to set orientation matrix for gyroscope: %d", rslt);
-    }
+    } */
 
     k_msleep(20);
 
@@ -346,7 +349,7 @@ static err_t init_bhi360(void)
         LOG_WRN("  Accelerometer sensor not available");
     }
 
-    if (bhy2_is_sensor_available(GYRO_SENSOR_ID, bhy2_ptr))
+   /* if (bhy2_is_sensor_available(GYRO_SENSOR_ID, bhy2_ptr))
     {
         LOG_INF("  Gyroscope - Available");
     }
@@ -354,7 +357,7 @@ static err_t init_bhi360(void)
     {
         LOG_ERR("  Gyroscope sensor not available!");
         return err_t::MOTION_ERROR;
-    }
+    } */
 
     // Check all step counter variants to find which one is available
     LOG_INF("  Checking step counter variants:");
@@ -454,13 +457,13 @@ static err_t init_bhi360(void)
         return err_t::MOTION_ERROR;
     }
     k_msleep(SAMPLE_PERIOD_MS);
-    rslt = bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
+   /* rslt = bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, motion_sensor_rate, report_latency_ms, bhy2_ptr);
     if (rslt != BHY2_OK)
     {
         LOG_ERR("Failed to configure gyroscope sensor: %d", rslt);
         return err_t::MOTION_ERROR;
     }
-    k_msleep(SAMPLE_PERIOD_MS);
+    k_msleep(SAMPLE_PERIOD_MS);*/
 
     // Configure whichever step counter variant is available
     if (active_step_counter_id != 0)
@@ -531,7 +534,7 @@ static err_t init_bhi360(void)
     // Register core sensor callbacks (always register these)
     rslt = bhy2_register_fifo_parse_callback(QUAT_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
     rslt |= bhy2_register_fifo_parse_callback(ACCEL_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
-    rslt |= bhy2_register_fifo_parse_callback(GYRO_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
+  //  rslt |= bhy2_register_fifo_parse_callback(GYRO_SENSOR_ID, parse_all_sensors, NULL, bhy2_ptr);
 
     // Register callbacks for whichever step counter/detector variants are available
     if (active_step_counter_id != 0)
@@ -574,33 +577,6 @@ static err_t init_bhi360(void)
     request_msg.sender = SENDER_MOTION_SENSOR;
     request_msg.type = MSG_TYPE_REQUEST_BHI360_CALIBRATION;
     k_msgq_put(&data_msgq, &request_msg, K_NO_WAIT);
-
-    // For waking up
-    if (bhy2_is_sensor_available(ANY_MOTION_SENSOR_ID, bhy2_ptr))
-    {
-        LOG_INF("Any Motion (Wake Up) sensor available.");
-        bhy2_set_virt_sensor_cfg(ANY_MOTION_SENSOR_ID, 0, 0, bhy2_ptr);
-    }
-    else
-    {
-        LOG_WRN("Any Motion (Wake Up) sensor NOT available. Wake-from-sleep will not work!");
-    }
-
-    if (!gpio_is_ready_dt(&int_gpio))
-    {
-        LOG_ERR("BHI360 interrupt GPIO not ready");
-        return err_t::MOTION_ERROR;
-    }
-    gpio_pin_configure_dt(&int_gpio, GPIO_INPUT);
-    gpio_init_callback(&bhi360_int_cb_data, bhi360_isr_handler, BIT(int_gpio.pin));
-    int ret = gpio_add_callback(int_gpio.port, &bhi360_int_cb_data);
-    if (ret != 0)
-    {
-        LOG_ERR("Failed to add GPIO callback for BHI360 INT: %d", ret);
-        return err_t::MOTION_ERROR;
-    }
-    gpio_pin_interrupt_configure_dt(&int_gpio, GPIO_INT_DISABLE);
-    LOG_INF("BHI360 GPIO interrupt handler configured.");
 
     return err_t::NO_ERROR;
 }
@@ -655,7 +631,7 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
     static const uint8_t QUAT_UPDATED = 0x01;
     static const uint8_t LACC_UPDATED = 0x02;
     static const uint8_t GYRO_UPDATED = 0x04;
-    static const uint8_t ALL_MOTION_SENSORS = (QUAT_UPDATED | LACC_UPDATED | GYRO_UPDATED);
+    static const uint8_t ALL_MOTION_SENSORS = (QUAT_UPDATED | LACC_UPDATED);
 
     bool send_data = false;
     bool motion_detected = false;
@@ -760,7 +736,7 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             break;
         }
 
-        case GYRO_SENSOR_ID: {
+     /*   case GYRO_SENSOR_ID: {
             struct bhy2_data_xyz data;
             bhy2_parse_xyz(callback_info->data_ptr, &data);
 
@@ -772,7 +748,7 @@ static void parse_all_sensors(const struct bhy2_fifo_parse_data_info *callback_i
             latest_gyro_z = ((float)data.z / 2900.0f) * DEG_TO_RAD;
             motion_update_mask |= GYRO_UPDATED;
             break;
-        }
+        } */
 
         case BHY2_SENSOR_ID_STD:    // 50: Step Detector
         case BHY2_SENSOR_ID_STD_WU: // 94: Step Detector Wake Up
@@ -952,9 +928,9 @@ static void process_sensor_data(void)
     float calibrated_lacc_z = latest_lacc_z;
 
     // The raw gyroscope data benefits from removing the zero-rate offset. This is CORRECT.
-    float calibrated_gyro_x = latest_gyro_x - gyro_offset_x;
-    float calibrated_gyro_y = latest_gyro_y - gyro_offset_y;
-    float calibrated_gyro_z = latest_gyro_z - gyro_offset_z;
+ //   float calibrated_gyro_x = latest_gyro_x - gyro_offset_x;
+ //   float calibrated_gyro_y = latest_gyro_y - gyro_offset_y;
+ //   float calibrated_gyro_z = latest_gyro_z - gyro_offset_z;
 
     // The raw accelerometer data should NOT be offset. The BHI360 fusion engine needs
     // the unaltered gravity vector to function correctly.
@@ -971,9 +947,9 @@ static void process_sensor_data(void)
                                              .lacc_x = calibrated_lacc_x,
                                              .lacc_y = calibrated_lacc_y,
                                              .lacc_z = calibrated_lacc_z,
-                                             .gyro_x = calibrated_gyro_x,
-                                             .gyro_y = calibrated_gyro_y,
-                                             .gyro_z = calibrated_gyro_z,
+                                         //   .gyro_x = calibrated_gyro_x,
+                                         //    .gyro_y = calibrated_gyro_y,
+                                         //    .gyro_z = calibrated_gyro_z,
                                              .step_count = latest_step_count,
                                              .timestamp = latest_timestamp};
     bhi360_update_sensor_data(bhi360_dev, &driver_data);
@@ -990,9 +966,9 @@ static void process_sensor_data(void)
     msg.data.bhi360_log_record.lacc_x = calibrated_lacc_x;
     msg.data.bhi360_log_record.lacc_y = calibrated_lacc_y;
     msg.data.bhi360_log_record.lacc_z = calibrated_lacc_z;
-    msg.data.bhi360_log_record.gyro_x = calibrated_gyro_x;
-    msg.data.bhi360_log_record.gyro_y = calibrated_gyro_y;
-    msg.data.bhi360_log_record.gyro_z = calibrated_gyro_z;
+    msg.data.bhi360_log_record.gyro_x = 0;
+    msg.data.bhi360_log_record.gyro_y = 0;
+    msg.data.bhi360_log_record.gyro_z = 0;
     msg.data.bhi360_log_record.step_count = latest_step_count;
     msg.data.bhi360_log_record.timestamp = latest_timestamp;
 
@@ -1022,13 +998,19 @@ static void process_sensor_data(void)
         {
             log_sample_counter = 0;
 
+            // Tell the idle module there is movement
+            generic_message_t msg;
+            msg.sender = SENDER_MOTION_SENSOR;
+            msg.type = MSG_TYPE_COMMAND;
+            k_msgq_put(&idle_msgq, &msg, K_NO_WAIT);
+
             // Log Quaternion data
             LOG_INF("BHI360 Quat: x=%.4f, y=%.4f, z=%.4f, w=%.4f, accuracy=%.1f", (double)latest_quat_x,
                     (double)latest_quat_y, (double)latest_quat_z, (double)latest_quat_w, (double)latest_quat_accuracy);
 
             // Log Gyroscope data (rad/s)
-            LOG_INF("BHI360 Gyro (cal): x=%.4f, y=%.4f, z=%.4f rad/s", (double)calibrated_gyro_x,
-                    (double)calibrated_gyro_y, (double)calibrated_gyro_z);
+         //   LOG_INF("BHI360 Gyro (cal): x=%.4f, y=%.4f, z=%.4f rad/s", (double)calibrated_gyro_x,
+           //         (double)calibrated_gyro_y, (double)calibrated_gyro_z);
 
             // Log Accelerometer data (with gravity) - always available
             LOG_INF("BHI360 Accel (cal): x=%.4f, y=%.4f, z=%.4f m/s² (with gravity)", (double)calibrated_acc_x,
@@ -1161,13 +1143,6 @@ static void handle_messages(void)
                 apply_calibration_data(&msg.data.bhi360_calibration);
                 break;
 
-            case MSG_TYPE_COMMAND:
-                if (strncmp(msg.data.command_str, "ENTER_SLEEP", MAX_COMMAND_STRING_LEN) == 0)
-                {
-                    motion_sensor_enter_sleep_mode();
-                }
-                break;
-
             default:
                 LOG_WRN("Unknown message type %d from %s", msg.type, get_sender_name(msg.sender));
                 break;
@@ -1232,9 +1207,9 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                 acc_sum_x = 0;
                 acc_sum_y = 0;
                 acc_sum_z = 0;
-                gyro_sum_x = 0;
-                gyro_sum_y = 0;
-                gyro_sum_z = 0;
+              //  gyro_sum_x = 0;
+             //   gyro_sum_y = 0;
+             //   gyro_sum_z = 0;
                 calibration_sample_count = 0;
 
                 state_start_time = k_uptime_get();
@@ -1245,9 +1220,9 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                 // Data is collected via the FIFO processing that now runs every loop.
                 // Here, we just add the latest values to our sums.
 
-                gyro_sum_x += latest_gyro_x;
-                gyro_sum_y += latest_gyro_y;
-                gyro_sum_z += latest_gyro_z;
+           //     gyro_sum_x += latest_gyro_x;
+            //    gyro_sum_y += latest_gyro_y;
+           //     gyro_sum_z += latest_gyro_z;
                 calibration_sample_count++;
 
                 if (k_uptime_get() - state_start_time >= CALIBRATION_DURATION_MS)
@@ -1261,9 +1236,9 @@ static void motion_sensor_thread(void *p1, void *p2, void *p3)
                 {
                     // Calculate the average to find the offset
 
-                    gyro_offset_x = (float)(gyro_sum_x / calibration_sample_count);
-                    gyro_offset_y = (float)(gyro_sum_y / calibration_sample_count);
-                    gyro_offset_z = (float)(gyro_sum_z / calibration_sample_count);
+               //     gyro_offset_x = (float)(gyro_sum_x / calibration_sample_count);
+              //      gyro_offset_y = (float)(gyro_sum_y / calibration_sample_count);
+               //     gyro_offset_z = (float)(gyro_sum_z / calibration_sample_count);
                 }
                 else
                 {
@@ -1403,11 +1378,11 @@ static void check_and_save_calibration_updates(const struct device *bhi360_dev)
         save_calibration_profile(bhi360_dev, BHI360_SENSOR_ACCEL, "accel");
     }
 
-    if (current_status.gyro_calib_status > last_status.gyro_calib_status)
-    {
-        LOG_INF("Gyro calibration improved: %d -> %d", last_status.gyro_calib_status, current_status.gyro_calib_status);
-        save_calibration_profile(bhi360_dev, BHI360_SENSOR_GYRO, "gyro");
-    }
+ //   if (current_status.gyro_calib_status > last_status.gyro_calib_status)
+ //   {
+ //       LOG_INF("Gyro calibration improved: %d -> %d", last_status.gyro_calib_status, current_status.gyro_calib_status);
+ //       save_calibration_profile(bhi360_dev, BHI360_SENSOR_GYRO, "gyro");
+ //   }
 
     last_status = current_status;
 }
@@ -1452,43 +1427,6 @@ static void motion_sensor_init(void)
     LOG_INF("Motion sensor module initialized successfully");
 }
 
-// =================== Interrupt and Mode-Switching Logic ===================
-static void bhi360_isr_handler(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-    k_work_submit(&bhi360_work);
-}
-
-static void bhi360_work_handler(struct k_work *work)
-{
-    ARG_UNUSED(work);
-    // ONLY reboot if the interrupt happens while we are in sleep mode
-    if (atomic_get(&is_in_sleep_mode) == 1)
-    {
-        LOG_WRN("Motion detected during sleep, triggering system reboot!");
-        k_msleep(100); // Allow log to flush
-        sys_reboot(SYS_REBOOT_COLD);
-    }
-}
-
-static void motion_sensor_enter_sleep_mode()
-{
-    LOG_INF("Switching BHI360 to low-power interrupt mode for wake-up.");
-    atomic_set(&is_in_sleep_mode, 1); // Set the flag
-
-    // Turn off high-frequency sensors
-    bhy2_set_virt_sensor_cfg(QUAT_SENSOR_ID, 0, 0, bhy2_ptr);
-    bhy2_set_virt_sensor_cfg(GYRO_SENSOR_ID, 0, 0, bhy2_ptr);
-    bhy2_set_virt_sensor_cfg(LACC_SENSOR_ID, 0, 0, bhy2_ptr);
-
-    // Turn on the wake-up sensor
-    bhy2_set_virt_sensor_cfg(ANY_MOTION_SENSOR_ID, 1.0f, 0, bhy2_ptr);
-
-    // Enable the BHI360's interrupt line
-    bhy2_set_host_interrupt_ctrl(0, bhy2_ptr);
-
-    // Enable the MCU's GPIO interrupt
-    gpio_pin_interrupt_configure_dt(&int_gpio, GPIO_INT_EDGE_TO_ACTIVE);
-}
 
 // =================== Event Handling ===================
 
@@ -1551,6 +1489,16 @@ static bool app_event_handler(const struct app_event_header *aeh)
         return false;
     }
 
+    if (is_sleep_state_event(aeh))
+    {
+        LOG_WRN("Received sleep event");
+        if (atomic_get(&is_in_sleep_mode) == 0)
+        {
+            k_thread_suspend(motion_sensor_tid);
+        }
+        return false;
+    }
+
     return false;
 }
 
@@ -1561,3 +1509,4 @@ APP_EVENT_SUBSCRIBE_FIRST(MODULE, bluetooth_state_event);
 APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_start_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, motion_sensor_stop_activity_event);
 APP_EVENT_SUBSCRIBE(MODULE, streaming_control_event);
+APP_EVENT_SUBSCRIBE(MODULE, sleep_state_event);

@@ -35,7 +35,7 @@ config IDLE_MODULE_PRIORITY
 
 config IDLE_INACTIVITY_TIMEOUT_MINUTES
     int "Minutes of inactivity before sleep"
-    default 5
+    default 1
     range 1 60
     help
       Number of minutes without motion sensor activity

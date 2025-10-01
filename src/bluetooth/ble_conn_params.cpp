@@ -81,6 +81,7 @@ int ble_conn_params_init(void)
 
 int ble_conn_params_update(struct bt_conn *conn, conn_profile_t profile)
 {
+
     if (!conn) {
         LOG_ERR("Invalid connection handle");
         return -EINVAL;

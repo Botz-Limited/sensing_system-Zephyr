@@ -1,6 +1,7 @@
 config BATTERY_MODULE
 	bool "Battery Module"
 	select GPIO
+	select I2C_NRFX_TWIM
 	help
 	  BATTERY MODULE
 

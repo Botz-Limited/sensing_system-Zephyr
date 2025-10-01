@@ -42,7 +42,7 @@ static constexpr uint8_t SAADC_CHANNEL_COUNT = 8;
 static constexpr uint8_t CALIBRATION_SAMPLES = 100;
 
 static constexpr uint32_t SAMPLE_PERIOD_MS = 1000 / SAMPLE_RATE_HZ; // 5ms
-static constexpr uint8_t BLUETOOTH_RATE_DIVIDER = 40;               // Send to BLE at 5Hz (200Hz / 40)
+static constexpr uint8_t BLUETOOTH_RATE_DIVIDER = 10;               // Send to BLE at 10Hz (100Hz / 10)
 
 
 //for VDD only monitoring 
